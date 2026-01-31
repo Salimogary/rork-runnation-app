@@ -1,0 +1,332 @@
+# Database Schema Documentation
+
+## Required Tables
+
+### 1. Activity Sample (Existing)
+Already configured with the following schema:
+
+```sql
+create table public."Activity Sample" (
+  "ActivityID" text not null,
+  "RegistrationID" text null,
+  "Activity_Date" date null,
+  "Exercise_Type" text null,
+  "Distance_km" double precision null,
+  "Start_Time" time without time zone null,
+  "End_Time" time without time zone null,
+  "Pace_km_h" double precision null,
+  constraint Activity Sample_pkey primary key ("ActivityID"),
+  constraint Activity Sample_RegistrationID_fkey foreign KEY ("RegistrationID") references "Registration Sample" ("RegistrationID")
+) TABLESPACE pg_default;
+```
+
+### 2. Pending Activities (NEW - Required)
+Create this table for treadmill activity approval workflow:
+
+```sql
+create table public."Pending Activities" (
+  "PendingID" text not null default gen_random_uuid()::text,
+  "RegistrationID" text null,
+  "Activity_Date" date null,
+  "Exercise_Type" text null,
+  "Distance_km" double precision null,
+  "Start_Time" time without time zone null,
+  "End_Time" time without time zone null,
+  "Pace_km_h" double precision null,
+  "Image_URL" text null,
+  "Status" text null default 'pending',
+  "Created_At" timestamp with time zone default now(),
+  constraint Pending Activities_pkey primary key ("PendingID"),
+  constraint Pending Activities_RegistrationID_fkey foreign KEY ("RegistrationID") references "Registration Sample" ("RegistrationID")
+) TABLESPACE pg_default;
+
+-- Create index for faster queries
+create index IF not exists idx_pending_activities_status on public."Pending Activities" using btree ("Status") TABLESPACE pg_default;
+create index IF not exists idx_pending_activities_registration on public."Pending Activities" using btree ("RegistrationID") TABLESPACE pg_default;
+```
+
+## How It Works
+
+### Exercise Type Flow
+
+1. **Walk/Run**: 
+   - User starts GPS tracking
+   - Activity is recorded directly to "Activity Sample" table
+   - No approval needed
+
+2. **Treadmill**:
+   - User inputs: Distance (km), Time (minutes), and Photo
+   - Data is saved to "Pending Activities" table with Status = 'pending'
+   - ActivityID is auto-generated (PendingID)
+   - Start_Time calculated as: End_Time - Time (from input)
+   - End_Time = Upload Timestamp
+   - Pace calculated as: Distance / (Time / 60)
+
+### Admin Approval Flow
+
+1. Admin views pending activities in Settings > Pending Approvals
+2. Admin reviews:
+   - Exercise Type
+   - Date
+   - Distance
+   - Pace
+   - Treadmill Screen Photo
+3. Admin can:
+   - **Approve**: Moves record to "Activity Sample" table and deletes from "Pending Activities"
+   - **Reject**: Deletes record from "Pending Activities"
+
+### 3. Social Posts (NEW - Required)
+Create this table for the social media feed feature:
+
+```sql
+create table public."social_posts" (
+  "id" bigserial primary key,
+  "user_id" uuid not null references auth.users(id) on delete cascade,
+  "photo_url" text null,
+  "caption" text null,
+  "activity_data" jsonb null,
+  "created_at" timestamp with time zone default now() not null
+) TABLESPACE pg_default;
+
+-- Create index for faster queries
+create index IF not exists idx_social_posts_user_id on public."social_posts" using btree ("user_id") TABLESPACE pg_default;
+create index IF not exists idx_social_posts_created_at on public."social_posts" using btree ("created_at" desc) TABLESPACE pg_default;
+
+-- Enable Row Level Security
+alter table public."social_posts" enable row level security;
+
+-- Policy to allow users to view all posts
+create policy "Posts are viewable by everyone"
+  on public."social_posts" for select
+  using (true);
+
+-- Policy to allow authenticated users to insert their own posts
+create policy "Users can insert their own posts"
+  on public."social_posts" for insert
+  with check (auth.uid() = user_id);
+
+-- Policy to allow users to delete their own posts
+create policy "Users can delete their own posts"
+  on public."social_posts" for delete
+  using (auth.uid() = user_id);
+```
+
+### 4. Post Likes (NEW - Required)
+Create this table to track post likes:
+
+```sql
+create table public."post_likes" (
+  "id" bigserial primary key,
+  "post_id" bigint not null references public."social_posts"(id) on delete cascade,
+  "user_id" uuid not null references auth.users(id) on delete cascade,
+  "created_at" timestamp with time zone default now() not null,
+  constraint "unique_post_like" unique (post_id, user_id)
+) TABLESPACE pg_default;
+
+-- Create indexes for faster queries
+create index IF not exists idx_post_likes_post_id on public."post_likes" using btree ("post_id") TABLESPACE pg_default;
+create index IF not exists idx_post_likes_user_id on public."post_likes" using btree ("user_id") TABLESPACE pg_default;
+
+-- Enable Row Level Security
+alter table public."post_likes" enable row level security;
+
+-- Policy to allow users to view all likes
+create policy "Likes are viewable by everyone"
+  on public."post_likes" for select
+  using (true);
+
+-- Policy to allow authenticated users to like posts
+create policy "Users can like posts"
+  on public."post_likes" for insert
+  with check (auth.uid() = user_id);
+
+-- Policy to allow users to unlike posts
+create policy "Users can unlike posts"
+  on public."post_likes" for delete
+  using (auth.uid() = user_id);
+```
+
+## Social Feed Feature
+
+### Post Structure
+Posts can contain any combination of:
+1. **Text** - Caption/message (optional)
+2. **Photo** - Image URL (optional)
+3. **Activity** - Today's activity data stored as JSONB (optional)
+   - Activity_Date
+   - Exercise_Type
+   - Distance_km
+   - Time
+   - Pace_km_h
+
+### User Interactions
+- **Like**: Users can like/unlike posts
+- **Delete**: Users can delete their own posts
+- **View**: All users can view the community feed
+
+### 5. Events (NEW - Required)
+Create this table for managing running events and races:
+
+```sql
+create table public."Events" (
+  "eventId" text not null,
+  "eventName" text null,
+  "startsAt" date null,
+  "endsAt" date null,
+  "medal_min_daily_distance" double precision null,
+  "medal_min_cumulative_distance" double precision null,
+  "medal_date_start" date null,
+  "medal_date_end" date null,
+  constraint Events_pkey primary key ("eventId")
+) TABLESPACE pg_default;
+```
+
+**Medal Criteria Fields:**
+- `medal_min_daily_distance`: Minimum km required per day to stay on medal list (if null, daily rule not enforced)
+- `medal_min_cumulative_distance`: Minimum total km required over entire period (if null, cumulative rule not enforced)
+- `medal_date_start`: Start date for medal tracking (can be different from event start)
+- `medal_date_end`: End date for medal tracking (can be different from event end)
+
+**Medal List Logic:**
+- If `medal_min_daily_distance` is set: User must complete at least this distance EVERY day in the range to stay qualified
+- If `medal_min_cumulative_distance` is set: User must complete at least this total distance over the entire range
+- Both rules can be set simultaneously (user must meet both)
+- Breaking the daily rule removes user from medal list
+
+### 6. Events Participants (NEW - Required)
+Create this table to track event registrations:
+
+```sql
+create table public."Events Participants" (
+  "ParticipantID" text not null default gen_random_uuid()::text,
+  "EventID" text not null,
+  "RegistrationID" text not null,
+  "Registration_Date" timestamp with time zone default now(),
+  "Status" text default 'registered',
+  "Days_Completed" integer default 0,
+  constraint Events_Participants_pkey primary key ("ParticipantID"),
+  constraint Events_Participants_EventID_fkey foreign key ("EventID") references "Events" ("eventId") on delete cascade,
+  constraint Events_Participants_RegistrationID_fkey foreign key ("RegistrationID") references "Registration Sample" ("RegistrationID") on delete cascade,
+  constraint unique_participant_per_event unique ("EventID", "RegistrationID")
+) TABLESPACE pg_default;
+
+-- Create indexes for faster queries
+create index IF not exists idx_participants_event on public."Events Participants" using btree ("EventID") TABLESPACE pg_default;
+create index IF not exists idx_participants_user on public."Events Participants" using btree ("RegistrationID") TABLESPACE pg_default;
+```
+
+### 7. Event Enrollments (NEW - Required)
+Create this table to track event enrollments (different from participants):
+
+```sql
+create table public."Event Enrollments" (
+  "EnrollmentID" text not null default gen_random_uuid()::text,
+  "EventID" text not null,
+  "RegistrationID" text null,
+  "First_Name" text not null,
+  "Other_Names" text not null,
+  "Email" text not null,
+  "Status" text default 'pending',
+  "Enrolled_At" timestamp with time zone default now(),
+  constraint Event_Enrollments_pkey primary key ("EnrollmentID"),
+  constraint Event_Enrollments_EventID_fkey foreign key ("EventID") references "Events" ("eventId") on delete cascade,
+  constraint Event_Enrollments_RegistrationID_fkey foreign key ("RegistrationID") references "Registration Sample" ("RegistrationID")
+) TABLESPACE pg_default;
+
+-- Create indexes for faster queries
+create index IF not exists idx_enrollments_event on public."Event Enrollments" using btree ("EventID") TABLESPACE pg_default;
+create index IF not exists idx_enrollments_email on public."Event Enrollments" using btree ("Email") TABLESPACE pg_default;
+create index IF not exists idx_enrollments_status on public."Event Enrollments" using btree ("Status") TABLESPACE pg_default;
+```
+
+## Events Feature
+
+### Event Types
+- **Race**: Competitive running event
+- **Challenge**: Time-based or distance-based challenge
+- **Marathon**: Long-distance running event
+- **Fun Run**: Casual community event
+
+### Event Management (Admin)
+1. Create events with name, date, type, distance, location
+2. Set maximum participants and registration deadline
+3. Update event details
+4. Delete events
+5. View participant list
+6. View enrollment list (First Name, Other Names, Email)
+
+### Event Participation (Users)
+1. **View Events**: Browse all active events
+2. **Enroll**: Quick enrollment with basic info (name + email)
+3. **Register**: Full registration via system account
+4. **Track Progress**: View days completed for multi-day challenges
+5. **Medal List**: See achievements with completed days count
+
+### Enrollments vs Participants
+- **Enrollments**: Quick signup with name/email from logged-in users (requires admin approval before becoming a participant)
+  - Status: pending → Admin reviews → approved/rejected
+  - Approved enrollments are moved to Event Participants table
+- **Participants**: Full system users with tracking (linked to RegistrationID) who have been approved by admin
+
+### Medal Calculation
+- Medals are awarded based on "Days_Completed" field
+- Admin or system tracks completion progress
+- Medal list shows Event name, Participant name, and completion count
+
+### 8. External Activity Submissions (NEW - Required)
+Create this table for users to submit historical activities:
+
+```sql
+create table public."External Activity Submissions" (
+  "SubmissionID" text not null default gen_random_uuid()::text,
+  "RegistrationID" text not null,
+  "Activity_Date" date not null,
+  "Exercise_Type" text not null,
+  "Start_Time" time without time zone not null,
+  "Duration" text not null,
+  "Distance_km" double precision not null,
+  "Submitted_At" timestamp with time zone default now(),
+  constraint External_Activity_Submissions_pkey primary key ("SubmissionID"),
+  constraint External_Activity_Submissions_RegistrationID_fkey foreign key ("RegistrationID") references "Registration Sample" ("RegistrationID") on delete cascade
+) TABLESPACE pg_default;
+
+-- Create indexes for faster queries
+create index IF not exists idx_external_submissions_registration on public."External Activity Submissions" using btree ("RegistrationID") TABLESPACE pg_default;
+create index IF not exists idx_external_submissions_date on public."External Activity Submissions" using btree ("Submitted_At" desc) TABLESPACE pg_default;
+```
+
+## External Activity Submission Flow
+
+### User Submission
+1. User clicks "Add External Activity" button
+2. Form appears with fields:
+   - Date (can be any date)
+   - Exercise Type (Run, Walk, Treadmill)
+   - Start Time (HH:MM)
+   - Duration (HH:MM:SS format)
+   - Distance (km)
+3. Data is saved to "External Activity Submissions" table
+4. User receives confirmation that submission is recorded
+
+### Admin Notification
+1. Admin views all submissions in admin dashboard
+2. Each submission shows:
+   - Registration ID
+   - Submission timestamp
+   - Activity details (date, type, start time, duration, distance)
+3. Admin is notified when new submissions are added
+
+## Notes
+
+- FriendID is hidden from users (system-generated)
+- ActivityID for Activity Sample is auto-incremented (series last count + 1)
+- PendingID for Pending Activities uses UUID generation
+- eventId uses E1, E2, E3 series generation; ParticipantID uses UUID generation
+- All pace values are stored as km/h but displayed as min/km in the UI
+- Dates are displayed as dd mmm yyyy format (e.g., "15 Dec 2024")
+- Social posts support text, photos, and activity data in any combination
+- Post likes are tracked with a unique constraint to prevent duplicate likes
+- Events can be active, completed, or cancelled
+- Each user can only register once per event (unique constraint)
+- External activity submissions must be for dates before today
+- Admin can approve/reject external submissions with optional notes

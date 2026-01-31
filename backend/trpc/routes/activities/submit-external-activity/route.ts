@@ -1,0 +1,43 @@
+import { z } from "zod";
+import { publicProcedure } from "../../../create-context";
+
+export default publicProcedure
+  .input(
+    z.object({
+      registrationId: z.string(),
+      activityDate: z.string(),
+      exerciseType: z.enum(["Run", "Walk", "Treadmill"]),
+      startTime: z.string(),
+      duration: z.string().regex(/^\d{2}:\d{2}:\d{2}$/, "Duration must be in HH:MM:SS format"),
+      distanceKm: z.number().positive(),
+    })
+  )
+  .mutation(async ({ ctx, input }) => {
+    try {
+      console.log("[Submit External Activity] Starting submission...", input);
+
+      const { data, error } = await ctx.supabase
+        .from("external_activity_submissions")
+        .insert({
+          RegistrationID: input.registrationId,
+          Activity_Date: input.activityDate,
+          Exercise_Type: input.exerciseType,
+          Start_Time: input.startTime,
+          Duration: input.duration,
+          Distance_km: input.distanceKm,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error("[Submit External Activity] Error:", error);
+        throw new Error(error.message || "Failed to submit activity");
+      }
+
+      console.log("[Submit External Activity] Success:", data);
+      return { success: true, submission: data };
+    } catch (error: any) {
+      console.error("[Submit External Activity] Error:", error);
+      throw new Error(error.message || "Failed to submit activity");
+    }
+  });

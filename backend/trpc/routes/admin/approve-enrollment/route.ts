@@ -1,0 +1,74 @@
+import { z } from "zod";
+import { publicProcedure } from "../../../create-context";
+
+export default publicProcedure
+  .input(
+    z.object({
+      enrollmentId: z.string(),
+    })
+  )
+  .mutation(async ({ ctx, input }) => {
+    console.log('[approveEnrollment] Approving enrollment:', input.enrollmentId);
+
+    const { data: enrollment, error: fetchError } = await ctx.supabase
+      .from("Event Enrollments")
+      .select("*")
+      .eq("EnrollmentID", input.enrollmentId)
+      .eq("Status", "pending")
+      .maybeSingle();
+
+    if (fetchError) {
+      console.error('[approveEnrollment] Error fetching enrollment:', fetchError);
+      throw new Error(`Failed to fetch enrollment: ${fetchError.message}`);
+    }
+
+    if (!enrollment) {
+      console.error('[approveEnrollment] Enrollment not found or already processed');
+      throw new Error('Enrollment not found or already processed');
+    }
+
+    const { data: maxParticipant } = await ctx.supabase
+      .from("Event Participants")
+      .select("eventParticipantId")
+      .order("eventParticipantId", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    let nextId = 1;
+    if (maxParticipant?.eventParticipantId) {
+      const currentNum = parseInt(maxParticipant.eventParticipantId.replace(/\D/g, '')) || 0;
+      nextId = currentNum + 1;
+    }
+
+    const participantId = `EP${nextId}`;
+
+    const { data: participant, error: insertError } = await ctx.supabase
+      .from("Event Participants")
+      .insert({
+        eventParticipantId: participantId,
+        eventId: enrollment.EventID,
+        RegistrationID: enrollment.RegistrationID,
+        Registration_Date: new Date().toISOString().split('T')[0],
+        Status: 'registered',
+        Days_Completed: 0,
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      console.error('[approveEnrollment] Error creating participant:', insertError);
+      throw new Error(`Failed to create participant: ${insertError.message}`);
+    }
+
+    const { error: deleteError } = await ctx.supabase
+      .from("Event Enrollments")
+      .delete()
+      .eq("EnrollmentID", input.enrollmentId);
+
+    if (deleteError) {
+      console.error('[approveEnrollment] Error deleting enrollment:', deleteError);
+    }
+
+    console.log('[approveEnrollment] Enrollment approved successfully:', participant);
+    return { success: true, participant };
+  });
