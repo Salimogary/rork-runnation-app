@@ -53,64 +53,72 @@ export default function ActivityScreen() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { data: activities, isLoading, refetch } = useQuery<ActivityData[]>({
+  const { data: activities, isLoading, refetch, error: activitiesError } = useQuery<ActivityData[]>({
     queryKey: ["activities", user],
     queryFn: async () => {
-      let query = supabase
-        .from("Activity Sample")
-        .select("*");
+      try {
+        let query = supabase
+          .from("Activity Sample")
+          .select("*");
 
-      if (user) {
-        query = query.eq("RegistrationID", user.id);
+        if (user) {
+          query = query.eq("RegistrationID", user.id);
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+          console.error("[Activities] Supabase error:", error);
+          throw error;
+        }
+
+        console.log("[Activities] Fetched", data?.length || 0, "activities");
+        return data || [];
+      } catch (error: any) {
+        console.error("[Activities] Query failed:", error);
+        throw error;
       }
-
-      const { data, error } = await query;
-
-      if (error) {
-        console.error("Error fetching activities:", error.message);
-        throw new Error(error.message || "Failed to fetch activities");
-      }
-
-      return data || [];
     },
     enabled: !showCommunity,
     staleTime: 30000,
+    retry: 1,
   });
 
-  const { data: communityData, isLoading: communityLoading, refetch: refetchCommunity } = useQuery<CommunityData[]>({
+  const { data: communityData, isLoading: communityLoading, refetch: refetchCommunity, error: communityError } = useQuery<CommunityData[]>({
     queryKey: ["community"],
     queryFn: async () => {
-      const { data: activities, error: activityError } = await supabase
-        .from("Activity Sample")
-        .select(`
-          RegistrationID,
-          Activity_Date,
-          Distance_km,
-          Start_Time,
-          End_Time,
-          Pace_km_h
-        `);
+      try {
+        const { data: activities, error: activityError } = await supabase
+          .from("Activity Sample")
+          .select(`
+            RegistrationID,
+            Activity_Date,
+            Distance_km,
+            Start_Time,
+            End_Time,
+            Pace_km_h
+          `);
 
-      if (activityError) {
-        console.error("Error fetching activities:", activityError.message);
-        throw new Error(activityError.message || "Failed to fetch activities");
-      }
+        if (activityError) {
+          console.error("[Community] Activity fetch error:", activityError);
+          throw activityError;
+        }
 
-      const { data: registrations, error: regError } = await supabase
-        .from("Registration Sample")
-        .select(`
-          RegistrationID,
-          "First Name",
-          "Other Names",
-          Country,
-          Residence,
-          Sex
-        `);
+        const { data: registrations, error: regError } = await supabase
+          .from("Registration Sample")
+          .select(`
+            RegistrationID,
+            "First Name",
+            "Other Names",
+            Country,
+            Residence,
+            Sex
+          `);
 
-      if (regError) {
-        console.error("Error fetching registrations:", regError.message);
-        throw new Error(regError.message || "Failed to fetch registrations");
-      }
+        if (regError) {
+          console.error("[Community] Registration fetch error:", regError);
+          throw regError;
+        }
 
       const regMap = new Map(registrations?.map(r => [r.RegistrationID, r]));
       const userStats = new Map<string, {
@@ -172,10 +180,16 @@ export default function ActivityScreen() {
         });
       });
 
+      console.log("[Community] Processed", result.length, "users");
       return result;
+      } catch (error: any) {
+        console.error("[Community] Query failed:", error);
+        throw error;
+      }
     },
     enabled: showCommunity,
     staleTime: 30000,
+    retry: 1,
   });
 
   const sortedActivities = useMemo(() => 
@@ -458,7 +472,19 @@ export default function ActivityScreen() {
         )}
 
         {showCommunity ? (
-          communityLoading && sortedCommunityData.length === 0 ? (
+          communityError ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyEmoji}>⚠️</Text>
+              <Text style={styles.emptyText}>Connection Error</Text>
+              <Text style={styles.emptySubtext}>Check your internet connection</Text>
+              <TouchableOpacity 
+                style={styles.retryButton} 
+                onPress={() => refetchCommunity()}
+              >
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : communityLoading && sortedCommunityData.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>Loading leaderboard...</Text>
             </View>
@@ -517,7 +543,19 @@ export default function ActivityScreen() {
             </View>
           )
         ) : (
-          isLoading && sortedActivities.length === 0 ? (
+          activitiesError ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyEmoji}>⚠️</Text>
+              <Text style={styles.emptyText}>Connection Error</Text>
+              <Text style={styles.emptySubtext}>Check your internet connection</Text>
+              <TouchableOpacity 
+                style={styles.retryButton} 
+                onPress={() => refetch()}
+              >
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : isLoading && sortedActivities.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>Loading activities...</Text>
             </View>
@@ -823,6 +861,23 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.textSecondary,
     textAlign: "center",
+  },
+  retryButton: {
+    marginTop: 20,
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  retryButtonText: {
+    fontSize: 15,
+    fontWeight: "700" as const,
+    color: colors.white,
   },
   leaderboardContainer: {
     padding: 16,
