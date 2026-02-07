@@ -145,7 +145,7 @@ const getMedalList = publicProcedure
         })
       );
 
-      const filtered = qualifiedParticipants.filter((p): p is NonNullable<typeof p> => p !== null);
+      const filtered = qualifiedParticipants.filter((p: any): p is NonNullable<typeof p> => p !== null);
       console.log("[getMedalList] Qualified participants:", filtered.length);
 
       return filtered;
