@@ -70,7 +70,6 @@ export default function ExerciseScreen() {
     }
 
     if (Platform.OS === 'web') {
-      alert('GPS tracking is not available on web');
       return;
     }
 
