@@ -1,12 +1,12 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
-import Surreal from "surrealdb";
+import { Surreal } from "surrealdb";
 
 const dbEndpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT;
 const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
 const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
 
-export const getMedalList = publicProcedure
+const getMedalList = publicProcedure
   .input(
     z.object({
       eventId: z.string().optional(),
@@ -145,7 +145,7 @@ export const getMedalList = publicProcedure
         })
       );
 
-      const filtered = qualifiedParticipants.filter(p => p !== null);
+      const filtered = qualifiedParticipants.filter((p): p is NonNullable<typeof p> => p !== null);
       console.log("[getMedalList] Qualified participants:", filtered.length);
 
       return filtered;
@@ -156,3 +156,5 @@ export const getMedalList = publicProcedure
       await db.close();
     }
   });
+
+export default getMedalList;
