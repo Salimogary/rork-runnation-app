@@ -4,12 +4,11 @@ import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { trpc, trpcClient } from "@/lib/trpc";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Linking from "expo-linking";
 import { supabase } from "@/lib/supabase";
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
@@ -17,28 +16,46 @@ const queryClient = new QueryClient();
 function RootLayoutNav() {
   const segments = useSegments();
   const router = useRouter();
+  const { user, isLoading: authLoading } = useAuth();
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState<boolean | null>(null);
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     const checkOnboarding = async () => {
       const seen = await AsyncStorage.getItem('hasSeenOnboarding');
       setHasSeenOnboarding(seen === 'true');
+      setIsReady(true);
     };
     checkOnboarding();
   }, []);
 
   useEffect(() => {
-    if (hasSeenOnboarding === null) return;
+    if (!isReady || authLoading || hasSeenOnboarding === null) return;
 
     const inOnboarding = segments[0] === 'onboarding';
     const inRegister = segments[0] === 'register';
+    const inTabs = segments[0] === '(tabs)';
+    const inAdminLogin = segments[0] === 'admin-login';
+    const inAdmin = segments[0] === 'admin';
 
-    if (!hasSeenOnboarding && !inOnboarding && !inRegister) {
-      router.replace('/onboarding');
-    } else if (hasSeenOnboarding && inOnboarding) {
-      router.replace('/(tabs)');
+    if (inAdminLogin || inAdmin) return;
+
+    if (user) {
+      if (!inTabs) {
+        router.replace('/(tabs)');
+      }
+    } else {
+      if (!hasSeenOnboarding) {
+        if (!inOnboarding && !inRegister) {
+          router.replace('/onboarding');
+        }
+      } else {
+        if (!inRegister) {
+          router.replace('/register');
+        }
+      }
     }
-  }, [hasSeenOnboarding, segments, router]);
+  }, [user, isReady, authLoading, hasSeenOnboarding, segments, router]);
 
   return (
     <Stack screenOptions={{ headerBackTitle: "Back" }}>
@@ -52,6 +69,7 @@ function RootLayoutNav() {
       <Stack.Screen name="cart" options={{ title: "Cart" }} />
       <Stack.Screen name="checkout" options={{ title: "Checkout" }} />
       <Stack.Screen name="participants" options={{ title: "Participants" }} />
+      <Stack.Screen name="medal-list" options={{ title: "Medal List" }} />
     </Stack>
   );
 }
