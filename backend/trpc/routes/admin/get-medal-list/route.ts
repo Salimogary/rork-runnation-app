@@ -1,10 +1,5 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
-import { Surreal } from "surrealdb";
-
-const dbEndpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT;
-const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
-const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
 
 const getMedalList = publicProcedure
   .input(
@@ -12,63 +7,55 @@ const getMedalList = publicProcedure
       eventId: z.string().optional(),
     })
   )
-  .query(async ({ input }) => {
+  .query(async ({ input, ctx }) => {
     console.log("[getMedalList] Starting query with input:", input);
-    
-    const db = new Surreal();
 
     try {
-      await db.connect(`${dbEndpoint}/rpc`, {
-        namespace: dbNamespace,
-        database: dbNamespace,
-        auth: { token: dbToken },
-      });
-
-      let query = `
-        SELECT 
-          ep."ParticipantID" as participantId,
-          ep."RegistrationID" as registrationId,
-          ep."EventID" as eventId,
-          rs."First_Name" as firstName,
-          rs."Other_Names" as otherNames,
-          rs."Country" as country,
-          rs."Residence" as residence,
-          e."eventName" as eventName,
-          e."medal_min_daily_distance" as medalMinDailyDistance,
-          e."medal_min_cumulative_distance" as medalMinCumulativeDistance,
-          e."medal_date_start" as medalDateStart,
-          e."medal_date_end" as medalDateEnd
-        FROM "Events Participants" as ep
-        INNER JOIN "Registration Sample" as rs ON ep."RegistrationID" = rs."RegistrationID"
-        INNER JOIN "Events" as e ON ep."EventID" = e."eventId"
-        WHERE 1=1
-      `;
+      let participantsQuery = ctx.supabase
+        .from("Event Participants")
+        .select(`
+          eventParticipantId,
+          eventId,
+          RegistrationID,
+          Events!inner(
+            eventName,
+            medal_min_daily_distance,
+            medal_min_cumulative_distance,
+            medal_date_start,
+            medal_date_end
+          ),
+          Registration Sample!inner(First Name, Other Names, Country, Residence)
+        `);
 
       if (input.eventId) {
-        query += ` AND ep."EventID" = '${input.eventId}'`;
+        participantsQuery = participantsQuery.eq("eventId", input.eventId);
       }
 
-      const result = await db.query(query);
-      console.log("[getMedalList] Raw query result:", JSON.stringify(result, null, 2));
+      const { data: participants, error: participantsError } = await participantsQuery;
 
-      if (!result || result.length === 0) {
-        console.log("[getMedalList] No data found");
+      if (participantsError) {
+        console.error("[getMedalList] Error fetching participants:", participantsError);
+        throw new Error(`Failed to fetch participants: ${participantsError.message}`);
+      }
+
+      if (!participants || participants.length === 0) {
+        console.log("[getMedalList] No participants found");
         return [];
       }
 
-      const participants = result[0] || [];
       console.log("[getMedalList] Participants count:", participants.length);
 
       const qualifiedParticipants = await Promise.all(
         participants.map(async (participant: any) => {
-          const { 
-            registrationId, 
-            eventId,
-            medalMinDailyDistance, 
-            medalMinCumulativeDistance,
-            medalDateStart,
-            medalDateEnd 
-          } = participant;
+          const event = participant.Events;
+          const registration = participant["Registration Sample"];
+
+          if (!event) return null;
+
+          const medalDateStart = event.medal_date_start;
+          const medalDateEnd = event.medal_date_end;
+          const medalMinDailyDistance = event.medal_min_daily_distance;
+          const medalMinCumulativeDistance = event.medal_min_cumulative_distance;
 
           if (!medalDateStart || !medalDateEnd) {
             return null;
@@ -80,29 +67,29 @@ const getMedalList = publicProcedure
           today.setHours(0, 0, 0, 0);
 
           const actualEndDate = endDate > today ? today : endDate;
+          const actualEndStr = actualEndDate.toISOString().split('T')[0];
 
-          const activityQuery = `
-            SELECT 
-              "Activity_Date" as activityDate,
-              "Distance_km" as distanceKm
-            FROM "Activity Sample"
-            WHERE "RegistrationID" = '${registrationId}'
-              AND "Activity_Date" >= '${medalDateStart}'
-              AND "Activity_Date" <= '${actualEndDate.toISOString().split('T')[0]}'
-            ORDER BY "Activity_Date" ASC
-          `;
+          const { data: activities, error: actError } = await ctx.supabase
+            .from("Activity Sample")
+            .select("Activity_Date, Distance_km")
+            .eq("RegistrationID", participant.RegistrationID)
+            .gte("Activity_Date", medalDateStart)
+            .lte("Activity_Date", actualEndStr)
+            .order("Activity_Date", { ascending: true });
 
-          const activityResult = await db.query(activityQuery);
-          const activities = activityResult[0] || [];
+          if (actError) {
+            console.error("[getMedalList] Error fetching activities:", actError);
+            return null;
+          }
 
           let totalDistance = 0;
           const activitiesByDate = new Map<string, number>();
 
-          activities.forEach((activity: any) => {
-            const dateKey = new Date(activity.activityDate).toISOString().split('T')[0];
+          (activities || []).forEach((activity: any) => {
+            const dateKey = new Date(activity.Activity_Date).toISOString().split('T')[0];
             const currentDistance = activitiesByDate.get(dateKey) || 0;
-            activitiesByDate.set(dateKey, currentDistance + activity.distanceKm);
-            totalDistance += activity.distanceKm;
+            activitiesByDate.set(dateKey, currentDistance + (activity.Distance_km || 0));
+            totalDistance += (activity.Distance_km || 0);
           });
 
           let qualifiedDays = 0;
@@ -110,17 +97,14 @@ const getMedalList = publicProcedure
 
           if (medalMinDailyDistance && medalMinDailyDistance > 0) {
             const currentDate = new Date(startDate);
-            
             while (currentDate <= actualEndDate) {
               const dateKey = currentDate.toISOString().split('T')[0];
               const dayDistance = activitiesByDate.get(dateKey) || 0;
-
               if (dayDistance >= medalMinDailyDistance) {
                 qualifiedDays++;
               } else {
                 isQualified = false;
               }
-
               currentDate.setDate(currentDate.getDate() + 1);
             }
           } else {
@@ -138,22 +122,31 @@ const getMedalList = publicProcedure
           }
 
           return {
-            ...participant,
+            participantId: participant.eventParticipantId,
+            registrationId: participant.RegistrationID,
+            eventId: participant.eventId,
+            firstName: registration?.["First Name"] || "",
+            otherNames: registration?.["Other Names"] || "",
+            country: registration?.Country || "",
+            residence: registration?.Residence || "",
+            eventName: event.eventName || "",
+            medalMinDailyDistance,
+            medalMinCumulativeDistance,
+            medalDateStart,
+            medalDateEnd,
             qualifiedDays,
             totalDistance: parseFloat(totalDistance.toFixed(2)),
           };
         })
       );
 
-      const filtered = qualifiedParticipants.filter((p: any): p is NonNullable<typeof p> => p !== null);
+      const filtered = qualifiedParticipants.filter((p): p is NonNullable<typeof p> => p !== null);
       console.log("[getMedalList] Qualified participants:", filtered.length);
 
       return filtered;
     } catch (error: any) {
       console.error("[getMedalList] Error:", error);
       throw new Error(`Failed to get medal list: ${error.message}`);
-    } finally {
-      await db.close();
     }
   });
 
