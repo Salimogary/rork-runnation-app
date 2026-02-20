@@ -40,8 +40,10 @@ function RootLayoutNav() {
 
     if (inAdminLogin || inAdmin) return;
 
+    const inAllowedRoute = segments[0] === 'settings' || segments[0] === 'profile' || segments[0] === 'cart' || segments[0] === 'checkout' || segments[0] === 'participants' || segments[0] === 'medal-list';
+
     if (user) {
-      if (!inTabs) {
+      if (!inTabs && !inAllowedRoute) {
         router.replace('/(tabs)');
       }
     } else {
