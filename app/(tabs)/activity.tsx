@@ -38,7 +38,7 @@ interface CommunityData {
 type CommunitySortOption = "distance" | "time";
 
 export default function ActivityScreen() {
-  const { user } = useAuth();
+  const { user, privateMode } = useAuth();
 
   const [communitySortBy, setCommunitySortBy] = useState<CommunitySortOption>("distance");
   const [showCommunity, setShowCommunity] = useState(false);
@@ -273,20 +273,20 @@ export default function ActivityScreen() {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  const sortedCommunityData = useMemo(() => 
-    communityData
-      ? [...communityData].sort((a, b) => {
-          const distDiff = b.AvgDistance - a.AvgDistance;
-          if (distDiff !== 0) return distDiff;
-          
-          const daysDiff = b.ActiveDays - a.ActiveDays;
-          if (daysDiff !== 0) return daysDiff;
-          
-          return a.AveragePace - b.AveragePace;
-        })
-      : [],
-    [communityData]
-  );
+  const sortedCommunityData = useMemo(() => {
+    if (!communityData) return [];
+    let filtered = communityData;
+    if (privateMode && user?.id) {
+      filtered = filtered.filter(item => item.RegistrationID !== user.id);
+    }
+    return [...filtered].sort((a, b) => {
+      const distDiff = b.AvgDistance - a.AvgDistance;
+      if (distDiff !== 0) return distDiff;
+      const daysDiff = b.ActiveDays - a.ActiveDays;
+      if (daysDiff !== 0) return daysDiff;
+      return a.AveragePace - b.AveragePace;
+    });
+  }, [communityData, privateMode, user?.id]);
 
   const formatTime = (minutes: number): string => {
     const hours = Math.floor(minutes / 60);

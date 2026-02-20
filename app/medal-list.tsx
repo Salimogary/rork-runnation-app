@@ -1,6 +1,7 @@
 import { StyleSheet, View, Text, ScrollView, RefreshControl } from "react-native";
 import { Stack } from "expo-router";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/contexts/AuthContext";
 import { Award, TrendingUp } from "lucide-react-native";
 import colors from "@/constants/colors";
 import { LinearGradient } from "expo-linear-gradient";
@@ -19,6 +20,8 @@ interface MedalParticipant {
 }
 
 export default function MedalListScreen() {
+  const { user, privateMode } = useAuth();
+
   const { data: medalList, isLoading, refetch } = trpc.admin.getMedalList.useQuery(
     {},
     {
@@ -28,15 +31,20 @@ export default function MedalListScreen() {
   ) as { data: MedalParticipant[] | undefined; isLoading: boolean; refetch: () => void };
 
   const sortedList = medalList
-    ? [...medalList].sort((a, b) => {
-        if (b.totalDistance !== a.totalDistance) {
-          return b.totalDistance - a.totalDistance;
-        }
-        if (b.qualifiedDays !== a.qualifiedDays) {
-          return b.qualifiedDays - a.qualifiedDays;
-        }
-        return 0;
-      })
+    ? [...medalList]
+        .filter((p) => {
+          if (privateMode && user?.id && p.registrationId === user.id) return false;
+          return true;
+        })
+        .sort((a, b) => {
+          if (b.totalDistance !== a.totalDistance) {
+            return b.totalDistance - a.totalDistance;
+          }
+          if (b.qualifiedDays !== a.qualifiedDays) {
+            return b.qualifiedDays - a.qualifiedDays;
+          }
+          return 0;
+        })
     : [];
 
   const groupedByEvent = sortedList.reduce((acc, participant) => {

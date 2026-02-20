@@ -2,6 +2,7 @@ import { StyleSheet, View, Text, ScrollView, RefreshControl, TouchableOpacity } 
 import { Stack } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 import { useMemo, useState } from "react";
 
 interface Participant {
@@ -10,9 +11,11 @@ interface Participant {
   other_names: string;
   residence: string;
   sex: string;
+  registration_id?: string;
 }
 
 export default function ParticipantsScreen() {
+  const { user, privateMode } = useAuth();
   const [selectedEvent, setSelectedEvent] = useState<string>("all");
 
   const { data: participants, isLoading, refetch } = useQuery<Participant[]>({
@@ -20,7 +23,7 @@ export default function ParticipantsScreen() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("event_participants_snapshot")
-        .select("event_name, first_name, other_names, residence, sex")
+        .select("event_name, first_name, other_names, residence, sex, registration_id")
         .order("event_name", { ascending: true });
 
       if (error) {
@@ -44,9 +47,13 @@ export default function ParticipantsScreen() {
 
   const filteredParticipants = useMemo(() => {
     if (!participants) return [];
-    if (selectedEvent === "all") return participants;
-    return participants.filter((p) => p.event_name === selectedEvent);
-  }, [participants, selectedEvent]);
+    let filtered = participants;
+    if (privateMode && user?.id) {
+      filtered = filtered.filter((p) => p.registration_id !== user.id);
+    }
+    if (selectedEvent === "all") return filtered;
+    return filtered.filter((p) => p.event_name === selectedEvent);
+  }, [participants, selectedEvent, privateMode, user?.id]);
 
   const groupedParticipants = useMemo(() => {
     const grouped: Record<string, Participant[]> = {};

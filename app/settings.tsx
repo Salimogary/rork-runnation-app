@@ -1,7 +1,7 @@
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, Image, TextInput } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, Bell, MapPin, Moon, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield } from "lucide-react-native";
+import { LogOut, Bell, MapPin, Moon, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff } from "lucide-react-native";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useState } from "react";
@@ -22,7 +22,7 @@ interface PendingActivity {
 }
 
 export default function SettingsScreen() {
-  const { signOut, user } = useAuth();
+  const { signOut, user, privateMode, setPrivateMode } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [showApprovalModal, setShowApprovalModal] = useState(false);
@@ -278,6 +278,24 @@ export default function SettingsScreen() {
           </View>
           <View style={[styles.radioButton, darkModeEnabled && styles.radioButtonActive]}>
             {darkModeEnabled && <View style={styles.radioButtonInner} />}
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={styles.settingItem} 
+          onPress={() => setPrivateMode(!privateMode)}
+        >
+          <View style={styles.settingLeft}>
+            <View style={[styles.iconContainer, privateMode && styles.iconContainerActive]}>
+              <EyeOff size={22} color={privateMode ? "#fff" : "#f97316"} />
+            </View>
+            <View style={styles.settingTextContainer}>
+              <Text style={styles.settingTitle}>Private Mode</Text>
+              <Text style={styles.settingSubtitle}>Hide your data from public views</Text>
+            </View>
+          </View>
+          <View style={[styles.radioButton, privateMode && styles.radioButtonActive]}>
+            {privateMode && <View style={styles.radioButtonInner} />}
           </View>
         </TouchableOpacity>
       </View>
@@ -821,6 +839,9 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: 6,
     backgroundColor: "#10b981",
+  },
+  iconContainerActive: {
+    backgroundColor: "#f97316",
   },
   feedbackBody: {
     padding: 20,

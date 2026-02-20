@@ -35,6 +35,7 @@ interface RegistrationData {
 const STORAGE_KEYS = {
   CURRENT_USER: 'current_user',
   USERS: 'users_data',
+  PRIVATE_MODE: 'private_mode',
 };
 
 const MAX_LOGIN_ATTEMPTS = 5;
@@ -66,11 +67,34 @@ const secureStorage = {
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [user, setUser] = useState<UserData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [privateMode, setPrivateModeState] = useState(false);
   const [loginAttempts, setLoginAttempts] = useState<{ [key: string]: { count: number; timestamp: number } }>({});
 
   useEffect(() => {
     checkAuthStatus();
+    loadPrivateMode();
   }, []);
+
+  const loadPrivateMode = async () => {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_KEYS.PRIVATE_MODE);
+      if (stored !== null) {
+        setPrivateModeState(stored === 'true');
+      }
+    } catch (error) {
+      console.error('Error loading private mode:', error);
+    }
+  };
+
+  const setPrivateMode = async (enabled: boolean) => {
+    try {
+      setPrivateModeState(enabled);
+      await AsyncStorage.setItem(STORAGE_KEYS.PRIVATE_MODE, enabled ? 'true' : 'false');
+      console.log('[AuthContext] Private mode set to:', enabled);
+    } catch (error) {
+      console.error('Error saving private mode:', error);
+    }
+  };
 
   const checkAuthStatus = async () => {
     try {
@@ -358,6 +382,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     user,
     isLoading,
     registrationId: user?.id || '',
+    privateMode,
+    setPrivateMode,
     signIn,
     signUp,
     signOut,
