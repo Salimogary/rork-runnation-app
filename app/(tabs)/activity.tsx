@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, X, Calendar, MapPin, TrendingUp, Clock } from "lucide-react-native";
+import { Plus, X, Calendar, MapPin, TrendingUp, Clock, Award, ChevronRight } from "lucide-react-native";
 import colors from "@/constants/colors";
 
 
@@ -21,6 +21,16 @@ interface ActivityData {
     name?: string;
     username?: string;
   };
+}
+
+interface RegisteredEvent {
+  EventID: string;
+  RegistrationID: string;
+  eventName: string;
+  startsAt: string;
+  endsAt: string;
+  isOnMedalList: boolean;
+  status: 'ongoing' | 'upcoming' | 'completed';
 }
 
 interface CommunityData {
@@ -52,6 +62,110 @@ export default function ActivityScreen() {
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const { data: registeredEvents, isLoading: eventsLoading, refetch: refetchEvents } = useQuery<RegisteredEvent[]>({
+    queryKey: ["registered-events", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      try {
+        const { data: participantData, error: pError } = await supabase
+          .from("Events Participants")
+          .select("EventID, RegistrationID")
+          .eq("RegistrationID", user.id);
+
+        if (pError) {
+          console.error("[RegisteredEvents] Participant fetch error:", pError);
+          throw pError;
+        }
+        if (!participantData || participantData.length === 0) return [];
+
+        const eventIds = participantData.map(p => p.EventID);
+        const { data: eventsData, error: eError } = await supabase
+          .from("Events")
+          .select("eventId, eventName, startsAt, endsAt, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
+          .in("eventId", eventIds);
+
+        if (eError) {
+          console.error("[RegisteredEvents] Events fetch error:", eError);
+          throw eError;
+        }
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const results: RegisteredEvent[] = await Promise.all(
+          (eventsData || []).map(async (event: any) => {
+            const startDate = new Date(event.startsAt);
+            const endDate = new Date(event.endsAt);
+            let status: RegisteredEvent['status'] = 'upcoming';
+            if (today >= startDate && today <= endDate) status = 'ongoing';
+            else if (today > endDate) status = 'completed';
+
+            let isOnMedalList = false;
+            const medalStart = event.medal_date_start;
+            const medalEnd = event.medal_date_end;
+            const minDaily = event.medal_min_daily_distance;
+            const minCumulative = event.medal_min_cumulative_distance;
+
+            if (medalStart && medalEnd) {
+              const mStart = new Date(medalStart);
+              const mEnd = new Date(medalEnd);
+              const actualEnd = mEnd > today ? today : mEnd;
+              const actualEndStr = actualEnd.toISOString().split('T')[0];
+
+              const { data: acts } = await supabase
+                .from("Activity Sample")
+                .select("Activity_Date, Distance_km")
+                .eq("RegistrationID", user.id)
+                .gte("Activity_Date", medalStart)
+                .lte("Activity_Date", actualEndStr);
+
+              let totalDist = 0;
+              const byDate = new Map<string, number>();
+              (acts || []).forEach((a: any) => {
+                const dk = new Date(a.Activity_Date).toISOString().split('T')[0];
+                byDate.set(dk, (byDate.get(dk) || 0) + (a.Distance_km || 0));
+                totalDist += a.Distance_km || 0;
+              });
+
+              let qualified = true;
+              if (minDaily && minDaily > 0) {
+                const cur = new Date(mStart);
+                while (cur <= actualEnd) {
+                  const dk = cur.toISOString().split('T')[0];
+                  if ((byDate.get(dk) || 0) < minDaily) { qualified = false; break; }
+                  cur.setDate(cur.getDate() + 1);
+                }
+              }
+              if (minCumulative && minCumulative > 0 && totalDist < minCumulative) {
+                qualified = false;
+              }
+              isOnMedalList = qualified;
+            }
+
+            return {
+              EventID: event.eventId,
+              RegistrationID: user.id,
+              eventName: event.eventName || 'Unnamed Event',
+              startsAt: event.startsAt,
+              endsAt: event.endsAt,
+              isOnMedalList,
+              status,
+            };
+          })
+        );
+
+        console.log("[RegisteredEvents] Fetched", results.length, "events");
+        return results;
+      } catch (error: any) {
+        console.error("[RegisteredEvents] Query failed:", error);
+        throw error;
+      }
+    },
+    enabled: !showCommunity && !!user?.id,
+    staleTime: 30000,
+    retry: 1,
+  });
 
   const { data: activities, isLoading, refetch, error: activitiesError } = useQuery<ActivityData[]>({
     queryKey: ["activities", user],
@@ -569,38 +683,75 @@ export default function ActivityScreen() {
             <View style={styles.activitiesContainer}>
               {sortedActivities.map((activity) => (
                 <View key={activity.ActivityID} style={styles.activityCard}>
-                  <View style={styles.activityHeader}>
-                    <View style={styles.activityTypeContainer}>
-                      <Text style={styles.activityEmoji}>{getExerciseEmoji(activity.Exercise_Type)}</Text>
-                      <View>
-                        <Text style={styles.activityType}>{activity.Exercise_Type}</Text>
-                        <Text style={styles.activityDate}>{formatDate(activity.Activity_Date)}</Text>
+                  <View style={styles.activityRow}>
+                    <View style={styles.activityMainInfo}>
+                      <Text style={styles.activityType}>{activity.Exercise_Type}</Text>
+                      <Text style={styles.activityDate}>{formatDate(activity.Activity_Date)}</Text>
+                    </View>
+                    <View style={styles.activityMetrics}>
+                      <View style={styles.metricItem}>
+                        <Text style={styles.metricValue}>{activity.Distance_km.toFixed(1)}</Text>
+                        <Text style={styles.metricLabel}>km</Text>
                       </View>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.activityStats}>
-                    <View style={styles.activityStatItem}>
-                      <Text style={styles.activityStatLabel}>Distance</Text>
-                      <Text style={styles.activityStatValue}>{activity.Distance_km.toFixed(2)} km</Text>
-                    </View>
-                    <View style={styles.activityStatDivider} />
-                    <View style={styles.activityStatItem}>
-                      <Text style={styles.activityStatLabel}>Duration</Text>
-                      <Text style={styles.activityStatValue}>
-                        {calculateDuration(activity.Start_Time, activity.End_Time)}
-                      </Text>
-                    </View>
-                    <View style={styles.activityStatDivider} />
-                    <View style={styles.activityStatItem}>
-                      <Text style={styles.activityStatLabel}>Pace</Text>
-                      <Text style={styles.activityStatValue}>
-                        {convertPaceToMinPerKm(activity.Pace_km_h)}
-                      </Text>
+                      <View style={styles.metricDot} />
+                      <View style={styles.metricItem}>
+                        <Text style={styles.metricValue}>{calculateDuration(activity.Start_Time, activity.End_Time)}</Text>
+                        <Text style={styles.metricLabel}>time</Text>
+                      </View>
+                      <View style={styles.metricDot} />
+                      <View style={styles.metricItem}>
+                        <Text style={styles.metricValue}>{convertPaceToMinPerKm(activity.Pace_km_h)}</Text>
+                        <Text style={styles.metricLabel}>pace</Text>
+                      </View>
                     </View>
                   </View>
                 </View>
               ))}
+
+              {registeredEvents && registeredEvents.length > 0 && (
+                <View style={styles.eventsSection}>
+                  <Text style={styles.eventsSectionTitle}>Registered Events</Text>
+                  {registeredEvents.map((event) => (
+                    <View key={event.EventID} style={styles.eventCard}>
+                      <View style={styles.eventCardTop}>
+                        <View style={styles.eventNameRow}>
+                          <Calendar size={16} color={colors.primary} />
+                          <Text style={styles.eventName} numberOfLines={1}>{event.eventName}</Text>
+                        </View>
+                        <View style={[
+                          styles.statusBadge,
+                          event.status === 'ongoing' && styles.statusOngoing,
+                          event.status === 'upcoming' && styles.statusUpcoming,
+                          event.status === 'completed' && styles.statusCompleted,
+                        ]}>
+                          <Text style={[
+                            styles.statusText,
+                            event.status === 'ongoing' && styles.statusTextOngoing,
+                            event.status === 'upcoming' && styles.statusTextUpcoming,
+                            event.status === 'completed' && styles.statusTextCompleted,
+                          ]}>
+                            {event.status === 'ongoing' ? 'Ongoing' : event.status === 'upcoming' ? formatDate(event.startsAt) : 'Completed'}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.eventCardBottom}>
+                        <View style={styles.medalIndicator}>
+                          <Award size={14} color={event.isOnMedalList ? '#FFD700' : colors.lightGray} />
+                          <Text style={[
+                            styles.medalText,
+                            event.isOnMedalList ? styles.medalTextQualified : styles.medalTextNot,
+                          ]}>
+                            {event.isOnMedalList ? 'On Medal List' : 'Not on Medal List'}
+                          </Text>
+                        </View>
+                        {event.status === 'upcoming' && (
+                          <Text style={styles.eventStartLabel}>Starts {formatDate(event.startsAt)}</Text>
+                        )}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
           )
         )}
@@ -955,66 +1106,154 @@ const styles = StyleSheet.create({
   },
   activityCard: {
     backgroundColor: colors.white,
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
-    gap: 14,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  activityHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+  activityRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
   },
-  activityTypeContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  activityEmoji: {
-    fontSize: 36,
+  activityMainInfo: {
+    flexShrink: 1,
+    marginRight: 12,
   },
   activityType: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: "700" as const,
     color: colors.text,
   },
   activityDate: {
-    fontSize: 13,
+    fontSize: 12,
     color: colors.textSecondary,
-    fontWeight: "600" as const,
-    marginTop: 2,
+    fontWeight: "500" as const,
+    marginTop: 1,
   },
-  activityStats: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-around",
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.divider,
+  activityMetrics: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
   },
-  activityStatItem: {
-    alignItems: "center",
-    flex: 1,
+  metricItem: {
+    alignItems: "center" as const,
   },
-  activityStatDivider: {
-    width: 1,
-    height: 32,
-    backgroundColor: colors.divider,
-  },
-  activityStatLabel: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    marginBottom: 6,
-    fontWeight: "600" as const,
-  },
-  activityStatValue: {
-    fontSize: 15,
+  metricValue: {
+    fontSize: 14,
     fontWeight: "700" as const,
     color: colors.text,
+  },
+  metricLabel: {
+    fontSize: 9,
+    color: colors.textLight,
+    fontWeight: "600" as const,
+    textTransform: "uppercase" as const,
+  },
+  metricDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: colors.lightGray,
+    marginHorizontal: 2,
+  },
+  eventsSection: {
+    marginTop: 8,
+    gap: 10,
+  },
+  eventsSectionTitle: {
+    fontSize: 16,
+    fontWeight: "700" as const,
+    color: colors.text,
+    marginBottom: 2,
+  },
+  eventCard: {
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    padding: 14,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+    gap: 10,
+  },
+  eventCardTop: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    gap: 8,
+  },
+  eventNameRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+    flex: 1,
+    minWidth: 0,
+  },
+  eventName: {
+    fontSize: 14,
+    fontWeight: "700" as const,
+    color: colors.text,
+    flex: 1,
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: colors.extraLightGray,
+  },
+  statusOngoing: {
+    backgroundColor: "rgba(16, 185, 129, 0.12)",
+  },
+  statusUpcoming: {
+    backgroundColor: "rgba(74, 144, 226, 0.12)",
+  },
+  statusCompleted: {
+    backgroundColor: "rgba(102, 102, 102, 0.1)",
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+    color: colors.textSecondary,
+  },
+  statusTextOngoing: {
+    color: colors.success,
+  },
+  statusTextUpcoming: {
+    color: '#4A90E2',
+  },
+  statusTextCompleted: {
+    color: colors.textSecondary,
+  },
+  eventCardBottom: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+  },
+  medalIndicator: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 5,
+  },
+  medalText: {
+    fontSize: 12,
+    fontWeight: "600" as const,
+  },
+  medalTextQualified: {
+    color: '#D4A017',
+  },
+  medalTextNot: {
+    color: colors.textLight,
+  },
+  eventStartLabel: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    fontWeight: "500" as const,
   },
   modalOverlay: {
     flex: 1,
