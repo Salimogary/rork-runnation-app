@@ -311,7 +311,7 @@ export default function RegisterScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <LinearGradient
-        colors={['#FF6B35', '#F7931E', '#FFD700']}
+        colors={['#C74E1A', '#D4691E', '#CC8800']}
         style={styles.gradient}
       >
         <ScrollView
