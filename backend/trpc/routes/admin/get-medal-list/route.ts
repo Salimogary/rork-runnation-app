@@ -13,19 +13,7 @@ const getMedalList = publicProcedure
     try {
       let participantsQuery = ctx.supabase
         .from("Events Participants")
-        .select(`
-          ParticipantID,
-          EventID,
-          RegistrationID,
-          Events!Events_Participants_EventID_fkey(
-            eventName,
-            medal_min_daily_distance,
-            medal_min_cumulative_distance,
-            medal_date_start,
-            medal_date_end
-          ),
-          Registration Sample!Events_Participants_RegistrationID_fkey(First Name, Other Names, Country, Residence)
-        `);
+        .select("ParticipantID, EventID, RegistrationID");
 
       if (input.eventId) {
         participantsQuery = participantsQuery.eq("EventID", input.eventId);
@@ -45,10 +33,37 @@ const getMedalList = publicProcedure
 
       console.log("[getMedalList] Participants count:", participants.length);
 
+      const eventIds = [...new Set(participants.map((p: any) => p.EventID))];
+      const regIds = [...new Set(participants.map((p: any) => p.RegistrationID))];
+
+      const { data: events, error: eventsError } = await ctx.supabase
+        .from("Events")
+        .select("eventId, eventName, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
+        .in("eventId", eventIds);
+
+      if (eventsError) {
+        console.error("[getMedalList] Error fetching events:", eventsError);
+        throw new Error(`Failed to fetch events: ${eventsError.message}`);
+      }
+
+      const eventsMap = new Map((events || []).map((e: any) => [e.eventId, e]));
+
+      const { data: registrations, error: regError } = await ctx.supabase
+        .from("Registration Sample")
+        .select('"RegistrationID", "First Name", "Other Names", "Country", "Residence"')
+        .in("RegistrationID", regIds);
+
+      if (regError) {
+        console.error("[getMedalList] Error fetching registrations:", regError);
+        throw new Error(`Failed to fetch registrations: ${regError.message}`);
+      }
+
+      const regMap = new Map((registrations || []).map((r: any) => [r.RegistrationID, r]));
+
       const qualifiedParticipants = await Promise.all(
         participants.map(async (participant: any) => {
-          const event = participant.Events;
-          const registration = participant["Registration Sample"];
+          const event = eventsMap.get(participant.EventID);
+          const registration = regMap.get(participant.RegistrationID);
 
           if (!event) return null;
 
@@ -129,9 +144,9 @@ const getMedalList = publicProcedure
             eventId: participant.EventID,
             firstName: registration?.["First Name"] || "",
             otherNames: registration?.["Other Names"] || "",
-            country: registration?.Country || "",
-            residence: registration?.Residence || "",
-            eventName: event.eventName || "",
+            country: registration?.Country ?? registration?.country ?? "",
+            residence: registration?.Residence ?? registration?.residence ?? "",
+            eventName: event?.eventName || "",
             medalMinDailyDistance,
             medalMinCumulativeDistance,
             medalDateStart,
