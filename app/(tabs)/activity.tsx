@@ -74,8 +74,8 @@ export default function ActivityScreen() {
           .eq("RegistrationID", user.id);
 
         if (pError) {
-          console.error("[RegisteredEvents] Participant fetch error:", pError);
-          throw pError;
+          console.error("[RegisteredEvents] Participant fetch error:", JSON.stringify(pError));
+          return [];
         }
         if (!participantData || participantData.length === 0) return [];
 
@@ -86,8 +86,8 @@ export default function ActivityScreen() {
           .in("eventId", eventIds);
 
         if (eError) {
-          console.error("[RegisteredEvents] Events fetch error:", eError);
-          throw eError;
+          console.error("[RegisteredEvents] Events fetch error:", JSON.stringify(eError));
+          return [];
         }
 
         const today = new Date();
@@ -158,8 +158,8 @@ export default function ActivityScreen() {
         console.log("[RegisteredEvents] Fetched", results.length, "events");
         return results;
       } catch (error: any) {
-        console.error("[RegisteredEvents] Query failed:", error);
-        throw error;
+        console.error("[RegisteredEvents] Query failed:", JSON.stringify(error), error?.message);
+        return [];
       }
     },
     enabled: !showCommunity && !!user?.id,
@@ -448,7 +448,7 @@ export default function ActivityScreen() {
       });
 
       const { data, error } = await supabase
-        .from("external_activity_submissions")
+        .from("External Activity Submissions")
         .insert({
           RegistrationID: user.id,
           Activity_Date: formData.activityDate,
