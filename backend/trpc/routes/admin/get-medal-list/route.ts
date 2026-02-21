@@ -23,6 +23,14 @@ const getMedalList = publicProcedure
 
       if (participantsError) {
         console.error("[getMedalList] Error fetching participants:", participantsError);
+        if (
+          participantsError.message.includes("schema cache") ||
+          participantsError.message.includes("does not exist") ||
+          participantsError.message.includes("relation")
+        ) {
+          console.warn("[getMedalList] Table 'Events Participants' not found or not cached. Returning empty list.");
+          return [];
+        }
         throw new Error(`Failed to fetch participants: ${participantsError.message}`);
       }
 
