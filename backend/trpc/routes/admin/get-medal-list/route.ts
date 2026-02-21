@@ -84,13 +84,15 @@ const getMedalList = publicProcedure
             return null;
           }
 
-          const startDate = new Date(medalDateStart);
-          const endDate = new Date(medalDateEnd);
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
+          const now = new Date();
+          const todayStr = now.toISOString().split('T')[0];
+          const yesterdayDate = new Date(now);
+          yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1);
+          const yesterdayStr = yesterdayDate.toISOString().split('T')[0];
 
-          const actualEndDate = endDate > today ? today : endDate;
-          const actualEndStr = actualEndDate.toISOString().split('T')[0];
+          const actualEndStr = medalDateEnd <= yesterdayStr ? medalDateEnd : yesterdayStr;
+
+          console.log('[getMedalList] Date range for participant:', { medalDateStart, medalDateEnd, todayStr, yesterdayStr, actualEndStr });
 
           const regId = participant.RegistrationID;
 
@@ -121,16 +123,17 @@ const getMedalList = publicProcedure
           let isQualified = true;
 
           if (medalMinDailyDistance && medalMinDailyDistance > 0) {
-            const currentDate = new Date(startDate);
-            while (currentDate <= actualEndDate) {
+            const currentDate = new Date(medalDateStart + 'T00:00:00Z');
+            while (true) {
               const dateKey = currentDate.toISOString().split('T')[0];
+              if (dateKey > actualEndStr) break;
               const dayDistance = activitiesByDate.get(dateKey) || 0;
               if (dayDistance >= medalMinDailyDistance) {
                 qualifiedDays++;
               } else {
                 isQualified = false;
               }
-              currentDate.setDate(currentDate.getDate() + 1);
+              currentDate.setUTCDate(currentDate.getUTCDate() + 1);
             }
           } else {
             qualifiedDays = activitiesByDate.size;
