@@ -86,10 +86,18 @@ const getMedalList = publicProcedure
 
           const now = new Date();
           const todayStr = now.toISOString().split('T')[0];
+          const yesterday = new Date(now);
+          yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+          const yesterdayStr = yesterday.toISOString().split('T')[0];
 
-          const actualEndStr = medalDateEnd <= todayStr ? medalDateEnd : todayStr;
+          const cutoffStr = medalDateEnd <= yesterdayStr ? medalDateEnd : yesterdayStr;
 
-          console.log('[getMedalList] Date range for participant:', { medalDateStart, medalDateEnd, todayStr, actualEndStr });
+          if (cutoffStr < medalDateStart) {
+            console.log('[getMedalList] Medal period has not had a full day yet, skipping participant:', regId);
+            return null;
+          }
+
+          console.log('[getMedalList] Date range for participant:', { regId, medalDateStart, medalDateEnd, todayStr, yesterdayStr, cutoffStr });
 
           const regId = participant.RegistrationID;
 
@@ -98,7 +106,7 @@ const getMedalList = publicProcedure
             .select("Activity_Date, Distance_km")
             .eq("RegistrationID", regId)
             .gte("Activity_Date", medalDateStart)
-            .lte("Activity_Date", actualEndStr)
+            .lte("Activity_Date", cutoffStr)
             .order("Activity_Date", { ascending: true });
 
           if (actError) {
@@ -117,21 +125,25 @@ const getMedalList = publicProcedure
           });
 
           let qualifiedDays = 0;
+          let totalDaysChecked = 0;
           let isQualified = true;
 
           if (medalMinDailyDistance && medalMinDailyDistance > 0) {
             const currentDate = new Date(medalDateStart + 'T00:00:00Z');
             while (true) {
               const dateKey = currentDate.toISOString().split('T')[0];
-              if (dateKey > actualEndStr) break;
+              if (dateKey > cutoffStr) break;
+              totalDaysChecked++;
               const dayDistance = activitiesByDate.get(dateKey) || 0;
               if (dayDistance >= medalMinDailyDistance) {
                 qualifiedDays++;
               } else {
+                console.log('[getMedalList] Day failed for', regId, ':', dateKey, 'distance:', dayDistance, 'required:', medalMinDailyDistance);
                 isQualified = false;
               }
               currentDate.setUTCDate(currentDate.getUTCDate() + 1);
             }
+            console.log('[getMedalList] Daily check for', regId, ':', { totalDaysChecked, qualifiedDays, isQualified });
           } else {
             qualifiedDays = activitiesByDate.size;
           }
@@ -141,6 +153,8 @@ const getMedalList = publicProcedure
               isQualified = false;
             }
           }
+
+          console.log('[getMedalList] Final check for', regId, ':', { isQualified, totalDistance, qualifiedDays });
 
           if (!isQualified) {
             return null;
