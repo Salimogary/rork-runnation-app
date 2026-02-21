@@ -69,7 +69,7 @@ export default function ActivityScreen() {
       if (!user?.id) return [];
       try {
         const { data: participantData, error: pError } = await supabase
-          .from("Event Participants")
+          .from("Events Participants")
           .select("EventID, RegistrationID")
           .eq("RegistrationID", user.id);
 

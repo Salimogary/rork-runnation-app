@@ -28,7 +28,7 @@ export default publicProcedure
     }
 
     const { data: participant, error: insertError } = await ctx.supabase
-      .from("Event Participants")
+      .from("Events Participants")
       .insert({
         EventID: enrollment.EventID,
         RegistrationID: enrollment.RegistrationID,
