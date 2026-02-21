@@ -205,26 +205,6 @@ export default function SettingsScreen() {
       )}
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Access</Text>
-        
-        <TouchableOpacity
-          style={styles.settingItem}
-          onPress={() => router.push("/admin-login" as any)}
-        >
-          <View style={styles.settingLeft}>
-            <View style={styles.iconContainer}>
-              <Shield size={22} color="#ef4444" />
-            </View>
-            <View style={styles.settingTextContainer}>
-              <Text style={styles.settingTitle}>Admin Login</Text>
-              <Text style={styles.settingSubtitle}>Access admin dashboard</Text>
-            </View>
-          </View>
-          <ChevronRight size={20} color="#999" />
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.section}>
         <Text style={styles.sectionTitle}>Preferences</Text>
         
         <TouchableOpacity 
@@ -346,6 +326,26 @@ export default function SettingsScreen() {
             <View style={styles.settingTextContainer}>
               <Text style={styles.settingTitle}>Send Feedback</Text>
               <Text style={styles.settingSubtitle}>Share your thoughts and suggestions</Text>
+            </View>
+          </View>
+          <ChevronRight size={20} color="#999" />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Access</Text>
+        
+        <TouchableOpacity
+          style={styles.settingItem}
+          onPress={() => router.push("/admin-login" as any)}
+        >
+          <View style={styles.settingLeft}>
+            <View style={styles.iconContainer}>
+              <Shield size={22} color="#ef4444" />
+            </View>
+            <View style={styles.settingTextContainer}>
+              <Text style={styles.settingTitle}>Admin Login</Text>
+              <Text style={styles.settingSubtitle}>Access admin dashboard</Text>
             </View>
           </View>
           <ChevronRight size={20} color="#999" />
