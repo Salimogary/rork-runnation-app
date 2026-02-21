@@ -566,22 +566,64 @@ export default function ActivityScreen() {
         {!showCommunity && sortedActivities.length > 0 && (
           <View style={styles.statsSection}>
             <LinearGradient colors={colors.gradient.orange} style={styles.statCard}>
-              <Calendar size={24} color={colors.white} />
               <Text style={styles.statValue}>{uniqueDaysCount}</Text>
               <Text style={styles.statLabel}>Active Days</Text>
             </LinearGradient>
             
             <LinearGradient colors={colors.gradient.teal} style={styles.statCard}>
-              <TrendingUp size={24} color={colors.white} />
               <Text style={styles.statValue}>{totalDistance.toFixed(1)}</Text>
               <Text style={styles.statLabel}>Total km</Text>
             </LinearGradient>
             
             <LinearGradient colors={colors.gradient.blue} style={styles.statCard}>
-              <Clock size={24} color={colors.white} />
               <Text style={styles.statValue}>{formatTime(totalTimeMinutes)}</Text>
               <Text style={styles.statLabel}>Total Time</Text>
             </LinearGradient>
+          </View>
+        )}
+
+        {!showCommunity && registeredEvents && registeredEvents.length > 0 && (
+          <View style={styles.eventsSection}>
+            <Text style={styles.eventsSectionTitle}>Registered Events</Text>
+            {registeredEvents.map((event) => (
+              <View key={event.eventId} style={styles.eventCard}>
+                <View style={styles.eventCardTop}>
+                  <View style={styles.eventNameRow}>
+                    <Calendar size={16} color={colors.primary} />
+                    <Text style={styles.eventName} numberOfLines={1}>{event.eventName}</Text>
+                  </View>
+                  <View style={[
+                    styles.statusBadge,
+                    event.status === 'ongoing' && styles.statusOngoing,
+                    event.status === 'upcoming' && styles.statusUpcoming,
+                    event.status === 'completed' && styles.statusCompleted,
+                  ]}>
+                    <Text style={[
+                      styles.statusText,
+                      event.status === 'ongoing' && styles.statusTextOngoing,
+                      event.status === 'upcoming' && styles.statusTextUpcoming,
+                      event.status === 'completed' && styles.statusTextCompleted,
+                    ]}>
+                      {event.status === 'ongoing' ? 'Ongoing' : event.status === 'upcoming' ? 'Not Started' : 'Closed'}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.eventCardBottom}>
+                  <View style={styles.medalIndicator}>
+                    <Award size={14} color={event.isOnMedalList ? '#FFD700' : colors.lightGray} />
+                    <Text style={[
+                      styles.medalText,
+                      event.isOnMedalList ? styles.medalTextQualified : styles.medalTextNot,
+                    ]}>
+                      {event.isOnMedalList ? 'Yes' : 'No'}
+                    </Text>
+                  </View>
+                  {event.status === 'upcoming' && (
+                    <Text style={styles.eventStartLabel}>Starts {formatDate(event.startsAt)}</Text>
+                  )}
+                </View>
+              </View>
+            ))}
           </View>
         )}
 
@@ -708,50 +750,7 @@ export default function ActivityScreen() {
                 </View>
               ))}
 
-              {registeredEvents && registeredEvents.length > 0 && (
-                <View style={styles.eventsSection}>
-                  <Text style={styles.eventsSectionTitle}>Registered Events</Text>
-                  {registeredEvents.map((event) => (
-                    <View key={event.eventId} style={styles.eventCard}>
-                      <View style={styles.eventCardTop}>
-                        <View style={styles.eventNameRow}>
-                          <Calendar size={16} color={colors.primary} />
-                          <Text style={styles.eventName} numberOfLines={1}>{event.eventName}</Text>
-                        </View>
-                        <View style={[
-                          styles.statusBadge,
-                          event.status === 'ongoing' && styles.statusOngoing,
-                          event.status === 'upcoming' && styles.statusUpcoming,
-                          event.status === 'completed' && styles.statusCompleted,
-                        ]}>
-                          <Text style={[
-                            styles.statusText,
-                            event.status === 'ongoing' && styles.statusTextOngoing,
-                            event.status === 'upcoming' && styles.statusTextUpcoming,
-                            event.status === 'completed' && styles.statusTextCompleted,
-                          ]}>
-                            {event.status === 'ongoing' ? 'Ongoing' : event.status === 'upcoming' ? formatDate(event.startsAt) : 'Completed'}
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={styles.eventCardBottom}>
-                        <View style={styles.medalIndicator}>
-                          <Award size={14} color={event.isOnMedalList ? '#FFD700' : colors.lightGray} />
-                          <Text style={[
-                            styles.medalText,
-                            event.isOnMedalList ? styles.medalTextQualified : styles.medalTextNot,
-                          ]}>
-                            {event.isOnMedalList ? 'On Medal List' : 'Not on Medal List'}
-                          </Text>
-                        </View>
-                        {event.status === 'upcoming' && (
-                          <Text style={styles.eventStartLabel}>Starts {formatDate(event.startsAt)}</Text>
-                        )}
-                      </View>
-                    </View>
-                  ))}
-                </View>
-              )}
+
             </View>
           )
         )}
@@ -970,23 +969,24 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
     alignItems: "center",
-    gap: 8,
+    gap: 2,
     shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 3,
   },
   statValue: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "800" as const,
     color: colors.white,
   },
   statLabel: {
-    fontSize: 11,
+    fontSize: 10,
     color: colors.white,
     opacity: 0.9,
     fontWeight: "600" as const,
@@ -1162,7 +1162,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 2,
   },
   eventsSection: {
-    marginTop: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
     gap: 10,
   },
   eventsSectionTitle: {
