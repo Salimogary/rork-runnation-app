@@ -24,7 +24,7 @@ export default publicProcedure
     }
 
     const { data: existingParticipant } = await ctx.supabase
-      .from("Events Participants")
+      .from("events_participants")
       .select("*")
       .eq("EventID", input.eventId)
       .eq("RegistrationID", input.registrationId)

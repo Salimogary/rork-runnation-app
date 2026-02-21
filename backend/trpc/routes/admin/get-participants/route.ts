@@ -11,14 +11,14 @@ export default publicProcedure
     console.log('[getParticipants] Fetching participants for eventId:', input.eventId);
 
     let query = ctx.supabase
-      .from("Events Participants")
+      .from("events_participants")
       .select(`
         ParticipantID,
         EventID,
         RegistrationID,
         Registration_Date,
-        Events!Events_Participants_EventID_fkey(eventName),
-        Registration Sample!Events_Participants_RegistrationID_fkey(First Name, Other Names, Sex, Residence)
+        Events!events_participants_EventID_fkey(eventName),
+        Registration Sample!events_participants_RegistrationID_fkey(First Name, Other Names, Sex, Residence)
       `);
 
     if (input.eventId) {

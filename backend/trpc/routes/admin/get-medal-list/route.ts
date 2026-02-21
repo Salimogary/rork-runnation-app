@@ -12,7 +12,7 @@ const getMedalList = publicProcedure
 
     try {
       let participantsQuery = ctx.supabase
-        .from("Events Participants")
+        .from("events_participants")
         .select("ParticipantID, EventID, RegistrationID");
 
       if (input.eventId) {
@@ -28,7 +28,7 @@ const getMedalList = publicProcedure
           participantsError.message.includes("does not exist") ||
           participantsError.message.includes("relation")
         ) {
-          console.warn("[getMedalList] Table 'Events Participants' not found or not cached. Returning empty list.");
+          console.warn("[getMedalList] Table 'events_participants' not found or not cached. Returning empty list.");
           return [];
         }
         throw new Error(`Failed to fetch participants: ${participantsError.message}`);
