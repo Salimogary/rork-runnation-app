@@ -301,7 +301,7 @@ export default function SettingsScreen() {
 
         <TouchableOpacity
           style={styles.settingItem}
-          onPress={() => showComingSoon("Policy & Terms")}
+          onPress={() => router.push("/policy" as any)}
         >
           <View style={styles.settingLeft}>
             <View style={styles.iconContainer}>

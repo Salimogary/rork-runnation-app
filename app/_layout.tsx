@@ -40,7 +40,7 @@ function RootLayoutNav() {
 
     if (inAdminLogin || inAdmin) return;
 
-    const inAllowedRoute = segments[0] === 'settings' || segments[0] === 'profile' || segments[0] === 'cart' || segments[0] === 'checkout' || segments[0] === 'participants' || segments[0] === 'medal-list';
+    const inAllowedRoute = segments[0] === 'settings' || segments[0] === 'profile' || segments[0] === 'cart' || segments[0] === 'checkout' || segments[0] === 'participants' || segments[0] === 'medal-list' || segments[0] === 'policy';
 
     if (user) {
       if (!inTabs && !inAllowedRoute) {
@@ -72,6 +72,7 @@ function RootLayoutNav() {
       <Stack.Screen name="checkout" options={{ title: "Checkout" }} />
       <Stack.Screen name="participants" options={{ title: "Participants" }} />
       <Stack.Screen name="medal-list" options={{ title: "Medal List" }} />
+      <Stack.Screen name="policy" options={{ presentation: "modal", title: "Policy & Terms" }} />
     </Stack>
   );
 }
