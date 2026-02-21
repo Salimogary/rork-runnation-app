@@ -108,39 +108,49 @@ export default function ActivityScreen() {
             const minCumulative = event.medal_min_cumulative_distance;
 
             if (medalStart && medalEnd) {
-              const mStart = new Date(medalStart);
-              const mEnd = new Date(medalEnd);
-              const actualEnd = mEnd > today ? today : mEnd;
-              const actualEndStr = actualEnd.toISOString().split('T')[0];
+              const yesterday = new Date(today);
+              yesterday.setDate(yesterday.getDate() - 1);
+              const todayIso = today.toISOString().split('T')[0];
+              const yesterdayIso = yesterday.toISOString().split('T')[0];
+              const medalEndStr = typeof medalEnd === 'string' ? medalEnd : new Date(medalEnd).toISOString().split('T')[0];
+              const cutoffStr = medalEndStr < todayIso ? medalEndStr : yesterdayIso;
 
-              const { data: acts } = await supabase
-                .from("Activity Sample")
-                .select("Activity_Date, Distance_km")
-                .eq("RegistrationID", user.id)
-                .gte("Activity_Date", medalStart)
-                .lte("Activity_Date", actualEndStr);
+              if (cutoffStr < medalStart) {
+                isOnMedalList = false;
+              } else {
+                const { data: acts } = await supabase
+                  .from("Activity Sample")
+                  .select("Activity_Date, Distance_km")
+                  .eq("RegistrationID", user.id)
+                  .gte("Activity_Date", medalStart)
+                  .lte("Activity_Date", cutoffStr);
 
-              let totalDist = 0;
-              const byDate = new Map<string, number>();
-              (acts || []).forEach((a: any) => {
-                const dk = new Date(a.Activity_Date).toISOString().split('T')[0];
-                byDate.set(dk, (byDate.get(dk) || 0) + (a.Distance_km || 0));
-                totalDist += a.Distance_km || 0;
-              });
+                let totalDist = 0;
+                const byDate = new Map<string, number>();
+                (acts || []).forEach((a: any) => {
+                  const dk = a.Activity_Date ? a.Activity_Date.split('T')[0] : a.Activity_Date;
+                  byDate.set(dk, (byDate.get(dk) || 0) + (a.Distance_km || 0));
+                  totalDist += a.Distance_km || 0;
+                });
 
-              let qualified = true;
-              if (minDaily && minDaily > 0) {
-                const cur = new Date(mStart);
-                while (cur <= actualEnd) {
-                  const dk = cur.toISOString().split('T')[0];
-                  if ((byDate.get(dk) || 0) < minDaily) { qualified = false; break; }
-                  cur.setDate(cur.getDate() + 1);
+                let qualified = true;
+                if (minDaily && minDaily > 0) {
+                  const cur = new Date(medalStart + 'T00:00:00Z');
+                  const cutoffDate = new Date(cutoffStr + 'T00:00:00Z');
+                  while (cur <= cutoffDate) {
+                    const dk = cur.toISOString().split('T')[0];
+                    if ((byDate.get(dk) || 0) < minDaily) { qualified = false; break; }
+                    cur.setUTCDate(cur.getUTCDate() + 1);
+                  }
                 }
+                if (minCumulative && minCumulative > 0 && totalDist < minCumulative) {
+                  qualified = false;
+                }
+                if (!minDaily && !minCumulative) {
+                  qualified = true;
+                }
+                isOnMedalList = qualified;
               }
-              if (minCumulative && minCumulative > 0 && totalDist < minCumulative) {
-                qualified = false;
-              }
-              isOnMedalList = qualified;
             }
 
             return {

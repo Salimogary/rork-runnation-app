@@ -23,26 +23,20 @@ const getMedalList = publicProcedure
 
       if (participantsError) {
         console.error("[getMedalList] Error fetching participants:", participantsError);
-        if (
-          participantsError.message.includes("schema cache") ||
-          participantsError.message.includes("does not exist") ||
-          participantsError.message.includes("relation")
-        ) {
-          console.warn("[getMedalList] Table 'events_participants' not found or not cached. Returning empty list.");
-          return [];
-        }
         throw new Error(`Failed to fetch participants: ${participantsError.message}`);
       }
 
       if (!participants || participants.length === 0) {
-        console.log("[getMedalList] No participants found");
+        console.log("[getMedalList] No participants found in events_participants table");
         return [];
       }
 
-      console.log("[getMedalList] Participants count:", participants.length);
+      console.log("[getMedalList] Participants found:", participants.length, JSON.stringify(participants));
 
       const eventIds = [...new Set(participants.map((p: any) => p.eventId))];
       const regIds = [...new Set(participants.map((p: any) => p.RegistrationID))];
+
+      console.log("[getMedalList] Event IDs:", eventIds, "Registration IDs:", regIds);
 
       const { data: events, error: eventsError } = await ctx.supabase
         .from("Events")
@@ -53,6 +47,8 @@ const getMedalList = publicProcedure
         console.error("[getMedalList] Error fetching events:", eventsError);
         throw new Error(`Failed to fetch events: ${eventsError.message}`);
       }
+
+      console.log("[getMedalList] Events found:", JSON.stringify(events));
 
       const eventsMap = new Map((events || []).map((e: any) => [e.eventId, e]));
 
@@ -66,6 +62,8 @@ const getMedalList = publicProcedure
         throw new Error(`Failed to fetch registrations: ${regError.message}`);
       }
 
+      console.log("[getMedalList] Registrations found:", registrations?.length);
+
       const regMap = new Map((registrations || []).map((r: any) => [r.RegistrationID, r]));
 
       const qualifiedParticipants = await Promise.all(
@@ -73,30 +71,46 @@ const getMedalList = publicProcedure
           const event = eventsMap.get(participant.eventId);
           const registration = regMap.get(participant.RegistrationID);
 
-          if (!event) return null;
+          if (!event) {
+            console.log('[getMedalList] No event found for eventId:', participant.eventId);
+            return null;
+          }
 
           const medalDateStart = event.medal_date_start;
           const medalDateEnd = event.medal_date_end;
           const medalMinDailyDistance = event.medal_min_daily_distance;
           const medalMinCumulativeDistance = event.medal_min_cumulative_distance;
 
+          console.log('[getMedalList] Event medal config:', {
+            eventId: participant.eventId,
+            eventName: event.eventName,
+            medalDateStart,
+            medalDateEnd,
+            medalMinDailyDistance,
+            medalMinCumulativeDistance,
+          });
+
           if (!medalDateStart || !medalDateEnd) {
+            console.log('[getMedalList] No medal date range set for event, skipping');
             return null;
           }
 
           const regId = participant.RegistrationID;
 
           const now = new Date();
+          const yesterdayDate = new Date(now);
+          yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1);
+          const yesterdayStr = yesterdayDate.toISOString().split('T')[0];
           const todayStr = now.toISOString().split('T')[0];
 
-          const cutoffStr = medalDateEnd <= todayStr ? medalDateEnd : todayStr;
+          const cutoffStr = medalDateEnd < todayStr ? medalDateEnd : yesterdayStr;
+
+          console.log('[getMedalList] Date calculation:', { regId, medalDateStart, medalDateEnd, todayStr, yesterdayStr, cutoffStr });
 
           if (cutoffStr < medalDateStart) {
-            console.log('[getMedalList] Medal period has not started yet, skipping participant:', regId);
+            console.log('[getMedalList] Cutoff is before medal start, skipping participant:', regId);
             return null;
           }
-
-          console.log('[getMedalList] Date range for participant:', { regId, medalDateStart, medalDateEnd, todayStr, cutoffStr });
 
           const { data: activities, error: actError } = await ctx.supabase
             .from("Activity Sample")
@@ -107,19 +121,25 @@ const getMedalList = publicProcedure
             .order("Activity_Date", { ascending: true });
 
           if (actError) {
-            console.error("[getMedalList] Error fetching activities:", actError);
+            console.error("[getMedalList] Error fetching activities for", regId, ":", actError);
             return null;
           }
+
+          console.log('[getMedalList] Activities for', regId, ':', activities?.length, 'records');
 
           let totalDistance = 0;
           const activitiesByDate = new Map<string, number>();
 
           (activities || []).forEach((activity: any) => {
-            const dateKey = new Date(activity.Activity_Date).toISOString().split('T')[0];
+            const rawDate = activity.Activity_Date;
+            const dateKey = rawDate ? rawDate.split('T')[0] : rawDate;
+            const dist = activity.Distance_km || 0;
             const currentDistance = activitiesByDate.get(dateKey) || 0;
-            activitiesByDate.set(dateKey, currentDistance + (activity.Distance_km || 0));
-            totalDistance += (activity.Distance_km || 0);
+            activitiesByDate.set(dateKey, currentDistance + dist);
+            totalDistance += dist;
           });
+
+          console.log('[getMedalList] Activities by date for', regId, ':', Object.fromEntries(activitiesByDate), 'total:', totalDistance);
 
           let qualifiedDays = 0;
           let totalDaysChecked = 0;
@@ -127,9 +147,9 @@ const getMedalList = publicProcedure
 
           if (medalMinDailyDistance && medalMinDailyDistance > 0) {
             const currentDate = new Date(medalDateStart + 'T00:00:00Z');
-            while (true) {
+            const cutoffDate = new Date(cutoffStr + 'T00:00:00Z');
+            while (currentDate <= cutoffDate) {
               const dateKey = currentDate.toISOString().split('T')[0];
-              if (dateKey > cutoffStr) break;
               totalDaysChecked++;
               const dayDistance = activitiesByDate.get(dateKey) || 0;
               if (dayDistance >= medalMinDailyDistance) {
@@ -143,15 +163,22 @@ const getMedalList = publicProcedure
             console.log('[getMedalList] Daily check for', regId, ':', { totalDaysChecked, qualifiedDays, isQualified });
           } else {
             qualifiedDays = activitiesByDate.size;
+            console.log('[getMedalList] No daily minimum set, qualifiedDays =', qualifiedDays);
           }
 
           if (medalMinCumulativeDistance && medalMinCumulativeDistance > 0) {
             if (totalDistance < medalMinCumulativeDistance) {
+              console.log('[getMedalList] Cumulative distance failed for', regId, ':', totalDistance, '<', medalMinCumulativeDistance);
               isQualified = false;
             }
           }
 
-          console.log('[getMedalList] Final check for', regId, ':', { isQualified, totalDistance, qualifiedDays });
+          if (!medalMinDailyDistance && !medalMinCumulativeDistance) {
+            console.log('[getMedalList] No medal criteria set, participant qualifies by default');
+            isQualified = true;
+          }
+
+          console.log('[getMedalList] FINAL result for', regId, ':', { isQualified, totalDistance, qualifiedDays, totalDaysChecked });
 
           if (!isQualified) {
             return null;
@@ -177,7 +204,7 @@ const getMedalList = publicProcedure
       );
 
       const filtered = qualifiedParticipants.filter((p): p is NonNullable<typeof p> => p !== null);
-      console.log("[getMedalList] Qualified participants:", filtered.length);
+      console.log("[getMedalList] Qualified participants:", filtered.length, JSON.stringify(filtered));
 
       return filtered;
     } catch (error: any) {
