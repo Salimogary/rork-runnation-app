@@ -632,6 +632,11 @@ export default function RegisterScreen() {
 
                   <View style={styles.inputContainer}>
                     <Text style={styles.label}>4-Digit PIN *</Text>
+                    <View style={styles.pinNoteContainer}>
+                      <Text style={styles.pinNoteText}>
+                        Your PIN is used to protect Shop access and to confirm when signing out. It is not required each time you open the app.
+                      </Text>
+                    </View>
                     <View style={styles.pinContainer}>
                       <TextInput
                         style={styles.pinInput}
@@ -1261,5 +1266,17 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold' as const,
     textDecorationLine: 'underline',
+  },
+  pinNoteContainer: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+  },
+  pinNoteText: {
+    fontSize: 12,
+    color: '#fff',
+    opacity: 0.9,
+    lineHeight: 18,
   },
 });

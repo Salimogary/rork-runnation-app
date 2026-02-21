@@ -1,10 +1,11 @@
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, Image, TextInput } from "react-native";
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, Image, TextInput, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, Bell, MapPin, Moon, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff } from "lucide-react-native";
+import { LogOut, Bell, MapPin, Moon, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff, Lock } from "lucide-react-native";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useState } from "react";
+import * as Haptics from "expo-haptics";
 
 interface PendingActivity {
   PendingActivityID: string;
@@ -22,7 +23,7 @@ interface PendingActivity {
 }
 
 export default function SettingsScreen() {
-  const { signOut, user, privateMode, setPrivateMode } = useAuth();
+  const { signOut, user, privateMode, setPrivateMode, verifyPin } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [showApprovalModal, setShowApprovalModal] = useState(false);
@@ -33,30 +34,43 @@ export default function SettingsScreen() {
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackAttachment, setFeedbackAttachment] = useState<string | null>(null);
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [signOutPin, setSignOutPin] = useState('');
+  const [signOutPinError, setSignOutPinError] = useState('');
+  const [isVerifyingPin, setIsVerifyingPin] = useState(false);
   const IS_ADMIN = true;
 
-  const handleSignOut = async () => {
-    if (Platform.OS !== 'web') {
-      Alert.alert(
-        "Sign Out",
-        "Are you sure you want to sign out?",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Sign Out",
-            style: "destructive",
-            onPress: async () => {
-              await signOut();
-              router.replace("/(tabs)" as any);
-            },
-          },
-        ]
-      );
-    } else {
-      if (confirm("Are you sure you want to sign out?")) {
+  const handleSignOut = () => {
+    setShowPinModal(true);
+    setSignOutPin('');
+    setSignOutPinError('');
+  };
+
+  const handlePinVerifyAndSignOut = async () => {
+    if (signOutPin.length !== 4) {
+      setSignOutPinError('Enter your 4-digit PIN');
+      return;
+    }
+    setIsVerifyingPin(true);
+    setSignOutPinError('');
+    try {
+      const valid = await verifyPin(signOutPin);
+      if (valid) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setShowPinModal(false);
+        setSignOutPin('');
         await signOut();
-        router.replace("/(tabs)" as any);
+        router.replace('/(tabs)' as any);
+      } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        setSignOutPinError('Incorrect PIN. Please try again.');
+        setSignOutPin('');
       }
+    } catch {
+      setSignOutPinError('Verification failed. Try again.');
+      setSignOutPin('');
+    } finally {
+      setIsVerifyingPin(false);
     }
   };
 
@@ -505,6 +519,94 @@ export default function SettingsScreen() {
       </Modal>
 
       <Modal
+        visible={showPinModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowPinModal(false)}
+      >
+        <View style={styles.detailModalOverlay}>
+          <View style={styles.pinModalContent}>
+            <View style={styles.detailHeader}>
+              <Text style={styles.detailTitle}>Verify PIN</Text>
+              <TouchableOpacity onPress={() => {
+                setShowPinModal(false);
+                setSignOutPin('');
+                setSignOutPinError('');
+              }}>
+                <XIcon size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.pinModalBody}>
+              <View style={styles.pinLockIcon}>
+                <Lock size={28} color="#ef4444" />
+              </View>
+              <Text style={styles.pinModalSubtitle}>Enter your PIN to sign out</Text>
+
+              <View style={styles.pinDotsRow}>
+                {[0, 1, 2, 3].map((i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.pinDot,
+                      signOutPin.length > i && styles.pinDotFilled,
+                      signOutPinError ? styles.pinDotError : null,
+                    ]}
+                  />
+                ))}
+              </View>
+
+              <TextInput
+                style={styles.hiddenPinInput}
+                value={signOutPin}
+                onChangeText={(text) => {
+                  const digits = text.replace(/[^0-9]/g, '').slice(0, 4);
+                  setSignOutPin(digits);
+                  if (signOutPinError) setSignOutPinError('');
+                }}
+                keyboardType="number-pad"
+                maxLength={4}
+                secureTextEntry
+                autoFocus
+                editable={!isVerifyingPin}
+              />
+
+              {!!signOutPinError && (
+                <Text style={styles.pinErrorText}>{signOutPinError}</Text>
+              )}
+            </View>
+
+            <View style={styles.feedbackActions}>
+              <TouchableOpacity
+                style={styles.cancelFeedbackButton}
+                onPress={() => {
+                  setShowPinModal(false);
+                  setSignOutPin('');
+                  setSignOutPinError('');
+                }}
+              >
+                <Text style={styles.cancelFeedbackText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.signOutConfirmButton,
+                  (signOutPin.length !== 4 || isVerifyingPin) && styles.submitFeedbackButtonDisabled
+                ]}
+                onPress={handlePinVerifyAndSignOut}
+                disabled={signOutPin.length !== 4 || isVerifyingPin}
+              >
+                {isVerifyingPin ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.submitFeedbackText}>Sign Out</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={selectedActivity !== null}
         animationType="slide"
         transparent={true}
@@ -929,5 +1031,69 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600" as const,
     color: "#fff",
+  },
+  pinModalContent: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingBottom: 20,
+  },
+  pinModalBody: {
+    padding: 24,
+    alignItems: "center" as const,
+    gap: 16,
+  },
+  pinLockIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#fef2f2",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    marginBottom: 4,
+  },
+  pinModalSubtitle: {
+    fontSize: 15,
+    color: "#666",
+    textAlign: "center" as const,
+  },
+  pinDotsRow: {
+    flexDirection: "row" as const,
+    gap: 16,
+    marginTop: 8,
+  },
+  pinDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "#ccc",
+    backgroundColor: "transparent",
+  },
+  pinDotFilled: {
+    backgroundColor: "#ef4444",
+    borderColor: "#ef4444",
+  },
+  pinDotError: {
+    borderColor: "#ef4444",
+  },
+  hiddenPinInput: {
+    position: "absolute" as const,
+    opacity: 0,
+    height: 0,
+    width: 0,
+  },
+  pinErrorText: {
+    fontSize: 14,
+    color: "#ef4444",
+    fontWeight: "500" as const,
+  },
+  signOutConfirmButton: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: "#ef4444",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
   },
 });

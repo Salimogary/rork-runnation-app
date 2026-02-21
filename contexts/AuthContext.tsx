@@ -378,6 +378,31 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     await secureStorage.deleteItem(`biometric_enabled_${username.toLowerCase()}`);
   };
 
+  const verifyPin = async (pin: string): Promise<boolean> => {
+    if (!user) return false;
+    try {
+      const pinHash = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        pin
+      );
+      const { data, error } = await supabase
+        .from('Registration Sample')
+        .select('RegistrationID')
+        .eq('RegistrationID', user.id)
+        .eq('pin_hash', pinHash)
+        .single();
+
+      if (error || !data) {
+        console.log('[AuthContext] PIN verification failed');
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error('[AuthContext] PIN verification error:', error);
+      return false;
+    }
+  };
+
   return {
     user,
     isLoading,
@@ -387,6 +412,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     signIn,
     signUp,
     signOut,
+    verifyPin,
     getBiometricStatus,
     disableBiometric,
   };

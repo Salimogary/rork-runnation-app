@@ -1,13 +1,15 @@
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, RefreshControl, Dimensions, Alert } from "react-native";
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, RefreshControl, Dimensions, Alert, TextInput, ActivityIndicator, Animated } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "@/lib/supabase";
-import { Package, ShoppingCart } from "lucide-react-native";
+import { Package, ShoppingCart, Lock, ShieldCheck } from "lucide-react-native";
 import { Image } from "expo-image";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter, Stack } from "expo-router";
 import colors from "@/constants/colors";
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import * as Haptics from "expo-haptics";
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
@@ -22,9 +24,68 @@ interface CatalogueItem {
 }
 
 export default function ShopScreen() {
-  const { registrationId } = useAuth();
+  const { registrationId, verifyPin } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const [pinUnlocked, setPinUnlocked] = useState(false);
+  const [pinValue, setPinValue] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const shakeAnim = useRef(new Animated.Value(0)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const pinInputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (!pinUnlocked) {
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [pinUnlocked]);
+
+  const triggerShake = useCallback(() => {
+    Animated.sequence([
+      Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
+    ]).start();
+  }, [shakeAnim]);
+
+  const handlePinSubmit = useCallback(async () => {
+    if (pinValue.length !== 4) {
+      setPinError('Enter your 4-digit PIN');
+      return;
+    }
+    setIsVerifying(true);
+    setPinError('');
+    try {
+      const valid = await verifyPin(pinValue);
+      if (valid) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setPinUnlocked(true);
+      } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        setPinError('Incorrect PIN. Please try again.');
+        setPinValue('');
+        triggerShake();
+      }
+    } catch {
+      setPinError('Verification failed. Try again.');
+      setPinValue('');
+    } finally {
+      setIsVerifying(false);
+    }
+  }, [pinValue, verifyPin, triggerShake]);
+
+  useEffect(() => {
+    if (pinValue.length === 4 && !pinUnlocked) {
+      handlePinSubmit();
+    }
+  }, [pinValue, pinUnlocked, handlePinSubmit]);
   
   const { data: products, isLoading, refetch } = useQuery<CatalogueItem[]>({
     queryKey: ["catalogue"],
@@ -75,6 +136,77 @@ export default function ShopScreen() {
       quantity: 1,
     });
   };
+
+  if (!pinUnlocked) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ title: "Shop" }} />
+        <Animated.View style={[styles.pinGateContainer, { opacity: fadeAnim }]}>
+          <View style={styles.pinGateContent}>
+            <View style={styles.lockIconWrap}>
+              <Lock size={36} color={colors.primary} />
+            </View>
+            <Text style={styles.pinGateTitle}>Shop Access</Text>
+            <Text style={styles.pinGateSubtitle}>Enter your 4-digit PIN to access the shop</Text>
+
+            <Animated.View style={{ transform: [{ translateX: shakeAnim }] }}>
+              <View style={styles.pinDotsRow}>
+                {[0, 1, 2, 3].map((i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.pinDot,
+                      pinValue.length > i && styles.pinDotFilled,
+                      pinError ? styles.pinDotError : null,
+                    ]}
+                  />
+                ))}
+              </View>
+            </Animated.View>
+
+            <TextInput
+              ref={pinInputRef}
+              style={styles.hiddenPinInput}
+              value={pinValue}
+              onChangeText={(text) => {
+                const digits = text.replace(/[^0-9]/g, '').slice(0, 4);
+                setPinValue(digits);
+                if (pinError) setPinError('');
+              }}
+              keyboardType="number-pad"
+              maxLength={4}
+              secureTextEntry
+              autoFocus
+              editable={!isVerifying}
+            />
+
+            <TouchableOpacity
+              style={styles.pinPadTouchArea}
+              onPress={() => pinInputRef.current?.focus()}
+              activeOpacity={1}
+            >
+              <Text style={styles.tapToEnterText}>
+                {isVerifying ? '' : 'Tap here to enter PIN'}
+              </Text>
+            </TouchableOpacity>
+
+            {isVerifying && (
+              <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 12 }} />
+            )}
+
+            {!!pinError && (
+              <Text style={styles.pinErrorText}>{pinError}</Text>
+            )}
+
+            <View style={styles.pinGateFooter}>
+              <ShieldCheck size={14} color={colors.textLight} />
+              <Text style={styles.pinGateFooterText}>PIN protects your shop purchases</Text>
+            </View>
+          </View>
+        </Animated.View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -350,5 +482,90 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 13,
     fontWeight: "700" as const,
+  },
+  pinGateContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: colors.background,
+    paddingHorizontal: 32,
+  },
+  pinGateContent: {
+    alignItems: "center",
+    width: "100%",
+    maxWidth: 320,
+  },
+  lockIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#FFF0E8',
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 20,
+  },
+  pinGateTitle: {
+    fontSize: 24,
+    fontWeight: "700" as const,
+    color: colors.text,
+    marginBottom: 8,
+  },
+  pinGateSubtitle: {
+    fontSize: 15,
+    color: colors.textSecondary,
+    textAlign: "center",
+    marginBottom: 32,
+    lineHeight: 22,
+  },
+  pinDotsRow: {
+    flexDirection: "row",
+    gap: 16,
+    marginBottom: 16,
+  },
+  pinDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: colors.lightGray,
+    backgroundColor: "transparent",
+  },
+  pinDotFilled: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  pinDotError: {
+    borderColor: colors.error,
+  },
+  hiddenPinInput: {
+    position: "absolute",
+    opacity: 0,
+    height: 0,
+    width: 0,
+  },
+  pinPadTouchArea: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+  },
+  tapToEnterText: {
+    fontSize: 14,
+    color: colors.primary,
+    fontWeight: "500" as const,
+  },
+  pinErrorText: {
+    fontSize: 14,
+    color: colors.error,
+    marginTop: 8,
+    fontWeight: "500" as const,
+  },
+  pinGateFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 40,
+  },
+  pinGateFooterText: {
+    fontSize: 13,
+    color: colors.textLight,
   },
 });
