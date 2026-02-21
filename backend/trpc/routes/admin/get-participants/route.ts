@@ -11,7 +11,7 @@ export default publicProcedure
     console.log('[getParticipants] Fetching participants for eventId:', input.eventId);
 
     let query = ctx.supabase
-      .from("Event Participants")
+      .from("Events Participants")
       .select(`
         ParticipantID,
         EventID,

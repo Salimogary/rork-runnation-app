@@ -69,8 +69,8 @@ export default function ActivityScreen() {
       if (!user?.id) return [];
       try {
         const { data: participantData, error: pError } = await supabase
-          .from("Event Participants")
-          .select("eventId, RegistrationID")
+          .from("Events Participants")
+          .select("EventID, RegistrationID")
           .eq("RegistrationID", user.id);
 
         if (pError) {
@@ -79,7 +79,7 @@ export default function ActivityScreen() {
         }
         if (!participantData || participantData.length === 0) return [];
 
-        const eventIds = participantData.map(p => p.eventId);
+        const eventIds = participantData.map(p => p.EventID);
         const { data: eventsData, error: eError } = await supabase
           .from("Events")
           .select("eventId, eventName, startsAt, endsAt, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
