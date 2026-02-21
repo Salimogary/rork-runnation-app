@@ -23,7 +23,7 @@ export default function ParticipantsScreen() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("event_participants_snapshot")
-        .select("event_name, first_name, other_names, residence, sex, registration_id")
+        .select("event_name, first_name, other_names, residence, sex")
         .order("event_name", { ascending: true });
 
       if (error) {
