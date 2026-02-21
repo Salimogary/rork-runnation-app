@@ -582,48 +582,55 @@ export default function ActivityScreen() {
           </View>
         )}
 
-        {!showCommunity && registeredEvents && registeredEvents.length > 0 && (
+        {!showCommunity && (
           <View style={styles.eventsSection}>
             <Text style={styles.eventsSectionTitle}>Registered Events</Text>
-            {registeredEvents.map((event) => (
-              <View key={event.eventId} style={styles.eventCard}>
-                <View style={styles.eventCardTop}>
-                  <View style={styles.eventNameRow}>
-                    <Calendar size={16} color={colors.primary} />
-                    <Text style={styles.eventName} numberOfLines={1}>{event.eventName}</Text>
-                  </View>
-                  <View style={[
-                    styles.statusBadge,
-                    event.status === 'ongoing' && styles.statusOngoing,
-                    event.status === 'upcoming' && styles.statusUpcoming,
-                    event.status === 'completed' && styles.statusCompleted,
-                  ]}>
-                    <Text style={[
-                      styles.statusText,
-                      event.status === 'ongoing' && styles.statusTextOngoing,
-                      event.status === 'upcoming' && styles.statusTextUpcoming,
-                      event.status === 'completed' && styles.statusTextCompleted,
+            {registeredEvents && registeredEvents.length > 0 ? (
+              registeredEvents.map((event) => (
+                <View key={event.eventId} style={styles.eventCard}>
+                  <View style={styles.eventCardTop}>
+                    <View style={styles.eventNameRow}>
+                      <Calendar size={16} color={colors.primary} />
+                      <Text style={styles.eventName} numberOfLines={1}>{event.eventName}</Text>
+                    </View>
+                    <View style={[
+                      styles.statusBadge,
+                      event.status === 'ongoing' && styles.statusOngoing,
+                      event.status === 'upcoming' && styles.statusUpcoming,
+                      event.status === 'completed' && styles.statusCompleted,
                     ]}>
-                      {event.status === 'ongoing' ? 'Ongoing' : event.status === 'upcoming' ? 'Not Started' : 'Closed'}
-                    </Text>
+                      <Text style={[
+                        styles.statusText,
+                        event.status === 'ongoing' && styles.statusTextOngoing,
+                        event.status === 'upcoming' && styles.statusTextUpcoming,
+                        event.status === 'completed' && styles.statusTextCompleted,
+                      ]}>
+                        {event.status === 'ongoing' ? 'Ongoing' : event.status === 'upcoming' ? 'Not Started' : 'Closed'}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.eventCardBottom}>
+                    <View style={styles.medalIndicator}>
+                      <Award size={14} color={event.isOnMedalList ? '#FFD700' : colors.lightGray} />
+                      <Text style={[
+                        styles.medalText,
+                        event.isOnMedalList ? styles.medalTextQualified : styles.medalTextNot,
+                      ]}>
+                        {event.isOnMedalList ? 'Yes' : 'No'}
+                      </Text>
+                    </View>
+                    {event.status === 'upcoming' && (
+                      <Text style={styles.eventStartLabel}>Starts {formatDate(event.startsAt)}</Text>
+                    )}
                   </View>
                 </View>
-                <View style={styles.eventCardBottom}>
-                  <View style={styles.medalIndicator}>
-                    <Award size={14} color={event.isOnMedalList ? '#FFD700' : colors.lightGray} />
-                    <Text style={[
-                      styles.medalText,
-                      event.isOnMedalList ? styles.medalTextQualified : styles.medalTextNot,
-                    ]}>
-                      {event.isOnMedalList ? 'Yes' : 'No'}
-                    </Text>
-                  </View>
-                  {event.status === 'upcoming' && (
-                    <Text style={styles.eventStartLabel}>Starts {formatDate(event.startsAt)}</Text>
-                  )}
-                </View>
+              ))
+            ) : (
+              <View style={styles.noEventsCard}>
+                <Calendar size={20} color={colors.textLight} />
+                <Text style={styles.noEventsText}>No registered events</Text>
               </View>
-            ))}
+            )}
           </View>
         )}
 
@@ -1255,6 +1262,25 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.textSecondary,
     fontWeight: "500" as const,
+  },
+  noEventsCard: {
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    padding: 20,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 10,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  noEventsText: {
+    fontSize: 14,
+    fontWeight: "600" as const,
+    color: colors.textLight,
   },
   modalOverlay: {
     flex: 1,
