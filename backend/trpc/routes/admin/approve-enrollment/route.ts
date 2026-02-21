@@ -27,28 +27,12 @@ export default publicProcedure
       throw new Error('Enrollment not found or already processed');
     }
 
-    const { data: maxParticipant } = await ctx.supabase
-      .from("Event Participants")
-      .select("eventParticipantId")
-      .order("eventParticipantId", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    let nextId = 1;
-    if (maxParticipant?.eventParticipantId) {
-      const currentNum = parseInt(maxParticipant.eventParticipantId.replace(/\D/g, '')) || 0;
-      nextId = currentNum + 1;
-    }
-
-    const participantId = `EP${nextId}`;
-
     const { data: participant, error: insertError } = await ctx.supabase
-      .from("Event Participants")
+      .from("Events Participants")
       .insert({
-        eventParticipantId: participantId,
-        eventId: enrollment.EventID,
+        EventID: enrollment.EventID,
         RegistrationID: enrollment.RegistrationID,
-        Registration_Date: new Date().toISOString().split('T')[0],
+        Registration_Date: new Date().toISOString(),
         Status: 'registered',
         Days_Completed: 0,
       })

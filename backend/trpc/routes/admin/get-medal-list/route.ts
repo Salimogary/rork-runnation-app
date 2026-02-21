@@ -12,23 +12,23 @@ const getMedalList = publicProcedure
 
     try {
       let participantsQuery = ctx.supabase
-        .from("Event Participants")
+        .from("Events Participants")
         .select(`
-          eventParticipantId,
-          eventId,
+          ParticipantID,
+          EventID,
           RegistrationID,
-          Events!inner(
+          Events!Events_Participants_EventID_fkey(
             eventName,
             medal_min_daily_distance,
             medal_min_cumulative_distance,
             medal_date_start,
             medal_date_end
           ),
-          Registration Sample!inner(First Name, Other Names, Country, Residence)
+          Registration Sample!Events_Participants_RegistrationID_fkey(First Name, Other Names, Country, Residence)
         `);
 
       if (input.eventId) {
-        participantsQuery = participantsQuery.eq("eventId", input.eventId);
+        participantsQuery = participantsQuery.eq("EventID", input.eventId);
       }
 
       const { data: participants, error: participantsError } = await participantsQuery;
@@ -69,10 +69,12 @@ const getMedalList = publicProcedure
           const actualEndDate = endDate > today ? today : endDate;
           const actualEndStr = actualEndDate.toISOString().split('T')[0];
 
+          const regId = participant.RegistrationID;
+
           const { data: activities, error: actError } = await ctx.supabase
             .from("Activity Sample")
             .select("Activity_Date, Distance_km")
-            .eq("RegistrationID", participant.RegistrationID)
+            .eq("RegistrationID", regId)
             .gte("Activity_Date", medalDateStart)
             .lte("Activity_Date", actualEndStr)
             .order("Activity_Date", { ascending: true });
@@ -122,9 +124,9 @@ const getMedalList = publicProcedure
           }
 
           return {
-            participantId: participant.eventParticipantId,
+            participantId: participant.ParticipantID,
             registrationId: participant.RegistrationID,
-            eventId: participant.eventId,
+            eventId: participant.EventID,
             firstName: registration?.["First Name"] || "",
             otherNames: registration?.["Other Names"] || "",
             country: registration?.Country || "",
