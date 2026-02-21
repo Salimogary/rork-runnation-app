@@ -588,40 +588,32 @@ export default function ActivityScreen() {
             {registeredEvents && registeredEvents.length > 0 ? (
               registeredEvents.map((event) => (
                 <View key={event.eventId} style={styles.eventCard}>
-                  <View style={styles.eventCardTop}>
-                    <View style={styles.eventNameRow}>
-                      <Calendar size={16} color={colors.primary} />
-                      <Text style={styles.eventName} numberOfLines={1}>{event.eventName}</Text>
-                    </View>
-                    <View style={[
-                      styles.statusBadge,
-                      event.status === 'ongoing' && styles.statusOngoing,
-                      event.status === 'upcoming' && styles.statusUpcoming,
-                      event.status === 'completed' && styles.statusCompleted,
-                    ]}>
-                      <Text style={[
-                        styles.statusText,
-                        event.status === 'ongoing' && styles.statusTextOngoing,
-                        event.status === 'upcoming' && styles.statusTextUpcoming,
-                        event.status === 'completed' && styles.statusTextCompleted,
+                  <View style={styles.eventCardRow}>
+                    <Calendar size={14} color={colors.primary} />
+                    <Text style={styles.eventName} numberOfLines={1}>{event.eventName}</Text>
+                    <View style={styles.eventBadges}>
+                      <View style={styles.medalIndicator}>
+                        <Award size={12} color={event.isOnMedalList ? '#FFD700' : colors.lightGray} />
+                        <Text style={[styles.medalText, event.isOnMedalList ? styles.medalTextQualified : styles.medalTextNot]}>
+                          {event.isOnMedalList ? 'Yes' : 'No'}
+                        </Text>
+                      </View>
+                      <View style={[
+                        styles.statusBadge,
+                        event.status === 'ongoing' && styles.statusOngoing,
+                        event.status === 'upcoming' && styles.statusUpcoming,
+                        event.status === 'completed' && styles.statusCompleted,
                       ]}>
-                        {event.status === 'ongoing' ? 'Ongoing' : event.status === 'upcoming' ? 'Not Started' : 'Closed'}
-                      </Text>
+                        <Text style={[
+                          styles.statusText,
+                          event.status === 'ongoing' && styles.statusTextOngoing,
+                          event.status === 'upcoming' && styles.statusTextUpcoming,
+                          event.status === 'completed' && styles.statusTextCompleted,
+                        ]}>
+                          {event.status === 'ongoing' ? 'Ongoing' : event.status === 'upcoming' ? 'Not Started' : 'Closed'}
+                        </Text>
+                      </View>
                     </View>
-                  </View>
-                  <View style={styles.eventCardBottom}>
-                    <View style={styles.medalIndicator}>
-                      <Award size={14} color={event.isOnMedalList ? '#FFD700' : colors.lightGray} />
-                      <Text style={[
-                        styles.medalText,
-                        event.isOnMedalList ? styles.medalTextQualified : styles.medalTextNot,
-                      ]}>
-                        {event.isOnMedalList ? 'Yes' : 'No'}
-                      </Text>
-                    </View>
-                    {event.status === 'upcoming' && (
-                      <Text style={styles.eventStartLabel}>Starts {formatDate(event.startsAt)}</Text>
-                    )}
                   </View>
                 </View>
               ))
@@ -1182,29 +1174,27 @@ const styles = StyleSheet.create({
   eventCard: {
     backgroundColor: colors.white,
     borderRadius: 12,
-    padding: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     shadowColor: colors.black,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 4,
     elevation: 2,
-    gap: 10,
   },
-  eventCardTop: {
+  eventCardRow: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    justifyContent: "space-between" as const,
-    gap: 8,
+    gap: 6,
   },
-  eventNameRow: {
+  eventBadges: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: 8,
-    flex: 1,
-    minWidth: 0,
+    gap: 6,
+    flexShrink: 0,
   },
   eventName: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "700" as const,
     color: colors.text,
     flex: 1,
@@ -1238,15 +1228,10 @@ const styles = StyleSheet.create({
   statusTextCompleted: {
     color: colors.textSecondary,
   },
-  eventCardBottom: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    justifyContent: "space-between" as const,
-  },
   medalIndicator: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: 5,
+    gap: 3,
   },
   medalText: {
     fontSize: 12,
@@ -1258,11 +1243,7 @@ const styles = StyleSheet.create({
   medalTextNot: {
     color: colors.textLight,
   },
-  eventStartLabel: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    fontWeight: "500" as const,
-  },
+
   noEventsCard: {
     backgroundColor: colors.white,
     borderRadius: 12,
