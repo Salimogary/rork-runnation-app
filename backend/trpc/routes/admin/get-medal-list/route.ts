@@ -12,7 +12,7 @@ const getMedalList = publicProcedure
 
     try {
       let participantsQuery = ctx.supabase
-        .from("Events Participants")
+        .from("Event Participants")
         .select("\"ParticipantID\", \"EventID\", \"RegistrationID\"");
 
       if (input.eventId) {
