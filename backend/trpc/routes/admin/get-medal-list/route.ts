@@ -84,22 +84,19 @@ const getMedalList = publicProcedure
             return null;
           }
 
+          const regId = participant.RegistrationID;
+
           const now = new Date();
           const todayStr = now.toISOString().split('T')[0];
-          const yesterday = new Date(now);
-          yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-          const yesterdayStr = yesterday.toISOString().split('T')[0];
 
-          const cutoffStr = medalDateEnd <= yesterdayStr ? medalDateEnd : yesterdayStr;
+          const cutoffStr = medalDateEnd <= todayStr ? medalDateEnd : todayStr;
 
           if (cutoffStr < medalDateStart) {
-            console.log('[getMedalList] Medal period has not had a full day yet, skipping participant:', regId);
+            console.log('[getMedalList] Medal period has not started yet, skipping participant:', regId);
             return null;
           }
 
-          console.log('[getMedalList] Date range for participant:', { regId, medalDateStart, medalDateEnd, todayStr, yesterdayStr, cutoffStr });
-
-          const regId = participant.RegistrationID;
+          console.log('[getMedalList] Date range for participant:', { regId, medalDateStart, medalDateEnd, todayStr, cutoffStr });
 
           const { data: activities, error: actError } = await ctx.supabase
             .from("Activity Sample")
