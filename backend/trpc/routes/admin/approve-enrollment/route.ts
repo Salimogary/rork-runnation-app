@@ -30,7 +30,7 @@ export default publicProcedure
     const { data: participant, error: insertError } = await ctx.supabase
       .from("events_participants")
       .insert({
-        EventID: enrollment.EventID,
+        eventId: enrollment.EventID,
         RegistrationID: enrollment.RegistrationID,
         Registration_Date: new Date().toISOString(),
         Status: 'registered',

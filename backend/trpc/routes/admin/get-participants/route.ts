@@ -14,15 +14,15 @@ export default publicProcedure
       .from("events_participants")
       .select(`
         ParticipantID,
-        EventID,
+        eventId,
         RegistrationID,
         Registration_Date,
-        Events!events_participants_EventID_fkey(eventName),
+        Events!events_participants_eventId_fkey(eventName),
         Registration Sample!events_participants_RegistrationID_fkey(First Name, Other Names, Sex, Residence)
       `);
 
     if (input.eventId) {
-      query = query.eq("EventID", input.eventId);
+      query = query.eq("eventId", input.eventId);
     }
 
     query = query.order("Registration_Date", { ascending: false });
@@ -38,7 +38,7 @@ export default publicProcedure
 
     const participants = (data || []).map((item: any) => ({
       ParticipantID: item.ParticipantID,
-      EventID: item.EventID,
+      EventID: item.eventId,
       RegistrationID: item.RegistrationID,
       Registration_Date: item.Registration_Date,
       Status: "Active",

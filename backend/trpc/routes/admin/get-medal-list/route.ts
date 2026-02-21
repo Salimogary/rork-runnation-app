@@ -13,10 +13,10 @@ const getMedalList = publicProcedure
     try {
       let participantsQuery = ctx.supabase
         .from("events_participants")
-        .select("ParticipantID, EventID, RegistrationID");
+        .select("ParticipantID, eventId, RegistrationID");
 
       if (input.eventId) {
-        participantsQuery = participantsQuery.eq("EventID", input.eventId);
+        participantsQuery = participantsQuery.eq("eventId", input.eventId);
       }
 
       const { data: participants, error: participantsError } = await participantsQuery;
@@ -41,7 +41,7 @@ const getMedalList = publicProcedure
 
       console.log("[getMedalList] Participants count:", participants.length);
 
-      const eventIds = [...new Set(participants.map((p: any) => p.EventID))];
+      const eventIds = [...new Set(participants.map((p: any) => p.eventId))];
       const regIds = [...new Set(participants.map((p: any) => p.RegistrationID))];
 
       const { data: events, error: eventsError } = await ctx.supabase
@@ -70,7 +70,7 @@ const getMedalList = publicProcedure
 
       const qualifiedParticipants = await Promise.all(
         participants.map(async (participant: any) => {
-          const event = eventsMap.get(participant.EventID);
+          const event = eventsMap.get(participant.eventId);
           const registration = regMap.get(participant.RegistrationID);
 
           if (!event) return null;
@@ -149,7 +149,7 @@ const getMedalList = publicProcedure
           return {
             participantId: participant.ParticipantID,
             registrationId: participant.RegistrationID,
-            eventId: participant.EventID,
+            eventId: participant.eventId,
             firstName: registration?.["First Name"] || "",
             otherNames: registration?.["Other Names"] || "",
             country: registration?.Country ?? registration?.country ?? "",
