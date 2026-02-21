@@ -24,7 +24,7 @@ interface ActivityData {
 }
 
 interface RegisteredEvent {
-  EventID: string;
+  eventId: string;
   RegistrationID: string;
   eventName: string;
   startsAt: string;
@@ -70,7 +70,7 @@ export default function ActivityScreen() {
       try {
         const { data: participantData, error: pError } = await supabase
           .from("Event Participants")
-          .select("EventID, RegistrationID")
+          .select("eventId, RegistrationID")
           .eq("RegistrationID", user.id);
 
         if (pError) {
@@ -79,7 +79,7 @@ export default function ActivityScreen() {
         }
         if (!participantData || participantData.length === 0) return [];
 
-        const eventIds = participantData.map(p => p.EventID);
+        const eventIds = participantData.map(p => p.eventId);
         const { data: eventsData, error: eError } = await supabase
           .from("Events")
           .select("eventId, eventName, startsAt, endsAt, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
@@ -144,7 +144,7 @@ export default function ActivityScreen() {
             }
 
             return {
-              EventID: event.eventId,
+              eventId: event.eventId,
               RegistrationID: user.id,
               eventName: event.eventName || 'Unnamed Event',
               startsAt: event.startsAt,
@@ -712,7 +712,7 @@ export default function ActivityScreen() {
                 <View style={styles.eventsSection}>
                   <Text style={styles.eventsSectionTitle}>Registered Events</Text>
                   {registeredEvents.map((event) => (
-                    <View key={event.EventID} style={styles.eventCard}>
+                    <View key={event.eventId} style={styles.eventCard}>
                       <View style={styles.eventCardTop}>
                         <View style={styles.eventNameRow}>
                           <Calendar size={16} color={colors.primary} />
