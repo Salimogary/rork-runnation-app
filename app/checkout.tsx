@@ -32,7 +32,7 @@ export default function CheckoutScreen() {
   });
 
   const totalAmount = cartItems?.reduce((total: number, item: any) => {
-    const product = item["Catalogue Sample"];
+    const product = item.product;
     return total + (product?.Price || 0) * item.quantity;
   }, 0) || 0;
 
@@ -107,7 +107,7 @@ export default function CheckoutScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Order Summary</Text>
           {cartItems?.map((item: any) => {
-            const product = item["Catalogue Sample"];
+            const product = item.product;
             return (
               <View key={item.cart_id} style={styles.summaryItem}>
                 <Text style={styles.summaryItemName}>

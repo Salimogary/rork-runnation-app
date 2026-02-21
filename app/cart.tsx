@@ -15,7 +15,7 @@ export default function CartScreen() {
 
   const updateCartMutation = trpc.shop.updateCartItem.useMutation({
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [[" shop", "getCart"]] });
+      queryClient.invalidateQueries({ queryKey: [["shop", "getCart"]] });
     },
     onError: (error: any) => {
       Alert.alert("Error", error.message || "Failed to update cart");
@@ -44,7 +44,7 @@ export default function CartScreen() {
   };
 
   const totalAmount = cartItems?.reduce((total: number, item: any) => {
-    const product = item["Catalogue Sample"];
+    const product = item.product;
     return total + (product?.Price || 0) * item.quantity;
   }, 0) || 0;
 
@@ -77,7 +77,7 @@ export default function CartScreen() {
         <>
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
             {cartItems.map((item: any) => {
-              const product = item["Catalogue Sample"];
+              const product = item.product;
               return (
                 <View key={item.cart_id} style={styles.cartItem}>
                   {product?.Photo_URL ? (
