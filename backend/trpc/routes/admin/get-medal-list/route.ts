@@ -86,13 +86,10 @@ const getMedalList = publicProcedure
 
           const now = new Date();
           const todayStr = now.toISOString().split('T')[0];
-          const yesterdayDate = new Date(now);
-          yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1);
-          const yesterdayStr = yesterdayDate.toISOString().split('T')[0];
 
-          const actualEndStr = medalDateEnd <= yesterdayStr ? medalDateEnd : yesterdayStr;
+          const actualEndStr = medalDateEnd <= todayStr ? medalDateEnd : todayStr;
 
-          console.log('[getMedalList] Date range for participant:', { medalDateStart, medalDateEnd, todayStr, yesterdayStr, actualEndStr });
+          console.log('[getMedalList] Date range for participant:', { medalDateStart, medalDateEnd, todayStr, actualEndStr });
 
           const regId = participant.RegistrationID;
 
