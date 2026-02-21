@@ -11,7 +11,7 @@ export default publicProcedure
         catalogue_id,
         quantity,
         created_at,
-        Catalogue Sample (
+        "Catalogue Sample" (
           CatalogueID,
           Catalogue_Item,
           Price,
