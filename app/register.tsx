@@ -12,9 +12,9 @@ import {
   Alert,
   Image,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, Link } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Fingerprint, Camera } from 'lucide-react-native';
+import { Fingerprint, Camera, Check } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@/contexts/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -74,6 +74,7 @@ export default function RegisterScreen() {
     photoUri: '',
   });
   const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   
   const pinRef1 = useRef<TextInput>(null);
   const pinRef2 = useRef<TextInput>(null);
@@ -225,6 +226,11 @@ export default function RegisterScreen() {
     const emptyFields = requiredFields.filter(field => !registrationData[field as keyof RegistrationData]);
     if (emptyFields.length > 0) {
       Alert.alert('Error', 'Please fill in all fields');
+      return;
+    }
+
+    if (!acceptedTerms) {
+      Alert.alert('Terms & Conditions', 'You must accept the Terms and Conditions and Privacy Policy to register.');
       return;
     }
 
@@ -740,11 +746,29 @@ export default function RegisterScreen() {
                     </View>
                   </View>
 
+                  <View style={styles.termsRow}>
+                    <TouchableOpacity
+                      style={[styles.checkbox, acceptedTerms && styles.checkboxChecked]}
+                      onPress={() => setAcceptedTerms(!acceptedTerms)}
+                      activeOpacity={0.7}
+                    >
+                      {acceptedTerms && <Check size={14} color="#fff" />}
+                    </TouchableOpacity>
+                    <Text style={styles.termsText}>
+                      I have read and accept the{' '}
+                    </Text>
+                    <Link href="/policy" asChild>
+                      <TouchableOpacity activeOpacity={0.7}>
+                        <Text style={styles.termsLink}>Terms & Conditions and Privacy Policy</Text>
+                      </TouchableOpacity>
+                    </Link>
+                  </View>
+
                   <View style={styles.buttonContainer}>
                     <TouchableOpacity
-                      style={[styles.button, styles.primaryButton, isLoading && styles.buttonDisabled]}
+                      style={[styles.button, styles.primaryButton, (isLoading || !acceptedTerms) && styles.buttonDisabled]}
                       onPress={handleCreateAccount}
-                      disabled={isLoading}
+                      disabled={isLoading || !acceptedTerms}
                       activeOpacity={0.8}
                     >
                       {isLoading ? (
@@ -758,6 +782,7 @@ export default function RegisterScreen() {
                       style={styles.textButton}
                       onPress={() => {
                         setScreenMode('login');
+                        setAcceptedTerms(false);
                         setRegistrationData({
                           firstName: '',
                           otherNames: '',
@@ -1203,5 +1228,38 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999',
     marginTop: 8,
+  },
+  termsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  checkboxChecked: {
+    backgroundColor: '#1a1a1a',
+    borderColor: '#1a1a1a',
+  },
+  termsText: {
+    fontSize: 13,
+    color: '#fff',
+    opacity: 0.9,
+  },
+  termsLink: {
+    fontSize: 13,
+    color: '#fff',
+    fontWeight: 'bold' as const,
+    textDecorationLine: 'underline',
   },
 });
