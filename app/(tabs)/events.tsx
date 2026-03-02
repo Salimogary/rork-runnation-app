@@ -57,7 +57,7 @@ export default function EventsScreen() {
     <View style={styles.container}>
       <TouchableOpacity
         style={styles.participantsButton}
-        onPress={() => router.push("/participants")}
+        onPress={() => router.push("/participants" as any)}
         activeOpacity={0.8}
       >
         <LinearGradient colors={colors.gradient.teal} style={styles.participantsGradient}>

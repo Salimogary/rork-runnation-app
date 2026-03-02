@@ -32,15 +32,16 @@ function RootLayoutNav() {
   useEffect(() => {
     if (!isReady || authLoading || hasSeenOnboarding === null) return;
 
-    const inOnboarding = segments[0] === 'onboarding';
-    const inRegister = segments[0] === 'register';
-    const inTabs = segments[0] === '(tabs)';
-    const inAdminLogin = segments[0] === 'admin-login';
-    const inAdmin = segments[0] === 'admin';
+    const currentSegment = segments[0] as string;
+    const inOnboarding = currentSegment === 'onboarding';
+    const inRegister = currentSegment === 'register';
+    const inTabs = currentSegment === '(tabs)';
+    const inAdminLogin = currentSegment === 'admin-login';
+    const inAdmin = currentSegment === 'admin';
 
     if (inAdminLogin || inAdmin) return;
 
-    const inAllowedRoute = segments[0] === 'settings' || segments[0] === 'profile' || segments[0] === 'cart' || segments[0] === 'checkout' || segments[0] === 'participants' || segments[0] === 'medal-list' || segments[0] === 'policy';
+    const inAllowedRoute = currentSegment === 'settings' || currentSegment === 'profile' || currentSegment === 'cart' || currentSegment === 'checkout' || currentSegment === 'participants' || currentSegment === 'medal-list' || currentSegment === 'policy';
 
     if (user) {
       if (!inTabs && !inAllowedRoute) {
@@ -49,11 +50,11 @@ function RootLayoutNav() {
     } else {
       if (!hasSeenOnboarding) {
         if (!inOnboarding && !inRegister) {
-          router.replace('/onboarding');
+          router.replace('/onboarding' as any);
         }
       } else {
         if (!inRegister) {
-          router.replace('/register');
+          router.replace('/register' as any);
         }
       }
     }

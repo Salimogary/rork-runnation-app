@@ -83,7 +83,7 @@ export default function OnboardingScreen() {
   const handleSkip = async () => {
     console.log('Navigating to register page...');
     try {
-      await router.replace('/register');
+      await router.replace('/register' as any);
     } catch (error) {
       console.error('Navigation error:', error);
     }

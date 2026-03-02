@@ -762,7 +762,7 @@ export default function RegisterScreen() {
                     <Text style={styles.termsText}>
                       I have read and accept the{' '}
                     </Text>
-                    <Link href="/policy" asChild>
+                    <Link href={"/policy" as any} asChild>
                       <TouchableOpacity activeOpacity={0.7}>
                         <Text style={styles.termsLink}>Terms & Conditions and Privacy Policy</Text>
                       </TouchableOpacity>
