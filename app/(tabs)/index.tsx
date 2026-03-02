@@ -1,9 +1,9 @@
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Platform, Modal, TextInput, Alert, Image } from "react-native";
-import { useState, useEffect, useRef } from "react";
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Platform, Modal, TextInput, Alert, Image, AppState, AppStateStatus } from "react-native";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge } from "lucide-react-native";
 import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
-import MapView, { Polyline, PROVIDER_GOOGLE } from "react-native-maps";
+import MapView, { Polyline } from "react-native-maps";
 import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -34,10 +34,31 @@ export default function ExerciseScreen() {
   
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
   const timerInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const elapsedBeforePause = useRef<number>(0);
+  const runningStartTimestamp = useRef<number | null>(null);
+  const appState = useRef<AppStateStatus>(AppState.currentState);
+
+  const updateDuration = useCallback(() => {
+    if (runningStartTimestamp.current !== null) {
+      const now = Date.now();
+      const currentSegment = Math.floor((now - runningStartTimestamp.current) / 1000);
+      setDuration(elapsedBeforePause.current + currentSegment);
+    }
+  }, []);
 
   useEffect(() => {
     requestLocationPermission();
+
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+        console.log('[Timer] App came to foreground, recalculating duration');
+        updateDuration();
+      }
+      appState.current = nextAppState;
+    });
+
     return () => {
+      subscription.remove();
       if (locationSubscription.current) {
         locationSubscription.current.remove();
       }
@@ -45,7 +66,7 @@ export default function ExerciseScreen() {
         clearInterval(timerInterval.current);
       }
     };
-  }, []);
+  }, [updateDuration]);
 
   const requestLocationPermission = async () => {
     if (Platform.OS === 'web') {
@@ -79,9 +100,15 @@ export default function ExerciseScreen() {
     setCoords([]);
     setDistance(0);
     setDuration(0);
+    elapsedBeforePause.current = 0;
+    runningStartTimestamp.current = Date.now();
 
     timerInterval.current = setInterval(() => {
-      setDuration((prev) => prev + 1);
+      if (runningStartTimestamp.current !== null) {
+        const now = Date.now();
+        const currentSegment = Math.floor((now - runningStartTimestamp.current) / 1000);
+        setDuration(elapsedBeforePause.current + currentSegment);
+      }
     }, 1000) as any;
 
     locationSubscription.current = await Location.watchPositionAsync(
@@ -109,6 +136,11 @@ export default function ExerciseScreen() {
   };
 
   const pauseTracking = () => {
+    if (runningStartTimestamp.current !== null) {
+      const now = Date.now();
+      elapsedBeforePause.current += Math.floor((now - runningStartTimestamp.current) / 1000);
+      runningStartTimestamp.current = null;
+    }
     setRunState("paused");
     if (timerInterval.current) {
       clearInterval(timerInterval.current);
@@ -124,8 +156,14 @@ export default function ExerciseScreen() {
     }
 
     setRunState("running");
+    runningStartTimestamp.current = Date.now();
+
     timerInterval.current = setInterval(() => {
-      setDuration((prev) => prev + 1);
+      if (runningStartTimestamp.current !== null) {
+        const now = Date.now();
+        const currentSegment = Math.floor((now - runningStartTimestamp.current) / 1000);
+        setDuration(elapsedBeforePause.current + currentSegment);
+      }
     }, 1000) as any;
 
     locationSubscription.current = await Location.watchPositionAsync(
@@ -153,6 +191,12 @@ export default function ExerciseScreen() {
   };
 
   const stopTracking = async () => {
+    if (runningStartTimestamp.current !== null) {
+      const now = Date.now();
+      elapsedBeforePause.current += Math.floor((now - runningStartTimestamp.current) / 1000);
+      runningStartTimestamp.current = null;
+    }
+    setDuration(elapsedBeforePause.current);
     setRunState("finished");
     if (timerInterval.current) {
       clearInterval(timerInterval.current);
@@ -211,6 +255,8 @@ export default function ExerciseScreen() {
     setCoords([]);
     setStartTime(null);
     setExerciseType(null);
+    elapsedBeforePause.current = 0;
+    runningStartTimestamp.current = null;
   };
 
   const pickImage = async () => {
@@ -307,7 +353,6 @@ export default function ExerciseScreen() {
         {Platform.OS !== 'web' && currentLocation && (
           <View style={styles.mapContainer}>
             <MapView
-              provider={PROVIDER_GOOGLE}
               style={styles.map}
               region={{
                 latitude: currentLocation.latitude,
