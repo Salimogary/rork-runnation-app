@@ -21,7 +21,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { Picker } from '@react-native-picker/picker';
-import { COUNTRIES, ACADEMIC_YEARS } from '@/constants/countries';
+import { COUNTRIES } from '@/constants/countries';
+import { supabase } from '@/lib/supabase';
 
 type ScreenMode = 'login' | 'create' | 'forgot' | 'fullRegistration';
 
@@ -31,7 +32,7 @@ interface RegistrationData {
   username: string;
   email: string;
   sex: string;
-  age: string;
+  dob: string;
   residence: string;
   occupation: string;
   mukStudentType?: string;
@@ -39,7 +40,7 @@ interface RegistrationData {
   weightCurrent: string;
   weightTarget: string;
   country: string;
-  academicYear: string;
+  runningClub: string;
   pin: string;
   confirmPin: string;
   photoUri?: string;
@@ -60,7 +61,7 @@ export default function RegisterScreen() {
     username: '',
     email: '',
     sex: '',
-    age: '',
+    dob: '',
     residence: '',
     occupation: '',
     mukStudentType: '',
@@ -68,13 +69,15 @@ export default function RegisterScreen() {
     weightCurrent: '',
     weightTarget: '',
     country: '',
-    academicYear: '',
+    runningClub: '',
     pin: '',
     confirmPin: '',
     photoUri: '',
   });
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [clubs, setClubs] = useState<string[]>([]);
+  const [clubsLoading, setClubsLoading] = useState(true);
   
   const pinRef1 = useRef<TextInput>(null);
   const pinRef2 = useRef<TextInput>(null);
@@ -87,7 +90,55 @@ export default function RegisterScreen() {
 
   React.useEffect(() => {
     checkBiometricAvailability();
+    fetchClubs();
   }, []);
+
+  const fetchClubs = async () => {
+    try {
+      setClubsLoading(true);
+      const { data, error } = await supabase
+        .from('clubs')
+        .select('club_name')
+        .order('club_name', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching clubs:', error);
+      } else if (data) {
+        setClubs(data.map((c: { club_name: string }) => c.club_name));
+      }
+    } catch (err) {
+      console.error('Failed to fetch clubs:', err);
+    } finally {
+      setClubsLoading(false);
+    }
+  };
+
+  const formatDobInput = (text: string) => {
+    const cleaned = text.replace(/[^0-9]/g, '');
+    let formatted = '';
+    if (cleaned.length > 0) {
+      formatted = cleaned.substring(0, 2);
+    }
+    if (cleaned.length > 2) {
+      formatted += '/' + cleaned.substring(2, 4);
+    }
+    if (cleaned.length > 4) {
+      formatted += '/' + cleaned.substring(4, 8);
+    }
+    return formatted;
+  };
+
+  const isValidDob = (dob: string): boolean => {
+    const match = dob.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!match) return false;
+    const day = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10);
+    const year = parseInt(match[3], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+    if (year < 1900 || year > new Date().getFullYear()) return false;
+    const date = new Date(year, month - 1, day);
+    return date.getDate() === day && date.getMonth() === month - 1 && date.getFullYear() === year;
+  };
 
   const checkBiometricAvailability = async () => {
     if (Platform.OS === 'web') {
@@ -218,9 +269,9 @@ export default function RegisterScreen() {
 
   const handleCreateAccount = async () => {
     const requiredFields = [
-      'firstName', 'otherNames', 'username', 'email', 'sex', 'age',
+      'firstName', 'otherNames', 'username', 'email', 'sex', 'dob',
       'residence', 'occupation', 'weightCurrent', 'weightTarget',
-      'country', 'academicYear', 'pin', 'confirmPin'
+      'country', 'runningClub', 'pin', 'confirmPin'
     ];
 
     const emptyFields = requiredFields.filter(field => !registrationData[field as keyof RegistrationData]);
@@ -231,6 +282,11 @@ export default function RegisterScreen() {
 
     if (!acceptedTerms) {
       Alert.alert('Terms & Conditions', 'You must accept the Terms and Conditions and Privacy Policy to register.');
+      return;
+    }
+
+    if (!isValidDob(registrationData.dob)) {
+      Alert.alert('Error', 'Please enter a valid date of birth in DD/MM/YYYY format');
       return;
     }
 
@@ -404,14 +460,18 @@ export default function RegisterScreen() {
                   </View>
 
                   <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Age *</Text>
+                    <Text style={styles.label}>Date of Birth *</Text>
                     <TextInput
                       style={styles.input}
-                      placeholder="Enter age"
+                      placeholder="DD/MM/YYYY"
                       placeholderTextColor="#999"
-                      value={registrationData.age}
-                      onChangeText={(text) => updateRegistrationField('age', text)}
+                      value={registrationData.dob}
+                      onChangeText={(text) => {
+                        const formatted = formatDobInput(text);
+                        updateRegistrationField('dob', formatted);
+                      }}
                       keyboardType="number-pad"
+                      maxLength={10}
                       editable={!isLoading}
                     />
                   </View>
@@ -592,17 +652,19 @@ export default function RegisterScreen() {
                   </View>
 
                   <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Academic Year *</Text>
+                    <Text style={styles.label}>Running Club *</Text>
                     <View style={styles.pickerContainer}>
                       <Picker
-                        selectedValue={registrationData.academicYear}
-                        onValueChange={(value: string) => updateRegistrationField('academicYear', value)}
+                        selectedValue={registrationData.runningClub}
+                        onValueChange={(value: string) => updateRegistrationField('runningClub', value)}
                         style={styles.picker}
-                        enabled={!isLoading}
+                        enabled={!isLoading && !clubsLoading}
                       >
-                        <Picker.Item label="Select academic year" value="" />
-                        {ACADEMIC_YEARS.map((year) => (
-                          <Picker.Item key={year} label={year} value={year} />
+                        <Picker.Item label={clubsLoading ? "Loading clubs..." : "Select running club"} value="" />
+                        <Picker.Item label="None - Prefer no club" value="None - Prefer no club" />
+                        <Picker.Item label="None - Want to join a club" value="None - Want to join a club" />
+                        {clubs.map((club) => (
+                          <Picker.Item key={club} label={club} value={club} />
                         ))}
                       </Picker>
                     </View>
@@ -794,7 +856,7 @@ export default function RegisterScreen() {
                           username: '',
                           email: '',
                           sex: '',
-                          age: '',
+                          dob: '',
                           residence: '',
                           occupation: '',
                           mukStudentType: '',
@@ -802,7 +864,7 @@ export default function RegisterScreen() {
                           weightCurrent: '',
                           weightTarget: '',
                           country: '',
-                          academicYear: '',
+                          runningClub: '',
                           pin: '',
                           confirmPin: '',
                           photoUri: '',

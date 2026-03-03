@@ -18,7 +18,7 @@ interface RegistrationData {
   username: string;
   email: string;
   sex: string;
-  age: string;
+  dob: string;
   residence: string;
   occupation: string;
   mukStudentType?: string;
@@ -26,7 +26,7 @@ interface RegistrationData {
   weightCurrent: string;
   weightTarget: string;
   country: string;
-  academicYear: string;
+  runningClub: string;
   pin: string;
   confirmPin: string;
   photoUri?: string;
@@ -265,13 +265,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
               Username: username.toLowerCase(),
               Email: email,
               Sex: registrationData.sex,
-              Age: registrationData.age ? parseInt(registrationData.age, 10) : null,
+              dob: registrationData.dob || null,
               Residence: residenceValue,
               Occupation: registrationData.occupation,
               'Weight Current': registrationData.weightCurrent ? parseFloat(registrationData.weightCurrent) : null,
               'Weight Target': registrationData.weightTarget ? parseFloat(registrationData.weightTarget) : null,
               Country: registrationData.country,
-              'Academic Year': registrationData.academicYear,
+              'Running Club': registrationData.runningClub,
               pin_hash: pinHash,
             })
             .select('RegistrationID, Username, "Created_At"')
