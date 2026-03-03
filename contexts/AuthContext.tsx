@@ -240,12 +240,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         try {
           let residenceValue = registrationData.residence;
 
-          const goalsArray = registrationData.runningGoals || [];
-          const allGoals = goalsArray.includes('Other') && registrationData.otherGoal
-            ? [...goalsArray.filter(g => g !== 'Other'), registrationData.otherGoal]
-            : goalsArray;
-          const occupationValue = allGoals.join(', ');
-
           const email = registrationData.email || `${username.toLowerCase()}@runapp.local`;
           const password = pinHash;
 
@@ -269,7 +263,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
               Sex: registrationData.sex,
               dob: registrationData.dob ? (() => { const match = registrationData.dob!.match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return match ? `${match[3]}-${match[2]}-${match[1]}` : registrationData.dob; })() : null,
               Residence: residenceValue,
-              Occupation: occupationValue,
               'Weight Current': registrationData.weightCurrent ? parseFloat(registrationData.weightCurrent) : null,
               'Weight Target': registrationData.weightTarget ? parseFloat(registrationData.weightTarget) : null,
               Country: registrationData.country,
@@ -285,6 +278,59 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           }
 
           registrationId = newUserData.RegistrationID;
+
+          try {
+            const goalsArray = registrationData.runningGoals || [];
+            const standardGoals = goalsArray.filter(g => g !== 'Other');
+            const resolvedGoalIds: string[] = [];
+
+            if (standardGoals.length > 0) {
+              const { data: goalsData, error: goalsError } = await supabase
+                .from('goals')
+                .select('goal_id, Goal')
+                .in('Goal', standardGoals);
+
+              if (goalsError) {
+                console.error('Error fetching goal_ids:', goalsError);
+              } else if (goalsData) {
+                for (const g of goalsData) {
+                  resolvedGoalIds.push(String(g.goal_id));
+                }
+              }
+            }
+
+            if (goalsArray.includes('Other') && registrationData.otherGoal) {
+              const { data: customGoal, error: customGoalError } = await supabase
+                .from('goals')
+                .insert({ Goal: registrationData.otherGoal, is_custom: true })
+                .select('goal_id')
+                .single();
+
+              if (customGoalError) {
+                console.error('Error inserting custom goal:', customGoalError);
+              } else if (customGoal) {
+                resolvedGoalIds.push(String(customGoal.goal_id));
+              }
+            }
+
+            if (resolvedGoalIds.length > 0) {
+              const { error: goalsPerUserError } = await supabase
+                .from('goals_per_user')
+                .insert({
+                  goals_per_user_id: registrationId,
+                  RegistrationID: registrationId,
+                  goal_ids: resolvedGoalIds,
+                });
+
+              if (goalsPerUserError) {
+                console.error('Error saving goals_per_user:', goalsPerUserError);
+              } else {
+                console.log('[AuthContext] Goals saved successfully:', resolvedGoalIds);
+              }
+            }
+          } catch (goalsError) {
+            console.error('Failed to save goals:', goalsError);
+          }
 
           if (registrationData.photoUri) {
             try {
