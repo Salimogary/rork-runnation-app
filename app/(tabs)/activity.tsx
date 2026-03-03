@@ -210,22 +210,35 @@ export default function ActivityScreen() {
     retry: 1,
   });
 
-  const { data: userClub } = useQuery<{ Club_Name: string } | null>({
+  const { data: userClub } = useQuery<{ club_name: string; coordinator_id: string } | null>({
     queryKey: ["user-club", user?.id],
     queryFn: async () => {
       if (!user?.id) return null;
       try {
-        const { data, error } = await supabase
+        const { data: membership, error: memError } = await supabase
           .from("club_members")
-          .select("Club_Name")
+          .select("coordinator_id")
           .eq("RegistrationID", user.id)
           .maybeSingle();
-        if (error) {
-          console.error("[UserClub] Fetch error:", JSON.stringify(error), error?.message, error?.code);
+        if (memError) {
+          console.error("[UserClub] Membership fetch error:", JSON.stringify(memError));
           return null;
         }
-        console.log("[UserClub] User club:", data?.Club_Name);
-        return data;
+        if (!membership?.coordinator_id) {
+          console.log("[UserClub] User is not in any club");
+          return null;
+        }
+        const { data: club, error: clubError } = await supabase
+          .from("clubs")
+          .select("club_name, coordinator_id")
+          .eq("coordinator_id", membership.coordinator_id)
+          .maybeSingle();
+        if (clubError) {
+          console.error("[UserClub] Club fetch error:", JSON.stringify(clubError));
+          return null;
+        }
+        console.log("[UserClub] User club:", club?.club_name);
+        return club;
       } catch (error: any) {
         console.error("[UserClub] Query failed:", JSON.stringify(error), error?.message);
         return null;
@@ -236,27 +249,27 @@ export default function ActivityScreen() {
   });
 
   const { data: clubMemberIds } = useQuery<string[]>({
-    queryKey: ["club-member-ids", userClub?.Club_Name],
+    queryKey: ["club-member-ids", userClub?.coordinator_id],
     queryFn: async () => {
-      if (!userClub?.Club_Name) return [];
+      if (!userClub?.coordinator_id) return [];
       try {
         const { data, error } = await supabase
           .from("club_members")
           .select("RegistrationID")
-          .eq("Club_Name", userClub.Club_Name);
+          .eq("coordinator_id", userClub.coordinator_id);
         if (error) {
-          console.error("[ClubMembers] Fetch error:", JSON.stringify(error), error?.message, error?.code);
+          console.error("[ClubMembers] Fetch error:", JSON.stringify(error));
           return [];
         }
         const ids = (data || []).map((m: any) => m.RegistrationID).filter(Boolean);
-        console.log("[ClubMembers] Found", ids.length, "members in club", userClub.Club_Name);
+        console.log("[ClubMembers] Found", ids.length, "members in club", userClub.club_name);
         return ids;
       } catch (error: any) {
         console.error("[ClubMembers] Query failed:", JSON.stringify(error), error?.message);
         return [];
       }
     },
-    enabled: !!userClub?.Club_Name,
+    enabled: !!userClub?.coordinator_id,
     staleTime: 60000,
   });
 
@@ -699,10 +712,10 @@ export default function ActivityScreen() {
           </TouchableOpacity>
         )}
 
-        {activeTab === "club" && userClub?.Club_Name && (
+        {activeTab === "club" && userClub?.club_name && (
           <View style={styles.clubHeaderInfo}>
             <Users size={16} color={colors.white} />
-            <Text style={styles.clubHeaderName}>{userClub.Club_Name}</Text>
+            <Text style={styles.clubHeaderName}>{userClub.club_name}</Text>
           </View>
         )}
 
@@ -808,7 +821,7 @@ export default function ActivityScreen() {
         )}
 
         {activeTab === "club" ? (
-          !userClub?.Club_Name ? (
+          !userClub?.club_name ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyEmoji}>🏅</Text>
               <Text style={styles.emptyText}>No Club Membership</Text>
