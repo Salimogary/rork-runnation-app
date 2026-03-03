@@ -265,7 +265,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
               Username: username.toLowerCase(),
               Email: email,
               Sex: registrationData.sex,
-              dob: registrationData.dob || null,
+              dob: registrationData.dob ? (() => { const match = registrationData.dob!.match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return match ? `${match[3]}-${match[2]}-${match[1]}` : registrationData.dob; })() : null,
               Residence: residenceValue,
               Occupation: registrationData.occupation,
               'Weight Current': registrationData.weightCurrent ? parseFloat(registrationData.weightCurrent) : null,
