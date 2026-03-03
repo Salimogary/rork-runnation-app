@@ -210,21 +210,21 @@ export default function ActivityScreen() {
     retry: 1,
   });
 
-  const { data: userClub } = useQuery<{ club_name: string } | null>({
+  const { data: userClub } = useQuery<{ Club_Name: string } | null>({
     queryKey: ["user-club", user?.id],
     queryFn: async () => {
       if (!user?.id) return null;
       try {
         const { data, error } = await supabase
           .from("club_members")
-          .select("club_name")
+          .select("Club_Name")
           .eq("RegistrationID", user.id)
           .maybeSingle();
         if (error) {
           console.error("[UserClub] Fetch error:", JSON.stringify(error), error?.message, error?.code);
           return null;
         }
-        console.log("[UserClub] User club:", data?.club_name);
+        console.log("[UserClub] User club:", data?.Club_Name);
         return data;
       } catch (error: any) {
         console.error("[UserClub] Query failed:", JSON.stringify(error), error?.message);
@@ -236,27 +236,27 @@ export default function ActivityScreen() {
   });
 
   const { data: clubMemberIds } = useQuery<string[]>({
-    queryKey: ["club-member-ids", userClub?.club_name],
+    queryKey: ["club-member-ids", userClub?.Club_Name],
     queryFn: async () => {
-      if (!userClub?.club_name) return [];
+      if (!userClub?.Club_Name) return [];
       try {
         const { data, error } = await supabase
           .from("club_members")
           .select("RegistrationID")
-          .eq("club_name", userClub.club_name);
+          .eq("Club_Name", userClub.Club_Name);
         if (error) {
           console.error("[ClubMembers] Fetch error:", JSON.stringify(error), error?.message, error?.code);
           return [];
         }
         const ids = (data || []).map((m: any) => m.RegistrationID).filter(Boolean);
-        console.log("[ClubMembers] Found", ids.length, "members in club", userClub.club_name);
+        console.log("[ClubMembers] Found", ids.length, "members in club", userClub.Club_Name);
         return ids;
       } catch (error: any) {
         console.error("[ClubMembers] Query failed:", JSON.stringify(error), error?.message);
         return [];
       }
     },
-    enabled: !!userClub?.club_name,
+    enabled: !!userClub?.Club_Name,
     staleTime: 60000,
   });
 
@@ -699,10 +699,10 @@ export default function ActivityScreen() {
           </TouchableOpacity>
         )}
 
-        {activeTab === "club" && userClub?.club_name && (
+        {activeTab === "club" && userClub?.Club_Name && (
           <View style={styles.clubHeaderInfo}>
             <Users size={16} color={colors.white} />
-            <Text style={styles.clubHeaderName}>{userClub.club_name}</Text>
+            <Text style={styles.clubHeaderName}>{userClub.Club_Name}</Text>
           </View>
         )}
 
@@ -808,7 +808,7 @@ export default function ActivityScreen() {
         )}
 
         {activeTab === "club" ? (
-          !userClub?.club_name ? (
+          !userClub?.Club_Name ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyEmoji}>🏅</Text>
               <Text style={styles.emptyText}>No Club Membership</Text>
