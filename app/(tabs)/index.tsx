@@ -99,13 +99,13 @@ export default function ExerciseScreen() {
       const resolvedGoals: UserGoal[] = [];
 
       if (goalIds.length > 0) {
-        const numericIds = goalIds.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
-        console.log('[Goals] Numeric IDs for lookup:', numericIds);
-        if (numericIds.length > 0) {
+        const cleanIds = goalIds.map(id => id.trim()).filter(id => id.length > 0);
+        console.log('[Goals] Clean IDs for lookup:', cleanIds);
+        if (cleanIds.length > 0) {
           const { data: goalsData, error: goalsError } = await supabase
             .from('goals')
-            .select('goal_id, "Goal"')
-            .in('goal_id', numericIds);
+            .select('goal_id, Goal')
+            .in('goal_id', cleanIds);
 
           console.log('[Goals] Goals table response:', JSON.stringify(goalsData), 'Error:', JSON.stringify(goalsError));
 
@@ -113,7 +113,9 @@ export default function ExerciseScreen() {
             console.error('[Goals] Error fetching goal names:', goalsError);
           } else if (goalsData) {
             for (const g of goalsData) {
-              resolvedGoals.push({ goal_id: String(g.goal_id), name: g.Goal || 'Goal' });
+              const goalRecord = g as Record<string, unknown>;
+              const goalName = (goalRecord['Goal'] as string) || 'Goal';
+              resolvedGoals.push({ goal_id: String(goalRecord['goal_id']), name: goalName });
             }
           }
         }
