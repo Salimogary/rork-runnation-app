@@ -4,6 +4,7 @@ import type { AppRouter } from "@/backend/trpc/app-router";
 import superjson from "superjson";
 
 export const trpc = createTRPCReact<AppRouter>();
+export const TRPCProvider = trpc.Provider;
 
 const getBaseUrl = () => {
   const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
