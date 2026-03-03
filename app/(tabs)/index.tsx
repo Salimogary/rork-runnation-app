@@ -377,7 +377,7 @@ export default function ExerciseScreen() {
         <View style={styles.statsContainer}>
           <LinearGradient
             colors={colors.gradient.orange}
-            style={styles.statCard}
+            style={styles.statCardSmall}
           >
             <Text style={styles.statLabel}>Distance</Text>
             <Text style={styles.statValue}>{distance.toFixed(2)}</Text>
@@ -386,18 +386,18 @@ export default function ExerciseScreen() {
           
           <LinearGradient
             colors={colors.gradient.teal}
-            style={styles.statCard}
+            style={styles.statCardLarge}
           >
-            <Timer size={20} color={colors.white} style={styles.statIcon} />
+            <Timer size={18} color={colors.white} style={styles.statIcon} />
             <Text style={styles.statLabel}>Time</Text>
             <Text style={styles.statValue}>{formatTime(duration)}</Text>
           </LinearGradient>
           
           <LinearGradient
             colors={colors.gradient.blue}
-            style={styles.statCard}
+            style={styles.statCardSmall}
           >
-            <Gauge size={20} color={colors.white} style={styles.statIcon} />
+            <Gauge size={18} color={colors.white} style={styles.statIcon} />
             <Text style={styles.statLabel}>Pace</Text>
             <Text style={styles.statValue}>{pace.toFixed(1)}</Text>
             <Text style={styles.statUnit}>km/h</Text>
@@ -629,13 +629,26 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 12,
   },
-  statCard: {
-    flex: 1,
+  statCardSmall: {
+    flex: 0.9,
     borderRadius: 16,
-    padding: 16,
+    padding: 12,
     alignItems: "center",
     justifyContent: "center",
-    minHeight: 110,
+    minHeight: 100,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  statCardLarge: {
+    flex: 1.2,
+    borderRadius: 16,
+    padding: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 100,
     shadowColor: colors.black,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
@@ -653,7 +666,7 @@ const styles = StyleSheet.create({
     fontWeight: "600" as const,
   },
   statValue: {
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: "800" as const,
     color: colors.white,
   },
