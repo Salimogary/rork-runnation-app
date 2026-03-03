@@ -20,11 +20,11 @@ interface RegistrationData {
   sex: string;
   dob: string;
   residence: string;
-  occupation: string;
-  mukStudentType?: string;
-  mukStudentLocation?: string;
+  runningGoals: string[];
+  otherGoal: string;
   weightCurrent: string;
   weightTarget: string;
+  weightMonths: string;
   country: string;
   runningClub: string;
   pin: string;
@@ -239,10 +239,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         let registrationId: string | null = null;
         try {
           let residenceValue = registrationData.residence;
-          
-          if (registrationData.occupation === 'MUK Student' && (registrationData as any).mukStudentLocation) {
-            residenceValue = `MUK,${(registrationData as any).mukStudentLocation}`;
-          }
+
+          const goalsArray = registrationData.runningGoals || [];
+          const allGoals = goalsArray.includes('Other') && registrationData.otherGoal
+            ? [...goalsArray.filter(g => g !== 'Other'), registrationData.otherGoal]
+            : goalsArray;
+          const occupationValue = allGoals.join(', ');
 
           const email = registrationData.email || `${username.toLowerCase()}@runapp.local`;
           const password = pinHash;
@@ -267,7 +269,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
               Sex: registrationData.sex,
               dob: registrationData.dob ? (() => { const match = registrationData.dob!.match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return match ? `${match[3]}-${match[2]}-${match[1]}` : registrationData.dob; })() : null,
               Residence: residenceValue,
-              Occupation: registrationData.occupation,
+              Occupation: occupationValue,
               'Weight Current': registrationData.weightCurrent ? parseFloat(registrationData.weightCurrent) : null,
               'Weight Target': registrationData.weightTarget ? parseFloat(registrationData.weightTarget) : null,
               Country: registrationData.country,

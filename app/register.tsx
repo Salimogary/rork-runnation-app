@@ -26,6 +26,18 @@ import { supabase } from '@/lib/supabase';
 
 type ScreenMode = 'login' | 'create' | 'forgot' | 'fullRegistration';
 
+const RUNNING_GOALS = [
+  'Weight Loss',
+  'Improve Fitness',
+  'Mental Health & Stress Relief',
+  'Self Discipline / Personal Improvement',
+  'Training for an Event',
+  'To interact with others',
+  'General Health',
+] as const;
+
+const MAX_GOALS = 3;
+
 interface RegistrationData {
   firstName: string;
   otherNames: string;
@@ -34,11 +46,11 @@ interface RegistrationData {
   sex: string;
   dob: string;
   residence: string;
-  occupation: string;
-  mukStudentType?: string;
-  mukStudentLocation?: string;
+  runningGoals: string[];
+  otherGoal: string;
   weightCurrent: string;
   weightTarget: string;
+  weightMonths: string;
   country: string;
   runningClub: string;
   pin: string;
@@ -63,11 +75,11 @@ export default function RegisterScreen() {
     sex: '',
     dob: '',
     residence: '',
-    occupation: '',
-    mukStudentType: '',
-    mukStudentLocation: '',
+    runningGoals: [],
+    otherGoal: '',
     weightCurrent: '',
     weightTarget: '',
+    weightMonths: '',
     country: '',
     runningClub: '',
     pin: '',
@@ -267,16 +279,44 @@ export default function RegisterScreen() {
     }
   };
 
+  const toggleGoal = (goal: string) => {
+    setRegistrationData(prev => {
+      const current = prev.runningGoals;
+      if (current.includes(goal)) {
+        const updated = current.filter(g => g !== goal);
+        const newData: Partial<RegistrationData> = { runningGoals: updated };
+        if (goal === 'Weight Loss') {
+          newData.weightCurrent = '';
+          newData.weightTarget = '';
+          newData.weightMonths = '';
+        }
+        return { ...prev, ...newData };
+      } else {
+        if (current.length >= MAX_GOALS) {
+          Alert.alert('Limit Reached', `You can select up to ${MAX_GOALS} running goals.`);
+          return prev;
+        }
+        return { ...prev, runningGoals: [...current, goal] };
+      }
+    });
+  };
+
+  const hasWeightLossGoal = registrationData.runningGoals.includes('Weight Loss');
+
   const handleCreateAccount = async () => {
     const requiredFields = [
       'firstName', 'otherNames', 'username', 'email', 'sex', 'dob',
-      'residence', 'occupation', 'weightCurrent', 'weightTarget',
-      'country', 'runningClub', 'pin', 'confirmPin'
+      'residence', 'country', 'runningClub', 'pin', 'confirmPin'
     ];
 
     const emptyFields = requiredFields.filter(field => !registrationData[field as keyof RegistrationData]);
     if (emptyFields.length > 0) {
-      Alert.alert('Error', 'Please fill in all fields');
+      Alert.alert('Error', 'Please fill in all required fields');
+      return;
+    }
+
+    if (registrationData.runningGoals.length === 0) {
+      Alert.alert('Error', 'Please select at least one running goal');
       return;
     }
 
@@ -290,13 +330,9 @@ export default function RegisterScreen() {
       return;
     }
 
-    if (registrationData.occupation === 'MUK Student') {
-      if (!registrationData.mukStudentType) {
-        Alert.alert('Error', 'Please select student type (Resident/Non-Resident)');
-        return;
-      }
-      if (!registrationData.mukStudentLocation) {
-        Alert.alert('Error', 'Please select your hall or hostel');
+    if (hasWeightLossGoal) {
+      if (!registrationData.weightCurrent || !registrationData.weightTarget || !registrationData.weightMonths) {
+        Alert.alert('Error', 'Please fill in your weight loss details (current weight, target weight, and timeframe)');
         return;
       }
     }
@@ -506,150 +542,107 @@ export default function RegisterScreen() {
                   </View>
 
                   <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Occupation *</Text>
-                    <View style={styles.pickerContainer}>
-                      <Picker
-                        selectedValue={registrationData.occupation}
-                        onValueChange={(value: string) => {
-                          updateRegistrationField('occupation', value);
-                          if (value !== 'MUK Student') {
-                            updateRegistrationField('mukStudentType', '');
-                            updateRegistrationField('mukStudentLocation', '');
-                          }
-                        }}
-                        style={styles.picker}
-                        enabled={!isLoading}
+                    <Text style={styles.label}>Running Goals * (select up to 3)</Text>
+                    <View style={styles.goalsContainer}>
+                      {RUNNING_GOALS.map((goal) => {
+                        const isSelected = registrationData.runningGoals.includes(goal);
+                        return (
+                          <TouchableOpacity
+                            key={goal}
+                            style={[styles.goalChip, isSelected && styles.goalChipSelected]}
+                            onPress={() => toggleGoal(goal)}
+                            activeOpacity={0.7}
+                            disabled={isLoading}
+                          >
+                            {isSelected && (
+                              <Check size={14} color="#fff" style={{ marginRight: 4 }} />
+                            )}
+                            <Text style={[styles.goalChipText, isSelected && styles.goalChipTextSelected]}>
+                              {goal}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                      <TouchableOpacity
+                        style={[
+                          styles.goalChip,
+                          registrationData.runningGoals.includes('Other') && styles.goalChipSelected,
+                        ]}
+                        onPress={() => toggleGoal('Other')}
+                        activeOpacity={0.7}
+                        disabled={isLoading}
                       >
-                        <Picker.Item label="Select occupation" value="" />
-                        <Picker.Item label="MUK Student" value="MUK Student" />
-                        <Picker.Item label="MUK Staff" value="MUK Staff" />
-                        <Picker.Item label="Other" value="Other" />
-                      </Picker>
+                        {registrationData.runningGoals.includes('Other') && (
+                          <Check size={14} color="#fff" style={{ marginRight: 4 }} />
+                        )}
+                        <Text style={[
+                          styles.goalChipText,
+                          registrationData.runningGoals.includes('Other') && styles.goalChipTextSelected,
+                        ]}>
+                          Other
+                        </Text>
+                      </TouchableOpacity>
                     </View>
+                    <Text style={styles.goalCount}>
+                      {registrationData.runningGoals.length}/{MAX_GOALS} selected
+                    </Text>
                   </View>
 
-                  {registrationData.occupation === 'MUK Student' && (
-                    <>
-                      <View style={styles.inputContainer}>
-                        <Text style={styles.label}>Student Type *</Text>
-                        <View style={styles.pickerContainer}>
-                          <Picker
-                            selectedValue={registrationData.mukStudentType}
-                            onValueChange={(value: string) => {
-                              updateRegistrationField('mukStudentType', value);
-                              updateRegistrationField('mukStudentLocation', '');
-                            }}
-                            style={styles.picker}
-                            enabled={!isLoading}
-                          >
-                            <Picker.Item label="Select type" value="" />
-                            <Picker.Item label="Resident" value="Resident" />
-                            <Picker.Item label="Non-Resident" value="Non-Resident" />
-                          </Picker>
-                        </View>
-                      </View>
-
-                      {registrationData.mukStudentType === 'Resident' && (
-                        <View style={styles.inputContainer}>
-                          <Text style={styles.label}>Hall *</Text>
-                          <View style={styles.pickerContainer}>
-                            <Picker
-                              selectedValue={registrationData.mukStudentLocation}
-                              onValueChange={(value: string) => updateRegistrationField('mukStudentLocation', value)}
-                              style={styles.picker}
-                              enabled={!isLoading}
-                            >
-                              <Picker.Item label="Select hall" value="" />
-                              <Picker.Item label="Lumumba" value="Lumumba" />
-                              <Picker.Item label="Livingstone" value="Livingstone" />
-                              <Picker.Item label="Mitchell" value="Mitchell" />
-                              <Picker.Item label="Nkurumah" value="Nkurumah" />
-                              <Picker.Item label="Nsibirwa" value="Nsibirwa" />
-                              <Picker.Item label="University Hall" value="University Hall" />
-                              <Picker.Item label="Africa" value="Africa" />
-                              <Picker.Item label="Complex" value="Complex" />
-                              <Picker.Item label="Mary Stuart" value="Mary Stuart" />
-                              <Picker.Item label="Galloway" value="Galloway" />
-                              <Picker.Item label="Kabanyolo" value="Kabanyolo" />
-                            </Picker>
-                          </View>
-                        </View>
-                      )}
-
-                      {registrationData.mukStudentType === 'Non-Resident' && (
-                        <View style={styles.inputContainer}>
-                          <Text style={styles.label}>Hostel *</Text>
-                          <View style={styles.pickerContainer}>
-                            <Picker
-                              selectedValue={registrationData.mukStudentLocation}
-                              onValueChange={(value: string) => updateRegistrationField('mukStudentLocation', value)}
-                              style={styles.picker}
-                              enabled={!isLoading}
-                            >
-                              <Picker.Item label="Select hostel" value="" />
-                              <Picker.Item label="Braetd Hostel" value="Braetd Hostel" />
-                              <Picker.Item label="JJ Hostel" value="JJ Hostel" />
-                              <Picker.Item label="Lady Juliana" value="Lady Juliana" />
-                              <Picker.Item label="Makerere Garden Courts" value="Makerere Garden Courts" />
-                              <Picker.Item label="Nakiyingi" value="Nakiyingi" />
-                              <Picker.Item label="New Nana" value="New Nana" />
-                              <Picker.Item label="Olympia Hostel" value="Olympia Hostel" />
-                              <Picker.Item label="Akwata Empola" value="Akwata Empola" />
-                              <Picker.Item label="Apex" value="Apex" />
-                              <Picker.Item label="Aryan" value="Aryan" />
-                              <Picker.Item label="Dream World Hostel" value="Dream World Hostel" />
-                              <Picker.Item label="Edith Hetty" value="Edith Hetty" />
-                              <Picker.Item label="Kann Hostel" value="Kann Hostel" />
-                              <Picker.Item label="Kare Hostel" value="Kare Hostel" />
-                              <Picker.Item label="Makerere International Students' Hostel" value="Makerere International Students' Hostel" />
-                              <Picker.Item label="Muhika" value="Muhika" />
-                              <Picker.Item label="Nalika" value="Nalika" />
-                              <Picker.Item label="Pearl View" value="Pearl View" />
-                              <Picker.Item label="St. Monica" value="St. Monica" />
-                              <Picker.Item label="Sunway" value="Sunway" />
-                              <Picker.Item label="Zoa Hostel" value="Zoa Hostel" />
-                              <Picker.Item label="Baskon Hostel" value="Baskon Hostel" />
-                              <Picker.Item label="Bbira" value="Bbira" />
-                              <Picker.Item label="Castle Ville" value="Castle Ville" />
-                              <Picker.Item label="Cheds" value="Cheds" />
-                              <Picker.Item label="Douglas Villa" value="Douglas Villa" />
-                              <Picker.Item label="Herican" value="Herican" />
-                              <Picker.Item label="Messiah" value="Messiah" />
-                              <Picker.Item label="Prince" value="Prince" />
-                              <Picker.Item label="Waveney Courts" value="Waveney Courts" />
-                              <Picker.Item label="Other" value="Other" />
-                            </Picker>
-                          </View>
-                        </View>
-                      )}
-                    </>
+                  {registrationData.runningGoals.includes('Other') && (
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.label}>Describe your goal</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Type your running goal"
+                        placeholderTextColor="#999"
+                        value={registrationData.otherGoal}
+                        onChangeText={(text) => updateRegistrationField('otherGoal', text)}
+                        editable={!isLoading}
+                      />
+                    </View>
                   )}
 
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Current Weight (kg) *</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Enter current weight"
-                      placeholderTextColor="#999"
-                      value={registrationData.weightCurrent}
-                      onChangeText={(text) => updateRegistrationField('weightCurrent', text)}
-                      keyboardType="decimal-pad"
-                      editable={!isLoading}
-                    />
-                  </View>
-
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Target Weight (kg) *</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Enter target weight"
-                      placeholderTextColor="#999"
-                      value={registrationData.weightTarget}
-                      onChangeText={(text) => updateRegistrationField('weightTarget', text)}
-                      keyboardType="decimal-pad"
-                      editable={!isLoading}
-                    />
-                  </View>
+                  {hasWeightLossGoal && (
+                    <View style={styles.weightLossSection}>
+                      <Text style={styles.weightLossSectionTitle}>Weight Loss Details</Text>
+                      <View style={styles.inputContainer}>
+                        <Text style={styles.label}>Current Weight (kg) *</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="e.g. 80"
+                          placeholderTextColor="#999"
+                          value={registrationData.weightCurrent}
+                          onChangeText={(text) => updateRegistrationField('weightCurrent', text)}
+                          keyboardType="decimal-pad"
+                          editable={!isLoading}
+                        />
+                      </View>
+                      <View style={styles.inputContainer}>
+                        <Text style={styles.label}>Target Weight (kg) *</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="e.g. 65"
+                          placeholderTextColor="#999"
+                          value={registrationData.weightTarget}
+                          onChangeText={(text) => updateRegistrationField('weightTarget', text)}
+                          keyboardType="decimal-pad"
+                          editable={!isLoading}
+                        />
+                      </View>
+                      <View style={styles.inputContainer}>
+                        <Text style={styles.label}>Target Duration (months) *</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="e.g. 6"
+                          placeholderTextColor="#999"
+                          value={registrationData.weightMonths}
+                          onChangeText={(text) => updateRegistrationField('weightMonths', text.replace(/[^0-9]/g, ''))}
+                          keyboardType="number-pad"
+                          editable={!isLoading}
+                        />
+                      </View>
+                    </View>
+                  )}
 
                   <View style={styles.inputContainer}>
                     <Text style={styles.label}>Running Club *</Text>
@@ -858,11 +851,11 @@ export default function RegisterScreen() {
                           sex: '',
                           dob: '',
                           residence: '',
-                          occupation: '',
-                          mukStudentType: '',
-                          mukStudentLocation: '',
+                          runningGoals: [],
+                          otherGoal: '',
                           weightCurrent: '',
                           weightTarget: '',
+                          weightMonths: '',
                           country: '',
                           runningClub: '',
                           pin: '',
@@ -1340,5 +1333,53 @@ const styles = StyleSheet.create({
     color: '#fff',
     opacity: 0.9,
     lineHeight: 18,
+  },
+  goalsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  goalChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.4)',
+  },
+  goalChipSelected: {
+    backgroundColor: '#1a1a1a',
+    borderColor: '#1a1a1a',
+  },
+  goalChipText: {
+    fontSize: 13,
+    color: '#fff',
+    fontWeight: '500' as const,
+  },
+  goalChipTextSelected: {
+    color: '#fff',
+    fontWeight: '600' as const,
+  },
+  goalCount: {
+    fontSize: 12,
+    color: '#fff',
+    opacity: 0.7,
+    marginTop: 8,
+  },
+  weightLossSection: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  weightLossSectionTitle: {
+    fontSize: 15,
+    fontWeight: '700' as const,
+    color: '#fff',
+    marginBottom: 14,
   },
 });
