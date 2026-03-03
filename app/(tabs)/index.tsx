@@ -2,7 +2,7 @@ import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Platform, Modal, 
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge } from "lucide-react-native";
+import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge, Target, TrendingUp, Clock } from "lucide-react-native";
 import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
 import MapView, { Polyline } from "react-native-maps";
@@ -33,7 +33,34 @@ export default function ExerciseScreen() {
   const [treadmillDistance, setTreadmillDistance] = useState("");
   const [treadmillTime, setTreadmillTime] = useState("");
   const [treadmillImage, setTreadmillImage] = useState<string | null>(null);
-  
+  const [goals, setGoals] = useState<{ distance: number | null; time: number | null; pace: number | null }>({
+    distance: null,
+    time: null,
+    pace: null,
+  });
+  const [showGoalModal, setShowGoalModal] = useState(false);
+  const [goalDistanceInput, setGoalDistanceInput] = useState("");
+  const [goalTimeInput, setGoalTimeInput] = useState("");
+  const [goalPaceInput, setGoalPaceInput] = useState("");
+
+  const activeGoals = [
+    goals.distance !== null ? { key: 'distance', label: 'Distance', target: goals.distance, current: distance, unit: 'km', icon: TrendingUp, gradient: colors.gradient.orange } : null,
+    goals.time !== null ? { key: 'time', label: 'Time', target: goals.time, current: duration / 60, unit: 'min', icon: Clock, gradient: colors.gradient.teal } : null,
+    goals.pace !== null ? { key: 'pace', label: 'Pace', target: goals.pace, current: pace, unit: 'km/h', icon: Gauge, gradient: colors.gradient.blue } : null,
+  ].filter(Boolean) as { key: string; label: string; target: number; current: number; unit: string; icon: any; gradient: readonly [string, string] }[];
+
+  const saveGoals = () => {
+    const d = goalDistanceInput ? parseFloat(goalDistanceInput) : null;
+    const t = goalTimeInput ? parseFloat(goalTimeInput) : null;
+    const p = goalPaceInput ? parseFloat(goalPaceInput) : null;
+    if (d === null && t === null && p === null) {
+      Alert.alert("Set Goals", "Please set at least one goal");
+      return;
+    }
+    setGoals({ distance: d, time: t, pace: p });
+    setShowGoalModal(false);
+  };
+
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
   const timerInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedBeforePause = useRef<number>(0);
@@ -339,7 +366,7 @@ export default function ExerciseScreen() {
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {Platform.OS !== 'web' && currentLocation && (
+        {Platform.OS !== 'web' && currentLocation && runState !== 'idle' && (
           <View style={styles.mapContainer}>
             <MapView
               style={styles.map}
@@ -363,40 +390,88 @@ export default function ExerciseScreen() {
           </View>
         )}
 
-        <View style={styles.statsContainer}>
-          <LinearGradient
-            colors={colors.gradient.orange}
-            style={styles.statCardSmall}
-          >
-            <Text style={styles.statLabel}>Distance</Text>
-            <Text style={styles.statValue}>{distance.toFixed(2)}</Text>
-            <Text style={styles.statUnit}>km</Text>
-          </LinearGradient>
-          
-          <LinearGradient
-            colors={colors.gradient.teal}
-            style={styles.statCardLarge}
-          >
-            <Timer size={18} color={colors.white} style={styles.statIcon} />
-            <Text style={styles.statLabel}>Time</Text>
-            <Text style={styles.statValue}>{formatTime(duration)}</Text>
-          </LinearGradient>
-          
-          <LinearGradient
-            colors={colors.gradient.blue}
-            style={styles.statCardSmall}
-          >
-            <Gauge size={18} color={colors.white} style={styles.statIcon} />
-            <Text style={styles.statLabel}>Pace</Text>
-            <Text style={styles.statValue}>{pace.toFixed(1)}</Text>
-            <Text style={styles.statUnit}>km/h</Text>
-          </LinearGradient>
+        <View style={styles.sectionContainer}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionTitleRow}>
+              <Target size={20} color={colors.primary} />
+              <Text style={styles.sectionTitle}>Goal Tracker</Text>
+            </View>
+            <TouchableOpacity onPress={() => {
+              setGoalDistanceInput(goals.distance?.toString() ?? "");
+              setGoalTimeInput(goals.time?.toString() ?? "");
+              setGoalPaceInput(goals.pace?.toString() ?? "");
+              setShowGoalModal(true);
+            }} activeOpacity={0.7}>
+              <View style={styles.setGoalChip}>
+                <Text style={styles.setGoalChipText}>{activeGoals.length > 0 ? 'Edit' : 'Set Goals'}</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          {activeGoals.length === 0 ? (
+            <TouchableOpacity
+              style={styles.emptyGoalCard}
+              onPress={() => {
+                setGoalDistanceInput("");
+                setGoalTimeInput("");
+                setGoalPaceInput("");
+                setShowGoalModal(true);
+              }}
+              activeOpacity={0.7}
+            >
+              <Target size={28} color={colors.textLight} />
+              <Text style={styles.emptyGoalText}>Tap to set your goals</Text>
+              <Text style={styles.emptyGoalSubtext}>Track distance, time or pace</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.goalsRow}>
+              {activeGoals.map((goal) => {
+                const progress = goal.target > 0 ? Math.min(goal.current / goal.target, 1) : 0;
+                const IconComp = goal.icon;
+                return (
+                  <LinearGradient key={goal.key} colors={goal.gradient} style={[styles.goalCard, activeGoals.length === 1 && styles.goalCardSingle]}>
+                    <IconComp size={16} color={colors.white} />
+                    <Text style={styles.goalLabel}>{goal.label}</Text>
+                    <Text style={styles.goalCurrent}>
+                      {goal.key === 'time' ? Math.floor(goal.current).toString() : goal.current.toFixed(goal.key === 'distance' ? 2 : 1)}
+                    </Text>
+                    <View style={styles.goalProgressBg}>
+                      <View style={[styles.goalProgressFill, { width: `${progress * 100}%` }]} />
+                    </View>
+                    <Text style={styles.goalTarget}>{goal.target} {goal.unit}</Text>
+                  </LinearGradient>
+                );
+              })}
+            </View>
+          )}
         </View>
+
+        {runState !== 'idle' && (
+          <View style={styles.statsContainer}>
+            <LinearGradient colors={colors.gradient.orange} style={styles.statCardSmall}>
+              <Text style={styles.statLabel}>Distance</Text>
+              <Text style={styles.statValue}>{distance.toFixed(2)}</Text>
+              <Text style={styles.statUnit}>km</Text>
+            </LinearGradient>
+            <LinearGradient colors={colors.gradient.teal} style={styles.statCardLarge}>
+              <Timer size={18} color={colors.white} style={styles.statIcon} />
+              <Text style={styles.statLabel}>Time</Text>
+              <Text style={styles.statValue}>{formatTime(duration)}</Text>
+            </LinearGradient>
+            <LinearGradient colors={colors.gradient.blue} style={styles.statCardSmall}>
+              <Gauge size={18} color={colors.white} style={styles.statIcon} />
+              <Text style={styles.statLabel}>Pace</Text>
+              <Text style={styles.statValue}>{pace.toFixed(1)}</Text>
+              <Text style={styles.statUnit}>km/h</Text>
+            </LinearGradient>
+          </View>
+        )}
 
         <View style={styles.controlsContainer}>
           {runState === "idle" && (
             <View style={styles.typeSelectionContainer}>
               <Text style={styles.typeSelectionTitle}>Choose Your Activity</Text>
+
               <TouchableOpacity
                 style={styles.typeButton}
                 onPress={() => startTracking("Walk")}
@@ -526,6 +601,69 @@ export default function ExerciseScreen() {
       </ScrollView>
 
       <Modal
+        visible={showGoalModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowGoalModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <LinearGradient colors={colors.gradient.orange} style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Set Your Goals</Text>
+              <TouchableOpacity onPress={() => setShowGoalModal(false)}>
+                <X size={24} color={colors.white} />
+              </TouchableOpacity>
+            </LinearGradient>
+
+            <ScrollView style={styles.modalBody}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Distance Goal (km)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={goalDistanceInput}
+                  onChangeText={setGoalDistanceInput}
+                  keyboardType="decimal-pad"
+                  placeholder="e.g., 5"
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Time Goal (minutes)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={goalTimeInput}
+                  onChangeText={setGoalTimeInput}
+                  keyboardType="decimal-pad"
+                  placeholder="e.g., 30"
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Pace Goal (km/h)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={goalPaceInput}
+                  onChangeText={setGoalPaceInput}
+                  keyboardType="decimal-pad"
+                  placeholder="e.g., 8"
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+              <Text style={styles.infoText}>Leave blank to skip a goal. Set 1-3 goals.</Text>
+            </ScrollView>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity style={styles.submitButton} onPress={saveGoals} activeOpacity={0.8}>
+                <LinearGradient colors={colors.gradient.orange} style={styles.submitButtonGradient}>
+                  <Text style={styles.submitButtonText}>Save Goals</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={showTreadmillModal}
         animationType="slide"
         transparent={true}
@@ -613,18 +751,120 @@ const styles = StyleSheet.create({
   map: {
     flex: 1,
   },
+  sectionContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 6,
+  },
+  sectionHeader: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+    marginBottom: 10,
+  },
+  sectionTitleRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "800" as const,
+    color: colors.text,
+  },
+  setGoalChip: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  setGoalChipText: {
+    color: colors.white,
+    fontSize: 13,
+    fontWeight: "700" as const,
+  },
+  emptyGoalCard: {
+    backgroundColor: colors.white,
+    borderRadius: 20,
+    padding: 24,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    borderWidth: 2,
+    borderColor: colors.border,
+    borderStyle: "dashed" as const,
+    gap: 6,
+  },
+  emptyGoalText: {
+    fontSize: 15,
+    fontWeight: "700" as const,
+    color: colors.textSecondary,
+  },
+  emptyGoalSubtext: {
+    fontSize: 13,
+    color: colors.textLight,
+  },
+  goalsRow: {
+    flexDirection: "row" as const,
+    gap: 10,
+  },
+  goalCard: {
+    flex: 1,
+    borderRadius: 16,
+    padding: 12,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
+    gap: 4,
+  },
+  goalCardSingle: {
+    maxWidth: "50%" as const,
+  },
+  goalLabel: {
+    fontSize: 11,
+    color: colors.white,
+    opacity: 0.9,
+    fontWeight: "600" as const,
+  },
+  goalCurrent: {
+    fontSize: 20,
+    fontWeight: "800" as const,
+    color: colors.white,
+  },
+  goalProgressBg: {
+    width: "100%",
+    height: 4,
+    backgroundColor: "rgba(255,255,255,0.3)",
+    borderRadius: 2,
+    overflow: "hidden" as const,
+  },
+  goalProgressFill: {
+    height: "100%",
+    backgroundColor: colors.white,
+    borderRadius: 2,
+  },
+  goalTarget: {
+    fontSize: 10,
+    color: colors.white,
+    opacity: 0.8,
+    fontWeight: "600" as const,
+  },
   statsContainer: {
     flexDirection: "row",
-    padding: 16,
-    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 10,
   },
   statCardSmall: {
     flex: 0.9,
     borderRadius: 16,
-    padding: 12,
+    padding: 10,
     alignItems: "center",
     justifyContent: "center",
-    minHeight: 100,
+    minHeight: 80,
     shadowColor: colors.black,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
@@ -634,10 +874,10 @@ const styles = StyleSheet.create({
   statCardLarge: {
     flex: 1.2,
     borderRadius: 16,
-    padding: 12,
+    padding: 10,
     alignItems: "center",
     justifyContent: "center",
-    minHeight: 100,
+    minHeight: 80,
     shadowColor: colors.black,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
@@ -666,19 +906,20 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   controlsContainer: {
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    paddingTop: 6,
     flex: 1,
     justifyContent: "center",
   },
   typeSelectionContainer: {
-    gap: 16,
+    gap: 12,
   },
   typeSelectionTitle: {
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: "800" as const,
     color: colors.text,
-    textAlign: "center" as const,
-    marginBottom: 8,
+    marginBottom: 4,
   },
   typeButton: {
     borderRadius: 20,
@@ -690,7 +931,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   typeButtonGradient: {
-    padding: 24,
+    padding: 18,
   },
   typeButtonContent: {
     flexDirection: "row" as const,
@@ -701,10 +942,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   typeButtonText: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: "700" as const,
     color: colors.white,
-    marginBottom: 4,
+    marginBottom: 2,
   },
   typeButtonSubtext: {
     fontSize: 14,
