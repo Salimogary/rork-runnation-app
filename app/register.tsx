@@ -21,7 +21,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { Picker } from '@react-native-picker/picker';
-import { COUNTRIES } from '@/constants/countries';
 import { supabase } from '@/lib/supabase';
 
 type ScreenMode = 'login' | 'create' | 'forgot' | 'fullRegistration';
@@ -90,6 +89,8 @@ export default function RegisterScreen() {
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [clubs, setClubs] = useState<string[]>([]);
   const [clubsLoading, setClubsLoading] = useState(true);
+  const [countries, setCountries] = useState<{ name: string; iso_alpha2: string }[]>([]);
+  const [countriesLoading, setCountriesLoading] = useState(true);
   
   const pinRef1 = useRef<TextInput>(null);
   const pinRef2 = useRef<TextInput>(null);
@@ -103,7 +104,28 @@ export default function RegisterScreen() {
   React.useEffect(() => {
     checkBiometricAvailability();
     fetchClubs();
+    fetchCountries();
   }, []);
+
+  const fetchCountries = async () => {
+    try {
+      setCountriesLoading(true);
+      const { data, error } = await supabase
+        .from('countries')
+        .select('name, iso_alpha2')
+        .order('name', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching countries:', error);
+      } else if (data) {
+        setCountries(data as { name: string; iso_alpha2: string }[]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch countries:', err);
+    } finally {
+      setCountriesLoading(false);
+    }
+  };
 
   const fetchClubs = async () => {
     try {
@@ -519,11 +541,11 @@ export default function RegisterScreen() {
                         selectedValue={registrationData.country}
                         onValueChange={(value: string) => updateRegistrationField('country', value)}
                         style={styles.picker}
-                        enabled={!isLoading}
+                        enabled={!isLoading && !countriesLoading}
                       >
-                        <Picker.Item label="Select country" value="" />
-                        {COUNTRIES.map((country) => (
-                          <Picker.Item key={country} label={country} value={country} />
+                        <Picker.Item label={countriesLoading ? "Loading countries..." : "Select country"} value="" />
+                        {countries.map((c) => (
+                          <Picker.Item key={c.iso_alpha2} label={c.name} value={c.iso_alpha2} />
                         ))}
                       </Picker>
                     </View>
