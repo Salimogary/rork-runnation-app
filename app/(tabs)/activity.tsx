@@ -221,13 +221,13 @@ export default function ActivityScreen() {
           .eq("RegistrationID", user.id)
           .maybeSingle();
         if (error) {
-          console.error("[UserClub] Fetch error:", error);
+          console.error("[UserClub] Fetch error:", JSON.stringify(error), error?.message, error?.code);
           return null;
         }
         console.log("[UserClub] User club:", data?.club_name);
         return data;
       } catch (error: any) {
-        console.error("[UserClub] Query failed:", error);
+        console.error("[UserClub] Query failed:", JSON.stringify(error), error?.message);
         return null;
       }
     },
@@ -245,14 +245,14 @@ export default function ActivityScreen() {
           .select("RegistrationID")
           .eq("club_name", userClub.club_name);
         if (error) {
-          console.error("[ClubMembers] Fetch error:", error);
+          console.error("[ClubMembers] Fetch error:", JSON.stringify(error), error?.message, error?.code);
           return [];
         }
         const ids = (data || []).map((m: any) => m.RegistrationID).filter(Boolean);
         console.log("[ClubMembers] Found", ids.length, "members in club", userClub.club_name);
         return ids;
       } catch (error: any) {
-        console.error("[ClubMembers] Query failed:", error);
+        console.error("[ClubMembers] Query failed:", JSON.stringify(error), error?.message);
         return [];
       }
     },
