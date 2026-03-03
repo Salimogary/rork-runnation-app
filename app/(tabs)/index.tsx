@@ -1,4 +1,6 @@
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Platform, Modal, TextInput, Alert, Image, AppState, AppStateStatus } from "react-native";
+import 'react-native-get-random-values';
+import { v4 as uuidv4 } from 'uuid';
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge } from "lucide-react-native";
 import * as Location from "expo-location";
@@ -209,20 +211,7 @@ export default function ExerciseScreen() {
       const endTime = new Date();
       const calculatedPace = duration > 0 ? (distance / (duration / 3600)) : 0;
 
-      const { data: lastActivity } = await supabase
-        .from("Activity Sample")
-        .select("ActivityID")
-        .order("ActivityID", { ascending: false })
-        .limit(1)
-        .single();
-
-      let nextActivityId = "1";
-      if (lastActivity?.ActivityID) {
-        const lastId = parseInt(lastActivity.ActivityID);
-        if (!isNaN(lastId)) {
-          nextActivityId = (lastId + 1).toString();
-        }
-      }
+      const nextActivityId = uuidv4();
 
       console.log("Saving activity with ID:", nextActivityId);
 
