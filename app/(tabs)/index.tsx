@@ -99,13 +99,12 @@ export default function ExerciseScreen() {
       const resolvedGoals: UserGoal[] = [];
 
       if (goalIds.length > 0) {
-        const numericIds = goalIds.map((id: string) => parseInt(id, 10)).filter((n: number) => !isNaN(n));
-        console.log('[Goals] Numeric IDs for lookup:', numericIds);
-        if (numericIds.length > 0) {
+        console.log('[Goals] IDs for lookup:', goalIds);
+        if (goalIds.length > 0) {
           const { data: goalsData, error: goalsError } = await supabase
             .from('goals')
-            .select('goal_id, Goal')
-            .in('goal_id', numericIds);
+            .select('goal_id, "Goal"')
+            .in('goal_id', goalIds);
 
           console.log('[Goals] Goals table response:', JSON.stringify(goalsData), 'Error:', JSON.stringify(goalsError));
 
