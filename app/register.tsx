@@ -511,8 +511,8 @@ export default function RegisterScreen() {
                         enabled={!isLoading}
                       >
                         <Picker.Item label="Select sex" value="" />
-                        <Picker.Item label="Male" value="Male" />
-                        <Picker.Item label="Female" value="Female" />
+                        <Picker.Item label="Male" value="M" />
+                        <Picker.Item label="Female" value="F" />
                       </Picker>
                     </View>
                   </View>
