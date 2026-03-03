@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, X, Calendar, MapPin, TrendingUp, Clock, Award, ChevronRight } from "lucide-react-native";
+import { Plus, X, Calendar, MapPin, TrendingUp, Clock, Award, ChevronRight, Users } from "lucide-react-native";
 import colors from "@/constants/colors";
 
 
@@ -46,12 +46,14 @@ interface CommunityData {
 }
 
 type CommunitySortOption = "distance" | "time";
+type ActiveTab = "runs" | "club" | "community";
 
 export default function ActivityScreen() {
   const { user, privateMode } = useAuth();
 
   const [communitySortBy, setCommunitySortBy] = useState<CommunitySortOption>("distance");
-  const [showCommunity, setShowCommunity] = useState(false);
+  const [clubSortBy, setClubSortBy] = useState<CommunitySortOption>("distance");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("runs");
   const [showExternalForm, setShowExternalForm] = useState(false);
   const [formData, setFormData] = useState({
     activityDate: "",
@@ -172,7 +174,7 @@ export default function ActivityScreen() {
         return [];
       }
     },
-    enabled: !showCommunity && !!user?.id,
+    enabled: activeTab === "runs" && !!user?.id,
     staleTime: 30000,
     retry: 1,
   });
@@ -203,7 +205,145 @@ export default function ActivityScreen() {
         throw error;
       }
     },
-    enabled: !showCommunity,
+    enabled: activeTab === "runs",
+    staleTime: 30000,
+    retry: 1,
+  });
+
+  const { data: userClub } = useQuery<{ club_name: string } | null>({
+    queryKey: ["user-club", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      try {
+        const { data, error } = await supabase
+          .from("club_members")
+          .select("club_name")
+          .eq("RegistrationID", user.id)
+          .maybeSingle();
+        if (error) {
+          console.error("[UserClub] Fetch error:", error);
+          return null;
+        }
+        console.log("[UserClub] User club:", data?.club_name);
+        return data;
+      } catch (error: any) {
+        console.error("[UserClub] Query failed:", error);
+        return null;
+      }
+    },
+    enabled: !!user?.id,
+    staleTime: 60000,
+  });
+
+  const { data: clubMemberIds } = useQuery<string[]>({
+    queryKey: ["club-member-ids", userClub?.club_name],
+    queryFn: async () => {
+      if (!userClub?.club_name) return [];
+      try {
+        const { data, error } = await supabase
+          .from("club_members")
+          .select("RegistrationID")
+          .eq("club_name", userClub.club_name);
+        if (error) {
+          console.error("[ClubMembers] Fetch error:", error);
+          return [];
+        }
+        const ids = (data || []).map((m: any) => m.RegistrationID).filter(Boolean);
+        console.log("[ClubMembers] Found", ids.length, "members in club", userClub.club_name);
+        return ids;
+      } catch (error: any) {
+        console.error("[ClubMembers] Query failed:", error);
+        return [];
+      }
+    },
+    enabled: !!userClub?.club_name,
+    staleTime: 60000,
+  });
+
+  const { data: clubCommunityData, isLoading: clubLoading, refetch: refetchClub, error: clubError } = useQuery<CommunityData[]>({
+    queryKey: ["club-community", clubMemberIds],
+    queryFn: async () => {
+      if (!clubMemberIds || clubMemberIds.length === 0) return [];
+      try {
+        const { data: activities, error: activityError } = await supabase
+          .from("activities")
+          .select("RegistrationID, Activity_Date, Distance_km, Start_Time, End_Time, Pace_km_h")
+          .in("RegistrationID", clubMemberIds);
+
+        if (activityError) {
+          console.error("[ClubCommunity] Activity fetch error:", activityError);
+          throw activityError;
+        }
+
+        const { data: registrations, error: regError } = await supabase
+          .from("registrations")
+          .select('RegistrationID, "First Name", "Other Names", Country, Residence, Sex')
+          .in("RegistrationID", clubMemberIds);
+
+        if (regError) {
+          console.error("[ClubCommunity] Registration fetch error:", regError);
+          throw regError;
+        }
+
+        const regMap = new Map(registrations?.map(r => [r.RegistrationID, r]));
+        const userStats = new Map<string, {
+          totalDistance: number;
+          totalTime: number;
+          paceSum: number;
+          activityCount: number;
+          activeDays: Set<string>;
+        }>();
+
+        activities?.forEach(activity => {
+          const regId = activity.RegistrationID;
+          if (!regId) return;
+          const startParts = activity.Start_Time.split(':');
+          const endParts = activity.End_Time.split(':');
+          const startMinutes = parseInt(startParts[0]) * 60 + parseInt(startParts[1]);
+          const endMinutes = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
+          let duration = endMinutes - startMinutes;
+          if (duration < 0) duration += 24 * 60;
+
+          const existing = userStats.get(regId) || {
+            totalDistance: 0, totalTime: 0, paceSum: 0, activityCount: 0, activeDays: new Set<string>(),
+          };
+          existing.totalDistance += activity.Distance_km || 0;
+          existing.totalTime += duration;
+          existing.paceSum += activity.Pace_km_h || 0;
+          existing.activityCount += 1;
+          existing.activeDays.add(activity.Activity_Date);
+          userStats.set(regId, existing);
+        });
+
+        const result: CommunityData[] = [];
+        userStats.forEach((stats, regId) => {
+          const registration = regMap.get(regId);
+          if (!registration) return;
+          const firstName = registration["First Name"] || "";
+          const otherNames = registration["Other Names"] || "";
+          const fullName = [firstName, otherNames].filter(n => n).join(" ") || "Unknown";
+          const activeDays = stats.activeDays.size;
+          result.push({
+            RegistrationID: regId,
+            Name: fullName,
+            Country: registration.Country || "-",
+            Residence: registration.Residence || "-",
+            Sex: registration.Sex || "-",
+            AvgDistance: activeDays > 0 ? stats.totalDistance / activeDays : 0,
+            AvgTime: activeDays > 0 ? stats.totalTime / activeDays : 0,
+            AveragePace: stats.activityCount > 0 ? stats.paceSum / stats.activityCount : 0,
+            ActiveDays: activeDays,
+          });
+        });
+
+        console.log("[ClubCommunity] Processed", result.length, "club members");
+        return result;
+      } catch (error: any) {
+        console.error("[ClubCommunity] Query failed:", error);
+        throw error;
+      }
+    },
+    enabled: activeTab === "club" && !!clubMemberIds && clubMemberIds.length > 0,
     staleTime: 30000,
     retry: 1,
   });
@@ -311,7 +451,7 @@ export default function ActivityScreen() {
         throw error;
       }
     },
-    enabled: showCommunity,
+    enabled: activeTab === "community",
     staleTime: 30000,
     retry: 1,
   });
@@ -412,6 +552,21 @@ export default function ActivityScreen() {
     });
   }, [communityData, privateMode, user?.id]);
 
+  const sortedClubData = useMemo(() => {
+    if (!clubCommunityData) return [];
+    let filtered = clubCommunityData;
+    if (privateMode && user?.id) {
+      filtered = filtered.filter(item => item.RegistrationID !== user.id);
+    }
+    return [...filtered].sort((a, b) => {
+      const distDiff = b.AvgDistance - a.AvgDistance;
+      if (distDiff !== 0) return distDiff;
+      const daysDiff = b.ActiveDays - a.ActiveDays;
+      if (daysDiff !== 0) return daysDiff;
+      return a.AveragePace - b.AveragePace;
+    });
+  }, [clubCommunityData, privateMode, user?.id]);
+
   const formatTime = (minutes: number): string => {
     const hours = Math.floor(minutes / 60);
     const mins = Math.round(minutes % 60);
@@ -504,26 +659,35 @@ export default function ActivityScreen() {
       <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.header}>
         <View style={styles.toggleContainer}>
           <TouchableOpacity
-            style={[styles.toggleButton, !showCommunity && styles.toggleButtonActive]}
-            onPress={() => setShowCommunity(false)}
+            style={[styles.toggleButton, activeTab === "runs" && styles.toggleButtonActive]}
+            onPress={() => setActiveTab("runs")}
             activeOpacity={0.7}
           >
-            <Text style={[styles.toggleText, !showCommunity && styles.toggleTextActive]}>
+            <Text style={[styles.toggleText, activeTab === "runs" && styles.toggleTextActive]}>
               My Runs
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.toggleButton, showCommunity && styles.toggleButtonActive]}
-            onPress={() => setShowCommunity(true)}
+            style={[styles.toggleButton, activeTab === "club" && styles.toggleButtonActive]}
+            onPress={() => setActiveTab("club")}
             activeOpacity={0.7}
           >
-            <Text style={[styles.toggleText, showCommunity && styles.toggleTextActive]}>
+            <Text style={[styles.toggleText, activeTab === "club" && styles.toggleTextActive]}>
+              My Club
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toggleButton, activeTab === "community" && styles.toggleButtonActive]}
+            onPress={() => setActiveTab("community")}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.toggleText, activeTab === "community" && styles.toggleTextActive]}>
               Community
             </Text>
           </TouchableOpacity>
         </View>
 
-        {!showCommunity && (
+        {activeTab === "runs" && (
           <TouchableOpacity
             style={styles.addButton}
             onPress={() => setShowExternalForm(true)}
@@ -535,26 +699,33 @@ export default function ActivityScreen() {
           </TouchableOpacity>
         )}
 
-        {showCommunity && (
+        {activeTab === "club" && userClub?.club_name && (
+          <View style={styles.clubHeaderInfo}>
+            <Users size={16} color={colors.white} />
+            <Text style={styles.clubHeaderName}>{userClub.club_name}</Text>
+          </View>
+        )}
+
+        {(activeTab === "community" || activeTab === "club") && (
           <View style={styles.sortContainer}>
             <Text style={styles.sortLabel}>Sort:</Text>
             <TouchableOpacity
-              style={[styles.sortChip, communitySortBy === "distance" && styles.sortChipActive]}
-              onPress={() => setCommunitySortBy("distance")}
+              style={[styles.sortChip, (activeTab === "community" ? communitySortBy : clubSortBy) === "distance" && styles.sortChipActive]}
+              onPress={() => activeTab === "community" ? setCommunitySortBy("distance") : setClubSortBy("distance")}
               activeOpacity={0.7}
             >
-              <TrendingUp size={14} color={communitySortBy === "distance" ? colors.primary : colors.white} />
-              <Text style={[styles.sortChipText, communitySortBy === "distance" && styles.sortChipTextActive]}>
+              <TrendingUp size={14} color={(activeTab === "community" ? communitySortBy : clubSortBy) === "distance" ? colors.primary : colors.white} />
+              <Text style={[styles.sortChipText, (activeTab === "community" ? communitySortBy : clubSortBy) === "distance" && styles.sortChipTextActive]}>
                 Distance
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.sortChip, communitySortBy === "time" && styles.sortChipActive]}
-              onPress={() => setCommunitySortBy("time")}
+              style={[styles.sortChip, (activeTab === "community" ? communitySortBy : clubSortBy) === "time" && styles.sortChipActive]}
+              onPress={() => activeTab === "community" ? setCommunitySortBy("time") : setClubSortBy("time")}
               activeOpacity={0.7}
             >
-              <Clock size={14} color={communitySortBy === "time" ? colors.primary : colors.white} />
-              <Text style={[styles.sortChipText, communitySortBy === "time" && styles.sortChipTextActive]}>
+              <Clock size={14} color={(activeTab === "community" ? communitySortBy : clubSortBy) === "time" ? colors.primary : colors.white} />
+              <Text style={[styles.sortChipText, (activeTab === "community" ? communitySortBy : clubSortBy) === "time" && styles.sortChipTextActive]}>
                 Time
               </Text>
             </TouchableOpacity>
@@ -566,14 +737,14 @@ export default function ActivityScreen() {
         style={styles.scrollView}
         refreshControl={
           <RefreshControl 
-            refreshing={showCommunity ? communityLoading : isLoading} 
-            onRefresh={() => showCommunity ? refetchCommunity() : refetch()}
+            refreshing={activeTab === "community" ? communityLoading : activeTab === "club" ? clubLoading : isLoading} 
+            onRefresh={() => activeTab === "community" ? refetchCommunity() : activeTab === "club" ? refetchClub() : refetch()}
             tintColor={colors.primary}
             colors={[colors.primary]}
           />
         }
       >
-        {!showCommunity && sortedActivities.length > 0 && (
+        {activeTab === "runs" && sortedActivities.length > 0 && (
           <View style={styles.statsSection}>
             <LinearGradient colors={colors.gradient.orange} style={styles.statCard}>
               <Text style={styles.statValue}>{uniqueDaysCount}</Text>
@@ -592,7 +763,7 @@ export default function ActivityScreen() {
           </View>
         )}
 
-        {!showCommunity && (
+        {activeTab === "runs" && (
           <View style={styles.eventsSection}>
             <Text style={styles.eventsSectionTitle}>Registered Events</Text>
             {registeredEvents && registeredEvents.length > 0 ? (
@@ -636,7 +807,81 @@ export default function ActivityScreen() {
           </View>
         )}
 
-        {showCommunity ? (
+        {activeTab === "club" ? (
+          !userClub?.club_name ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyEmoji}>🏅</Text>
+              <Text style={styles.emptyText}>No Club Membership</Text>
+              <Text style={styles.emptySubtext}>You are not a member of any running club yet</Text>
+            </View>
+          ) : clubError ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyEmoji}>⚠️</Text>
+              <Text style={styles.emptyText}>Connection Error</Text>
+              <Text style={styles.emptySubtext}>Check your internet connection</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={() => refetchClub()}>
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : clubLoading && sortedClubData.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Loading club members...</Text>
+            </View>
+          ) : sortedClubData.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyEmoji}>🏃‍♂️</Text>
+              <Text style={styles.emptyText}>No active club members</Text>
+              <Text style={styles.emptySubtext}>Club members will appear once they log activities</Text>
+            </View>
+          ) : (
+            <View style={styles.leaderboardContainer}>
+              {sortedClubData.map((item, index) => (
+                <View key={item.RegistrationID} style={styles.leaderboardCard}>
+                  <View style={styles.leaderboardHeader}>
+                    <View style={styles.nameBadge}>
+                      <Text style={styles.runnerName} numberOfLines={1}>{item.Name}</Text>
+                    </View>
+                    <View style={styles.locationBadge}>
+                      <MapPin size={10} color={colors.textSecondary} />
+                      <Text style={styles.locationText} numberOfLines={1}>
+                        {item.Country !== "-" && item.Residence !== "-" 
+                          ? `${item.Country}, ${item.Residence}`
+                          : item.Country !== "-" 
+                          ? item.Country
+                          : item.Residence}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.leaderboardStats}>
+                    <View style={styles.leaderStatItem}>
+                      <Text style={styles.leaderStatValue}>{index + 1}</Text>
+                    </View>
+                    <View style={styles.leaderStatDivider} />
+                    <View style={styles.leaderStatItem}>
+                      <Text style={styles.leaderStatValue}>{item.ActiveDays}</Text>
+                      <Text style={styles.leaderStatLabel}>Days</Text>
+                    </View>
+                    <View style={styles.leaderStatDivider} />
+                    <View style={styles.leaderStatItem}>
+                      <Text style={styles.leaderStatValue}>{item.AvgDistance.toFixed(1)}</Text>
+                      <Text style={styles.leaderStatLabel}>Av.km</Text>
+                    </View>
+                    <View style={styles.leaderStatDivider} />
+                    <View style={styles.leaderStatItem}>
+                      <Text style={styles.leaderStatValue}>{formatTime(item.AvgTime)}</Text>
+                      <Text style={styles.leaderStatLabel}>Av.Time</Text>
+                    </View>
+                    <View style={styles.leaderStatDivider} />
+                    <View style={styles.leaderStatItem}>
+                      <Text style={styles.leaderStatValue}>{convertPaceToMinPerKm(item.AveragePace)}</Text>
+                      <Text style={styles.leaderStatLabel}>Av.Pace</Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )
+        ) : activeTab === "community" ? (
           communityError ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyEmoji}>⚠️</Text>
@@ -707,7 +952,7 @@ export default function ActivityScreen() {
               ))}
             </View>
           )
-        ) : (
+        ) : activeTab === "runs" ? (
           activitiesError ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyEmoji}>⚠️</Text>
@@ -762,7 +1007,7 @@ export default function ActivityScreen() {
 
             </View>
           )
-        )}
+        ) : null}
       </ScrollView>
 
       <Modal
@@ -1392,6 +1637,21 @@ const styles = StyleSheet.create({
   },
   modalSubmitText: {
     fontSize: 16,
+    fontWeight: "700" as const,
+    color: colors.white,
+  },
+  clubHeaderInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    alignSelf: "flex-start",
+  },
+  clubHeaderName: {
+    fontSize: 14,
     fontWeight: "700" as const,
     color: colors.white,
   },
