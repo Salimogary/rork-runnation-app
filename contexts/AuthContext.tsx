@@ -299,33 +299,28 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
               }
             }
 
-            if (goalsArray.includes('Other') && registrationData.otherGoal) {
-              const { data: customGoal, error: customGoalError } = await supabase
-                .from('goals')
-                .insert({ Goal: registrationData.otherGoal, is_custom: true })
-                .select('goal_id')
-                .single();
+            const hasOtherGoal = goalsArray.includes('Other') && registrationData.otherGoal;
 
-              if (customGoalError) {
-                console.error('Error inserting custom goal:', customGoalError);
-              } else if (customGoal) {
-                resolvedGoalIds.push(String(customGoal.goal_id));
+            if (resolvedGoalIds.length > 0 || hasOtherGoal) {
+              const insertData: Record<string, unknown> = {
+                goals_per_user_id: registrationId,
+                RegistrationID: registrationId,
+                goal_ids: resolvedGoalIds,
+              };
+
+              if (hasOtherGoal) {
+                insertData.other_goals = registrationData.otherGoal;
+                console.log('[AuthContext] Saving other_goals:', registrationData.otherGoal);
               }
-            }
 
-            if (resolvedGoalIds.length > 0) {
               const { error: goalsPerUserError } = await supabase
                 .from('goals_per_user')
-                .insert({
-                  goals_per_user_id: registrationId,
-                  RegistrationID: registrationId,
-                  goal_ids: resolvedGoalIds,
-                });
+                .insert(insertData);
 
               if (goalsPerUserError) {
                 console.error('Error saving goals_per_user:', goalsPerUserError);
               } else {
-                console.log('[AuthContext] Goals saved successfully:', resolvedGoalIds);
+                console.log('[AuthContext] Goals saved successfully:', resolvedGoalIds, hasOtherGoal ? `other_goals: ${registrationData.otherGoal}` : '');
               }
             }
           } catch (goalsError) {
