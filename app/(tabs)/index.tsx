@@ -66,25 +66,48 @@ export default function ExerciseScreen() {
         .from('goals_per_user')
         .select('goal_ids, other_goals')
         .eq('RegistrationID', user.id)
-        .single();
+        .maybeSingle();
 
-      if (gpuError || !goalsPerUser) {
-        console.log('[Goals] No goals found for user:', gpuError?.message);
+      console.log('[Goals] Raw response:', JSON.stringify(goalsPerUser), 'Error:', JSON.stringify(gpuError));
+
+      if (gpuError) {
+        console.log('[Goals] Query error:', gpuError.message, gpuError.code);
         setUserGoals([]);
         setGoalsLoading(false);
         return;
       }
 
-      const goalIds = goalsPerUser.goal_ids || [];
+      if (!goalsPerUser) {
+        console.log('[Goals] No goals_per_user row found for RegistrationID:', user.id);
+        setUserGoals([]);
+        setGoalsLoading(false);
+        return;
+      }
+
+      let rawGoalIds = goalsPerUser.goal_ids;
+      console.log('[Goals] Raw goal_ids:', rawGoalIds, 'type:', typeof rawGoalIds);
+
+      let goalIds: string[] = [];
+      if (Array.isArray(rawGoalIds)) {
+        goalIds = rawGoalIds;
+      } else if (typeof rawGoalIds === 'string') {
+        const cleaned = (rawGoalIds as string).replace(/[{}]/g, '');
+        goalIds = cleaned ? cleaned.split(',').map((s: string) => s.trim()) : [];
+      }
+
+      console.log('[Goals] Parsed goalIds:', goalIds);
       const resolvedGoals: UserGoal[] = [];
 
       if (goalIds.length > 0) {
         const numericIds = goalIds.map((id: string) => parseInt(id, 10)).filter((n: number) => !isNaN(n));
+        console.log('[Goals] Numeric IDs for lookup:', numericIds);
         if (numericIds.length > 0) {
           const { data: goalsData, error: goalsError } = await supabase
             .from('goals')
             .select('goal_id, Goal')
             .in('goal_id', numericIds);
+
+          console.log('[Goals] Goals table response:', JSON.stringify(goalsData), 'Error:', JSON.stringify(goalsError));
 
           if (goalsError) {
             console.error('[Goals] Error fetching goal names:', goalsError);
