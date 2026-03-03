@@ -60,7 +60,26 @@ export default function ExerciseScreen() {
     if (!user) return;
     try {
       setGoalsLoading(true);
-      console.log('[Goals] Fetching goals for user:', user.id);
+      console.log('[Goals] Fetching goals for user via JOIN query:', user.id);
+
+      const { data: joinData, error: joinError } = await supabase
+        .rpc('get_user_goals', { p_registration_id: user.id });
+
+      console.log('[Goals] RPC response:', JSON.stringify(joinData), 'Error:', JSON.stringify(joinError));
+
+      if (!joinError && joinData && Array.isArray(joinData) && joinData.length > 0) {
+        const resolvedGoals: UserGoal[] = joinData.map((row: Record<string, unknown>) => ({
+          goal_id: String(row.goal_id ?? row.goal_name ?? ''),
+          name: (row.goal_name as string) || 'Goal',
+        }));
+        console.log('[Goals] Resolved goals from RPC:', resolvedGoals);
+        setUserGoals(resolvedGoals.slice(0, 3));
+        return;
+      }
+
+      if (joinError) {
+        console.log('[Goals] RPC not available, falling back to manual join:', joinError.message);
+      }
 
       const { data: goalsPerUser, error: gpuError } = await supabase
         .from('goals_per_user')
@@ -68,19 +87,11 @@ export default function ExerciseScreen() {
         .eq('RegistrationID', user.id)
         .maybeSingle();
 
-      console.log('[Goals] Raw response:', JSON.stringify(goalsPerUser), 'Error:', JSON.stringify(gpuError));
+      console.log('[Goals] goals_per_user response:', JSON.stringify(goalsPerUser), 'Error:', JSON.stringify(gpuError));
 
-      if (gpuError) {
-        console.log('[Goals] Query error:', gpuError.message, gpuError.code);
+      if (gpuError || !goalsPerUser) {
+        console.log('[Goals] No goals_per_user row or error:', gpuError?.message);
         setUserGoals([]);
-        setGoalsLoading(false);
-        return;
-      }
-
-      if (!goalsPerUser) {
-        console.log('[Goals] No goals_per_user row found for RegistrationID:', user.id);
-        setUserGoals([]);
-        setGoalsLoading(false);
         return;
       }
 
@@ -89,9 +100,9 @@ export default function ExerciseScreen() {
 
       let goalIds: string[] = [];
       if (Array.isArray(rawGoalIds)) {
-        goalIds = rawGoalIds;
+        goalIds = rawGoalIds.map((id: unknown) => String(id).trim());
       } else if (typeof rawGoalIds === 'string') {
-        const cleaned = (rawGoalIds as string).replace(/[{}]/g, '');
+        const cleaned = (rawGoalIds as string).replace(/[{}"\'\[\]]/g, '');
         goalIds = cleaned ? cleaned.split(',').map((s: string) => s.trim()) : [];
       }
 
@@ -99,24 +110,25 @@ export default function ExerciseScreen() {
       const resolvedGoals: UserGoal[] = [];
 
       if (goalIds.length > 0) {
-        const cleanIds = goalIds.map(id => id.trim()).filter(id => id.length > 0);
-        const numericIds = cleanIds.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
-        console.log('[Goals] Clean IDs for lookup:', cleanIds, 'Numeric IDs:', numericIds);
+        const numericIds = goalIds.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+        console.log('[Goals] Numeric IDs for lookup:', numericIds);
+
         if (numericIds.length > 0) {
-          const { data: goalsData, error: goalsError } = await supabase
-            .from('goals')
-            .select('goal_id, Goal')
-            .in('goal_id', numericIds);
+          for (const numId of numericIds) {
+            const { data: goalRow, error: goalErr } = await supabase
+              .from('goals')
+              .select('goal_id, Goal')
+              .eq('goal_id', numId)
+              .maybeSingle();
 
-          console.log('[Goals] Goals table response:', JSON.stringify(goalsData), 'Error:', JSON.stringify(goalsError));
+            console.log('[Goals] Lookup goal_id', numId, ':', JSON.stringify(goalRow), 'Error:', JSON.stringify(goalErr));
 
-          if (goalsError) {
-            console.error('[Goals] Error fetching goal names:', goalsError);
-          } else if (goalsData) {
-            for (const g of goalsData) {
-              const goalRecord = g as Record<string, unknown>;
-              const goalName = (goalRecord['Goal'] as string) || 'Goal';
-              resolvedGoals.push({ goal_id: String(goalRecord['goal_id']), name: goalName });
+            if (goalRow && !goalErr) {
+              const goalRecord = goalRow as Record<string, unknown>;
+              resolvedGoals.push({
+                goal_id: String(goalRecord['goal_id']),
+                name: (goalRecord['Goal'] as string) || 'Goal',
+              });
             }
           }
         }
@@ -126,7 +138,7 @@ export default function ExerciseScreen() {
         resolvedGoals.push({ goal_id: 'other', name: goalsPerUser.other_goals });
       }
 
-      console.log('[Goals] Resolved goals:', resolvedGoals);
+      console.log('[Goals] Final resolved goals:', resolvedGoals);
       setUserGoals(resolvedGoals.slice(0, 3));
     } catch (err) {
       console.error('[Goals] Fetch error:', err);
