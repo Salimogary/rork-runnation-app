@@ -11,7 +11,7 @@ export default publicProcedure
     console.log('[getEnrollments] Fetching enrollments for event:', input.eventId);
 
     let query = ctx.supabase
-      .from("Event Enrollments")
+      .from("event_enrollments")
       .select(`
         EnrollmentID,
         EventID,

@@ -83,7 +83,7 @@ export default function ChatScreen() {
 
       const userIds = [...new Set((data || []).map(p => p.user_id))];
       const { data: userData } = await supabase
-        .from("Registration Sample")
+        .from("registrations")
         .select("RegistrationID, \"First Name\", Username")
         .in("RegistrationID", userIds);
 
@@ -116,7 +116,7 @@ export default function ChatScreen() {
     queryFn: async () => {
       const today = new Date().toISOString().split('T')[0];
       const { data, error } = await supabase
-        .from("Activity Sample")
+        .from("activities")
         .select("Activity_Date, Exercise_Type, Distance_km, Start_Time, End_Time, Pace_km_h")
         .eq("RegistrationID", registrationId)
         .eq("Activity_Date", today)

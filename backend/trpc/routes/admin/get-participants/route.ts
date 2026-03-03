@@ -17,8 +17,8 @@ export default publicProcedure
         eventId,
         RegistrationID,
         Registration_Date,
-        Events!events_participants_eventId_fkey(eventName),
-        Registration Sample!events_participants_RegistrationID_fkey(First Name, Other Names, Sex, Residence)
+        events!events_participants_eventId_fkey(eventName),
+        registrations!events_participants_RegistrationID_fkey(First Name, Other Names, Sex, Residence)
       `);
 
     if (input.eventId) {
@@ -45,10 +45,10 @@ export default publicProcedure
       Days_Completed: 0,
       eventName: item.Events?.eventName || '',
       user: {
-        "First Name": item["Registration Sample"]?.["First Name"] || "",
-        "Other Names": item["Registration Sample"]?.["Other Names"] || "",
-        Sex: item["Registration Sample"]?.Sex || "",
-        Residence: item["Registration Sample"]?.Residence || "",
+        "First Name": item["registrations"]?.["First Name"] || "",
+        "Other Names": item["registrations"]?.["Other Names"] || "",
+        Sex: item["registrations"]?.Sex || "",
+        Residence: item["registrations"]?.Residence || "",
       },
     }));
 

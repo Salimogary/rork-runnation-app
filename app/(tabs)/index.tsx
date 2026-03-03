@@ -215,7 +215,7 @@ export default function ExerciseScreen() {
 
       console.log("Saving activity with ID:", nextActivityId);
 
-      const { error } = await supabase.from("Activity Sample").insert({
+      const { error } = await supabase.from("activities").insert({
         ActivityID: nextActivityId,
         RegistrationID: user.id,
         Activity_Date: startTime.toISOString().split('T')[0],
@@ -281,7 +281,7 @@ export default function ExerciseScreen() {
       return;
     }
 
-    const { error } = await supabase.from("Pending Activities").insert({
+    const { error } = await supabase.from("pending_activities").insert({
       RegistrationID: user.id,
       Exercise_Type: "Treadmill",
       Distance_Entered: distanceKm,

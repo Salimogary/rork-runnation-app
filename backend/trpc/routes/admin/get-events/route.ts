@@ -6,7 +6,7 @@ export default publicProcedure.query(async ({ ctx }) => {
   
   try {
     const { data, error } = await ctx.supabase
-      .from("Events")
+      .from("events")
       .select("*")
       .order("startsAt", { ascending: false });
 

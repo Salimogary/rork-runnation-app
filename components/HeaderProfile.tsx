@@ -32,7 +32,7 @@ export default function HeaderProfile() {
       if (!user) throw new Error("Not authenticated");
       
       const { data, error } = await supabase
-        .from("Registration Sample")
+        .from("registrations")
         .select('"First Name", "Other Names"')
         .eq("RegistrationID", user.id)
         .maybeSingle();

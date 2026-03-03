@@ -86,7 +86,7 @@ export default function SettingsScreen() {
     queryKey: ["pendingActivities"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("Pending Activities")
+        .from("pending_activities")
         .select("*")
         .eq("Status", "pending")
         .order("Created_At", { ascending: false });
@@ -118,7 +118,7 @@ export default function SettingsScreen() {
       const calculatedPace = totalMinutes > 0 ? (distanceKm / (totalMinutes / 60)) : 0;
 
       const { data, error } = await supabase
-        .from("Activity Sample")
+        .from("activities")
         .insert({
           RegistrationID: activity.RegistrationID,
           Activity_Date: new Date().toISOString().split('T')[0],
@@ -133,7 +133,7 @@ export default function SettingsScreen() {
       if (error) throw error;
 
       const { error: deleteError } = await supabase
-        .from("Pending Activities")
+        .from("pending_activities")
         .delete()
         .eq("PendingActivityID", activity.PendingActivityID);
 
@@ -156,7 +156,7 @@ export default function SettingsScreen() {
   const rejectMutation = useMutation({
     mutationFn: async (activityId: string) => {
       const { error } = await supabase
-        .from("Pending Activities")
+        .from("pending_activities")
         .delete()
         .eq("PendingActivityID", activityId);
 

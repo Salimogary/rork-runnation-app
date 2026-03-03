@@ -81,7 +81,7 @@ export default function ActivityScreen() {
 
         const eventIds = participantData.map(p => p.eventId);
         const { data: eventsData, error: eError } = await supabase
-          .from("Events")
+          .from("events")
           .select("eventId, eventName, startsAt, endsAt, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
           .in("eventId", eventIds);
 
@@ -119,7 +119,7 @@ export default function ActivityScreen() {
                 isOnMedalList = false;
               } else {
                 const { data: acts } = await supabase
-                  .from("Activity Sample")
+                  .from("activities")
                   .select("Activity_Date, Distance_km")
                   .eq("RegistrationID", user.id)
                   .gte("Activity_Date", medalStart)
@@ -182,7 +182,7 @@ export default function ActivityScreen() {
     queryFn: async () => {
       try {
         let query = supabase
-          .from("Activity Sample")
+          .from("activities")
           .select("*");
 
         if (user) {
@@ -213,7 +213,7 @@ export default function ActivityScreen() {
     queryFn: async () => {
       try {
         const { data: activities, error: activityError } = await supabase
-          .from("Activity Sample")
+          .from("activities")
           .select(`
             RegistrationID,
             Activity_Date,
@@ -229,7 +229,7 @@ export default function ActivityScreen() {
         }
 
         const { data: registrations, error: regError } = await supabase
-          .from("Registration Sample")
+          .from("registrations")
           .select(`
             RegistrationID,
             "First Name",

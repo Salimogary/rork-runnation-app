@@ -22,7 +22,7 @@ export default publicProcedure
     }
 
     const { data: product, error: productError } = await ctx.supabase
-      .from("Catalogue Sample")
+      .from("catalogue")
       .select("Quanity")
       .eq("CatalogueID", cartItem.catalogue_id)
       .single();

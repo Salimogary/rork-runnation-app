@@ -12,7 +12,7 @@ export default publicProcedure
     console.log('[enrollEvent] Starting enrollment:', input);
 
     const { data: existingPendingEnrollment } = await ctx.supabase
-      .from("Event Enrollments")
+      .from("event_enrollments")
       .select("*")
       .eq("EventID", input.eventId)
       .eq("RegistrationID", input.registrationId)
@@ -36,7 +36,7 @@ export default publicProcedure
     }
 
     const { data: userProfile } = await ctx.supabase
-      .from("Registration Sample")
+      .from("registrations")
       .select('"First Name", "Other Names", Email')
       .eq("RegistrationID", input.registrationId)
       .maybeSingle();
@@ -47,7 +47,7 @@ export default publicProcedure
     }
 
     const { data, error } = await ctx.supabase
-      .from("Event Enrollments")
+      .from("event_enrollments")
       .insert({
         EventID: input.eventId,
         RegistrationID: input.registrationId,

@@ -11,7 +11,7 @@ export default publicProcedure
     console.log('[approveEnrollment] Approving enrollment:', input.enrollmentId);
 
     const { data: enrollment, error: fetchError } = await ctx.supabase
-      .from("Event Enrollments")
+      .from("event_enrollments")
       .select("*")
       .eq("EnrollmentID", input.enrollmentId)
       .eq("Status", "pending")
@@ -45,7 +45,7 @@ export default publicProcedure
     }
 
     const { error: deleteError } = await ctx.supabase
-      .from("Event Enrollments")
+      .from("event_enrollments")
       .delete()
       .eq("EnrollmentID", input.enrollmentId);
 

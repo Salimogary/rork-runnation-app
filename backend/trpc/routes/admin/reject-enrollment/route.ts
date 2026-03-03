@@ -11,7 +11,7 @@ export default publicProcedure
     console.log('[rejectEnrollment] Rejecting enrollment:', input.enrollmentId);
 
     const { error } = await ctx.supabase
-      .from("Event Enrollments")
+      .from("event_enrollments")
       .delete()
       .eq("EnrollmentID", input.enrollmentId)
       .eq("Status", "pending");

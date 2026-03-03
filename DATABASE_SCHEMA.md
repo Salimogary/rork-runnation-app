@@ -2,11 +2,11 @@
 
 ## Required Tables
 
-### 1. Activity Sample (Existing)
+### 1. activities (Existing)
 Already configured with the following schema:
 
 ```sql
-create table public."Activity Sample" (
+create table public."activities" (
   "ActivityID" text not null,
   "RegistrationID" text null,
   "Activity_Date" date null,
@@ -15,16 +15,16 @@ create table public."Activity Sample" (
   "Start_Time" time without time zone null,
   "End_Time" time without time zone null,
   "Pace_km_h" double precision null,
-  constraint Activity Sample_pkey primary key ("ActivityID"),
-  constraint Activity Sample_RegistrationID_fkey foreign KEY ("RegistrationID") references "Registration Sample" ("RegistrationID")
+  constraint activities_pkey primary key ("ActivityID"),
+  constraint activities_RegistrationID_fkey foreign KEY ("RegistrationID") references "registrations" ("RegistrationID")
 ) TABLESPACE pg_default;
 ```
 
-### 2. Pending Activities (NEW - Required)
+### 2. pending_activities (NEW - Required)
 Create this table for treadmill activity approval workflow:
 
 ```sql
-create table public."Pending Activities" (
+create table public."pending_activities" (
   "PendingID" text not null default gen_random_uuid()::text,
   "RegistrationID" text null,
   "Activity_Date" date null,
@@ -36,13 +36,13 @@ create table public."Pending Activities" (
   "Image_URL" text null,
   "Status" text null default 'pending',
   "Created_At" timestamp with time zone default now(),
-  constraint Pending Activities_pkey primary key ("PendingID"),
-  constraint Pending Activities_RegistrationID_fkey foreign KEY ("RegistrationID") references "Registration Sample" ("RegistrationID")
+  constraint pending_activities_pkey primary key ("PendingID"),
+  constraint pending_activities_RegistrationID_fkey foreign KEY ("RegistrationID") references "registrations" ("RegistrationID")
 ) TABLESPACE pg_default;
 
 -- Create index for faster queries
-create index IF not exists idx_pending_activities_status on public."Pending Activities" using btree ("Status") TABLESPACE pg_default;
-create index IF not exists idx_pending_activities_registration on public."Pending Activities" using btree ("RegistrationID") TABLESPACE pg_default;
+create index IF not exists idx_pending_activities_status on public."pending_activities" using btree ("Status") TABLESPACE pg_default;
+create index IF not exists idx_pending_activities_registration on public."pending_activities" using btree ("RegistrationID") TABLESPACE pg_default;
 ```
 
 ## How It Works
@@ -51,12 +51,12 @@ create index IF not exists idx_pending_activities_registration on public."Pendin
 
 1. **Walk/Run**: 
    - User starts GPS tracking
-   - Activity is recorded directly to "Activity Sample" table
+   - Activity is recorded directly to "activities" table
    - No approval needed
 
 2. **Treadmill**:
    - User inputs: Distance (km), Time (minutes), and Photo
-   - Data is saved to "Pending Activities" table with Status = 'pending'
+   - Data is saved to "pending_activities" table with Status = 'pending'
    - ActivityID is auto-generated (PendingID)
    - Start_Time calculated as: End_Time - Time (from input)
    - End_Time = Upload Timestamp
@@ -72,8 +72,8 @@ create index IF not exists idx_pending_activities_registration on public."Pendin
    - Pace
    - Treadmill Screen Photo
 3. Admin can:
-   - **Approve**: Moves record to "Activity Sample" table and deletes from "Pending Activities"
-   - **Reject**: Deletes record from "Pending Activities"
+   - **Approve**: Moves record to "activities" table and deletes from "pending_activities"
+   - **Reject**: Deletes record from "pending_activities"
 
 ### 3. Social Posts (NEW - Required)
 Create this table for the social media feed feature:
@@ -168,7 +168,7 @@ Posts can contain any combination of:
 Create this table for managing running events and races:
 
 ```sql
-create table public."Events" (
+create table public."events" (
   "eventId" text not null,
   "eventName" text null,
   "startsAt" date null,
@@ -177,7 +177,7 @@ create table public."Events" (
   "medal_min_cumulative_distance" double precision null,
   "medal_date_start" date null,
   "medal_date_end" date null,
-  constraint Events_pkey primary key ("eventId")
+  constraint events_pkey primary key ("eventId")
 ) TABLESPACE pg_default;
 ```
 
@@ -205,8 +205,8 @@ create table public."Events Participants" (
   "Status" text default 'registered',
   "Days_Completed" integer default 0,
   constraint Events_Participants_pkey primary key ("ParticipantID"),
-  constraint Events_Participants_EventID_fkey foreign key ("EventID") references "Events" ("eventId") on delete cascade,
-  constraint Events_Participants_RegistrationID_fkey foreign key ("RegistrationID") references "Registration Sample" ("RegistrationID") on delete cascade,
+  constraint Events_Participants_EventID_fkey foreign key ("EventID") references "events" ("eventId") on delete cascade,
+  constraint Events_Participants_RegistrationID_fkey foreign key ("RegistrationID") references "registrations" ("RegistrationID") on delete cascade,
   constraint unique_participant_per_event unique ("EventID", "RegistrationID")
 ) TABLESPACE pg_default;
 
@@ -215,11 +215,11 @@ create index IF not exists idx_participants_event on public."Events Participants
 create index IF not exists idx_participants_user on public."Events Participants" using btree ("RegistrationID") TABLESPACE pg_default;
 ```
 
-### 7. Event Enrollments (NEW - Required)
+### 7. event_enrollments (NEW - Required)
 Create this table to track event enrollments (different from participants):
 
 ```sql
-create table public."Event Enrollments" (
+create table public."event_enrollments" (
   "EnrollmentID" text not null default gen_random_uuid()::text,
   "EventID" text not null,
   "RegistrationID" text null,
@@ -229,14 +229,14 @@ create table public."Event Enrollments" (
   "Status" text default 'pending',
   "Enrolled_At" timestamp with time zone default now(),
   constraint Event_Enrollments_pkey primary key ("EnrollmentID"),
-  constraint Event_Enrollments_EventID_fkey foreign key ("EventID") references "Events" ("eventId") on delete cascade,
-  constraint Event_Enrollments_RegistrationID_fkey foreign key ("RegistrationID") references "Registration Sample" ("RegistrationID")
+  constraint Event_Enrollments_EventID_fkey foreign key ("EventID") references "events" ("eventId") on delete cascade,
+  constraint Event_Enrollments_RegistrationID_fkey foreign key ("RegistrationID") references "registrations" ("RegistrationID")
 ) TABLESPACE pg_default;
 
 -- Create indexes for faster queries
-create index IF not exists idx_enrollments_event on public."Event Enrollments" using btree ("EventID") TABLESPACE pg_default;
-create index IF not exists idx_enrollments_email on public."Event Enrollments" using btree ("Email") TABLESPACE pg_default;
-create index IF not exists idx_enrollments_status on public."Event Enrollments" using btree ("Status") TABLESPACE pg_default;
+create index IF not exists idx_enrollments_event on public."event_enrollments" using btree ("EventID") TABLESPACE pg_default;
+create index IF not exists idx_enrollments_email on public."event_enrollments" using btree ("Email") TABLESPACE pg_default;
+create index IF not exists idx_enrollments_status on public."event_enrollments" using btree ("Status") TABLESPACE pg_default;
 ```
 
 ## Events Feature
@@ -287,7 +287,7 @@ create table public."External Activity Submissions" (
   "Distance_km" double precision not null,
   "Submitted_At" timestamp with time zone default now(),
   constraint External_Activity_Submissions_pkey primary key ("SubmissionID"),
-  constraint External_Activity_Submissions_RegistrationID_fkey foreign key ("RegistrationID") references "Registration Sample" ("RegistrationID") on delete cascade
+  constraint External_Activity_Submissions_RegistrationID_fkey foreign key ("RegistrationID") references "registrations" ("RegistrationID") on delete cascade
 ) TABLESPACE pg_default;
 
 -- Create indexes for faster queries
@@ -319,8 +319,8 @@ create index IF not exists idx_external_submissions_date on public."External Act
 ## Notes
 
 - FriendID is hidden from users (system-generated)
-- ActivityID for Activity Sample is auto-incremented (series last count + 1)
-- PendingID for Pending Activities uses UUID generation
+- ActivityID for activities is auto-incremented (series last count + 1)
+- PendingID for pending_activities uses UUID generation
 - eventId uses E1, E2, E3 series generation; ParticipantID uses UUID generation
 - All pace values are stored as km/h but displayed as min/km in the UI
 - Dates are displayed as dd mmm yyyy format (e.g., "15 Dec 2024")

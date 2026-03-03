@@ -12,7 +12,7 @@ export default publicProcedure
     const { catalogueId, quantity } = input;
 
     const { error } = await ctx.supabase
-      .from("Catalogue Sample")
+      .from("catalogue")
       .update({ Quanity: quantity })
       .eq("CatalogueID", catalogueId);
 

@@ -39,7 +39,7 @@ const getMedalList = publicProcedure
       console.log("[getMedalList] Event IDs:", eventIds, "Registration IDs:", regIds);
 
       const { data: events, error: eventsError } = await ctx.supabase
-        .from("Events")
+        .from("events")
         .select("eventId, eventName, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
         .in("eventId", eventIds);
 
@@ -53,7 +53,7 @@ const getMedalList = publicProcedure
       const eventsMap = new Map((events || []).map((e: any) => [e.eventId, e]));
 
       const { data: registrations, error: regError } = await ctx.supabase
-        .from("Registration Sample")
+        .from("registrations")
         .select('"RegistrationID", "First Name", "Other Names", "Country", "Residence"')
         .in("RegistrationID", regIds);
 
@@ -113,7 +113,7 @@ const getMedalList = publicProcedure
           }
 
           const { data: activities, error: actError } = await ctx.supabase
-            .from("Activity Sample")
+            .from("activities")
             .select("Activity_Date, Distance_km")
             .eq("RegistrationID", regId)
             .gte("Activity_Date", medalDateStart)

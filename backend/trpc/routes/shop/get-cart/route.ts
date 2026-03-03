@@ -16,7 +16,7 @@ export default publicProcedure
     const catalogueIds = cartItems.map((item: any) => item.catalogue_id);
 
     const { data: products, error: productsError } = await ctx.supabase
-      .from("Catalogue Sample")
+      .from("catalogue")
       .select("CatalogueID, Catalogue_Item, Price, Size, Quanity, Photo_URL")
       .in("CatalogueID", catalogueIds);
 

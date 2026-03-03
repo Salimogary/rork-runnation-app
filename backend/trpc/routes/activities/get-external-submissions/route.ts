@@ -18,7 +18,7 @@ export default publicProcedure.query(async ({ ctx }) => {
     }
 
     const { data: registrations, error: regError } = await ctx.supabase
-      .from("Registration Sample")
+      .from("registrations")
       .select('RegistrationID, "First Name", "Other Names", Email, Username');
 
     if (regError) {

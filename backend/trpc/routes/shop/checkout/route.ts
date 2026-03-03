@@ -28,7 +28,7 @@ export default publicProcedure
 
     for (const item of cartItems) {
       const { data: product, error: productError } = await ctx.supabase
-        .from("Catalogue Sample")
+        .from("catalogue")
         .select("*")
         .eq("CatalogueID", item.catalogue_id)
         .single();
@@ -77,7 +77,7 @@ export default publicProcedure
       if (itemError) throw itemError;
 
       const { data: currentProduct, error: fetchError } = await ctx.supabase
-        .from("Catalogue Sample")
+        .from("catalogue")
         .select("Quanity")
         .eq("CatalogueID", orderItem.catalogue_id)
         .single();
@@ -87,7 +87,7 @@ export default publicProcedure
       } else {
         const newStock = (currentProduct.Quanity || 0) - orderItem.quantity;
         const { error: stockError } = await ctx.supabase
-          .from("Catalogue Sample")
+          .from("catalogue")
           .update({ Quanity: Math.max(0, newStock) })
           .eq("CatalogueID", orderItem.catalogue_id);
 

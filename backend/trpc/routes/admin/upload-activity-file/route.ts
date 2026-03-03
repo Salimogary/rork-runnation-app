@@ -3,7 +3,7 @@ import { publicProcedure } from "../../../create-context";
 export default publicProcedure.query(async ({ ctx }) => {
   try {
     const { data: uploads, error } = await ctx.supabase
-      .from("Activity Uploads admin log")
+      .from("activity_uploads_admin_log")
       .select(`
         RegistrationID,
         file_name,
@@ -19,7 +19,7 @@ export default publicProcedure.query(async ({ ctx }) => {
     }
 
     const { data: registrations, error: regError } = await ctx.supabase
-      .from("Registration Sample")
+      .from("registrations")
       .select('RegistrationID, "First Name", "Other Names", Email, Username');
 
     if (regError) {

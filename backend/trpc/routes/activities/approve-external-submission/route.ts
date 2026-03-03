@@ -22,7 +22,7 @@ export default publicProcedure
       }
 
       const { data: lastActivity } = await ctx.supabase
-        .from("Activity Sample")
+        .from("activities")
         .select("ActivityID")
         .order("ActivityID", { ascending: false })
         .limit(1)
@@ -47,7 +47,7 @@ export default publicProcedure
       const paceKmH = submission.Distance_km / (submission.Duration_Minutes / 60);
 
       const { error: insertError } = await ctx.supabase
-        .from("Activity Sample")
+        .from("activities")
         .insert({
           ActivityID: newActivityId,
           RegistrationID: submission.RegistrationID,

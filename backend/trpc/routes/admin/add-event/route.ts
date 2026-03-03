@@ -13,7 +13,7 @@ const addEventInput = z.object({
 
 export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx }) => {
   const { data: existingEvents, error: fetchError } = await ctx.supabase
-    .from("Events")
+    .from("events")
     .select('"eventId"')
     .order('"eventId"', { ascending: false })
     .limit(1);
@@ -31,7 +31,7 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
   }
 
   const { data, error } = await ctx.supabase
-    .from("Events")
+    .from("events")
     .insert({
       "eventId": nextEventId,
       "eventName": input.eventName,

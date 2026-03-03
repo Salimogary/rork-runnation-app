@@ -22,7 +22,7 @@ The system automatically calculates:
 - `ActivityID` = Auto-generated UUID (PendingID)
 
 ### 3. Pending State
-- Treadmill submissions go to "Pending Activities" table
+- Treadmill submissions go to "pending_activities" table
 - Status remains "pending" until admin action
 - Users see success message: "Treadmill activity submitted for approval"
 
@@ -35,7 +35,7 @@ The system automatically calculates:
 - Shows: Type, Date, Distance, Pace
 - Click to view full details with treadmill photo
 - Two actions:
-  - **Approve**: Moves to Activity Sample table (visible in My Runs)
+  - **Approve**: Moves to activities table (visible in My Runs)
   - **Reject**: Permanently deletes the submission
 
 **Review Screen Shows**:
@@ -49,11 +49,11 @@ The system automatically calculates:
 
 **Tables Used**:
 
-1. **Activity Sample** (Existing)
+1. **activities** (Existing)
    - Stores approved activities (Walk, Run, approved Treadmill)
    - Visible in "My Runs" tab
 
-2. **Pending Activities** (New - Must be created)
+2. **pending_activities** (New - Must be created)
    - Stores treadmill submissions awaiting approval
    - Includes Image_URL field for photo
    - Status field ('pending', could add 'approved'/'rejected' for history)
@@ -105,7 +105,7 @@ Time formatting:
    - Added review and approve/reject functionality
 
 3. **DATABASE_SCHEMA.md**
-   - Updated with Pending Activities table schema
+   - Updated with pending_activities table schema
    - Documented workflow and calculations
 
 ## Next Steps
@@ -113,7 +113,7 @@ Time formatting:
 To make this fully functional:
 
 1. **Create Database Table**:
-   Run the SQL in DATABASE_SCHEMA.md to create "Pending Activities" table
+   Run the SQL in DATABASE_SCHEMA.md to create "pending_activities" table
 
 2. **Configure Admin Access** (Optional):
    Update the `IS_ADMIN` check to use actual role-based logic

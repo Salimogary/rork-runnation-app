@@ -168,7 +168,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       );
 
       const { data: userData, error: queryError } = await supabase
-        .from('Registration Sample')
+        .from('registrations')
         .select('RegistrationID, Username, Email, "Created_At"')
         .eq('Username', username.toLowerCase())
         .eq('pin_hash', pinHash)
@@ -221,7 +221,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const signUp = async (username: string, pin: string, registrationData?: Partial<RegistrationData>) => {
     try {
       const { data: existingUser } = await supabase
-        .from('Registration Sample')
+        .from('registrations')
         .select('Username')
         .eq('Username', username.toLowerCase())
         .single();
@@ -254,7 +254,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           }
 
           const { data: newUserData, error: insertError } = await supabase
-            .from('Registration Sample')
+            .from('registrations')
             .insert({
               'First Name': registrationData.firstName,
               'Other Names': registrationData.otherNames,
@@ -273,7 +273,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             .single();
 
           if (insertError || !newUserData) {
-            console.error('Registration Sample insert error:', insertError);
+            console.error('registrations insert error:', insertError);
             return { error: { message: insertError?.message || 'Failed to create account' } };
           }
 
@@ -387,7 +387,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         } catch (dbError) {
           console.error('Failed to save registration data:', dbError);
           if (registrationId) {
-            await supabase.from('Registration Sample').delete().eq('RegistrationID', registrationId);
+            await supabase.from('registrations').delete().eq('RegistrationID', registrationId);
           }
           return { error: { message: 'Failed to save registration data. Please try again.' } };
         }
@@ -429,7 +429,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         pin
       );
       const { data, error } = await supabase
-        .from('Registration Sample')
+        .from('registrations')
         .select('RegistrationID')
         .eq('RegistrationID', user.id)
         .eq('pin_hash', pinHash)

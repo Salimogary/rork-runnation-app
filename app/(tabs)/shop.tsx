@@ -92,7 +92,7 @@ export default function ShopScreen() {
     queryFn: async () => {
       console.log("Fetching catalogue items...");
       const { data, error } = await supabase
-        .from("Catalogue Sample")
+        .from("catalogue")
         .select("*")
         .order("Catalogue_Item", { ascending: true });
 

@@ -17,7 +17,7 @@ export default publicProcedure
     
     try {
       const { data: user, error: userError } = await ctx.supabase
-        .from("Registration Sample")
+        .from("registrations")
         .select('RegistrationID, "First Name", "Other Names", Email, Username')
         .eq("RegistrationID", input.registrationId)
         .single();
@@ -137,7 +137,7 @@ This file was submitted by a user for admin review and processing.
         console.log("[Email] Content preview:", emailContent.substring(0, 500));
         
         const { error: dbError } = await ctx.supabase
-          .from("Activity Uploads admin log")
+          .from("activity_uploads_admin_log")
           .insert({
             RegistrationID: input.registrationId,
             file_name: input.fileName,
@@ -177,7 +177,7 @@ This file was submitted by a user for admin review and processing.
       console.log("[Email] Email sent successfully:", result);
 
       const { error: dbError } = await ctx.supabase
-        .from("Activity Uploads admin log")
+        .from("activity_uploads_admin_log")
         .insert({
           RegistrationID: input.registrationId,
           file_name: input.fileName,

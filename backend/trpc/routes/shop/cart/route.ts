@@ -13,7 +13,7 @@ export default publicProcedure
     const { userId, catalogueId, quantity } = input;
 
     const { data: product, error: productError } = await ctx.supabase
-      .from("Catalogue Sample")
+      .from("catalogue")
       .select("Quanity")
       .eq("CatalogueID", catalogueId)
       .single();

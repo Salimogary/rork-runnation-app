@@ -175,7 +175,7 @@ const { data: pendingActivities = [], error: pendingActivitiesError, isLoading: 
     queryFn: async () => {
       console.log("Fetching pending activities...");
       const { data, error } = await supabase
-        .from("Pending Activities")
+        .from("pending_activities")
         .select("*")
         .eq("Status", "pending")
         .order("Created_At", { ascending: false });
@@ -214,7 +214,7 @@ const { data: pendingActivities = [], error: pendingActivitiesError, isLoading: 
       const calculatedPace = totalMinutes > 0 ? (distanceKm / (totalMinutes / 60)) : 0;
 
       const { data, error } = await supabase
-        .from("Activity Sample")
+        .from("activities")
         .insert({
           RegistrationID: activity.RegistrationID,
           Activity_Date: new Date().toISOString().split('T')[0],
@@ -229,7 +229,7 @@ const { data: pendingActivities = [], error: pendingActivitiesError, isLoading: 
       if (error) throw error;
 
       const { error: deleteError } = await supabase
-        .from("Pending Activities")
+        .from("pending_activities")
         .delete()
         .eq("PendingActivityID", activity.PendingActivityID);
 
@@ -252,7 +252,7 @@ const { data: pendingActivities = [], error: pendingActivitiesError, isLoading: 
   const rejectMutation = useMutation({
     mutationFn: async (activityId: string) => {
       const { error } = await supabase
-        .from("Pending Activities")
+        .from("pending_activities")
         .delete()
         .eq("PendingActivityID", activityId);
 
@@ -654,7 +654,7 @@ const getStatusColor = (status: string) => {
                         {JSON.stringify(eventsError.data)}
                       </Text>
                     )}
-                    <Text style={styles.errorHint}>Please ensure the &quot;Events&quot; table exists in Supabase.</Text>
+                    <Text style={styles.errorHint}>Please ensure the &quot;events&quot; table exists in Supabase.</Text>
                     <TouchableOpacity
                       style={styles.retryButton}
                       onPress={() => refetchEvents()}
@@ -799,7 +799,7 @@ const getStatusColor = (status: string) => {
               <Text style={styles.errorSubtext}>
                 {enrollmentsError.message || "Failed to fetch enrollments"}
               </Text>
-              <Text style={styles.errorHint}>Please ensure the &quot;Event Enrollments&quot; table exists in Supabase.</Text>
+              <Text style={styles.errorHint}>Please ensure the &quot;event_enrollments&quot; table exists in Supabase.</Text>
               <TouchableOpacity
                 style={styles.retryButton}
                 onPress={() => refetchEnrollments()}
@@ -852,7 +852,7 @@ const getStatusColor = (status: string) => {
               <Text style={styles.errorSubtext}>
                 {activityUploadsError.message || "Failed to fetch activity uploads"}
               </Text>
-              <Text style={styles.errorHint}>Please ensure the &quot;Activity Uploads admin log&quot; table exists in Supabase.</Text>
+              <Text style={styles.errorHint}>Please ensure the &quot;activity_uploads_admin_log&quot; table exists in Supabase.</Text>
               <TouchableOpacity
                 style={styles.retryButton}
                 onPress={() => refetchActivityUploads()}
@@ -961,7 +961,7 @@ const getStatusColor = (status: string) => {
                   ? pendingActivitiesError.message 
                   : "Failed to fetch pending activities. The table may not exist."}
               </Text>
-              <Text style={styles.errorHint}>Please ensure the &quot;Pending Activities&quot; table is created in Supabase.</Text>
+              <Text style={styles.errorHint}>Please ensure the &quot;pending_activities&quot; table is created in Supabase.</Text>
             </View>
           ) : pendingActivitiesLoading ? (
             <View style={styles.emptyContainer}>
@@ -1275,7 +1275,7 @@ function StockManagementList({ onUpdateStock }: { onUpdateStock: (product: any) 
     queryFn: async () => {
       const { supabase } = await import("@/lib/supabase");
       const { data, error } = await supabase
-        .from("Catalogue Sample")
+        .from("catalogue")
         .select("*")
         .order("Catalogue_Item", { ascending: true });
 

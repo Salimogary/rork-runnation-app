@@ -46,7 +46,7 @@ export default function ProfileScreen() {
       
       console.log("Fetching profile for user:", user.id);
       const { data, error } = await supabase
-        .from("Registration Sample")
+        .from("registrations")
         .select("*")
         .eq("RegistrationID", user.id)
         .maybeSingle();
@@ -88,7 +88,7 @@ export default function ProfileScreen() {
       if (!user) throw new Error("Not authenticated");
 
       const { error } = await supabase
-        .from("Registration Sample")
+        .from("registrations")
         .update(updates)
         .eq("RegistrationID", user.id);
 
