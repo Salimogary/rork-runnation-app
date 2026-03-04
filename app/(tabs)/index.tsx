@@ -64,7 +64,7 @@ export default function ExerciseScreen() {
 
       const { data: gpuRows, error: gpuError } = await supabase
         .from('goals_per_user')
-        .select('goal_id, other, goals(goal_id, Goal)')
+        .select('goal_id, other, goals!goals_per_user_goal_id_fkey(goal_id, Goal)')
         .eq('registration_id', user.id)
         .order('goals_per_user_id', { ascending: true });
 
