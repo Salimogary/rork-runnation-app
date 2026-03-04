@@ -65,12 +65,13 @@ export default function ExerciseScreen() {
       const { data: gpuRows, error: gpuError } = await supabase
         .from('goals_per_user')
         .select('goal_id, other')
-        .eq('registration_id', user.id);
+        .eq('registration_id', user.id)
+        .order('goals_per_user_id', { ascending: true });
 
       console.log('[Goals] goals_per_user rows:', JSON.stringify(gpuRows), 'Error:', JSON.stringify(gpuError));
 
       if (gpuError || !gpuRows || gpuRows.length === 0) {
-        console.log('[Goals] No goals found for user');
+        console.log('[Goals] No goals found in goals_per_user for user:', user.id);
         setUserGoals([]);
         return;
       }
@@ -85,18 +86,26 @@ export default function ExerciseScreen() {
       if (goalIds.length > 0) {
         const { data: goalsData, error: goalsError } = await supabase
           .from('goals')
-          .select('goal_id, Goal')
+          .select('*')
           .in('goal_id', goalIds);
 
-        console.log('[Goals] Goals lookup result:', JSON.stringify(goalsData), 'Error:', JSON.stringify(goalsError));
+        console.log('[Goals] Goals table raw result:', JSON.stringify(goalsData), 'Error:', JSON.stringify(goalsError));
+
+        if (goalsData && goalsData.length > 0) {
+          const firstRow = goalsData[0] as Record<string, unknown>;
+          console.log('[Goals] First goal row keys:', Object.keys(firstRow));
+          console.log('[Goals] First goal row values:', JSON.stringify(firstRow));
+        }
 
         if (goalsData && !goalsError) {
           for (const goalId of goalIds) {
             const match = goalsData.find((g: Record<string, unknown>) => Number(g.goal_id) === goalId);
             if (match) {
+              const row = match as Record<string, unknown>;
+              const goalName = (row['Goal'] as string) || (row['goal'] as string) || (row['goal_name'] as string) || (row['name'] as string) || 'Goal';
               resolvedGoals.push({
-                goal_id: String((match as Record<string, unknown>).goal_id),
-                name: ((match as Record<string, unknown>)['Goal'] as string) || 'Goal',
+                goal_id: String(row.goal_id),
+                name: goalName,
               });
             }
           }
@@ -110,7 +119,7 @@ export default function ExerciseScreen() {
         resolvedGoals.push({ goal_id: 'other', name: other });
       }
 
-      console.log('[Goals] Final resolved goals:', resolvedGoals);
+      console.log('[Goals] Final resolved goals:', JSON.stringify(resolvedGoals));
       setUserGoals(resolvedGoals.slice(0, 3));
     } catch (err) {
       console.error('[Goals] Fetch error:', err);
