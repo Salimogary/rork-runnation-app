@@ -61,87 +61,62 @@ export default function ExerciseScreen() {
     try {
       setGoalsLoading(true);
       const regId = user.id;
-      console.log('[Goals] Fetching goals for registration_id:', regId, 'type:', typeof regId);
+      console.log('[Goals] Fetching goals for registration_id:', regId);
 
       const { data: gpuRows, error: gpuError } = await supabase
         .from('goals_per_user')
-        .select('goal_id, other, goals(goal_id, Goal)')
-        .eq('registration_id', regId);
+        .select('goal_id, other')
+        .eq('registration_id', regId)
+        .order('goals_per_user_id', { ascending: true });
 
-      console.log('[Goals] JOIN query result:', JSON.stringify(gpuRows));
-      console.log('[Goals] JOIN query error:', JSON.stringify(gpuError));
+      console.log('[Goals] goals_per_user rows:', JSON.stringify(gpuRows));
+      console.log('[Goals] goals_per_user error:', JSON.stringify(gpuError));
 
-      if (gpuError) {
-        console.log('[Goals] Query error, falling back to two-step query');
-        const { data: rawRows, error: rawError } = await supabase
-          .from('goals_per_user')
-          .select('goal_id, other')
-          .eq('registration_id', regId);
-
-        console.log('[Goals] Fallback raw rows:', JSON.stringify(rawRows), 'Error:', JSON.stringify(rawError));
-
-        if (rawError || !rawRows || rawRows.length === 0) {
-          console.log('[Goals] No goals found in fallback either');
-          setUserGoals([]);
-          return;
-        }
-
-        const goalIds = rawRows.map((row: any) => row.goal_id);
-        const { data: goalsData } = await supabase
-          .from('goals')
-          .select('goal_id, Goal')
-          .in('goal_id', goalIds);
-
-        if (!goalsData) {
-          setUserGoals([]);
-          return;
-        }
-
-        const goalNameMap = new Map<number, string>();
-        for (const g of goalsData) {
-          goalNameMap.set(Number(g.goal_id), g.Goal as string);
-        }
-
-        const resolvedGoals: UserGoal[] = [];
-        for (const row of rawRows) {
-          const goalName = goalNameMap.get(Number(row.goal_id));
-          if (goalName && goalName.toLowerCase() === 'other' && row.other) {
-            resolvedGoals.push({ goal_id: String(row.goal_id), name: row.other });
-          } else if (goalName) {
-            resolvedGoals.push({ goal_id: String(row.goal_id), name: goalName });
-          }
-        }
-        setUserGoals(resolvedGoals.slice(0, 3));
-        return;
-      }
-
-      if (!gpuRows || gpuRows.length === 0) {
-        console.log('[Goals] No rows in goals_per_user for registration_id:', regId);
-
-        const { data: allRows, error: allErr } = await supabase
+      if (gpuError || !gpuRows || gpuRows.length === 0) {
+        console.log('[Goals] No rows found. Checking table sample...');
+        const { data: sampleRows } = await supabase
           .from('goals_per_user')
           .select('goals_per_user_id, registration_id, goal_id')
           .limit(5);
-        console.log('[Goals] DEBUG sample goals_per_user rows:', JSON.stringify(allRows), 'Error:', JSON.stringify(allErr));
-
+        console.log('[Goals] Sample rows from goals_per_user:', JSON.stringify(sampleRows));
         setUserGoals([]);
         return;
       }
 
+      const goalIds = gpuRows.map((row: any) => Number(row.goal_id));
+      console.log('[Goals] Fetching goal names for IDs:', goalIds);
+
+      const { data: goalsData, error: goalsError } = await supabase
+        .from('goals')
+        .select('goal_id, Goal')
+        .in('goal_id', goalIds);
+
+      console.log('[Goals] goals table data:', JSON.stringify(goalsData));
+      console.log('[Goals] goals table error:', JSON.stringify(goalsError));
+
+      if (goalsError || !goalsData || goalsData.length === 0) {
+        console.log('[Goals] Could not fetch goal names');
+        setUserGoals([]);
+        return;
+      }
+
+      const goalNameMap = new Map<number, string>();
+      for (const g of goalsData) {
+        goalNameMap.set(Number(g.goal_id), g.Goal as string);
+      }
+
       const resolvedGoals: UserGoal[] = [];
-      for (const row of gpuRows as any[]) {
-        const goalRecord = row.goals;
-        const goalName = goalRecord?.Goal as string | undefined;
+      for (const row of gpuRows) {
+        const gid = Number(row.goal_id);
+        const goalName = goalNameMap.get(gid);
         if (goalName && goalName.toLowerCase() === 'other' && row.other) {
-          resolvedGoals.push({ goal_id: String(row.goal_id), name: row.other });
+          resolvedGoals.push({ goal_id: String(gid), name: row.other as string });
         } else if (goalName) {
-          resolvedGoals.push({ goal_id: String(row.goal_id), name: goalName });
-        } else {
-          resolvedGoals.push({ goal_id: String(row.goal_id), name: `Goal #${row.goal_id}` });
+          resolvedGoals.push({ goal_id: String(gid), name: goalName });
         }
       }
 
-      console.log('[Goals] Final resolved goals:', JSON.stringify(resolvedGoals));
+      console.log('[Goals] Resolved goals:', JSON.stringify(resolvedGoals));
       setUserGoals(resolvedGoals.slice(0, 3));
     } catch (err) {
       console.error('[Goals] Fetch error:', err);
