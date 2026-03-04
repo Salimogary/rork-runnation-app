@@ -109,19 +109,30 @@ export default function RegisterScreen() {
   const fetchGoalsFromDb = async () => {
     try {
       setGoalsLoading(true);
-      const { data, error } = await supabase
+      console.log('[Register] Fetching goals from Supabase...');
+      const { data, error, status, statusText } = await supabase
         .from('goals')
         .select('goal_id, Goal')
         .order('goal_id', { ascending: true });
 
+      console.log('[Register] Goals response - status:', status, statusText);
+      console.log('[Register] Goals response - error:', JSON.stringify(error));
+      console.log('[Register] Goals response - data:', JSON.stringify(data));
+      console.log('[Register] Goals response - data length:', data?.length);
+
       if (error) {
         console.error('[Register] Error fetching goals:', error);
-      } else if (data) {
-        console.log('[Register] Fetched goals from DB:', JSON.stringify(data));
+        Alert.alert('Goals Error', `Could not load goals: ${error.message}`);
+      } else if (data && data.length > 0) {
+        console.log('[Register] Successfully fetched', data.length, 'goals');
         setDbGoals(data as DbGoal[]);
+      } else {
+        console.warn('[Register] Goals query returned empty array. This usually means RLS is blocking access.');
+        console.warn('[Register] Fix: In Supabase, go to goals table > RLS > Add policy: allow SELECT for all users, OR disable RLS on goals table.');
       }
     } catch (err) {
       console.error('[Register] Failed to fetch goals:', err);
+      Alert.alert('Goals Error', 'Failed to load goals. Please check your connection.');
     } finally {
       setGoalsLoading(false);
     }
@@ -601,6 +612,16 @@ export default function RegisterScreen() {
                       <View style={styles.goalsLoadingRow}>
                         <Loader size={18} color="#fff" />
                         <Text style={styles.goalsLoadingText}>Loading goals...</Text>
+                      </View>
+                    ) : dbGoals.length === 0 ? (
+                      <View style={styles.goalsLoadingRow}>
+                        <Text style={styles.goalsLoadingText}>No goals found. Check RLS policies on the goals table in Supabase.</Text>
+                        <TouchableOpacity
+                          onPress={fetchGoalsFromDb}
+                          style={{ marginTop: 8, paddingVertical: 6, paddingHorizontal: 16, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 8 }}
+                        >
+                          <Text style={{ color: '#fff', fontWeight: '600' as const }}>Retry</Text>
+                        </TouchableOpacity>
                       </View>
                     ) : (
                       <View style={styles.goalsContainer}>
