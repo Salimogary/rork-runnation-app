@@ -282,7 +282,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           try {
             const goalsArray = registrationData.runningGoals || [];
             const standardGoals = goalsArray.filter(g => g !== 'Other');
-            const resolvedGoalIds: string[] = [];
+            const hasOtherGoal = goalsArray.includes('Other') && registrationData.otherGoal;
+
+            const rowsToInsert: { goals_per_user_id: string; registration_id: string; goal_id: number; other: string | null }[] = [];
 
             if (standardGoals.length > 0) {
               const { data: goalsData, error: goalsError } = await supabase
@@ -294,33 +296,45 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
                 console.error('Error fetching goal_ids:', goalsError);
               } else if (goalsData) {
                 for (const g of goalsData) {
-                  resolvedGoalIds.push(String(g.goal_id));
+                  rowsToInsert.push({
+                    goals_per_user_id: `${registrationId}_g${g.goal_id}`,
+                    registration_id: registrationId!,
+                    goal_id: Number(g.goal_id),
+                    other: null,
+                  });
                 }
               }
             }
 
-            const hasOtherGoal = goalsArray.includes('Other') && registrationData.otherGoal;
+            if (hasOtherGoal) {
+              const { data: otherGoalData } = await supabase
+                .from('goals')
+                .select('goal_id')
+                .eq('Goal', 'Other')
+                .single();
 
-            if (resolvedGoalIds.length > 0 || hasOtherGoal) {
-              const insertData: Record<string, unknown> = {
-                goals_per_user_id: registrationId,
-                RegistrationID: registrationId,
-                goal_ids: resolvedGoalIds,
-              };
-
-              if (hasOtherGoal) {
-                insertData.other_goals = registrationData.otherGoal;
-                console.log('[AuthContext] Saving other_goals:', registrationData.otherGoal);
+              const otherGoalId = otherGoalData ? Number(otherGoalData.goal_id) : 0;
+              if (otherGoalId > 0) {
+                rowsToInsert.push({
+                  goals_per_user_id: `${registrationId}_gOther`,
+                  registration_id: registrationId!,
+                  goal_id: otherGoalId,
+                  other: registrationData.otherGoal || null,
+                });
+                console.log('[AuthContext] Saving other goal:', registrationData.otherGoal);
               }
+            }
 
+            if (rowsToInsert.length > 0) {
+              console.log('[AuthContext] Inserting goals_per_user rows:', JSON.stringify(rowsToInsert));
               const { error: goalsPerUserError } = await supabase
                 .from('goals_per_user')
-                .insert(insertData);
+                .insert(rowsToInsert);
 
               if (goalsPerUserError) {
                 console.error('Error saving goals_per_user:', goalsPerUserError);
               } else {
-                console.log('[AuthContext] Goals saved successfully:', resolvedGoalIds, hasOtherGoal ? `other_goals: ${registrationData.otherGoal}` : '');
+                console.log('[AuthContext] Goals saved successfully:', rowsToInsert.length, 'rows');
               }
             }
           } catch (goalsError) {
