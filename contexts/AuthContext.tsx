@@ -267,7 +267,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
               'Weight Current': registrationData.weightCurrent ? parseFloat(registrationData.weightCurrent) : null,
               'Weight Target': registrationData.weightTarget ? parseFloat(registrationData.weightTarget) : null,
               Country: registrationData.country,
-              club: registrationData.runningClub,
+              Club: registrationData.runningClub,
               pin_hash: pinHash,
             })
             .select('RegistrationID, Username, "Created_At"')
