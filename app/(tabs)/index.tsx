@@ -64,59 +64,32 @@ export default function ExerciseScreen() {
 
       const { data: gpuRows, error: gpuError } = await supabase
         .from('goals_per_user')
-        .select('goal_id, other')
+        .select('goal_id, other, goals(goal_id, Goal)')
         .eq('registration_id', user.id)
         .order('goals_per_user_id', { ascending: true });
 
-      console.log('[Goals] goals_per_user rows:', JSON.stringify(gpuRows), 'Error:', JSON.stringify(gpuError));
+      console.log('[Goals] goals_per_user joined rows:', JSON.stringify(gpuRows), 'Error:', JSON.stringify(gpuError));
 
       if (gpuError || !gpuRows || gpuRows.length === 0) {
-        console.log('[Goals] No goals found in goals_per_user for user:', user.id);
+        console.log('[Goals] No goals found for user:', user.id);
         setUserGoals([]);
         return;
       }
 
-      const goalIds = gpuRows
-        .map((row: Record<string, unknown>) => Number(row.goal_id))
-        .filter((id: number) => !isNaN(id) && id > 0);
-      console.log('[Goals] Goal IDs to look up:', goalIds);
-
       const resolvedGoals: UserGoal[] = [];
 
-      if (goalIds.length > 0) {
-        const { data: goalsData, error: goalsError } = await supabase
-          .from('goals')
-          .select('*')
-          .in('goal_id', goalIds);
-
-        console.log('[Goals] Goals table raw result:', JSON.stringify(goalsData), 'Error:', JSON.stringify(goalsError));
-
-        if (goalsData && goalsData.length > 0) {
-          const firstRow = goalsData[0] as Record<string, unknown>;
-          console.log('[Goals] First goal row keys:', Object.keys(firstRow));
-          console.log('[Goals] First goal row values:', JSON.stringify(firstRow));
+      for (const row of gpuRows) {
+        const r = row as Record<string, unknown>;
+        const goalData = r.goals as Record<string, unknown> | null;
+        if (goalData) {
+          const goalName = (goalData['Goal'] as string) || (goalData['goal'] as string) || (goalData['goal_name'] as string) || 'Goal';
+          resolvedGoals.push({
+            goal_id: String(r.goal_id),
+            name: goalName,
+          });
+        } else if (r.other) {
+          resolvedGoals.push({ goal_id: 'other', name: r.other as string });
         }
-
-        if (goalsData && !goalsError) {
-          for (const goalId of goalIds) {
-            const match = goalsData.find((g: Record<string, unknown>) => Number(g.goal_id) === goalId);
-            if (match) {
-              const row = match as Record<string, unknown>;
-              const goalName = (row['Goal'] as string) || (row['goal'] as string) || (row['goal_name'] as string) || (row['name'] as string) || 'Goal';
-              resolvedGoals.push({
-                goal_id: String(row.goal_id),
-                name: goalName,
-              });
-            }
-          }
-        }
-      }
-
-      const otherGoals = gpuRows
-        .filter((row: Record<string, unknown>) => row.other)
-        .map((row: Record<string, unknown>) => row.other as string);
-      for (const other of otherGoals) {
-        resolvedGoals.push({ goal_id: 'other', name: other });
       }
 
       console.log('[Goals] Final resolved goals:', JSON.stringify(resolvedGoals));
