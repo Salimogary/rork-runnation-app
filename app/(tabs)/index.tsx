@@ -64,11 +64,11 @@ export default function ExerciseScreen() {
 
       const { data: gpuRows, error: gpuError } = await supabase
         .from('goals_per_user')
-        .select('goal_id, other, goals!goals_per_user_goal_id_fkey(goal_id, Goal), registrations!goals_per_user_registration_id_fkey(RegistrationID)')
+        .select('goal_id, other')
         .eq('registration_id', user.id)
         .order('goals_per_user_id', { ascending: true });
 
-      console.log('[Goals] goals_per_user joined rows:', JSON.stringify(gpuRows), 'Error:', JSON.stringify(gpuError));
+      console.log('[Goals] goals_per_user rows:', JSON.stringify(gpuRows), 'Error:', JSON.stringify(gpuError));
 
       if (gpuError || !gpuRows || gpuRows.length === 0) {
         console.log('[Goals] No goals found for user:', user.id);
@@ -76,19 +76,34 @@ export default function ExerciseScreen() {
         return;
       }
 
-      const resolvedGoals: UserGoal[] = [];
+      const goalIds = gpuRows.map((row) => row.goal_id);
+      console.log('[Goals] Goal IDs:', goalIds);
 
+      const { data: goalsData, error: goalsError } = await supabase
+        .from('goals')
+        .select('goal_id, Goal')
+        .in('goal_id', goalIds);
+
+      console.log('[Goals] goals table data:', JSON.stringify(goalsData), 'Error:', JSON.stringify(goalsError));
+
+      if (goalsError || !goalsData) {
+        console.log('[Goals] Failed to fetch goal names');
+        setUserGoals([]);
+        return;
+      }
+
+      const goalNameMap = new Map<number, string>();
+      for (const g of goalsData) {
+        goalNameMap.set(Number(g.goal_id), g.Goal as string);
+      }
+
+      const resolvedGoals: UserGoal[] = [];
       for (const row of gpuRows) {
-        const r = row as Record<string, unknown>;
-        const goalData = r.goals as Record<string, unknown> | null;
-        if (goalData) {
-          const goalName = (goalData['Goal'] as string) || (goalData['goal'] as string) || (goalData['goal_name'] as string) || 'Goal';
-          resolvedGoals.push({
-            goal_id: String(r.goal_id),
-            name: goalName,
-          });
-        } else if (r.other) {
-          resolvedGoals.push({ goal_id: 'other', name: r.other as string });
+        const goalName = goalNameMap.get(Number(row.goal_id));
+        if (goalName && goalName.toLowerCase() === 'other' && row.other) {
+          resolvedGoals.push({ goal_id: String(row.goal_id), name: row.other });
+        } else if (goalName) {
+          resolvedGoals.push({ goal_id: String(row.goal_id), name: goalName });
         }
       }
 
