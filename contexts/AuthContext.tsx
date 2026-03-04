@@ -295,7 +295,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             console.log('[AuthContext] selectedGoalIds from form:', JSON.stringify(selectedIds));
             console.log('[AuthContext] runningGoals names:', JSON.stringify(goalsArray));
 
-            const rowsToInsert: { goals_per_user_id: string; registration_id: string; goal_id: number; other: string | null }[] = [];
+            const rowsToInsert: { registration_id: string; goal_id: number; other: string | null }[] = [];
 
             if (selectedIds.length > 0) {
               for (const goalId of selectedIds) {
@@ -310,7 +310,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
                 })();
 
                 rowsToInsert.push({
-                  goals_per_user_id: Crypto.randomUUID(),
                   registration_id: registrationId!,
                   goal_id: goalId,
                   other: isOtherGoal ? (registrationData.otherGoal || null) : null,
@@ -331,7 +330,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
                 } else if (goalsData) {
                   for (const g of goalsData) {
                     rowsToInsert.push({
-                      goals_per_user_id: Crypto.randomUUID(),
                       registration_id: registrationId!,
                       goal_id: Number(g.goal_id),
                       other: null,
@@ -350,7 +348,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
                 const otherGId = otherGoalData ? Number(otherGoalData.goal_id) : 0;
                 if (otherGId > 0) {
                   rowsToInsert.push({
-                    goals_per_user_id: Crypto.randomUUID(),
                     registration_id: registrationId!,
                     goal_id: otherGId,
                     other: registrationData.otherGoal || null,
