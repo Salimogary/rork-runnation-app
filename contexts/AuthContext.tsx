@@ -310,7 +310,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
                 })();
 
                 rowsToInsert.push({
-                  goals_per_user_id: `${registrationId}_g${goalId}`,
+                  goals_per_user_id: Crypto.randomUUID(),
                   registration_id: registrationId!,
                   goal_id: goalId,
                   other: isOtherGoal ? (registrationData.otherGoal || null) : null,
@@ -331,7 +331,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
                 } else if (goalsData) {
                   for (const g of goalsData) {
                     rowsToInsert.push({
-                      goals_per_user_id: `${registrationId}_g${g.goal_id}`,
+                      goals_per_user_id: Crypto.randomUUID(),
                       registration_id: registrationId!,
                       goal_id: Number(g.goal_id),
                       other: null,
@@ -350,7 +350,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
                 const otherGId = otherGoalData ? Number(otherGoalData.goal_id) : 0;
                 if (otherGId > 0) {
                   rowsToInsert.push({
-                    goals_per_user_id: `${registrationId}_gOther`,
+                    goals_per_user_id: Crypto.randomUUID(),
                     registration_id: registrationId!,
                     goal_id: otherGId,
                     other: registrationData.otherGoal || null,
