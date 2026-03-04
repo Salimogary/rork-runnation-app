@@ -21,6 +21,7 @@ interface RegistrationData {
   dob: string;
   residence: string;
   runningGoals: string[];
+  selectedGoalIds?: number[];
   otherGoal: string;
   weightCurrent: string;
   weightTarget: string;
@@ -280,62 +281,92 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           registrationId = newUserData.RegistrationID;
 
           try {
+            const selectedIds = registrationData.selectedGoalIds || [];
             const goalsArray = registrationData.runningGoals || [];
-            const standardGoals = goalsArray.filter(g => g !== 'Other');
-            const hasOtherGoal = goalsArray.includes('Other') && registrationData.otherGoal;
+            const hasOtherGoalName = goalsArray.some(g => g.toLowerCase() === 'other') && registrationData.otherGoal;
+
+            console.log('[AuthContext] selectedGoalIds from form:', JSON.stringify(selectedIds));
+            console.log('[AuthContext] runningGoals names:', JSON.stringify(goalsArray));
 
             const rowsToInsert: { goals_per_user_id: string; registration_id: string; goal_id: number; other: string | null }[] = [];
 
-            if (standardGoals.length > 0) {
-              const { data: goalsData, error: goalsError } = await supabase
-                .from('goals')
-                .select('goal_id, Goal')
-                .in('Goal', standardGoals);
+            if (selectedIds.length > 0) {
+              for (const goalId of selectedIds) {
 
-              if (goalsError) {
-                console.error('Error fetching goal_ids:', goalsError);
-              } else if (goalsData) {
-                for (const g of goalsData) {
+                const isOtherGoal = hasOtherGoalName && await (async () => {
+                  const { data: gData } = await supabase
+                    .from('goals')
+                    .select('Goal')
+                    .eq('goal_id', goalId)
+                    .single();
+                  return gData?.Goal?.toLowerCase() === 'other';
+                })();
+
+                rowsToInsert.push({
+                  goals_per_user_id: `${registrationId}_g${goalId}`,
+                  registration_id: registrationId!,
+                  goal_id: goalId,
+                  other: isOtherGoal ? (registrationData.otherGoal || null) : null,
+                });
+              }
+            } else if (goalsArray.length > 0) {
+              console.log('[AuthContext] No selectedGoalIds, falling back to name-based lookup');
+              const standardGoals = goalsArray.filter(g => g.toLowerCase() !== 'other');
+
+              if (standardGoals.length > 0) {
+                const { data: goalsData, error: goalsError } = await supabase
+                  .from('goals')
+                  .select('goal_id, Goal')
+                  .in('Goal', standardGoals);
+
+                if (goalsError) {
+                  console.error('Error fetching goal_ids:', goalsError);
+                } else if (goalsData) {
+                  for (const g of goalsData) {
+                    rowsToInsert.push({
+                      goals_per_user_id: `${registrationId}_g${g.goal_id}`,
+                      registration_id: registrationId!,
+                      goal_id: Number(g.goal_id),
+                      other: null,
+                    });
+                  }
+                }
+              }
+
+              if (hasOtherGoalName) {
+                const { data: otherGoalData } = await supabase
+                  .from('goals')
+                  .select('goal_id')
+                  .ilike('Goal', 'other')
+                  .single();
+
+                const otherGId = otherGoalData ? Number(otherGoalData.goal_id) : 0;
+                if (otherGId > 0) {
                   rowsToInsert.push({
-                    goals_per_user_id: `${registrationId}_g${g.goal_id}`,
+                    goals_per_user_id: `${registrationId}_gOther`,
                     registration_id: registrationId!,
-                    goal_id: Number(g.goal_id),
-                    other: null,
+                    goal_id: otherGId,
+                    other: registrationData.otherGoal || null,
                   });
                 }
               }
             }
 
-            if (hasOtherGoal) {
-              const { data: otherGoalData } = await supabase
-                .from('goals')
-                .select('goal_id')
-                .eq('Goal', 'Other')
-                .single();
-
-              const otherGoalId = otherGoalData ? Number(otherGoalData.goal_id) : 0;
-              if (otherGoalId > 0) {
-                rowsToInsert.push({
-                  goals_per_user_id: `${registrationId}_gOther`,
-                  registration_id: registrationId!,
-                  goal_id: otherGoalId,
-                  other: registrationData.otherGoal || null,
-                });
-                console.log('[AuthContext] Saving other goal:', registrationData.otherGoal);
-              }
-            }
-
             if (rowsToInsert.length > 0) {
               console.log('[AuthContext] Inserting goals_per_user rows:', JSON.stringify(rowsToInsert));
-              const { error: goalsPerUserError } = await supabase
+              const { data: insertedData, error: goalsPerUserError } = await supabase
                 .from('goals_per_user')
-                .insert(rowsToInsert);
+                .insert(rowsToInsert)
+                .select();
 
               if (goalsPerUserError) {
-                console.error('Error saving goals_per_user:', goalsPerUserError);
+                console.error('[AuthContext] Error saving goals_per_user:', JSON.stringify(goalsPerUserError));
               } else {
-                console.log('[AuthContext] Goals saved successfully:', rowsToInsert.length, 'rows');
+                console.log('[AuthContext] Goals saved successfully:', insertedData?.length, 'rows inserted');
+                console.log('[AuthContext] Inserted data:', JSON.stringify(insertedData));
               }
+            } else {
+              console.warn('[AuthContext] No goal rows to insert!');
             }
           } catch (goalsError) {
             console.error('Failed to save goals:', goalsError);

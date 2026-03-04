@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Fingerprint, Camera, Check } from 'lucide-react-native';
+import { Fingerprint, Camera, Check, Loader } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@/contexts/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -23,19 +23,15 @@ import * as SecureStore from 'expo-secure-store';
 import { Picker } from '@react-native-picker/picker';
 import { supabase } from '@/lib/supabase';
 
+
 type ScreenMode = 'login' | 'create' | 'forgot' | 'fullRegistration';
 
-const RUNNING_GOALS = [
-  'Weight Loss',
-  'Improve Fitness',
-  'Mental Health & Stress Relief',
-  'Self Discipline / Personal Improvement',
-  'Training for an Event',
-  'To interact with others',
-  'General Health',
-] as const;
-
 const MAX_GOALS = 3;
+
+interface DbGoal {
+  goal_id: number;
+  Goal: string;
+}
 
 interface RegistrationData {
   firstName: string;
@@ -45,7 +41,7 @@ interface RegistrationData {
   sex: string;
   dob: string;
   residence: string;
-  runningGoals: string[];
+  selectedGoalIds: number[];
   otherGoal: string;
   weightCurrent: string;
   weightTarget: string;
@@ -74,7 +70,7 @@ export default function RegisterScreen() {
     sex: '',
     dob: '',
     residence: '',
-    runningGoals: [],
+    selectedGoalIds: [],
     otherGoal: '',
     weightCurrent: '',
     weightTarget: '',
@@ -91,6 +87,8 @@ export default function RegisterScreen() {
   const [clubsLoading, setClubsLoading] = useState(true);
   const [countries, setCountries] = useState<{ name: string; iso_alpha2: string }[]>([]);
   const [countriesLoading, setCountriesLoading] = useState(true);
+  const [dbGoals, setDbGoals] = useState<DbGoal[]>([]);
+  const [goalsLoading, setGoalsLoading] = useState(true);
   
   const pinRef1 = useRef<TextInput>(null);
   const pinRef2 = useRef<TextInput>(null);
@@ -105,7 +103,29 @@ export default function RegisterScreen() {
     checkBiometricAvailability();
     fetchClubs();
     fetchCountries();
+    fetchGoalsFromDb();
   }, []);
+
+  const fetchGoalsFromDb = async () => {
+    try {
+      setGoalsLoading(true);
+      const { data, error } = await supabase
+        .from('goals')
+        .select('goal_id, Goal')
+        .order('goal_id', { ascending: true });
+
+      if (error) {
+        console.error('[Register] Error fetching goals:', error);
+      } else if (data) {
+        console.log('[Register] Fetched goals from DB:', JSON.stringify(data));
+        setDbGoals(data as DbGoal[]);
+      }
+    } catch (err) {
+      console.error('[Register] Failed to fetch goals:', err);
+    } finally {
+      setGoalsLoading(false);
+    }
+  };
 
   const fetchCountries = async () => {
     try {
@@ -301,13 +321,14 @@ export default function RegisterScreen() {
     }
   };
 
-  const toggleGoal = (goal: string) => {
+  const toggleGoalById = (goalId: number) => {
     setRegistrationData(prev => {
-      const current = prev.runningGoals;
-      if (current.includes(goal)) {
-        const updated = current.filter(g => g !== goal);
-        const newData: Partial<RegistrationData> = { runningGoals: updated };
-        if (goal === 'Weight Loss') {
+      const current = prev.selectedGoalIds;
+      if (current.includes(goalId)) {
+        const updated = current.filter(id => id !== goalId);
+        const goalName = dbGoals.find(g => g.goal_id === goalId)?.Goal || '';
+        const newData: Partial<RegistrationData> = { selectedGoalIds: updated };
+        if (goalName.toLowerCase().includes('weight loss')) {
           newData.weightCurrent = '';
           newData.weightTarget = '';
           newData.weightMonths = '';
@@ -318,12 +339,20 @@ export default function RegisterScreen() {
           Alert.alert('Limit Reached', `You can select up to ${MAX_GOALS} running goals.`);
           return prev;
         }
-        return { ...prev, runningGoals: [...current, goal] };
+        return { ...prev, selectedGoalIds: [...current, goalId] };
       }
     });
   };
 
-  const hasWeightLossGoal = registrationData.runningGoals.includes('Weight Loss');
+  const getSelectedGoalNames = (): string[] => {
+    return registrationData.selectedGoalIds.map(id => {
+      const g = dbGoals.find(goal => goal.goal_id === id);
+      return g?.Goal || '';
+    });
+  };
+
+  const hasWeightLossGoal = getSelectedGoalNames().some(n => n.toLowerCase().includes('weight loss'));
+  const hasOtherGoal = getSelectedGoalNames().some(n => n.toLowerCase() === 'other');
 
   const handleCreateAccount = async () => {
     const requiredFields = [
@@ -337,7 +366,7 @@ export default function RegisterScreen() {
       return;
     }
 
-    if (registrationData.runningGoals.length === 0) {
+    if (registrationData.selectedGoalIds.length === 0) {
       Alert.alert('Error', 'Please select at least one running goal');
       return;
     }
@@ -372,7 +401,10 @@ export default function RegisterScreen() {
     setIsLoading(true);
 
     try {
-      const { error } = await signUp(registrationData.username, registrationData.pin, registrationData);
+      const { error } = await signUp(registrationData.username, registrationData.pin, {
+        ...registrationData,
+        runningGoals: getSelectedGoalNames(),
+      });
       if (error) {
         Alert.alert('Registration Failed', error.message);
       } else {
@@ -565,52 +597,40 @@ export default function RegisterScreen() {
 
                   <View style={styles.inputContainer}>
                     <Text style={styles.label}>Running Goals * (select up to 3)</Text>
-                    <View style={styles.goalsContainer}>
-                      {RUNNING_GOALS.map((goal) => {
-                        const isSelected = registrationData.runningGoals.includes(goal);
-                        return (
-                          <TouchableOpacity
-                            key={goal}
-                            style={[styles.goalChip, isSelected && styles.goalChipSelected]}
-                            onPress={() => toggleGoal(goal)}
-                            activeOpacity={0.7}
-                            disabled={isLoading}
-                          >
-                            {isSelected && (
-                              <Check size={14} color="#fff" style={{ marginRight: 4 }} />
-                            )}
-                            <Text style={[styles.goalChipText, isSelected && styles.goalChipTextSelected]}>
-                              {goal}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                      <TouchableOpacity
-                        style={[
-                          styles.goalChip,
-                          registrationData.runningGoals.includes('Other') && styles.goalChipSelected,
-                        ]}
-                        onPress={() => toggleGoal('Other')}
-                        activeOpacity={0.7}
-                        disabled={isLoading}
-                      >
-                        {registrationData.runningGoals.includes('Other') && (
-                          <Check size={14} color="#fff" style={{ marginRight: 4 }} />
-                        )}
-                        <Text style={[
-                          styles.goalChipText,
-                          registrationData.runningGoals.includes('Other') && styles.goalChipTextSelected,
-                        ]}>
-                          Other
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
+                    {goalsLoading ? (
+                      <View style={styles.goalsLoadingRow}>
+                        <Loader size={18} color="#fff" />
+                        <Text style={styles.goalsLoadingText}>Loading goals...</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.goalsContainer}>
+                        {dbGoals.map((goal) => {
+                          const isSelected = registrationData.selectedGoalIds.includes(goal.goal_id);
+                          return (
+                            <TouchableOpacity
+                              key={goal.goal_id}
+                              style={[styles.goalChip, isSelected && styles.goalChipSelected]}
+                              onPress={() => toggleGoalById(goal.goal_id)}
+                              activeOpacity={0.7}
+                              disabled={isLoading}
+                            >
+                              {isSelected && (
+                                <Check size={14} color="#fff" style={{ marginRight: 4 }} />
+                              )}
+                              <Text style={[styles.goalChipText, isSelected && styles.goalChipTextSelected]}>
+                                {goal.Goal}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    )}
                     <Text style={styles.goalCount}>
-                      {registrationData.runningGoals.length}/{MAX_GOALS} selected
+                      {registrationData.selectedGoalIds.length}/{MAX_GOALS} selected
                     </Text>
                   </View>
 
-                  {registrationData.runningGoals.includes('Other') && (
+                  {hasOtherGoal && (
                     <View style={styles.inputContainer}>
                       <Text style={styles.label}>Describe your goal</Text>
                       <TextInput
@@ -873,7 +893,7 @@ export default function RegisterScreen() {
                           sex: '',
                           dob: '',
                           residence: '',
-                          runningGoals: [],
+                          selectedGoalIds: [],
                           otherGoal: '',
                           weightCurrent: '',
                           weightTarget: '',
@@ -1355,6 +1375,17 @@ const styles = StyleSheet.create({
     color: '#fff',
     opacity: 0.9,
     lineHeight: 18,
+  },
+  goalsLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+  },
+  goalsLoadingText: {
+    fontSize: 14,
+    color: '#fff',
+    opacity: 0.8,
   },
   goalsContainer: {
     flexDirection: 'row',
