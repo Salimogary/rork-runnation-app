@@ -50,8 +50,11 @@ export default function ExerciseScreen() {
 
   useEffect(() => {
     if (user) {
+      console.log('[DEBUG] Current user RegistrationID:', user.id);
+      console.log('[DEBUG] Is U0101?', user.id === 'U0101');
       fetchUserGoals();
     } else {
+      console.log('[DEBUG] No user logged in');
       setGoalsLoading(false);
     }
   }, [user]);
