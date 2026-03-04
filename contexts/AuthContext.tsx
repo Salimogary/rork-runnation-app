@@ -198,6 +198,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
         if (signUpError) {
           console.error('Supabase auth sign up error:', signUpError);
+          if (signUpError.message?.includes('rate limit')) {
+            console.warn('Auth rate limit hit during sign in, proceeding without re-auth');
+          }
         }
       }
 
@@ -251,7 +254,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
           if (authSignUpError) {
             console.error('Supabase auth sign up error:', authSignUpError);
-            return { error: { message: 'Failed to create authentication account' } };
+            if (authSignUpError.message?.includes('rate limit')) {
+              console.warn('Auth rate limit hit, proceeding without Supabase auth');
+            } else {
+              console.warn('Auth sign up failed, proceeding without Supabase auth:', authSignUpError.message);
+            }
           }
 
           const { data: newUserData, error: insertError } = await supabase
