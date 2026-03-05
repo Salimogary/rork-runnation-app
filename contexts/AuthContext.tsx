@@ -177,29 +177,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         return { error: { message: 'Username not found or incorrect PIN' } };
       }
 
-      const email = userData.Email || `${username.toLowerCase()}@runapp.local`;
-      const password = pinHash;
-
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (signInError) {
-        console.log('Supabase auth sign in failed, attempting sign up:', signInError.message);
-        const { error: signUpError } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-
-        if (signUpError) {
-          console.error('Supabase auth sign up error:', signUpError);
-          if (signUpError.message?.includes('rate limit')) {
-            console.warn('Auth rate limit hit during sign in, proceeding without re-auth');
-          }
-        }
-      }
-
       const userObj: UserData = {
         id: userData.RegistrationID,
         username: userData.Username,
@@ -241,21 +218,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           let residenceValue = registrationData.residence;
 
           const email = registrationData.email || `${username.toLowerCase()}@runapp.local`;
-          const password = pinHash;
-
-          const { error: authSignUpError } = await supabase.auth.signUp({
-            email,
-            password,
-          });
-
-          if (authSignUpError) {
-            console.error('Supabase auth sign up error:', authSignUpError);
-            if (authSignUpError.message?.includes('rate limit')) {
-              console.warn('Auth rate limit hit, proceeding without Supabase auth');
-            } else {
-              console.warn('Auth sign up failed, proceeding without Supabase auth:', authSignUpError.message);
-            }
-          }
 
           const { data: newUserData, error: insertError } = await supabase
             .from('registrations')
