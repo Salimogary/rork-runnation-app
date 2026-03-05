@@ -329,6 +329,52 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   };
 
+  const deleteAccount = async (): Promise<{ error: { message: string } | null }> => {
+    if (!user) return { error: { message: 'No user logged in' } };
+    const regId = user.id;
+    try {
+      console.log('[AuthContext] Deleting account for:', regId);
+
+      const deletions = [
+        supabase.from('activities').delete().eq('RegistrationID', regId),
+        supabase.from('pending_activities').delete().eq('RegistrationID', regId),
+        supabase.from('user_goals').delete().eq('registration_id', regId),
+        supabase.from('user_photos').delete().eq('registration_id', regId),
+        supabase.from('club_membership_request').delete().eq('registration_id', regId),
+        supabase.from('Events Participants').delete().eq('RegistrationID', regId),
+        supabase.from('event_enrollments').delete().eq('RegistrationID', regId),
+        supabase.from('External Activity Submissions').delete().eq('RegistrationID', regId),
+      ];
+
+      const results = await Promise.allSettled(deletions);
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') {
+          console.warn(`[AuthContext] Deletion step ${i} failed:`, r.reason);
+        } else if (r.value?.error) {
+          console.warn(`[AuthContext] Deletion step ${i} error:`, r.value.error.message);
+        }
+      });
+
+      const { error: regDeleteError } = await supabase
+        .from('registrations')
+        .delete()
+        .eq('RegistrationID', regId);
+
+      if (regDeleteError) {
+        console.error('[AuthContext] Failed to delete registration:', regDeleteError);
+        return { error: { message: 'Failed to delete account. Please contact support.' } };
+      }
+
+      await AsyncStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      setUser(null);
+      console.log('[AuthContext] Account deleted successfully');
+      return { error: null };
+    } catch (error) {
+      console.error('[AuthContext] Delete account error:', error);
+      return { error: { message: 'Failed to delete account. Please try again.' } };
+    }
+  };
+
   const getBiometricStatus = async (username: string): Promise<boolean> => {
     const status = await secureStorage.getItem(`biometric_enabled_${username.toLowerCase()}`);
     return status === 'true';
@@ -372,6 +418,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     signIn,
     signUp,
     signOut,
+    deleteAccount,
     verifyPin,
     getBiometricStatus,
     disableBiometric,

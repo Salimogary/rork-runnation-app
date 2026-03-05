@@ -1,7 +1,7 @@
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, Image, TextInput, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, Bell, MapPin, Moon, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff, Lock } from "lucide-react-native";
+import { LogOut, Bell, MapPin, Moon, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff, Lock, Trash2, AlertTriangle } from "lucide-react-native";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useState } from "react";
@@ -23,7 +23,7 @@ interface PendingActivity {
 }
 
 export default function SettingsScreen() {
-  const { signOut, user, privateMode, setPrivateMode, verifyPin } = useAuth();
+  const { signOut, user, privateMode, setPrivateMode, verifyPin, deleteAccount } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [showApprovalModal, setShowApprovalModal] = useState(false);
@@ -38,6 +38,11 @@ export default function SettingsScreen() {
   const [signOutPin, setSignOutPin] = useState('');
   const [signOutPinError, setSignOutPinError] = useState('');
   const [isVerifyingPin, setIsVerifyingPin] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletePin, setDeletePin] = useState('');
+  const [deletePinError, setDeletePinError] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteStep, setDeleteStep] = useState<'confirm' | 'pin'>('confirm');
   const IS_ADMIN = true;
 
   const handleSignOut = () => {
@@ -375,6 +380,24 @@ export default function SettingsScreen() {
         </View>
       )}
 
+      {user && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Danger Zone</Text>
+          <TouchableOpacity
+            style={styles.deleteAccountButton}
+            onPress={() => {
+              setShowDeleteModal(true);
+              setDeleteStep('confirm');
+              setDeletePin('');
+              setDeletePinError('');
+            }}
+          >
+            <Trash2 size={22} color="#dc2626" />
+            <Text style={styles.deleteAccountText}>Delete Account</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <View style={styles.footer}>
         <Text style={styles.footerText}>Version 1.0.0</Text>
         {user && 'username' in user && user.username && (
@@ -602,6 +625,167 @@ export default function SettingsScreen() {
                 )}
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showDeleteModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowDeleteModal(false)}
+      >
+        <View style={styles.detailModalOverlay}>
+          <View style={styles.pinModalContent}>
+            {deleteStep === 'confirm' ? (
+              <>
+                <View style={styles.detailHeader}>
+                  <Text style={styles.detailTitle}>Delete Account</Text>
+                  <TouchableOpacity onPress={() => setShowDeleteModal(false)}>
+                    <XIcon size={24} color="#666" />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.deleteWarningBody}>
+                  <View style={styles.deleteWarningIcon}>
+                    <AlertTriangle size={32} color="#dc2626" />
+                  </View>
+                  <Text style={styles.deleteWarningTitle}>Are you sure?</Text>
+                  <Text style={styles.deleteWarningText}>
+                    This action is permanent and cannot be undone. All your data including activities, goals, club memberships, and event participation will be permanently deleted.
+                  </Text>
+                </View>
+
+                <View style={styles.feedbackActions}>
+                  <TouchableOpacity
+                    style={styles.cancelFeedbackButton}
+                    onPress={() => setShowDeleteModal(false)}
+                  >
+                    <Text style={styles.cancelFeedbackText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.deleteConfirmStepButton}
+                    onPress={() => setDeleteStep('pin')}
+                  >
+                    <Text style={styles.submitFeedbackText}>Continue</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.detailHeader}>
+                  <Text style={styles.detailTitle}>Verify PIN</Text>
+                  <TouchableOpacity onPress={() => {
+                    setShowDeleteModal(false);
+                    setDeletePin('');
+                    setDeletePinError('');
+                  }}>
+                    <XIcon size={24} color="#666" />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.pinModalBody}>
+                  <View style={styles.deleteLockIcon}>
+                    <Lock size={28} color="#dc2626" />
+                  </View>
+                  <Text style={styles.pinModalSubtitle}>Enter your PIN to confirm account deletion</Text>
+
+                  <View style={styles.pinDotsRow}>
+                    {[0, 1, 2, 3].map((i) => (
+                      <View
+                        key={i}
+                        style={[
+                          styles.pinDot,
+                          deletePin.length > i && styles.deletePinDotFilled,
+                          deletePinError ? styles.pinDotError : null,
+                        ]}
+                      />
+                    ))}
+                  </View>
+
+                  <TextInput
+                    style={styles.hiddenPinInput}
+                    value={deletePin}
+                    onChangeText={(text) => {
+                      const digits = text.replace(/[^0-9]/g, '').slice(0, 4);
+                      setDeletePin(digits);
+                      if (deletePinError) setDeletePinError('');
+                    }}
+                    keyboardType="number-pad"
+                    maxLength={4}
+                    secureTextEntry
+                    autoFocus
+                    editable={!isDeleting}
+                  />
+
+                  {!!deletePinError && (
+                    <Text style={styles.pinErrorText}>{deletePinError}</Text>
+                  )}
+                </View>
+
+                <View style={styles.feedbackActions}>
+                  <TouchableOpacity
+                    style={styles.cancelFeedbackButton}
+                    onPress={() => {
+                      setDeleteStep('confirm');
+                      setDeletePin('');
+                      setDeletePinError('');
+                    }}
+                  >
+                    <Text style={styles.cancelFeedbackText}>Back</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.deleteConfirmButton,
+                      (deletePin.length !== 4 || isDeleting) && styles.submitFeedbackButtonDisabled
+                    ]}
+                    onPress={async () => {
+                      if (deletePin.length !== 4) {
+                        setDeletePinError('Enter your 4-digit PIN');
+                        return;
+                      }
+                      setIsDeleting(true);
+                      setDeletePinError('');
+                      try {
+                        const valid = await verifyPin(deletePin);
+                        if (valid) {
+                          const result = await deleteAccount();
+                          if (result.error) {
+                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                            setDeletePinError(result.error.message);
+                          } else {
+                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                            setShowDeleteModal(false);
+                            if (Platform.OS !== 'web') {
+                              Alert.alert('Account Deleted', 'Your account has been permanently deleted.');
+                            } else {
+                              alert('Your account has been permanently deleted.');
+                            }
+                            router.replace('/(tabs)' as any);
+                          }
+                        } else {
+                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                          setDeletePinError('Incorrect PIN. Please try again.');
+                          setDeletePin('');
+                        }
+                      } catch {
+                        setDeletePinError('Verification failed. Try again.');
+                        setDeletePin('');
+                      } finally {
+                        setIsDeleting(false);
+                      }
+                    }}
+                    disabled={deletePin.length !== 4 || isDeleting}
+                  >
+                    {isDeleting ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.submitFeedbackText}>Delete Account</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -1095,5 +1279,75 @@ const styles = StyleSheet.create({
     backgroundColor: "#ef4444",
     alignItems: "center" as const,
     justifyContent: "center" as const,
+  },
+  deleteAccountButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 12,
+    backgroundColor: "#fff",
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "#dc2626",
+  },
+  deleteAccountText: {
+    fontSize: 16,
+    fontWeight: "600" as const,
+    color: "#dc2626",
+  },
+  deleteWarningBody: {
+    padding: 24,
+    alignItems: "center" as const,
+    gap: 12,
+  },
+  deleteWarningIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#fef2f2",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    marginBottom: 4,
+  },
+  deleteWarningTitle: {
+    fontSize: 20,
+    fontWeight: "700" as const,
+    color: "#dc2626",
+  },
+  deleteWarningText: {
+    fontSize: 14,
+    color: "#666",
+    textAlign: "center" as const,
+    lineHeight: 20,
+  },
+  deleteConfirmStepButton: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: "#dc2626",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  deleteConfirmButton: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: "#dc2626",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  deleteLockIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#fef2f2",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    marginBottom: 4,
+  },
+  deletePinDotFilled: {
+    backgroundColor: "#dc2626",
+    borderColor: "#dc2626",
   },
 });
