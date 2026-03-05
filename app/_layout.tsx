@@ -44,7 +44,7 @@ function RootLayoutNav() {
     const inAllowedRoute = currentSegment === 'settings' || currentSegment === 'profile' || currentSegment === 'cart' || currentSegment === 'checkout' || currentSegment === 'participants' || currentSegment === 'medal-list' || currentSegment === 'policy';
 
     if (user) {
-      if (!inTabs && !inAllowedRoute) {
+      if (!inTabs && !inAllowedRoute && !inRegister) {
         router.replace('/(tabs)');
       }
     } else {
