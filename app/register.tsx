@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,10 +11,11 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Animated,
 } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Fingerprint, Camera, Check } from 'lucide-react-native';
+import { Fingerprint, Camera, Check, ChevronRight, Target, Users } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@/contexts/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -25,6 +26,7 @@ import { supabase } from '@/lib/supabase';
 
 
 type ScreenMode = 'login' | 'create' | 'forgot' | 'fullRegistration';
+type RegistrationStep = 1 | 2 | 3;
 
 interface RegistrationData {
   firstName: string;
@@ -43,15 +45,27 @@ interface RegistrationData {
   photoUri?: string;
 }
 
+interface GoalItem {
+  goal_id: number;
+  Goal: string;
+}
+
+interface ClubItem {
+  club_id: number;
+  club_name: string;
+}
+
 export default function RegisterScreen() {
   const router = useRouter();
   const { signUp, signIn } = useAuth();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [pin, setPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
+
   const [isLoading, setIsLoading] = useState(false);
   const [screenMode, setScreenMode] = useState<ScreenMode>('login');
+  const [registrationStep, setRegistrationStep] = useState<RegistrationStep>(1);
+  const [registrationId, setRegistrationId] = useState<string | null>(null);
   const [registrationData, setRegistrationData] = useState<RegistrationData>({
     firstName: '',
     otherNames: '',
@@ -72,20 +86,44 @@ export default function RegisterScreen() {
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [countries, setCountries] = useState<{ name: string; iso_alpha2: string }[]>([]);
   const [countriesLoading, setCountriesLoading] = useState(true);
-  
+
+  const [goals, setGoals] = useState<GoalItem[]>([]);
+  const [goalsLoading, setGoalsLoading] = useState(false);
+  const [selectedGoalIds, setSelectedGoalIds] = useState<number[]>([]);
+  const [otherGoalText, setOtherGoalText] = useState('');
+
+  const [clubs, setClubs] = useState<ClubItem[]>([]);
+  const [clubsLoading, setClubsLoading] = useState(false);
+  const [selectedClubId, setSelectedClubId] = useState<number | null>(null);
+
+  const stepAnim = useRef(new Animated.Value(0)).current;
+
   const pinRef1 = useRef<TextInput>(null);
   const pinRef2 = useRef<TextInput>(null);
   const pinRef3 = useRef<TextInput>(null);
   const pinRef4 = useRef<TextInput>(null);
-  const confirmPinRef1 = useRef<TextInput>(null);
-  const confirmPinRef2 = useRef<TextInput>(null);
-  const confirmPinRef3 = useRef<TextInput>(null);
-  const confirmPinRef4 = useRef<TextInput>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     checkBiometricAvailability();
     fetchCountries();
   }, []);
+
+  useEffect(() => {
+    if (registrationStep === 2) {
+      fetchGoals();
+    } else if (registrationStep === 3) {
+      fetchClubs();
+    }
+  }, [registrationStep]);
+
+  useEffect(() => {
+    Animated.spring(stepAnim, {
+      toValue: registrationStep - 1,
+      useNativeDriver: true,
+      tension: 50,
+      friction: 10,
+    }).start();
+  }, [registrationStep, stepAnim]);
 
   const fetchCountries = async () => {
     try {
@@ -104,6 +142,46 @@ export default function RegisterScreen() {
       console.error('Failed to fetch countries:', err);
     } finally {
       setCountriesLoading(false);
+    }
+  };
+
+  const fetchGoals = async () => {
+    try {
+      setGoalsLoading(true);
+      const { data, error } = await supabase
+        .from('goals')
+        .select('goal_id, Goal')
+        .order('goal_id', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching goals:', error);
+      } else if (data) {
+        setGoals(data as GoalItem[]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch goals:', err);
+    } finally {
+      setGoalsLoading(false);
+    }
+  };
+
+  const fetchClubs = async () => {
+    try {
+      setClubsLoading(true);
+      const { data, error } = await supabase
+        .from('clubs')
+        .select('club_id, club_name')
+        .order('club_name', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching clubs:', error);
+      } else if (data) {
+        setClubs(data as ClubItem[]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch clubs:', err);
+    } finally {
+      setClubsLoading(false);
     }
   };
 
@@ -152,7 +230,7 @@ export default function RegisterScreen() {
 
     try {
       const biometricEnabled = await SecureStore.getItemAsync(`biometric_enabled_${username.toLowerCase()}`);
-      
+
       if (biometricEnabled !== 'true') {
         Alert.alert('Error', 'Biometric login not set up. Please log in with PIN first.');
         return;
@@ -210,29 +288,16 @@ export default function RegisterScreen() {
     if (value.length > 1) {
       value = value.charAt(value.length - 1);
     }
-    
+
     const newPin = pin.split('');
     newPin[index] = value;
     setPin(newPin.join(''));
-    
+
     if (value && index < 3) {
       refs[index + 1].current?.focus();
     }
   };
 
-  const handleConfirmPinChange = (value: string, index: number, refs: React.RefObject<TextInput | null>[]) => {
-    if (value.length > 1) {
-      value = value.charAt(value.length - 1);
-    }
-    
-    const newPin = confirmPin.split('');
-    newPin[index] = value;
-    setConfirmPin(newPin.join(''));
-    
-    if (value && index < 3) {
-      refs[index + 1].current?.focus();
-    }
-  };
 
   const handleLogin = async () => {
     if (!username || pin.length !== 4) {
@@ -261,7 +326,7 @@ export default function RegisterScreen() {
     }
   };
 
-  const handleCreateAccount = async () => {
+  const handleStep1Complete = async () => {
     const requiredFields = [
       'firstName', 'otherNames', 'username', 'email', 'sex', 'dob',
       'residence', 'country', 'pin', 'confirmPin'
@@ -296,9 +361,10 @@ export default function RegisterScreen() {
     setIsLoading(true);
 
     try {
-      const { error } = await signUp(registrationData.username, registrationData.pin, {
+      const { error, registrationId: newRegId } = await signUp(registrationData.username, registrationData.pin, {
         ...registrationData,
-      });
+      }) as { error: { message: string } | null; registrationId?: string };
+
       if (error) {
         Alert.alert('Registration Failed', error.message);
       } else {
@@ -306,14 +372,136 @@ export default function RegisterScreen() {
           await SecureStore.setItemAsync(`biometric_pin_${registrationData.username.toLowerCase()}`, registrationData.pin);
           await SecureStore.setItemAsync(`biometric_enabled_${registrationData.username.toLowerCase()}`, 'true');
         }
-        await AsyncStorage.setItem('hasSeenOnboarding', 'true');
-        router.replace('/(tabs)');
+
+        const regId = newRegId || null;
+        if (!regId) {
+          const { data: regData } = await supabase
+            .from('registrations')
+            .select('RegistrationID')
+            .eq('Username', registrationData.username.toLowerCase())
+            .single();
+          setRegistrationId(regData?.RegistrationID || null);
+        } else {
+          setRegistrationId(regId);
+        }
+
+        console.log('[Register] Step 1 complete, moving to goals. RegistrationID:', regId);
+        setRegistrationStep(2);
       }
     } catch {
       Alert.alert('Error', 'Something went wrong. Please try again.');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleStep2Complete = async () => {
+    if (selectedGoalIds.length === 0) {
+      Alert.alert('Select Goals', 'Please select at least one goal to continue.');
+      return;
+    }
+
+    if (!registrationId) {
+      console.error('[Register] No registrationId for step 2');
+      Alert.alert('Error', 'Registration ID not found. Please try again.');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const hasOtherGoal = selectedGoalIds.some(id => {
+        const goal = goals.find(g => g.goal_id === id);
+        return goal?.Goal?.toLowerCase() === 'other';
+      });
+
+      const rowsToInsert = selectedGoalIds.map(goalId => {
+        const goal = goals.find(g => g.goal_id === goalId);
+        const isOther = goal?.Goal?.toLowerCase() === 'other';
+        return {
+          registration_id: registrationId,
+          goal_id: goalId,
+          other: isOther && hasOtherGoal ? (otherGoalText || null) : null,
+        };
+      });
+
+      console.log('[Register] Inserting goals_per_user:', JSON.stringify(rowsToInsert));
+
+      const { error: goalsError } = await supabase
+        .from('goals_per_user')
+        .insert(rowsToInsert);
+
+      if (goalsError) {
+        console.error('[Register] Error saving goals:', JSON.stringify(goalsError));
+        Alert.alert('Error', 'Failed to save goals. Please try again.');
+      } else {
+        console.log('[Register] Goals saved, moving to clubs');
+        setRegistrationStep(3);
+      }
+    } catch (err) {
+      console.error('[Register] Goals save error:', err);
+      Alert.alert('Error', 'Something went wrong saving your goals.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStep3Complete = async () => {
+    if (!registrationId) {
+      console.error('[Register] No registrationId for step 3');
+      await AsyncStorage.setItem('hasSeenOnboarding', 'true');
+      router.replace('/(tabs)');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      if (selectedClubId) {
+        const selectedClub = clubs.find(c => c.club_id === selectedClubId);
+        console.log('[Register] Inserting club_membership_request for club:', selectedClub?.club_name);
+
+        const { error: clubError } = await supabase
+          .from('club_membership_request')
+          .insert({
+            registration_id: registrationId,
+            club_id: selectedClubId,
+          });
+
+        if (clubError) {
+          console.error('[Register] Error saving club membership:', JSON.stringify(clubError));
+          Alert.alert('Error', 'Failed to save club membership request. Please try again.');
+          setIsLoading(false);
+          return;
+        }
+        console.log('[Register] Club membership request saved');
+      }
+
+      await AsyncStorage.setItem('hasSeenOnboarding', 'true');
+      router.replace('/(tabs)');
+    } catch (err) {
+      console.error('[Register] Club save error:', err);
+      Alert.alert('Error', 'Something went wrong. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSkipStep = async () => {
+    if (registrationStep === 2) {
+      setRegistrationStep(3);
+    } else if (registrationStep === 3) {
+      await AsyncStorage.setItem('hasSeenOnboarding', 'true');
+      router.replace('/(tabs)');
+    }
+  };
+
+  const toggleGoal = (goalId: number) => {
+    setSelectedGoalIds(prev =>
+      prev.includes(goalId)
+        ? prev.filter(id => id !== goalId)
+        : [...prev, goalId]
+    );
   };
 
   const updateRegistrationField = (field: keyof RegistrationData, value: string) => {
@@ -329,7 +517,7 @@ export default function RegisterScreen() {
     setIsLoading(true);
     await new Promise(resolve => setTimeout(resolve, 1500));
     setIsLoading(false);
-    
+
     Alert.alert(
       'Recovery PIN Sent',
       `A system-generated PIN has been sent to ${email}. Please check your email.`,
@@ -344,6 +532,453 @@ export default function RegisterScreen() {
       ]
     );
   };
+
+  const showsOtherInput = selectedGoalIds.some(id => {
+    const goal = goals.find(g => g.goal_id === id);
+    return goal?.Goal?.toLowerCase() === 'other';
+  });
+
+  const renderStepIndicator = () => (
+    <View style={styles.stepIndicatorContainer}>
+      {[1, 2, 3].map((step) => {
+        const isActive = registrationStep >= step;
+        const isCurrent = registrationStep === step;
+        return (
+          <React.Fragment key={step}>
+            <View style={[styles.stepDot, isActive && styles.stepDotActive, isCurrent && styles.stepDotCurrent]}>
+              {isActive && registrationStep > step ? (
+                <Check size={14} color="#fff" />
+              ) : (
+                <Text style={[styles.stepDotText, isActive && styles.stepDotTextActive]}>{step}</Text>
+              )}
+            </View>
+            {step < 3 && (
+              <View style={[styles.stepLine, registrationStep > step && styles.stepLineActive]} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </View>
+  );
+
+  const renderStepLabels = () => (
+    <View style={styles.stepLabelsRow}>
+      <Text style={[styles.stepLabel, registrationStep >= 1 && styles.stepLabelActive]}>Registration</Text>
+      <Text style={[styles.stepLabel, registrationStep >= 2 && styles.stepLabelActive]}>Your Goals</Text>
+      <Text style={[styles.stepLabel, registrationStep >= 3 && styles.stepLabelActive]}>Club</Text>
+    </View>
+  );
+
+  const renderStep1 = () => (
+    <>
+      <Text style={styles.formTitle}>Create Your Account</Text>
+
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>First Name *</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter first name"
+          placeholderTextColor="#999"
+          value={registrationData.firstName}
+          onChangeText={(text) => updateRegistrationField('firstName', text)}
+          editable={!isLoading}
+        />
+      </View>
+
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>Other Names *</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter other names"
+          placeholderTextColor="#999"
+          value={registrationData.otherNames}
+          onChangeText={(text) => updateRegistrationField('otherNames', text)}
+          editable={!isLoading}
+        />
+      </View>
+
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>Username *</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Choose a username"
+          placeholderTextColor="#999"
+          value={registrationData.username}
+          onChangeText={(text) => updateRegistrationField('username', text)}
+          autoCapitalize="none"
+          autoCorrect={false}
+          editable={!isLoading}
+        />
+      </View>
+
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>Email *</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter email address"
+          placeholderTextColor="#999"
+          value={registrationData.email}
+          onChangeText={(text) => updateRegistrationField('email', text)}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="email-address"
+          editable={!isLoading}
+        />
+      </View>
+
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>Sex *</Text>
+        <View style={styles.pickerContainer}>
+          <Picker
+            selectedValue={registrationData.sex}
+            onValueChange={(value: string) => updateRegistrationField('sex', value)}
+            style={styles.picker}
+            enabled={!isLoading}
+          >
+            <Picker.Item label="Select sex" value="" />
+            <Picker.Item label="Male" value="M" />
+            <Picker.Item label="Female" value="F" />
+          </Picker>
+        </View>
+      </View>
+
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>Date of Birth *</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="DD/MM/YYYY"
+          placeholderTextColor="#999"
+          value={registrationData.dob}
+          onChangeText={(text) => {
+            const formatted = formatDobInput(text);
+            updateRegistrationField('dob', formatted);
+          }}
+          keyboardType="number-pad"
+          maxLength={10}
+          editable={!isLoading}
+        />
+      </View>
+
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>Country *</Text>
+        <View style={styles.pickerContainer}>
+          <Picker
+            selectedValue={registrationData.country}
+            onValueChange={(value: string) => updateRegistrationField('country', value)}
+            style={styles.picker}
+            enabled={!isLoading && !countriesLoading}
+          >
+            <Picker.Item label={countriesLoading ? "Loading countries..." : "Select country"} value="" />
+            {countries.map((c) => (
+              <Picker.Item key={c.iso_alpha2} label={c.name} value={c.iso_alpha2} />
+            ))}
+          </Picker>
+        </View>
+      </View>
+
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>Residence (city/district/state/province) *</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter city/district/state/province"
+          placeholderTextColor="#999"
+          value={registrationData.residence}
+          onChangeText={(text) => updateRegistrationField('residence', text)}
+          editable={!isLoading}
+        />
+      </View>
+
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>Add Photo (Optional)</Text>
+        <TouchableOpacity
+          style={styles.photoButton}
+          onPress={pickImage}
+          disabled={isLoading}
+          activeOpacity={0.7}
+        >
+          {registrationData.photoUri ? (
+            <Image
+              source={{ uri: registrationData.photoUri }}
+              style={styles.photoPreview}
+            />
+          ) : (
+            <View style={styles.photoPlaceholder}>
+              <Camera size={40} color="#999" />
+              <Text style={styles.photoPlaceholderText}>Tap to add photo</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>4-Digit PIN *</Text>
+        <View style={styles.pinNoteContainer}>
+          <Text style={styles.pinNoteText}>
+            Your PIN is used to protect Shop access and to confirm when signing out. It is not required each time you open the app.
+          </Text>
+        </View>
+        <View style={styles.pinContainer}>
+          {[0, 1, 2, 3].map((i) => (
+            <TextInput
+              key={`pin-${i}`}
+              style={styles.pinInput}
+              value={registrationData.pin[i] || ''}
+              onChangeText={(value) => {
+                const newPin = registrationData.pin.split('');
+                newPin[i] = value.slice(-1);
+                updateRegistrationField('pin', newPin.join(''));
+              }}
+              keyboardType="number-pad"
+              maxLength={1}
+              secureTextEntry
+              editable={!isLoading}
+            />
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>Confirm PIN *</Text>
+        <View style={styles.pinContainer}>
+          {[0, 1, 2, 3].map((i) => (
+            <TextInput
+              key={`cpin-${i}`}
+              style={styles.pinInput}
+              value={registrationData.confirmPin[i] || ''}
+              onChangeText={(value) => {
+                const newPin = registrationData.confirmPin.split('');
+                newPin[i] = value.slice(-1);
+                updateRegistrationField('confirmPin', newPin.join(''));
+              }}
+              keyboardType="number-pad"
+              maxLength={1}
+              secureTextEntry
+              editable={!isLoading}
+            />
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.termsRow}>
+        <TouchableOpacity
+          style={[styles.checkbox, acceptedTerms && styles.checkboxChecked]}
+          onPress={() => setAcceptedTerms(!acceptedTerms)}
+          activeOpacity={0.7}
+        >
+          {acceptedTerms && <Check size={14} color="#fff" />}
+        </TouchableOpacity>
+        <Text style={styles.termsText}>
+          I have read and accept the{' '}
+        </Text>
+        <Link href={"/policy" as any} asChild>
+          <TouchableOpacity activeOpacity={0.7}>
+            <Text style={styles.termsLink}>Terms & Conditions and Privacy Policy</Text>
+          </TouchableOpacity>
+        </Link>
+      </View>
+
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity
+          style={[styles.button, styles.primaryButton, (isLoading || !acceptedTerms) && styles.buttonDisabled]}
+          onPress={handleStep1Complete}
+          disabled={isLoading || !acceptedTerms}
+          activeOpacity={0.8}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <View style={styles.buttonInner}>
+              <Text style={styles.buttonText}>Next: Set Your Goals</Text>
+              <ChevronRight size={20} color="#fff" />
+            </View>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.textButton}
+          onPress={() => {
+            setScreenMode('login');
+            setAcceptedTerms(false);
+            setRegistrationStep(1);
+            setRegistrationData({
+              firstName: '',
+              otherNames: '',
+              username: '',
+              email: '',
+              sex: '',
+              dob: '',
+              residence: '',
+              weightCurrent: '',
+              weightTarget: '',
+              weightMonths: '',
+              country: '',
+              pin: '',
+              confirmPin: '',
+              photoUri: '',
+            });
+          }}
+          disabled={isLoading}
+        >
+          <Text style={styles.textButtonText}>Back to Login</Text>
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+
+  const renderStep2 = () => (
+    <>
+      <View style={styles.stepHeader}>
+        <Target size={32} color="#fff" />
+        <Text style={styles.formTitle}>Set Your Goals</Text>
+        <Text style={styles.stepSubtitle}>What do you want to achieve? Select all that apply.</Text>
+      </View>
+
+      {goalsLoading ? (
+        <View style={styles.loadingRow}>
+          <ActivityIndicator color="#fff" />
+          <Text style={styles.loadingText}>Loading goals...</Text>
+        </View>
+      ) : (
+        <View style={styles.goalsGrid}>
+          {goals.map((goal) => {
+            const isSelected = selectedGoalIds.includes(goal.goal_id);
+            return (
+              <TouchableOpacity
+                key={goal.goal_id}
+                style={[styles.goalCard, isSelected && styles.goalCardSelected]}
+                onPress={() => toggleGoal(goal.goal_id)}
+                activeOpacity={0.7}
+                disabled={isLoading}
+              >
+                <View style={[styles.goalCheckbox, isSelected && styles.goalCheckboxSelected]}>
+                  {isSelected && <Check size={14} color="#fff" />}
+                </View>
+                <Text style={[styles.goalCardText, isSelected && styles.goalCardTextSelected]}>
+                  {goal.Goal}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
+      {showsOtherInput && (
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>Please specify your other goal</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Describe your goal..."
+            placeholderTextColor="#999"
+            value={otherGoalText}
+            onChangeText={setOtherGoalText}
+            editable={!isLoading}
+          />
+        </View>
+      )}
+
+      {selectedGoalIds.length > 0 && (
+        <Text style={styles.selectedCount}>
+          {selectedGoalIds.length} goal{selectedGoalIds.length !== 1 ? 's' : ''} selected
+        </Text>
+      )}
+
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity
+          style={[styles.button, styles.primaryButton, isLoading && styles.buttonDisabled]}
+          onPress={handleStep2Complete}
+          disabled={isLoading || selectedGoalIds.length === 0}
+          activeOpacity={0.8}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <View style={styles.buttonInner}>
+              <Text style={styles.buttonText}>Next: Club Membership</Text>
+              <ChevronRight size={20} color="#fff" />
+            </View>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.textButton}
+          onPress={handleSkipStep}
+          disabled={isLoading}
+        >
+          <Text style={styles.textButtonText}>Skip for now</Text>
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+
+  const renderStep3 = () => (
+    <>
+      <View style={styles.stepHeader}>
+        <Users size={32} color="#fff" />
+        <Text style={styles.formTitle}>Club Membership</Text>
+        <Text style={styles.stepSubtitle}>Join a running club to connect with fellow runners.</Text>
+      </View>
+
+      {clubsLoading ? (
+        <View style={styles.loadingRow}>
+          <ActivityIndicator color="#fff" />
+          <Text style={styles.loadingText}>Loading clubs...</Text>
+        </View>
+      ) : clubs.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyStateText}>No clubs available at the moment.</Text>
+        </View>
+      ) : (
+        <View style={styles.clubsList}>
+          {clubs.map((club) => {
+            const isSelected = selectedClubId === club.club_id;
+            return (
+              <TouchableOpacity
+                key={club.club_id}
+                style={[styles.clubCard, isSelected && styles.clubCardSelected]}
+                onPress={() => setSelectedClubId(isSelected ? null : club.club_id)}
+                activeOpacity={0.7}
+                disabled={isLoading}
+              >
+                <View style={[styles.clubRadio, isSelected && styles.clubRadioSelected]}>
+                  {isSelected && <View style={styles.clubRadioDot} />}
+                </View>
+                <Text style={[styles.clubCardText, isSelected && styles.clubCardTextSelected]}>
+                  {club.club_name}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity
+          style={[styles.button, styles.primaryButton, isLoading && styles.buttonDisabled]}
+          onPress={handleStep3Complete}
+          disabled={isLoading}
+          activeOpacity={0.8}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.buttonText}>
+              {selectedClubId ? 'Complete Registration' : 'Finish Without Club'}
+            </Text>
+          )}
+        </TouchableOpacity>
+
+        {selectedClubId && (
+          <TouchableOpacity
+            style={styles.textButton}
+            onPress={handleSkipStep}
+            disabled={isLoading}
+          >
+            <Text style={styles.textButtonText}>Skip for now</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </>
+  );
 
   return (
     <KeyboardAvoidingView
@@ -364,7 +999,9 @@ export default function RegisterScreen() {
               <Text style={styles.title}>Maun Runner</Text>
               <Text style={styles.subtitle}>
                 {screenMode === 'login' && 'Welcome back!'}
-                {screenMode === 'create' && 'Join the community'}
+                {screenMode === 'fullRegistration' && registrationStep === 1 && 'Join the community'}
+                {screenMode === 'fullRegistration' && registrationStep === 2 && 'Almost there!'}
+                {screenMode === 'fullRegistration' && registrationStep === 3 && 'One last step!'}
                 {screenMode === 'forgot' && 'Recover your PIN'}
               </Text>
             </View>
@@ -372,328 +1009,11 @@ export default function RegisterScreen() {
             <View style={styles.form}>
               {screenMode === 'fullRegistration' ? (
                 <>
-                  <Text style={styles.formTitle}>Registration Form</Text>
-                  
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>First Name *</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Enter first name"
-                      placeholderTextColor="#999"
-                      value={registrationData.firstName}
-                      onChangeText={(text) => updateRegistrationField('firstName', text)}
-                      editable={!isLoading}
-                    />
-                  </View>
-
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Other Names *</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Enter other names"
-                      placeholderTextColor="#999"
-                      value={registrationData.otherNames}
-                      onChangeText={(text) => updateRegistrationField('otherNames', text)}
-                      editable={!isLoading}
-                    />
-                  </View>
-
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Username *</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Choose a username"
-                      placeholderTextColor="#999"
-                      value={registrationData.username}
-                      onChangeText={(text) => updateRegistrationField('username', text)}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      editable={!isLoading}
-                    />
-                  </View>
-
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Email *</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Enter email address"
-                      placeholderTextColor="#999"
-                      value={registrationData.email}
-                      onChangeText={(text) => updateRegistrationField('email', text)}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      keyboardType="email-address"
-                      editable={!isLoading}
-                    />
-                  </View>
-
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Sex *</Text>
-                    <View style={styles.pickerContainer}>
-                      <Picker
-                        selectedValue={registrationData.sex}
-                        onValueChange={(value: string) => updateRegistrationField('sex', value)}
-                        style={styles.picker}
-                        enabled={!isLoading}
-                      >
-                        <Picker.Item label="Select sex" value="" />
-                        <Picker.Item label="Male" value="M" />
-                        <Picker.Item label="Female" value="F" />
-                      </Picker>
-                    </View>
-                  </View>
-
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Date of Birth *</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="DD/MM/YYYY"
-                      placeholderTextColor="#999"
-                      value={registrationData.dob}
-                      onChangeText={(text) => {
-                        const formatted = formatDobInput(text);
-                        updateRegistrationField('dob', formatted);
-                      }}
-                      keyboardType="number-pad"
-                      maxLength={10}
-                      editable={!isLoading}
-                    />
-                  </View>
-
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Country *</Text>
-                    <View style={styles.pickerContainer}>
-                      <Picker
-                        selectedValue={registrationData.country}
-                        onValueChange={(value: string) => updateRegistrationField('country', value)}
-                        style={styles.picker}
-                        enabled={!isLoading && !countriesLoading}
-                      >
-                        <Picker.Item label={countriesLoading ? "Loading countries..." : "Select country"} value="" />
-                        {countries.map((c) => (
-                          <Picker.Item key={c.iso_alpha2} label={c.name} value={c.iso_alpha2} />
-                        ))}
-                      </Picker>
-                    </View>
-                  </View>
-
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Residence (city/district/state/province) *</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Enter city/district/state/province"
-                      placeholderTextColor="#999"
-                      value={registrationData.residence}
-                      onChangeText={(text) => updateRegistrationField('residence', text)}
-                      editable={!isLoading}
-                    />
-                  </View>
-
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Add Photo (Optional)</Text>
-                    <TouchableOpacity
-                      style={styles.photoButton}
-                      onPress={pickImage}
-                      disabled={isLoading}
-                      activeOpacity={0.7}
-                    >
-                      {registrationData.photoUri ? (
-                        <Image
-                          source={{ uri: registrationData.photoUri }}
-                          style={styles.photoPreview}
-                        />
-                      ) : (
-                        <View style={styles.photoPlaceholder}>
-                          <Camera size={40} color="#999" />
-                          <Text style={styles.photoPlaceholderText}>Tap to add photo</Text>
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>4-Digit PIN *</Text>
-                    <View style={styles.pinNoteContainer}>
-                      <Text style={styles.pinNoteText}>
-                        Your PIN is used to protect Shop access and to confirm when signing out. It is not required each time you open the app.
-                      </Text>
-                    </View>
-                    <View style={styles.pinContainer}>
-                      <TextInput
-                        style={styles.pinInput}
-                        value={registrationData.pin[0] || ''}
-                        onChangeText={(value) => {
-                          const newPin = registrationData.pin.split('');
-                          newPin[0] = value.slice(-1);
-                          updateRegistrationField('pin', newPin.join(''));
-                        }}
-                        keyboardType="number-pad"
-                        maxLength={1}
-                        secureTextEntry
-                        editable={!isLoading}
-                      />
-                      <TextInput
-                        style={styles.pinInput}
-                        value={registrationData.pin[1] || ''}
-                        onChangeText={(value) => {
-                          const newPin = registrationData.pin.split('');
-                          newPin[1] = value.slice(-1);
-                          updateRegistrationField('pin', newPin.join(''));
-                        }}
-                        keyboardType="number-pad"
-                        maxLength={1}
-                        secureTextEntry
-                        editable={!isLoading}
-                      />
-                      <TextInput
-                        style={styles.pinInput}
-                        value={registrationData.pin[2] || ''}
-                        onChangeText={(value) => {
-                          const newPin = registrationData.pin.split('');
-                          newPin[2] = value.slice(-1);
-                          updateRegistrationField('pin', newPin.join(''));
-                        }}
-                        keyboardType="number-pad"
-                        maxLength={1}
-                        secureTextEntry
-                        editable={!isLoading}
-                      />
-                      <TextInput
-                        style={styles.pinInput}
-                        value={registrationData.pin[3] || ''}
-                        onChangeText={(value) => {
-                          const newPin = registrationData.pin.split('');
-                          newPin[3] = value.slice(-1);
-                          updateRegistrationField('pin', newPin.join(''));
-                        }}
-                        keyboardType="number-pad"
-                        maxLength={1}
-                        secureTextEntry
-                        editable={!isLoading}
-                      />
-                    </View>
-                  </View>
-
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Confirm PIN *</Text>
-                    <View style={styles.pinContainer}>
-                      <TextInput
-                        style={styles.pinInput}
-                        value={registrationData.confirmPin[0] || ''}
-                        onChangeText={(value) => {
-                          const newPin = registrationData.confirmPin.split('');
-                          newPin[0] = value.slice(-1);
-                          updateRegistrationField('confirmPin', newPin.join(''));
-                        }}
-                        keyboardType="number-pad"
-                        maxLength={1}
-                        secureTextEntry
-                        editable={!isLoading}
-                      />
-                      <TextInput
-                        style={styles.pinInput}
-                        value={registrationData.confirmPin[1] || ''}
-                        onChangeText={(value) => {
-                          const newPin = registrationData.confirmPin.split('');
-                          newPin[1] = value.slice(-1);
-                          updateRegistrationField('confirmPin', newPin.join(''));
-                        }}
-                        keyboardType="number-pad"
-                        maxLength={1}
-                        secureTextEntry
-                        editable={!isLoading}
-                      />
-                      <TextInput
-                        style={styles.pinInput}
-                        value={registrationData.confirmPin[2] || ''}
-                        onChangeText={(value) => {
-                          const newPin = registrationData.confirmPin.split('');
-                          newPin[2] = value.slice(-1);
-                          updateRegistrationField('confirmPin', newPin.join(''));
-                        }}
-                        keyboardType="number-pad"
-                        maxLength={1}
-                        secureTextEntry
-                        editable={!isLoading}
-                      />
-                      <TextInput
-                        style={styles.pinInput}
-                        value={registrationData.confirmPin[3] || ''}
-                        onChangeText={(value) => {
-                          const newPin = registrationData.confirmPin.split('');
-                          newPin[3] = value.slice(-1);
-                          updateRegistrationField('confirmPin', newPin.join(''));
-                        }}
-                        keyboardType="number-pad"
-                        maxLength={1}
-                        secureTextEntry
-                        editable={!isLoading}
-                      />
-                    </View>
-                  </View>
-
-                  <View style={styles.termsRow}>
-                    <TouchableOpacity
-                      style={[styles.checkbox, acceptedTerms && styles.checkboxChecked]}
-                      onPress={() => setAcceptedTerms(!acceptedTerms)}
-                      activeOpacity={0.7}
-                    >
-                      {acceptedTerms && <Check size={14} color="#fff" />}
-                    </TouchableOpacity>
-                    <Text style={styles.termsText}>
-                      I have read and accept the{' '}
-                    </Text>
-                    <Link href={"/policy" as any} asChild>
-                      <TouchableOpacity activeOpacity={0.7}>
-                        <Text style={styles.termsLink}>Terms & Conditions and Privacy Policy</Text>
-                      </TouchableOpacity>
-                    </Link>
-                  </View>
-
-                  <View style={styles.buttonContainer}>
-                    <TouchableOpacity
-                      style={[styles.button, styles.primaryButton, (isLoading || !acceptedTerms) && styles.buttonDisabled]}
-                      onPress={handleCreateAccount}
-                      disabled={isLoading || !acceptedTerms}
-                      activeOpacity={0.8}
-                    >
-                      {isLoading ? (
-                        <ActivityIndicator color="#FFFFFF" />
-                      ) : (
-                        <Text style={styles.buttonText}>Complete Registration</Text>
-                      )}
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={styles.textButton}
-                      onPress={() => {
-                        setScreenMode('login');
-                        setAcceptedTerms(false);
-                        setRegistrationData({
-                          firstName: '',
-                          otherNames: '',
-                          username: '',
-                          email: '',
-                          sex: '',
-                          dob: '',
-                          residence: '',
-                          selectedGoalIds: [],
-                          otherGoal: '',
-                          weightCurrent: '',
-                          weightTarget: '',
-                          weightMonths: '',
-                          country: '',
-                          runningClub: '',
-                          pin: '',
-                          confirmPin: '',
-                          photoUri: '',
-                        });
-                      }}
-                      disabled={isLoading}
-                    >
-                      <Text style={styles.textButtonText}>Back to Login</Text>
-                    </TouchableOpacity>
-                  </View>
+                  {renderStepIndicator()}
+                  {renderStepLabels()}
+                  {registrationStep === 1 && renderStep1()}
+                  {registrationStep === 2 && renderStep2()}
+                  {registrationStep === 3 && renderStep3()}
                 </>
               ) : screenMode === 'forgot' ? (
                 <>
@@ -812,54 +1132,6 @@ export default function RegisterScreen() {
                     </View>
                   </View>
 
-                  {screenMode === 'create' && (
-                    <View style={styles.inputContainer}>
-                      <Text style={styles.label}>Confirm PIN</Text>
-                      <View style={styles.pinContainer}>
-                        <TextInput
-                          ref={confirmPinRef1}
-                          style={styles.pinInput}
-                          value={confirmPin[0] || ''}
-                          onChangeText={(value) => handleConfirmPinChange(value, 0, [confirmPinRef1, confirmPinRef2, confirmPinRef3, confirmPinRef4])}
-                          keyboardType="number-pad"
-                          maxLength={1}
-                          secureTextEntry
-                          editable={!isLoading}
-                        />
-                        <TextInput
-                          ref={confirmPinRef2}
-                          style={styles.pinInput}
-                          value={confirmPin[1] || ''}
-                          onChangeText={(value) => handleConfirmPinChange(value, 1, [confirmPinRef1, confirmPinRef2, confirmPinRef3, confirmPinRef4])}
-                          keyboardType="number-pad"
-                          maxLength={1}
-                          secureTextEntry
-                          editable={!isLoading}
-                        />
-                        <TextInput
-                          ref={confirmPinRef3}
-                          style={styles.pinInput}
-                          value={confirmPin[2] || ''}
-                          onChangeText={(value) => handleConfirmPinChange(value, 2, [confirmPinRef1, confirmPinRef2, confirmPinRef3, confirmPinRef4])}
-                          keyboardType="number-pad"
-                          maxLength={1}
-                          secureTextEntry
-                          editable={!isLoading}
-                        />
-                        <TextInput
-                          ref={confirmPinRef4}
-                          style={styles.pinInput}
-                          value={confirmPin[3] || ''}
-                          onChangeText={(value) => handleConfirmPinChange(value, 3, [confirmPinRef1, confirmPinRef2, confirmPinRef3, confirmPinRef4])}
-                          keyboardType="number-pad"
-                          maxLength={1}
-                          secureTextEntry
-                          editable={!isLoading}
-                        />
-                      </View>
-                    </View>
-                  )}
-
                   {screenMode === 'login' && (
                     <View style={styles.buttonContainer}>
                       <TouchableOpacity
@@ -878,8 +1150,8 @@ export default function RegisterScreen() {
                       <TouchableOpacity
                         style={[styles.button, styles.secondaryButton, isLoading && styles.buttonDisabled]}
                         onPress={() => {
-                          console.log('Create Account button pressed - navigating to full registration');
                           setScreenMode('fullRegistration');
+                          setRegistrationStep(1);
                         }}
                         disabled={isLoading}
                         activeOpacity={0.8}
@@ -893,35 +1165,6 @@ export default function RegisterScreen() {
                         disabled={isLoading}
                       >
                         <Text style={styles.textButtonText}>Forgot PIN?</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-
-                  {screenMode === 'create' && (
-                    <View style={styles.buttonContainer}>
-                      <TouchableOpacity
-                        style={[styles.button, styles.primaryButton, isLoading && styles.buttonDisabled]}
-                        onPress={handleCreateAccount}
-                        disabled={isLoading}
-                        activeOpacity={0.8}
-                      >
-                        {isLoading ? (
-                          <ActivityIndicator color="#FFFFFF" />
-                        ) : (
-                          <Text style={styles.buttonText}>Create Account</Text>
-                        )}
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={styles.textButton}
-                        onPress={() => {
-                          setScreenMode('login');
-                          setPin('');
-                          setConfirmPin('');
-                        }}
-                        disabled={isLoading}
-                      >
-                        <Text style={styles.textButtonText}>Already have an account? Log in</Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -954,7 +1197,7 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginBottom: 48,
+    marginBottom: 32,
   },
   logo: {
     fontSize: 64,
@@ -962,7 +1205,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 36,
-    fontWeight: 'bold',
+    fontWeight: 'bold' as const,
     color: '#FFFFFF',
     marginBottom: 8,
   },
@@ -975,12 +1218,82 @@ const styles = StyleSheet.create({
   form: {
     width: '100%',
   },
+  stepIndicatorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 20,
+  },
+  stepDot: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  stepDotActive: {
+    backgroundColor: 'rgba(255,255,255,0.4)',
+    borderColor: '#fff',
+  },
+  stepDotCurrent: {
+    backgroundColor: '#1a1a1a',
+    borderColor: '#1a1a1a',
+  },
+  stepDotText: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+    color: 'rgba(255,255,255,0.6)',
+  },
+  stepDotTextActive: {
+    color: '#fff',
+  },
+  stepLine: {
+    flex: 1,
+    height: 2,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    marginHorizontal: 8,
+  },
+  stepLineActive: {
+    backgroundColor: '#fff',
+  },
+  stepLabelsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+    paddingHorizontal: 0,
+  },
+  stepLabel: {
+    fontSize: 11,
+    fontWeight: '600' as const,
+    color: 'rgba(255,255,255,0.5)',
+    textAlign: 'center',
+    flex: 1,
+  },
+  stepLabelActive: {
+    color: '#fff',
+  },
+  stepHeader: {
+    alignItems: 'center',
+    marginBottom: 24,
+    gap: 8,
+  },
+  stepSubtitle: {
+    fontSize: 14,
+    color: '#fff',
+    opacity: 0.85,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
   inputContainer: {
     marginBottom: 20,
   },
   label: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '600' as const,
     color: '#FFFFFF',
     marginBottom: 8,
     opacity: 0.9,
@@ -1057,6 +1370,11 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: 'bold' as const,
+  },
+  buttonInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   secondaryButtonText: {
     color: '#1a1a1a',
@@ -1160,63 +1478,123 @@ const styles = StyleSheet.create({
     opacity: 0.9,
     lineHeight: 18,
   },
-  goalsLoadingRow: {
+  goalsGrid: {
+    gap: 10,
+    marginBottom: 16,
+  },
+  goalCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingVertical: 12,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.25)',
+    gap: 12,
   },
-  goalsLoadingText: {
+  goalCardSelected: {
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderColor: '#fff',
+  },
+  goalCheckbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.5)',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  goalCheckboxSelected: {
+    backgroundColor: '#1a1a1a',
+    borderColor: '#1a1a1a',
+  },
+  goalCardText: {
+    fontSize: 15,
+    color: '#fff',
+    fontWeight: '500' as const,
+    flex: 1,
+  },
+  goalCardTextSelected: {
+    fontWeight: '700' as const,
+  },
+  selectedCount: {
+    fontSize: 13,
+    color: '#fff',
+    opacity: 0.8,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  clubsList: {
+    gap: 10,
+    marginBottom: 16,
+  },
+  clubCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.25)',
+    gap: 12,
+  },
+  clubCardSelected: {
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderColor: '#fff',
+  },
+  clubRadio: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.5)',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clubRadioSelected: {
+    borderColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  clubRadioDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#1a1a1a',
+  },
+  clubCardText: {
+    fontSize: 15,
+    color: '#fff',
+    fontWeight: '500' as const,
+    flex: 1,
+  },
+  clubCardTextSelected: {
+    fontWeight: '700' as const,
+  },
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 24,
+  },
+  loadingText: {
     fontSize: 14,
     color: '#fff',
     opacity: 0.8,
   },
-  goalsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  goalChip: {
-    flexDirection: 'row',
+  emptyState: {
+    paddingVertical: 32,
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.4)',
   },
-  goalChipSelected: {
-    backgroundColor: '#1a1a1a',
-    borderColor: '#1a1a1a',
-  },
-  goalChipText: {
-    fontSize: 13,
-    color: '#fff',
-    fontWeight: '500' as const,
-  },
-  goalChipTextSelected: {
-    color: '#fff',
-    fontWeight: '600' as const,
-  },
-  goalCount: {
-    fontSize: 12,
+  emptyStateText: {
+    fontSize: 15,
     color: '#fff',
     opacity: 0.7,
-    marginTop: 8,
-  },
-  weightLossSection: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  weightLossSectionTitle: {
-    fontSize: 15,
-    fontWeight: '700' as const,
-    color: '#fff',
-    marginBottom: 14,
+    textAlign: 'center',
   },
 });

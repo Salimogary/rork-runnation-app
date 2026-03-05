@@ -20,14 +20,10 @@ interface RegistrationData {
   sex: string;
   dob: string;
   residence: string;
-  runningGoals: string[];
-  selectedGoalIds?: number[];
-  otherGoal: string;
   weightCurrent: string;
   weightTarget: string;
   weightMonths: string;
   country: string;
-  runningClub: string;
   pin: string;
   confirmPin: string;
   photoUri?: string;
@@ -274,7 +270,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
               'Weight Current': registrationData.weightCurrent ? parseFloat(registrationData.weightCurrent) : null,
               'Weight Target': registrationData.weightTarget ? parseFloat(registrationData.weightTarget) : null,
               Country: registrationData.country,
-              Club: registrationData.runningClub,
               pin_hash: pinHash,
             })
             .select('RegistrationID, Username, "Created_At"')
@@ -286,95 +281,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           }
 
           registrationId = newUserData.RegistrationID;
-
-          try {
-            const selectedIds = registrationData.selectedGoalIds || [];
-            const goalsArray = registrationData.runningGoals || [];
-            const hasOtherGoalName = goalsArray.some(g => g.toLowerCase() === 'other') && registrationData.otherGoal;
-
-            console.log('[AuthContext] selectedGoalIds from form:', JSON.stringify(selectedIds));
-            console.log('[AuthContext] runningGoals names:', JSON.stringify(goalsArray));
-
-            const rowsToInsert: { registration_id: string; goal_id: number; other: string | null }[] = [];
-
-            if (selectedIds.length > 0) {
-              for (const goalId of selectedIds) {
-
-                const isOtherGoal = hasOtherGoalName && await (async () => {
-                  const { data: gData } = await supabase
-                    .from('goals')
-                    .select('Goal')
-                    .eq('goal_id', goalId)
-                    .single();
-                  return gData?.Goal?.toLowerCase() === 'other';
-                })();
-
-                rowsToInsert.push({
-                  registration_id: registrationId!,
-                  goal_id: goalId,
-                  other: isOtherGoal ? (registrationData.otherGoal || null) : null,
-                });
-              }
-            } else if (goalsArray.length > 0) {
-              console.log('[AuthContext] No selectedGoalIds, falling back to name-based lookup');
-              const standardGoals = goalsArray.filter(g => g.toLowerCase() !== 'other');
-
-              if (standardGoals.length > 0) {
-                const { data: goalsData, error: goalsError } = await supabase
-                  .from('goals')
-                  .select('goal_id, Goal')
-                  .in('Goal', standardGoals);
-
-                if (goalsError) {
-                  console.error('Error fetching goal_ids:', goalsError);
-                } else if (goalsData) {
-                  for (const g of goalsData) {
-                    rowsToInsert.push({
-                      registration_id: registrationId!,
-                      goal_id: Number(g.goal_id),
-                      other: null,
-                    });
-                  }
-                }
-              }
-
-              if (hasOtherGoalName) {
-                const { data: otherGoalData } = await supabase
-                  .from('goals')
-                  .select('goal_id')
-                  .ilike('Goal', 'other')
-                  .single();
-
-                const otherGId = otherGoalData ? Number(otherGoalData.goal_id) : 0;
-                if (otherGId > 0) {
-                  rowsToInsert.push({
-                    registration_id: registrationId!,
-                    goal_id: otherGId,
-                    other: registrationData.otherGoal || null,
-                  });
-                }
-              }
-            }
-
-            if (rowsToInsert.length > 0) {
-              console.log('[AuthContext] Inserting goals_per_user rows:', JSON.stringify(rowsToInsert));
-              const { data: insertedData, error: goalsPerUserError } = await supabase
-                .from('goals_per_user')
-                .insert(rowsToInsert)
-                .select();
-
-              if (goalsPerUserError) {
-                console.error('[AuthContext] Error saving goals_per_user:', JSON.stringify(goalsPerUserError));
-              } else {
-                console.log('[AuthContext] Goals saved successfully:', insertedData?.length, 'rows inserted');
-                console.log('[AuthContext] Inserted data:', JSON.stringify(insertedData));
-              }
-            } else {
-              console.warn('[AuthContext] No goal rows to insert!');
-            }
-          } catch (goalsError) {
-            console.error('Failed to save goals:', goalsError);
-          }
 
           if (registrationData.photoUri) {
             try {
@@ -432,7 +338,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
           await AsyncStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(newUser));
           setUser(newUser);
-          return { error: null };
+          return { error: null, registrationId: registrationId! };
         } catch (dbError) {
           console.error('Failed to save registration data:', dbError);
           if (registrationId) {
