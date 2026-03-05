@@ -67,57 +67,24 @@ export default function ExerciseScreen() {
       console.log('[Goals] Fetching goals for registration_id:', regId);
 
       const { data: gpuRows, error: gpuError } = await supabase
-        .from('goals_per_user')
-        .select('goal_id, other')
+        .from('user_goals')
+        .select('user_goals_id, goal')
         .eq('registration_id', regId)
-        .order('goals_per_user_id', { ascending: true });
+        .order('user_goals_id', { ascending: true });
 
-      console.log('[Goals] goals_per_user rows:', JSON.stringify(gpuRows));
-      console.log('[Goals] goals_per_user error:', JSON.stringify(gpuError));
+      console.log('[Goals] user_goals rows:', JSON.stringify(gpuRows));
+      console.log('[Goals] user_goals error:', JSON.stringify(gpuError));
 
       if (gpuError || !gpuRows || gpuRows.length === 0) {
-        console.log('[Goals] No rows found. Checking table sample...');
-        const { data: sampleRows } = await supabase
-          .from('goals_per_user')
-          .select('goals_per_user_id, registration_id, goal_id')
-          .limit(5);
-        console.log('[Goals] Sample rows from goals_per_user:', JSON.stringify(sampleRows));
+        console.log('[Goals] No rows found in user_goals');
         setUserGoals([]);
         return;
       }
 
-      const goalIds = gpuRows.map((row: any) => Number(row.goal_id));
-      console.log('[Goals] Fetching goal names for IDs:', goalIds);
-
-      const { data: goalsData, error: goalsError } = await supabase
-        .from('goals')
-        .select('goal_id, Goal')
-        .in('goal_id', goalIds);
-
-      console.log('[Goals] goals table data:', JSON.stringify(goalsData));
-      console.log('[Goals] goals table error:', JSON.stringify(goalsError));
-
-      if (goalsError || !goalsData || goalsData.length === 0) {
-        console.log('[Goals] Could not fetch goal names');
-        setUserGoals([]);
-        return;
-      }
-
-      const goalNameMap = new Map<number, string>();
-      for (const g of goalsData) {
-        goalNameMap.set(Number(g.goal_id), g.Goal as string);
-      }
-
-      const resolvedGoals: UserGoal[] = [];
-      for (const row of gpuRows) {
-        const gid = Number(row.goal_id);
-        const goalName = goalNameMap.get(gid);
-        if (goalName && goalName.toLowerCase() === 'other' && row.other) {
-          resolvedGoals.push({ goal_id: String(gid), name: row.other as string });
-        } else if (goalName) {
-          resolvedGoals.push({ goal_id: String(gid), name: goalName });
-        }
-      }
+      const resolvedGoals: UserGoal[] = gpuRows.map((row: any) => ({
+        goal_id: String(row.user_goals_id),
+        name: row.goal || 'Unknown',
+      }));
 
       console.log('[Goals] Resolved goals:', JSON.stringify(resolvedGoals));
       setUserGoals(resolvedGoals.slice(0, 3));

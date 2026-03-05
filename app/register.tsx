@@ -418,17 +418,17 @@ export default function RegisterScreen() {
       const rowsToInsert = selectedGoalIds.map(goalId => {
         const goal = goals.find(g => g.goal_id === goalId);
         const isOther = goal?.Goal?.toLowerCase() === 'other';
+        const goalText = isOther && hasOtherGoal ? (otherGoalText || 'Other') : (goal?.Goal || '');
         return {
           registration_id: registrationId,
-          goal_id: goalId,
-          other: isOther && hasOtherGoal ? (otherGoalText || null) : null,
+          goal: goalText,
         };
       });
 
-      console.log('[Register] Inserting goals_per_user:', JSON.stringify(rowsToInsert));
+      console.log('[Register] Inserting user_goals:', JSON.stringify(rowsToInsert));
 
       const { error: goalsError } = await supabase
-        .from('goals_per_user')
+        .from('user_goals')
         .insert(rowsToInsert);
 
       if (goalsError) {
