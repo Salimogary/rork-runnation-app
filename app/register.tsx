@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Fingerprint, Camera, Check, ChevronRight, Target, Users } from 'lucide-react-native';
+import { Fingerprint, Camera, Check, ChevronRight, Target, Users, UserPlus, UserCheck, PlusCircle, X, MapPin, Globe, FileText, Download, ChevronLeft } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@/contexts/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -53,7 +53,12 @@ interface GoalItem {
 interface ClubItem {
   club_id: number;
   club_name: string;
+  country: string | null;
+  location: string | null;
+  description: string | null;
 }
+
+type ClubChoice = 'join' | 'existing' | 'start' | 'none' | null;
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -95,6 +100,7 @@ export default function RegisterScreen() {
   const [clubs, setClubs] = useState<ClubItem[]>([]);
   const [clubsLoading, setClubsLoading] = useState(false);
   const [selectedClubId, setSelectedClubId] = useState<number | null>(null);
+  const [clubChoice, setClubChoice] = useState<ClubChoice>(null);
 
   const stepAnim = useRef(new Animated.Value(0)).current;
 
@@ -170,7 +176,7 @@ export default function RegisterScreen() {
       setClubsLoading(true);
       const { data, error } = await supabase
         .from('clubs')
-        .select('club_id, club_name')
+        .select('club_id, club_name, country, location, description')
         .order('club_name', { ascending: true });
 
       if (error) {
@@ -454,28 +460,52 @@ export default function RegisterScreen() {
       return;
     }
 
+    if (clubChoice === 'join' || clubChoice === 'existing') {
+      if (!selectedClubId) {
+        Alert.alert('Select a Club', 'Please choose a club from the list.');
+        return;
+      }
+    }
+
     setIsLoading(true);
 
     try {
-      if (selectedClubId) {
+      let clubValue: string | null = null;
+      let newMemberValue: string = 'No';
+
+      if (clubChoice === 'join') {
         const selectedClub = clubs.find(c => c.club_id === selectedClubId);
-        console.log('[Register] Inserting club_membership_request for club:', selectedClub?.club_name);
-
-        const { error: clubError } = await supabase
-          .from('club_membership_request')
-          .insert({
-            registration_id: registrationId,
-            club_id: selectedClubId,
-          });
-
-        if (clubError) {
-          console.error('[Register] Error saving club membership:', JSON.stringify(clubError));
-          Alert.alert('Error', 'Failed to save club membership request. Please try again.');
-          setIsLoading(false);
-          return;
-        }
-        console.log('[Register] Club membership request saved');
+        clubValue = selectedClub?.club_name || null;
+        newMemberValue = 'Yes';
+      } else if (clubChoice === 'existing') {
+        const selectedClub = clubs.find(c => c.club_id === selectedClubId);
+        clubValue = selectedClub?.club_name || null;
+        newMemberValue = 'No';
+      } else if (clubChoice === 'start') {
+        clubValue = 'new request';
+        newMemberValue = 'Yes';
+      } else {
+        clubValue = null;
+        newMemberValue = 'No';
       }
+
+      console.log('[Register] Inserting club_membership_request:', { club: clubValue, new_member: newMemberValue });
+
+      const { error: clubError } = await supabase
+        .from('club_membership_request')
+        .insert({
+          registration_id: registrationId,
+          club: clubValue,
+          new_member: newMemberValue,
+        });
+
+      if (clubError) {
+        console.error('[Register] Error saving club membership:', JSON.stringify(clubError));
+        Alert.alert('Error', 'Failed to save club membership request. Please try again.');
+        setIsLoading(false);
+        return;
+      }
+      console.log('[Register] Club membership request saved');
 
       await AsyncStorage.setItem('hasSeenOnboarding', 'true');
       router.replace('/(tabs)');
@@ -910,14 +940,121 @@ export default function RegisterScreen() {
     </>
   );
 
-  const renderStep3 = () => (
-    <>
-      <View style={styles.stepHeader}>
-        <Users size={32} color="#fff" />
-        <Text style={styles.formTitle}>Club Membership</Text>
-        <Text style={styles.stepSubtitle}>Join a running club to connect with fellow runners.</Text>
-      </View>
+  const handleClubChoiceSelect = (choice: ClubChoice) => {
+    setClubChoice(choice);
+    setSelectedClubId(null);
+    if (choice === 'join' || choice === 'existing') {
+      fetchClubs();
+    }
+  };
 
+  const renderClubChoiceOptions = () => {
+    const options: { key: ClubChoice; label: string; icon: React.ReactNode; desc: string }[] = [
+      { key: 'join', label: 'Want to join a club', icon: <UserPlus size={22} color="#fff" />, desc: 'Browse and join an existing club' },
+      { key: 'existing', label: 'I already have a club', icon: <UserCheck size={22} color="#fff" />, desc: 'Select your current club' },
+      { key: 'start', label: 'Want to start a club', icon: <PlusCircle size={22} color="#fff" />, desc: 'Download the application form' },
+      { key: 'none', label: 'No thanks', icon: <X size={22} color="#fff" />, desc: 'Continue without a club' },
+    ];
+
+    return (
+      <View style={styles.clubChoiceList}>
+        {options.map((opt) => {
+          const isSelected = clubChoice === opt.key;
+          return (
+            <TouchableOpacity
+              key={opt.key}
+              style={[styles.clubChoiceCard, isSelected && styles.clubChoiceCardSelected]}
+              onPress={() => handleClubChoiceSelect(opt.key)}
+              activeOpacity={0.7}
+              disabled={isLoading}
+            >
+              <View style={[styles.clubChoiceIcon, isSelected && styles.clubChoiceIconSelected]}>
+                {opt.icon}
+              </View>
+              <View style={styles.clubChoiceTextWrap}>
+                <Text style={[styles.clubChoiceLabel, isSelected && styles.clubChoiceLabelSelected]}>{opt.label}</Text>
+                <Text style={styles.clubChoiceDesc}>{opt.desc}</Text>
+              </View>
+              <View style={[styles.clubRadio, isSelected && styles.clubRadioSelected]}>
+                {isSelected && <View style={styles.clubRadioDot} />}
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    );
+  };
+
+  const renderClubJoinList = () => (
+    <View style={styles.clubSubSection}>
+      <TouchableOpacity style={styles.clubBackBtn} onPress={() => { setClubChoice(null); setSelectedClubId(null); }}>
+        <ChevronLeft size={18} color="#fff" />
+        <Text style={styles.clubBackText}>Back to options</Text>
+      </TouchableOpacity>
+      <Text style={styles.clubSubTitle}>Choose a club to join</Text>
+      {clubsLoading ? (
+        <View style={styles.loadingRow}>
+          <ActivityIndicator color="#fff" />
+          <Text style={styles.loadingText}>Loading clubs...</Text>
+        </View>
+      ) : clubs.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyStateText}>No clubs available at the moment.</Text>
+        </View>
+      ) : (
+        <View style={styles.clubsList}>
+          {clubs.map((club) => {
+            const isSelected = selectedClubId === club.club_id;
+            return (
+              <TouchableOpacity
+                key={club.club_id}
+                style={[styles.clubDetailCard, isSelected && styles.clubDetailCardSelected]}
+                onPress={() => setSelectedClubId(isSelected ? null : club.club_id)}
+                activeOpacity={0.7}
+                disabled={isLoading}
+              >
+                <View style={styles.clubDetailHeader}>
+                  <View style={[styles.clubRadio, isSelected && styles.clubRadioSelected]}>
+                    {isSelected && <View style={styles.clubRadioDot} />}
+                  </View>
+                  <Text style={[styles.clubDetailName, isSelected && styles.clubDetailNameSelected]}>
+                    {club.club_name}
+                  </Text>
+                </View>
+                {(club.country || club.location) && (
+                  <View style={styles.clubDetailMeta}>
+                    {club.country && (
+                      <View style={styles.clubMetaRow}>
+                        <Globe size={13} color="rgba(255,255,255,0.7)" />
+                        <Text style={styles.clubMetaText}>{club.country}</Text>
+                      </View>
+                    )}
+                    {club.location && (
+                      <View style={styles.clubMetaRow}>
+                        <MapPin size={13} color="rgba(255,255,255,0.7)" />
+                        <Text style={styles.clubMetaText}>{club.location}</Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+                {club.description && (
+                  <Text style={styles.clubDetailDesc}>{club.description}</Text>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+    </View>
+  );
+
+  const renderClubExistingList = () => (
+    <View style={styles.clubSubSection}>
+      <TouchableOpacity style={styles.clubBackBtn} onPress={() => { setClubChoice(null); setSelectedClubId(null); }}>
+        <ChevronLeft size={18} color="#fff" />
+        <Text style={styles.clubBackText}>Back to options</Text>
+      </TouchableOpacity>
+      <Text style={styles.clubSubTitle}>Select your current club</Text>
       {clubsLoading ? (
         <View style={styles.loadingRow}>
           <ActivityIndicator color="#fff" />
@@ -950,24 +1087,86 @@ export default function RegisterScreen() {
           })}
         </View>
       )}
+    </View>
+  );
 
-      <View style={styles.buttonContainer}>
+  const renderClubStartNew = () => (
+    <View style={styles.clubSubSection}>
+      <TouchableOpacity style={styles.clubBackBtn} onPress={() => setClubChoice(null)}>
+        <ChevronLeft size={18} color="#fff" />
+        <Text style={styles.clubBackText}>Back to options</Text>
+      </TouchableOpacity>
+      <View style={styles.startClubCard}>
+        <FileText size={40} color="#fff" />
+        <Text style={styles.startClubTitle}>Start a New Club</Text>
+        <Text style={styles.startClubDesc}>
+          Download the New Club Application Form below. Fill it out and send it to the admin email address included in the form.
+        </Text>
         <TouchableOpacity
-          style={[styles.button, styles.primaryButton, isLoading && styles.buttonDisabled]}
-          onPress={handleStep3Complete}
-          disabled={isLoading}
-          activeOpacity={0.8}
+          style={styles.downloadButton}
+          onPress={() => {
+            Alert.alert(
+              'Download Form',
+              'The New Club Application Form will be available for download. Please send the completed form to admin@maunrunner.com',
+              [{ text: 'OK' }]
+            );
+          }}
+          activeOpacity={0.7}
         >
-          {isLoading ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <Text style={styles.buttonText}>
-              {selectedClubId ? 'Complete Registration' : 'Finish Without Club'}
-            </Text>
-          )}
+          <Download size={20} color="#1a1a1a" />
+          <Text style={styles.downloadButtonText}>Download Application Form</Text>
         </TouchableOpacity>
+        <Text style={styles.adminEmailNote}>Send completed form to: admin@maunrunner.com</Text>
+      </View>
+    </View>
+  );
 
-        {selectedClubId && (
+  const renderStep3 = () => {
+    const showCompleteButton = clubChoice === 'none' ||
+      clubChoice === 'start' ||
+      (clubChoice === 'join' && selectedClubId) ||
+      (clubChoice === 'existing' && selectedClubId);
+
+    return (
+      <>
+        <View style={styles.stepHeader}>
+          <Users size={32} color="#fff" />
+          <Text style={styles.formTitle}>Club Membership</Text>
+          <Text style={styles.stepSubtitle}>Connect with fellow runners through a club.</Text>
+        </View>
+
+        {clubChoice === null && renderClubChoiceOptions()}
+        {clubChoice === 'join' && renderClubJoinList()}
+        {clubChoice === 'existing' && renderClubExistingList()}
+        {clubChoice === 'start' && renderClubStartNew()}
+        {clubChoice === 'none' && (
+          <View style={styles.clubSubSection}>
+            <TouchableOpacity style={styles.clubBackBtn} onPress={() => setClubChoice(null)}>
+              <ChevronLeft size={18} color="#fff" />
+              <Text style={styles.clubBackText}>Back to options</Text>
+            </TouchableOpacity>
+            <View style={styles.noClubCard}>
+              <Text style={styles.noClubText}>No problem! You can always join a club later from your profile settings.</Text>
+            </View>
+          </View>
+        )}
+
+        <View style={styles.buttonContainer}>
+          {showCompleteButton && (
+            <TouchableOpacity
+              style={[styles.button, styles.primaryButton, isLoading && styles.buttonDisabled]}
+              onPress={handleStep3Complete}
+              disabled={isLoading}
+              activeOpacity={0.8}
+            >
+              {isLoading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.buttonText}>Complete Registration</Text>
+              )}
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             style={styles.textButton}
             onPress={handleSkipStep}
@@ -975,10 +1174,10 @@ export default function RegisterScreen() {
           >
             <Text style={styles.textButtonText}>Skip for now</Text>
           </TouchableOpacity>
-        )}
-      </View>
-    </>
-  );
+        </View>
+      </>
+    );
+  };
 
   return (
     <KeyboardAvoidingView
@@ -1527,6 +1726,74 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 8,
   },
+  clubChoiceList: {
+    gap: 10,
+    marginBottom: 16,
+  },
+  clubChoiceCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.2)',
+    gap: 12,
+  },
+  clubChoiceCardSelected: {
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    borderColor: '#fff',
+  },
+  clubChoiceIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clubChoiceIconSelected: {
+    backgroundColor: 'rgba(26,26,26,0.6)',
+  },
+  clubChoiceTextWrap: {
+    flex: 1,
+  },
+  clubChoiceLabel: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: '#fff',
+  },
+  clubChoiceLabelSelected: {
+    fontWeight: '700' as const,
+  },
+  clubChoiceDesc: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.65)',
+    marginTop: 2,
+  },
+  clubSubSection: {
+    marginBottom: 12,
+  },
+  clubBackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 14,
+    paddingVertical: 4,
+  },
+  clubBackText: {
+    fontSize: 14,
+    color: '#fff',
+    opacity: 0.85,
+    fontWeight: '500' as const,
+  },
+  clubSubTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: '#fff',
+    marginBottom: 12,
+  },
   clubsList: {
     gap: 10,
     marginBottom: 16,
@@ -1545,6 +1812,54 @@ const styles = StyleSheet.create({
   clubCardSelected: {
     backgroundColor: 'rgba(255,255,255,0.3)',
     borderColor: '#fff',
+  },
+  clubDetailCard: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  clubDetailCardSelected: {
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    borderColor: '#fff',
+  },
+  clubDetailHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  clubDetailName: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: '#fff',
+    flex: 1,
+  },
+  clubDetailNameSelected: {
+    fontWeight: '700' as const,
+  },
+  clubDetailMeta: {
+    flexDirection: 'row',
+    gap: 14,
+    marginTop: 8,
+    marginLeft: 36,
+  },
+  clubMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  clubMetaText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  clubDetailDesc: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.6)',
+    marginTop: 6,
+    marginLeft: 36,
+    lineHeight: 18,
   },
   clubRadio: {
     width: 24,
@@ -1574,6 +1889,60 @@ const styles = StyleSheet.create({
   },
   clubCardTextSelected: {
     fontWeight: '700' as const,
+  },
+  startClubCard: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.2)',
+    gap: 10,
+  },
+  startClubTitle: {
+    fontSize: 18,
+    fontWeight: '700' as const,
+    color: '#fff',
+    marginTop: 4,
+  },
+  startClubDesc: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.75)',
+    textAlign: 'center',
+    lineHeight: 19,
+  },
+  downloadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    gap: 8,
+    marginTop: 6,
+  },
+  downloadButtonText: {
+    fontSize: 15,
+    fontWeight: '700' as const,
+    color: '#1a1a1a',
+  },
+  adminEmailNote: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.55)',
+    marginTop: 4,
+  },
+  noClubCard: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 14,
+    padding: 20,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  noClubText: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.8)',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   loadingRow: {
     flexDirection: 'row',
