@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Fingerprint, Camera, Check, Loader } from 'lucide-react-native';
+import { Fingerprint, Camera, Check } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@/contexts/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -26,13 +26,6 @@ import { supabase } from '@/lib/supabase';
 
 type ScreenMode = 'login' | 'create' | 'forgot' | 'fullRegistration';
 
-const MAX_GOALS = 3;
-
-interface DbGoal {
-  goal_id: number;
-  Goal: string;
-}
-
 interface RegistrationData {
   firstName: string;
   otherNames: string;
@@ -41,13 +34,10 @@ interface RegistrationData {
   sex: string;
   dob: string;
   residence: string;
-  selectedGoalIds: number[];
-  otherGoal: string;
   weightCurrent: string;
   weightTarget: string;
   weightMonths: string;
   country: string;
-  runningClub: string;
   pin: string;
   confirmPin: string;
   photoUri?: string;
@@ -70,25 +60,18 @@ export default function RegisterScreen() {
     sex: '',
     dob: '',
     residence: '',
-    selectedGoalIds: [],
-    otherGoal: '',
     weightCurrent: '',
     weightTarget: '',
     weightMonths: '',
     country: '',
-    runningClub: '',
     pin: '',
     confirmPin: '',
     photoUri: '',
   });
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
-  const [clubs, setClubs] = useState<string[]>([]);
-  const [clubsLoading, setClubsLoading] = useState(true);
   const [countries, setCountries] = useState<{ name: string; iso_alpha2: string }[]>([]);
   const [countriesLoading, setCountriesLoading] = useState(true);
-  const [dbGoals, setDbGoals] = useState<DbGoal[]>([]);
-  const [goalsLoading, setGoalsLoading] = useState(true);
   
   const pinRef1 = useRef<TextInput>(null);
   const pinRef2 = useRef<TextInput>(null);
@@ -101,42 +84,8 @@ export default function RegisterScreen() {
 
   React.useEffect(() => {
     checkBiometricAvailability();
-    fetchClubs();
     fetchCountries();
-    fetchGoalsFromDb();
   }, []);
-
-  const fetchGoalsFromDb = async () => {
-    try {
-      setGoalsLoading(true);
-      console.log('[Register] Fetching goals from Supabase...');
-      const { data, error, status, statusText } = await supabase
-        .from('goals')
-        .select('goal_id, Goal')
-        .order('goal_id', { ascending: true });
-
-      console.log('[Register] Goals response - status:', status, statusText);
-      console.log('[Register] Goals response - error:', JSON.stringify(error));
-      console.log('[Register] Goals response - data:', JSON.stringify(data));
-      console.log('[Register] Goals response - data length:', data?.length);
-
-      if (error) {
-        console.error('[Register] Error fetching goals:', error);
-        Alert.alert('Goals Error', `Could not load goals: ${error.message}`);
-      } else if (data && data.length > 0) {
-        console.log('[Register] Successfully fetched', data.length, 'goals');
-        setDbGoals(data as DbGoal[]);
-      } else {
-        console.warn('[Register] Goals query returned empty array. This usually means RLS is blocking access.');
-        console.warn('[Register] Fix: In Supabase, go to goals table > RLS > Add policy: allow SELECT for all users, OR disable RLS on goals table.');
-      }
-    } catch (err) {
-      console.error('[Register] Failed to fetch goals:', err);
-      Alert.alert('Goals Error', 'Failed to load goals. Please check your connection.');
-    } finally {
-      setGoalsLoading(false);
-    }
-  };
 
   const fetchCountries = async () => {
     try {
@@ -155,26 +104,6 @@ export default function RegisterScreen() {
       console.error('Failed to fetch countries:', err);
     } finally {
       setCountriesLoading(false);
-    }
-  };
-
-  const fetchClubs = async () => {
-    try {
-      setClubsLoading(true);
-      const { data, error } = await supabase
-        .from('clubs')
-        .select('club_name')
-        .order('club_name', { ascending: true });
-
-      if (error) {
-        console.error('Error fetching clubs:', error);
-      } else if (data) {
-        setClubs(data.map((c: { club_name: string }) => c.club_name));
-      }
-    } catch (err) {
-      console.error('Failed to fetch clubs:', err);
-    } finally {
-      setClubsLoading(false);
     }
   };
 
@@ -332,53 +261,15 @@ export default function RegisterScreen() {
     }
   };
 
-  const toggleGoalById = (goalId: number) => {
-    setRegistrationData(prev => {
-      const current = prev.selectedGoalIds;
-      if (current.includes(goalId)) {
-        const updated = current.filter(id => id !== goalId);
-        const goalName = dbGoals.find(g => g.goal_id === goalId)?.Goal || '';
-        const newData: Partial<RegistrationData> = { selectedGoalIds: updated };
-        if (goalName.toLowerCase().includes('weight loss')) {
-          newData.weightCurrent = '';
-          newData.weightTarget = '';
-          newData.weightMonths = '';
-        }
-        return { ...prev, ...newData };
-      } else {
-        if (current.length >= MAX_GOALS) {
-          Alert.alert('Limit Reached', `You can select up to ${MAX_GOALS} running goals.`);
-          return prev;
-        }
-        return { ...prev, selectedGoalIds: [...current, goalId] };
-      }
-    });
-  };
-
-  const getSelectedGoalNames = (): string[] => {
-    return registrationData.selectedGoalIds.map(id => {
-      const g = dbGoals.find(goal => goal.goal_id === id);
-      return g?.Goal || '';
-    });
-  };
-
-  const hasWeightLossGoal = getSelectedGoalNames().some(n => n.toLowerCase().includes('weight loss'));
-  const hasOtherGoal = getSelectedGoalNames().some(n => n.toLowerCase() === 'other');
-
   const handleCreateAccount = async () => {
     const requiredFields = [
       'firstName', 'otherNames', 'username', 'email', 'sex', 'dob',
-      'residence', 'country', 'runningClub', 'pin', 'confirmPin'
+      'residence', 'country', 'pin', 'confirmPin'
     ];
 
     const emptyFields = requiredFields.filter(field => !registrationData[field as keyof RegistrationData]);
     if (emptyFields.length > 0) {
       Alert.alert('Error', 'Please fill in all required fields');
-      return;
-    }
-
-    if (registrationData.selectedGoalIds.length === 0) {
-      Alert.alert('Error', 'Please select at least one running goal');
       return;
     }
 
@@ -390,13 +281,6 @@ export default function RegisterScreen() {
     if (!isValidDob(registrationData.dob)) {
       Alert.alert('Error', 'Please enter a valid date of birth in DD/MM/YYYY format');
       return;
-    }
-
-    if (hasWeightLossGoal) {
-      if (!registrationData.weightCurrent || !registrationData.weightTarget || !registrationData.weightMonths) {
-        Alert.alert('Error', 'Please fill in your weight loss details (current weight, target weight, and timeframe)');
-        return;
-      }
     }
 
     if (registrationData.pin.length !== 4 || registrationData.confirmPin.length !== 4) {
@@ -414,7 +298,6 @@ export default function RegisterScreen() {
     try {
       const { error } = await signUp(registrationData.username, registrationData.pin, {
         ...registrationData,
-        runningGoals: getSelectedGoalNames(),
       });
       if (error) {
         Alert.alert('Registration Failed', error.message);
@@ -604,126 +487,6 @@ export default function RegisterScreen() {
                       onChangeText={(text) => updateRegistrationField('residence', text)}
                       editable={!isLoading}
                     />
-                  </View>
-
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Running Goals * (select up to 3)</Text>
-                    {goalsLoading ? (
-                      <View style={styles.goalsLoadingRow}>
-                        <Loader size={18} color="#fff" />
-                        <Text style={styles.goalsLoadingText}>Loading goals...</Text>
-                      </View>
-                    ) : dbGoals.length === 0 ? (
-                      <View style={styles.goalsLoadingRow}>
-                        <Text style={styles.goalsLoadingText}>No goals found. Check RLS policies on the goals table in Supabase.</Text>
-                        <TouchableOpacity
-                          onPress={fetchGoalsFromDb}
-                          style={{ marginTop: 8, paddingVertical: 6, paddingHorizontal: 16, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 8 }}
-                        >
-                          <Text style={{ color: '#fff', fontWeight: '600' as const }}>Retry</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ) : (
-                      <View style={styles.goalsContainer}>
-                        {dbGoals.map((goal) => {
-                          const isSelected = registrationData.selectedGoalIds.includes(goal.goal_id);
-                          return (
-                            <TouchableOpacity
-                              key={goal.goal_id}
-                              style={[styles.goalChip, isSelected && styles.goalChipSelected]}
-                              onPress={() => toggleGoalById(goal.goal_id)}
-                              activeOpacity={0.7}
-                              disabled={isLoading}
-                            >
-                              {isSelected && (
-                                <Check size={14} color="#fff" style={{ marginRight: 4 }} />
-                              )}
-                              <Text style={[styles.goalChipText, isSelected && styles.goalChipTextSelected]}>
-                                {goal.Goal}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
-                    )}
-                    <Text style={styles.goalCount}>
-                      {registrationData.selectedGoalIds.length}/{MAX_GOALS} selected
-                    </Text>
-                  </View>
-
-                  {hasOtherGoal && (
-                    <View style={styles.inputContainer}>
-                      <Text style={styles.label}>Describe your goal</Text>
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Type your running goal"
-                        placeholderTextColor="#999"
-                        value={registrationData.otherGoal}
-                        onChangeText={(text) => updateRegistrationField('otherGoal', text)}
-                        editable={!isLoading}
-                      />
-                    </View>
-                  )}
-
-                  {hasWeightLossGoal && (
-                    <View style={styles.weightLossSection}>
-                      <Text style={styles.weightLossSectionTitle}>Weight Loss Details</Text>
-                      <View style={styles.inputContainer}>
-                        <Text style={styles.label}>Current Weight (kg) *</Text>
-                        <TextInput
-                          style={styles.input}
-                          placeholder="e.g. 80"
-                          placeholderTextColor="#999"
-                          value={registrationData.weightCurrent}
-                          onChangeText={(text) => updateRegistrationField('weightCurrent', text)}
-                          keyboardType="decimal-pad"
-                          editable={!isLoading}
-                        />
-                      </View>
-                      <View style={styles.inputContainer}>
-                        <Text style={styles.label}>Target Weight (kg) *</Text>
-                        <TextInput
-                          style={styles.input}
-                          placeholder="e.g. 65"
-                          placeholderTextColor="#999"
-                          value={registrationData.weightTarget}
-                          onChangeText={(text) => updateRegistrationField('weightTarget', text)}
-                          keyboardType="decimal-pad"
-                          editable={!isLoading}
-                        />
-                      </View>
-                      <View style={styles.inputContainer}>
-                        <Text style={styles.label}>Target Duration (months) *</Text>
-                        <TextInput
-                          style={styles.input}
-                          placeholder="e.g. 6"
-                          placeholderTextColor="#999"
-                          value={registrationData.weightMonths}
-                          onChangeText={(text) => updateRegistrationField('weightMonths', text.replace(/[^0-9]/g, ''))}
-                          keyboardType="number-pad"
-                          editable={!isLoading}
-                        />
-                      </View>
-                    </View>
-                  )}
-
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.label}>Running Club *</Text>
-                    <View style={styles.pickerContainer}>
-                      <Picker
-                        selectedValue={registrationData.runningClub}
-                        onValueChange={(value: string) => updateRegistrationField('runningClub', value)}
-                        style={styles.picker}
-                        enabled={!isLoading && !clubsLoading}
-                      >
-                        <Picker.Item label={clubsLoading ? "Loading clubs..." : "Select running club"} value="" />
-                        <Picker.Item label="None - Prefer no club" value="None - Prefer no club" />
-                        <Picker.Item label="None - Want to join a club" value="None - Want to join a club" />
-                        {clubs.map((club) => (
-                          <Picker.Item key={club} label={club} value={club} />
-                        ))}
-                      </Picker>
-                    </View>
                   </View>
 
                   <View style={styles.inputContainer}>
