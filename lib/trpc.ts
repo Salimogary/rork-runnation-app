@@ -2,9 +2,35 @@ import { createTRPCReact } from "@trpc/react-query";
 import { httpLink } from "@trpc/client";
 import type { AppRouter } from "@/backend/trpc/app-router";
 import superjson from "superjson";
+import React from "react";
+import type { QueryClient } from "@tanstack/react-query";
 
 export const trpc = createTRPCReact<AppRouter>();
-export const TRPCProvider = trpc.Provider;
+
+const TRPCInternalProvider = trpc.Provider as React.ComponentType<{
+  client: ReturnType<typeof trpc.createClient>;
+  queryClient: QueryClient;
+  children: React.ReactNode;
+}> | undefined;
+
+export function TRPCProvider({
+  client,
+  queryClient,
+  children,
+}: {
+  client: ReturnType<typeof trpc.createClient>;
+  queryClient: QueryClient;
+  children: React.ReactNode;
+}) {
+  if (TRPCInternalProvider) {
+    return (
+      <TRPCInternalProvider client={client} queryClient={queryClient}>
+        {children}
+      </TRPCInternalProvider>
+    );
+  }
+  return <>{children}</>;
+}
 
 const getBaseUrl = () => {
   const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
