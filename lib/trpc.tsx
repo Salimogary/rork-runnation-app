@@ -16,15 +16,10 @@ export function TRPCProvider({
   queryClient: QueryClient;
   children: React.ReactNode;
 }) {
-  const Provider = trpc.Provider;
-  if (typeof Provider !== "function") {
-    console.warn("[TRPCProvider] trpc.Provider is not a function, skipping wrapper");
-    return <React.Fragment>{children}</React.Fragment>;
-  }
   return (
-    <Provider client={client} queryClient={queryClient}>
+    <trpc.Provider client={client} queryClient={queryClient}>
       {children}
-    </Provider>
+    </trpc.Provider>
   );
 }
 
