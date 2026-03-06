@@ -1,23 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter, useSegments } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
-
-let TRPCProviderComponent: React.ComponentType<{ children: React.ReactNode; queryClient: QueryClient }> | null = null;
-
-try {
-  const trpcModule = require("@/lib/trpc");
-  if (trpcModule && typeof trpcModule.TRPCProvider === "function") {
-    TRPCProviderComponent = trpcModule.TRPCProvider;
-  } else {
-    console.warn("[Layout] TRPCProvider is not a valid component, skipping");
-  }
-} catch (e) {
-  console.warn("[Layout] Failed to load TRPCProvider:", e);
-}
-
-const queryClient = new QueryClient();
+import { TRPCProvider } from "@/lib/trpc";
 
 function RootLayoutNav() {
   const segments = useSegments();
@@ -98,17 +83,6 @@ function RootLayoutNav() {
   );
 }
 
-function AppProviders({ children }: { children: React.ReactNode }) {
-  if (TRPCProviderComponent) {
-    return (
-      <TRPCProviderComponent queryClient={queryClient}>
-        {children}
-      </TRPCProviderComponent>
-    );
-  }
-  return <>{children}</>;
-}
-
 export default function RootLayout() {
   useEffect(() => {
     let SplashScreen: typeof import("expo-splash-screen") | null = null;
@@ -159,12 +133,10 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <AppProviders>
-        <AuthProvider>
-          <RootLayoutNav />
-        </AuthProvider>
-      </AppProviders>
-    </QueryClientProvider>
+    <TRPCProvider>
+      <AuthProvider>
+        <RootLayoutNav />
+      </AuthProvider>
+    </TRPCProvider>
   );
 }

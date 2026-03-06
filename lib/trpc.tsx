@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createTRPCReact } from "@trpc/react-query";
 import { httpLink } from "@trpc/client";
 import type { AppRouter } from "@/backend/trpc/app-router";
@@ -55,22 +55,17 @@ function createTRPCClient() {
 
 interface TRPCProviderProps {
   children: React.ReactNode;
-  queryClient: QueryClient;
 }
 
-export function TRPCProvider({ children, queryClient }: TRPCProviderProps) {
-  const [client] = useState(createTRPCClient);
-
-  const ProviderComponent = trpc.Provider;
-
-  if (!ProviderComponent) {
-    console.error("[tRPC] trpc.Provider is undefined - rendering children without tRPC context");
-    return <>{children}</>;
-  }
+export function TRPCProvider({ children }: TRPCProviderProps) {
+  const [queryClient] = useState(() => new QueryClient());
+  const [trpcClient] = useState(createTRPCClient);
 
   return (
-    <ProviderComponent client={client} queryClient={queryClient}>
-      {children}
-    </ProviderComponent>
+    <trpc.Provider client={trpcClient} queryClient={queryClient}>
+      <QueryClientProvider client={queryClient}>
+        {children}
+      </QueryClientProvider>
+    </trpc.Provider>
   );
 }
