@@ -2,7 +2,8 @@ import { StyleSheet, View, Text, ScrollView, RefreshControl, Animated, Touchable
 import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
-import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints, Shield, Check, Trash2 } from "lucide-react-native";
+import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints, Shield, Check, Trash2, Users, ArrowUp, ArrowDown, Minus } from "lucide-react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import colors from "@/constants/colors";
@@ -69,6 +70,20 @@ interface RecentActivity {
   Activity_Date: string;
 }
 
+interface CommunityRankData {
+  RegistrationID: string;
+  Name: string;
+  AvgDistance: number;
+  ActiveDays: number;
+  AveragePace: number;
+}
+
+interface StoredRankSnapshot {
+  rank: number;
+  totalParticipants: number;
+  timestamp: string;
+}
+
 interface ActivitySummary {
   totalDistance: number;
   totalTime: number;
@@ -127,6 +142,7 @@ export default function GoalsScreen() {
   const [healthSleepInput, setHealthSleepInput] = useState("");
   const [healthSpo2Input, setHealthSpo2Input] = useState("");
   const [showDisciplineModal, setShowDisciplineModal] = useState(false);
+  const [previousRank, setPreviousRank] = useState<StoredRankSnapshot | null>(null);
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -834,6 +850,153 @@ export default function GoalsScreen() {
     };
   }, [activitySummary, userDisciplineGoals]);
 
+  const { data: communityRankData, isLoading: communityRankLoading, refetch: refetchCommunityRank } = useQuery<CommunityRankData[]>({
+    queryKey: ["goalCommunityRank"],
+    queryFn: async () => {
+      try {
+        const { data: activities, error: activityError } = await supabase
+          .from("activities")
+          .select("RegistrationID, Activity_Date, Distance_km, Start_Time, End_Time, Pace_km_h");
+        if (activityError) {
+          console.error("[Goals] Community rank activity fetch error:", activityError);
+          throw activityError;
+        }
+        const { data: registrations, error: regError } = await supabase
+          .from("registrations")
+          .select('RegistrationID, "First Name", "Other Names"');
+        if (regError) {
+          console.error("[Goals] Community rank registration fetch error:", regError);
+          throw regError;
+        }
+        const regMap = new Map(registrations?.map((r: any) => [r.RegistrationID, r]));
+        const userStats = new Map<string, {
+          totalDistance: number;
+          paceSum: number;
+          activityCount: number;
+          activeDays: Set<string>;
+        }>();
+        activities?.forEach((activity: any) => {
+          const regId = activity.RegistrationID;
+          if (!regId) return;
+          const existing = userStats.get(regId) || {
+            totalDistance: 0, paceSum: 0, activityCount: 0, activeDays: new Set<string>(),
+          };
+          existing.totalDistance += activity.Distance_km || 0;
+          existing.paceSum += activity.Pace_km_h || 0;
+          existing.activityCount += 1;
+          existing.activeDays.add(activity.Activity_Date);
+          userStats.set(regId, existing);
+        });
+        const result: CommunityRankData[] = [];
+        userStats.forEach((stats, regId) => {
+          const registration = regMap.get(regId) as any;
+          if (!registration) return;
+          const firstName = registration["First Name"] || "";
+          const otherNames = registration["Other Names"] || "";
+          const fullName = [firstName, otherNames].filter((n: string) => n).join(" ") || "Unknown";
+          const activeDays = stats.activeDays.size;
+          result.push({
+            RegistrationID: regId,
+            Name: fullName,
+            AvgDistance: activeDays > 0 ? stats.totalDistance / activeDays : 0,
+            ActiveDays: activeDays,
+            AveragePace: stats.activityCount > 0 ? stats.paceSum / stats.activityCount : 0,
+          });
+        });
+        console.log("[Goals] Community rank data processed:", result.length, "users");
+        return result;
+      } catch (error: any) {
+        console.error("[Goals] Community rank query failed:", error);
+        throw error;
+      }
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
+  const communityRanking = useMemo(() => {
+    if (!communityRankData || !user?.id) return null;
+    const sorted = [...communityRankData].sort((a, b) => {
+      const distDiff = b.AvgDistance - a.AvgDistance;
+      if (distDiff !== 0) return distDiff;
+      const daysDiff = b.ActiveDays - a.ActiveDays;
+      if (daysDiff !== 0) return daysDiff;
+      return a.AveragePace - b.AveragePace;
+    });
+    const userIndex = sorted.findIndex((item) => item.RegistrationID === user.id);
+    if (userIndex === -1) return null;
+    const currentRank = userIndex + 1;
+    const totalParticipants = sorted.length;
+    const userData = sorted[userIndex];
+    return {
+      currentRank,
+      totalParticipants,
+      name: userData.Name,
+      avgDistance: userData.AvgDistance,
+      activeDays: userData.ActiveDays,
+      avgPace: userData.AveragePace,
+    };
+  }, [communityRankData, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const loadPreviousRank = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(`community_rank_${user.id}`);
+        if (stored) {
+          const parsed = JSON.parse(stored) as StoredRankSnapshot;
+          console.log("[Goals] Loaded previous rank:", parsed);
+          setPreviousRank(parsed);
+        }
+      } catch (error) {
+        console.error("[Goals] Error loading previous rank:", error);
+      }
+    };
+    void loadPreviousRank();
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!communityRanking || !user?.id) return;
+    const saveCurrentRank = async () => {
+      try {
+        const now = new Date();
+        const todayKey = now.toISOString().split("T")[0];
+        const previousStored = await AsyncStorage.getItem(`community_rank_${user.id}`);
+        if (previousStored) {
+          const parsed = JSON.parse(previousStored) as StoredRankSnapshot;
+          const storedDate = parsed.timestamp.split("T")[0];
+          if (storedDate === todayKey) {
+            return;
+          }
+          setPreviousRank(parsed);
+        }
+        const snapshot: StoredRankSnapshot = {
+          rank: communityRanking.currentRank,
+          totalParticipants: communityRanking.totalParticipants,
+          timestamp: now.toISOString(),
+        };
+        await AsyncStorage.setItem(`community_rank_${user.id}`, JSON.stringify(snapshot));
+        console.log("[Goals] Saved rank snapshot:", snapshot);
+      } catch (error) {
+        console.error("[Goals] Error saving rank snapshot:", error);
+      }
+    };
+    void saveCurrentRank();
+  }, [communityRanking, user?.id]);
+
+  const rankChange = useMemo(() => {
+    if (!communityRanking || !previousRank) return null;
+    const diff = previousRank.rank - communityRanking.currentRank;
+    return {
+      diff,
+      isImproving: diff > 0,
+      isDeclining: diff < 0,
+      isSame: diff === 0,
+      previousRank: previousRank.rank,
+      lastChecked: previousRank.timestamp,
+    };
+  }, [communityRanking, previousRank]);
+
   const { data: eventGoals = [], refetch: refetchEvents } = useQuery<RegisteredEvent[]>({
     queryKey: ["goalEvents", user?.id],
     queryFn: async () => {
@@ -921,6 +1084,7 @@ export default function GoalsScreen() {
     void refetchRecent();
     void refetchHealth();
     void refetchDiscipline();
+    void refetchCommunityRank();
   };
 
   const weightProgress = useMemo(() => {
@@ -1033,7 +1197,7 @@ export default function GoalsScreen() {
     setShowGoalForm(true);
   }, [fitnessGoal]);
 
-  const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading && userDisciplineGoals.length === 0 && !userDisciplineLoading;
+  const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading && userDisciplineGoals.length === 0 && !userDisciplineLoading && !communityRanking && !communityRankLoading;
 
   return (
     <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
@@ -1525,6 +1689,101 @@ export default function GoalsScreen() {
                 </View>
               </LinearGradient>
             </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {communityRanking ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Users size={18} color="#0EA5E9" />
+              <Text style={styles.sectionTitle}>Compete in Community</Text>
+            </View>
+            <View style={styles.communityCard}>
+              <View style={styles.communityRankCenter}>
+                <View style={styles.communityRankCircle}>
+                  <Text style={styles.communityRankNumber}>#{communityRanking.currentRank}</Text>
+                  <Text style={styles.communityRankOf}>of {communityRanking.totalParticipants}</Text>
+                </View>
+                {rankChange ? (
+                  <View style={[
+                    styles.rankChangePill,
+                    rankChange.isImproving && styles.rankChangePillUp,
+                    rankChange.isDeclining && styles.rankChangePillDown,
+                    rankChange.isSame && styles.rankChangePillSame,
+                  ]}>
+                    {rankChange.isImproving ? (
+                      <ArrowUp size={13} color="#10B981" />
+                    ) : rankChange.isDeclining ? (
+                      <ArrowDown size={13} color="#EF4444" />
+                    ) : (
+                      <Minus size={13} color="#F59E0B" />
+                    )}
+                    <Text style={[
+                      styles.rankChangeText,
+                      rankChange.isImproving && styles.rankChangeTextUp,
+                      rankChange.isDeclining && styles.rankChangeTextDown,
+                      rankChange.isSame && styles.rankChangeTextSame,
+                    ]}>
+                      {rankChange.isImproving
+                        ? `Up ${Math.abs(rankChange.diff)} ${Math.abs(rankChange.diff) === 1 ? "place" : "places"}`
+                        : rankChange.isDeclining
+                        ? `Down ${Math.abs(rankChange.diff)} ${Math.abs(rankChange.diff) === 1 ? "place" : "places"}`
+                        : "No change"}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={[styles.rankChangePill, styles.rankChangePillSame]}>
+                    <Text style={[styles.rankChangeText, styles.rankChangeTextSame]}>First check-in</Text>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.communityStatsRow}>
+                <View style={styles.communityStatItem}>
+                  <Text style={styles.communityStatValue}>{communityRanking.avgDistance.toFixed(1)}</Text>
+                  <Text style={styles.communityStatLabel}>Avg km/day</Text>
+                </View>
+                <View style={styles.communityStatDivider} />
+                <View style={styles.communityStatItem}>
+                  <Text style={styles.communityStatValue}>{communityRanking.activeDays}</Text>
+                  <Text style={styles.communityStatLabel}>Active Days</Text>
+                </View>
+                <View style={styles.communityStatDivider} />
+                <View style={styles.communityStatItem}>
+                  <Text style={styles.communityStatValue}>
+                    {communityRanking.avgPace > 0 ? formatPaceMinPerKm(communityRanking.avgPace) : "--"}
+                  </Text>
+                  <Text style={styles.communityStatLabel}>Avg Pace</Text>
+                </View>
+              </View>
+
+              {rankChange && rankChange.previousRank > 0 && (
+                <View style={styles.communityHistoryRow}>
+                  <Text style={styles.communityHistoryLabel}>Previous rank</Text>
+                  <Text style={styles.communityHistoryValue}>#{rankChange.previousRank}</Text>
+                </View>
+              )}
+
+              <Text style={styles.fitnessFootnote}>
+                Ranked by average daily distance
+              </Text>
+            </View>
+          </View>
+        ) : !communityRankLoading ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Users size={18} color="#0EA5E9" />
+              <Text style={styles.sectionTitle}>Compete in Community</Text>
+            </View>
+            <View style={styles.communityCard}>
+              <View style={styles.noActivitiesInfo}>
+                <Users size={28} color={colors.textLight} />
+                <Text style={styles.noActivitiesTitle}>Not Ranked Yet</Text>
+                <Text style={styles.noActivitiesText}>
+                  Complete your first activity to appear on the community leaderboard and start tracking your rank
+                </Text>
+              </View>
+            </View>
           </View>
         ) : null}
 
@@ -2892,5 +3151,117 @@ const styles = StyleSheet.create({
   },
   disciplineRemoveBtn: {
     padding: 6,
+  },
+  communityCard: {
+    backgroundColor: colors.cardBackground,
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  communityRankCenter: {
+    alignItems: "center" as const,
+    marginBottom: 20,
+  },
+  communityRankCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 5,
+    borderColor: "#0EA5E9",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    marginBottom: 12,
+    backgroundColor: "#F0F9FF",
+  },
+  communityRankNumber: {
+    fontSize: 32,
+    fontWeight: "900" as const,
+    color: "#0EA5E9",
+  },
+  communityRankOf: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: -2,
+  },
+  rankChangePill: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  rankChangePillUp: {
+    backgroundColor: "#ECFDF5",
+  },
+  rankChangePillDown: {
+    backgroundColor: "#FEF2F2",
+  },
+  rankChangePillSame: {
+    backgroundColor: "#FFFBEB",
+  },
+  rankChangeText: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+  },
+  rankChangeTextUp: {
+    color: "#10B981",
+  },
+  rankChangeTextDown: {
+    color: "#EF4444",
+  },
+  rankChangeTextSame: {
+    color: "#F59E0B",
+  },
+  communityStatsRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-around" as const,
+    backgroundColor: "#F0F9FF",
+    borderRadius: 12,
+    paddingVertical: 14,
+    marginBottom: 12,
+  },
+  communityStatItem: {
+    alignItems: "center" as const,
+    flex: 1,
+  },
+  communityStatValue: {
+    fontSize: 18,
+    fontWeight: "800" as const,
+    color: "#0EA5E9",
+  },
+  communityStatLabel: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  communityStatDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: "#BAE6FD",
+  },
+  communityHistoryRow: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+    paddingVertical: 8,
+    marginBottom: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+    paddingTop: 12,
+  },
+  communityHistoryLabel: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  communityHistoryValue: {
+    fontSize: 15,
+    fontWeight: "700" as const,
+    color: colors.text,
   },
 });
