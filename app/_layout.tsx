@@ -14,9 +14,6 @@ SplashScreen.preventAutoHideAsync().catch(() => {
 
 const queryClient = new QueryClient();
 
-console.log("[Layout] QueryClientProvider:", typeof QueryClientProvider);
-console.log("[Layout] TRPCProvider:", typeof TRPCProvider);
-console.log("[Layout] AuthProvider:", typeof AuthProvider);
 
 function RootLayoutNav() {
   const segments = useSegments();
