@@ -1,14 +1,21 @@
 import React, { useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter, useSegments } from "expo-router";
-import * as SplashScreen from "expo-splash-screen";
-import * as Linking from "expo-linking";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { TRPCProvider } from "@/lib/trpc";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/lib/supabase";
 
-SplashScreen.preventAutoHideAsync().catch(() => {});
+let TRPCProviderComponent: React.ComponentType<{ children: React.ReactNode; queryClient: QueryClient }> | null = null;
+
+try {
+  const trpcModule = require("@/lib/trpc");
+  if (trpcModule && typeof trpcModule.TRPCProvider === "function") {
+    TRPCProviderComponent = trpcModule.TRPCProvider;
+  } else {
+    console.warn("[Layout] TRPCProvider is not a valid component, skipping");
+  }
+} catch (e) {
+  console.warn("[Layout] Failed to load TRPCProvider:", e);
+}
 
 const queryClient = new QueryClient();
 
@@ -91,16 +98,43 @@ function RootLayoutNav() {
   );
 }
 
+function AppProviders({ children }: { children: React.ReactNode }) {
+  if (TRPCProviderComponent) {
+    return (
+      <TRPCProviderComponent queryClient={queryClient}>
+        {children}
+      </TRPCProviderComponent>
+    );
+  }
+  return <>{children}</>;
+}
+
 export default function RootLayout() {
   useEffect(() => {
-    SplashScreen.hideAsync().catch(() => {});
+    let SplashScreen: typeof import("expo-splash-screen") | null = null;
+    try {
+      SplashScreen = require("expo-splash-screen");
+      SplashScreen?.hideAsync?.().catch(() => {});
+    } catch {
+      console.log("[Layout] SplashScreen not available");
+    }
   }, []);
 
   useEffect(() => {
+    let Linking: typeof import("expo-linking") | null = null;
+    try {
+      Linking = require("expo-linking");
+    } catch {
+      console.log("[Layout] Linking not available");
+      return;
+    }
+
     const handleDeepLink = async (event: { url: string }) => {
       try {
+        if (!Linking) return;
         const { queryParams } = Linking.parse(event.url);
         if (queryParams?.access_token && queryParams?.refresh_token) {
+          const { supabase } = require("@/lib/supabase");
           await supabase.auth.setSession({
             access_token: queryParams.access_token as string,
             refresh_token: queryParams.refresh_token as string,
@@ -111,10 +145,10 @@ export default function RootLayout() {
       }
     };
 
-    const subscription = Linking.addEventListener("url", handleDeepLink);
+    const subscription = Linking!.addEventListener("url", handleDeepLink);
 
-    Linking.getInitialURL()
-      .then((url) => {
+    Linking!.getInitialURL()
+      .then((url: string | null) => {
         if (url) void handleDeepLink({ url });
       })
       .catch(() => {});
@@ -126,11 +160,11 @@ export default function RootLayout() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <TRPCProvider queryClient={queryClient}>
+      <AppProviders>
         <AuthProvider>
           <RootLayoutNav />
         </AuthProvider>
-      </TRPCProvider>
+      </AppProviders>
     </QueryClientProvider>
   );
 }

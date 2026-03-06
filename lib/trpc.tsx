@@ -1,9 +1,9 @@
 import React, { useState } from "react";
+import { QueryClient } from "@tanstack/react-query";
 import { createTRPCReact } from "@trpc/react-query";
 import { httpLink } from "@trpc/client";
 import type { AppRouter } from "@/backend/trpc/app-router";
 import superjson from "superjson";
-import type { QueryClient } from "@tanstack/react-query";
 
 export const trpc = createTRPCReact<AppRouter>();
 
@@ -25,7 +25,7 @@ function createTRPCClient() {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 60000);
           try {
-            const response = await fetch(url, {
+            const response = await globalThis.fetch(url as string, {
               ...options,
               headers: {
                 ...(options?.headers instanceof Headers
@@ -61,16 +61,16 @@ interface TRPCProviderProps {
 export function TRPCProvider({ children, queryClient }: TRPCProviderProps) {
   const [client] = useState(createTRPCClient);
 
-  const InternalProvider = (trpc as unknown as { Provider: React.ComponentType<{ client: typeof client; queryClient: QueryClient; children: React.ReactNode }> }).Provider;
+  const ProviderComponent = trpc.Provider;
 
-  if (typeof InternalProvider !== "function" && typeof InternalProvider !== "object") {
-    console.error("[TRPCProvider] trpc.Provider is not available, type:", typeof InternalProvider);
+  if (!ProviderComponent) {
+    console.error("[tRPC] trpc.Provider is undefined - rendering children without tRPC context");
     return <>{children}</>;
   }
 
   return (
-    <InternalProvider client={client} queryClient={queryClient}>
+    <ProviderComponent client={client} queryClient={queryClient}>
       {children}
-    </InternalProvider>
+    </ProviderComponent>
   );
 }
