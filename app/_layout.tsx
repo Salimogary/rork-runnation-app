@@ -13,6 +13,10 @@ void SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
+console.log("[_layout] QueryClientProvider:", typeof QueryClientProvider);
+console.log("[_layout] TRPCProvider:", typeof TRPCProvider);
+console.log("[_layout] AuthProvider:", typeof AuthProvider);
+
 function RootLayoutNav() {
   const segments = useSegments();
   const router = useRouter();

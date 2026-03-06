@@ -7,38 +7,34 @@ import type { QueryClient } from "@tanstack/react-query";
 
 export const trpc = createTRPCReact<AppRouter>();
 
-const InternalProvider = trpc.Provider;
-
 export function TRPCProvider({
   client,
   queryClient,
   children,
 }: {
-  client: any;
+  client: ReturnType<typeof trpc.createClient>;
   queryClient: QueryClient;
   children: React.ReactNode;
 }) {
-  console.log('[TRPCProvider] InternalProvider type:', typeof InternalProvider);
-  if (!InternalProvider) {
-    console.warn('[TRPCProvider] trpc.Provider is undefined, rendering children directly');
-    return <>{children}</>;
+  const Provider = trpc.Provider;
+  if (typeof Provider !== "function") {
+    console.warn("[TRPCProvider] trpc.Provider is not a function, skipping wrapper");
+    return <React.Fragment>{children}</React.Fragment>;
   }
   return (
-    <InternalProvider client={client} queryClient={queryClient}>
+    <Provider client={client} queryClient={queryClient}>
       {children}
-    </InternalProvider>
+    </Provider>
   );
 }
 
 const getBaseUrl = () => {
   const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
-  
   if (baseUrl) {
     return baseUrl;
   }
-
-  console.warn('[tRPC] EXPO_PUBLIC_RORK_API_BASE_URL not set, using empty string');
-  return '';
+  console.warn("[tRPC] EXPO_PUBLIC_RORK_API_BASE_URL not set, using empty string");
+  return "";
 };
 
 export const trpcClient = trpc.createClient({
@@ -47,17 +43,11 @@ export const trpcClient = trpc.createClient({
       url: `${getBaseUrl()}/api/trpc`,
       transformer: superjson,
       fetch: async (url, options) => {
-        console.log('[tRPC] Request URL:', url);
-        console.log('[tRPC] Request method:', options?.method);
-        if (options?.body) {
-          const bodyStr = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
-          console.log('[tRPC] Request body size:', (bodyStr.length / 1024).toFixed(2), 'KB');
-        }
-        
+        console.log("[tRPC] Request URL:", url);
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 60000);
-          
+
           const response = await fetch(url, {
             ...options,
             headers: Object.assign(
@@ -65,27 +55,24 @@ export const trpcClient = trpc.createClient({
               options?.headers instanceof Headers
                 ? Object.fromEntries(options.headers.entries())
                 : options?.headers,
-              { 'Content-Type': 'application/json' },
+              { "Content-Type": "application/json" }
             ),
             signal: controller.signal,
           });
-          
+
           clearTimeout(timeoutId);
-          console.log('[tRPC] Response status:', response.status);
-          console.log('[tRPC] Response headers:', response.headers);
-          
+          console.log("[tRPC] Response status:", response.status);
+
           if (!response.ok) {
             const text = await response.clone().text();
-            console.error('[tRPC] Error response body:', text.substring(0, 500));
+            console.error("[tRPC] Error response body:", text.substring(0, 500));
           }
-          
+
           return response;
         } catch (error: any) {
-          console.error('[tRPC] Fetch error:', error);
-          console.error('[tRPC] Error name:', error?.name);
-          console.error('[tRPC] Error message:', error?.message);
-          if (error.name === 'AbortError') {
-            throw new Error('Request timed out after 60 seconds. The file might be too large or the server is not responding.');
+          console.error("[tRPC] Fetch error:", error?.message);
+          if (error.name === "AbortError") {
+            throw new Error("Request timed out after 60 seconds.");
           }
           throw error;
         }
