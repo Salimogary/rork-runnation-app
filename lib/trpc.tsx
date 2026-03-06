@@ -2,8 +2,8 @@ import React, { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createTRPCReact } from "@trpc/react-query";
 import { httpLink } from "@trpc/client";
-import type { AppRouter } from "@/backend/trpc/app-router";
 import superjson from "superjson";
+import type { AppRouter } from "@/backend/trpc/app-router";
 
 export const trpc = createTRPCReact<AppRouter>();
 
@@ -14,24 +14,29 @@ const getBaseUrl = (): string => {
   return "";
 };
 
-function createTRPCClient() {
-  return trpc.createClient({
-    links: [
-      httpLink({
-        url: `${getBaseUrl()}/api/trpc`,
-        transformer: superjson,
-      }),
-    ],
-  });
-}
+export function TRPCProvider({ children }: { children: React.ReactNode }) {
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            retry: 1,
+            refetchOnWindowFocus: false,
+          },
+        },
+      })
+  );
 
-interface TRPCProviderProps {
-  children: React.ReactNode;
-}
-
-export function TRPCProvider({ children }: TRPCProviderProps) {
-  const [queryClient] = useState(() => new QueryClient());
-  const [trpcClient] = useState(createTRPCClient);
+  const [trpcClient] = useState(() =>
+    trpc.createClient({
+      links: [
+        httpLink({
+          url: `${getBaseUrl()}/api/trpc`,
+          transformer: superjson,
+        }),
+      ],
+    })
+  );
 
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>

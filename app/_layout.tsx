@@ -5,28 +5,72 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { TRPCProvider } from "@/lib/trpc";
 import * as SplashScreen from "expo-splash-screen";
 import * as Linking from "expo-linking";
-import { Platform } from "react-native";
+import { Platform, View, Text } from "react-native";
 
-function RootLayoutNav() {
-  const segments = useSegments();
-  const router = useRouter();
-  const { user, isLoading: authLoading } = useAuth();
+function useOnboardingCheck() {
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState<boolean | null>(null);
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    const checkOnboarding = async () => {
+    let mounted = true;
+    AsyncStorage.getItem("hasSeenOnboarding")
+      .then((seen) => {
+        if (mounted) {
+          setHasSeenOnboarding(seen === "true");
+          setIsReady(true);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setHasSeenOnboarding(false);
+          setIsReady(true);
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  return { hasSeenOnboarding, isReady };
+}
+
+function useDeepLinkHandler() {
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+
+    const handleDeepLink = async (event: { url: string }) => {
       try {
-        const seen = await AsyncStorage.getItem("hasSeenOnboarding");
-        setHasSeenOnboarding(seen === "true");
-      } catch {
-        setHasSeenOnboarding(false);
-      } finally {
-        setIsReady(true);
+        const { queryParams } = Linking.parse(event.url);
+        if (queryParams?.access_token && queryParams?.refresh_token) {
+          const { supabase } = await import("@/lib/supabase");
+          await supabase.auth.setSession({
+            access_token: queryParams.access_token as string,
+            refresh_token: queryParams.refresh_token as string,
+          });
+        }
+      } catch (error) {
+        console.error("[Layout] Deep link error:", error);
       }
     };
-    void checkOnboarding();
+
+    const subscription = Linking.addEventListener("url", handleDeepLink);
+    Linking.getInitialURL()
+      .then((url: string | null) => {
+        if (url) void handleDeepLink({ url });
+      })
+      .catch(() => {});
+
+    return () => {
+      subscription.remove();
+    };
   }, []);
+}
+
+function NavigationGuard() {
+  const segments = useSegments();
+  const router = useRouter();
+  const { user, isLoading: authLoading } = useAuth();
+  const { hasSeenOnboarding, isReady } = useOnboardingCheck();
 
   useEffect(() => {
     if (!isReady || authLoading || hasSeenOnboarding === null) return;
@@ -66,24 +110,64 @@ function RootLayoutNav() {
     }
   }, [user, isReady, authLoading, hasSeenOnboarding, segments, router]);
 
+  return null;
+}
+
+function RootLayoutNav() {
   return (
-    <Stack screenOptions={{ headerBackTitle: "Back" }}>
-      <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-      <Stack.Screen name="register" options={{ headerShown: false }} />
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="modal" options={{ presentation: "modal", title: "Modal" }} />
-      <Stack.Screen name="profile" options={{ presentation: "modal", title: "Profile" }} />
-      <Stack.Screen name="settings" options={{ presentation: "modal", title: "Settings" }} />
-      <Stack.Screen name="admin-login" options={{ presentation: "modal", title: "Admin Login" }} />
-      <Stack.Screen name="admin" options={{ title: "Admin" }} />
-      <Stack.Screen name="cart" options={{ title: "Cart" }} />
-      <Stack.Screen name="checkout" options={{ title: "Checkout" }} />
-      <Stack.Screen name="participants" options={{ title: "Participants" }} />
-      <Stack.Screen name="medal-list" options={{ title: "Medal List" }} />
-      <Stack.Screen name="policy" options={{ presentation: "modal", title: "Policy & Terms" }} />
-      <Stack.Screen name="+not-found" />
-    </Stack>
+    <>
+      <NavigationGuard />
+      <Stack screenOptions={{ headerBackTitle: "Back" }}>
+        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+        <Stack.Screen name="register" options={{ headerShown: false }} />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="modal" options={{ presentation: "modal", title: "Modal" }} />
+        <Stack.Screen name="profile" options={{ presentation: "modal", title: "Profile" }} />
+        <Stack.Screen name="settings" options={{ presentation: "modal", title: "Settings" }} />
+        <Stack.Screen name="admin-login" options={{ presentation: "modal", title: "Admin Login" }} />
+        <Stack.Screen name="admin" options={{ title: "Admin" }} />
+        <Stack.Screen name="cart" options={{ title: "Cart" }} />
+        <Stack.Screen name="checkout" options={{ title: "Checkout" }} />
+        <Stack.Screen name="participants" options={{ title: "Participants" }} />
+        <Stack.Screen name="medal-list" options={{ title: "Medal List" }} />
+        <Stack.Screen name="policy" options={{ presentation: "modal", title: "Policy & Terms" }} />
+        <Stack.Screen name="+not-found" />
+      </Stack>
+    </>
   );
+}
+
+function ErrorFallback() {
+  return (
+    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 20 }}>
+      <Text style={{ fontSize: 16, textAlign: "center" }}>Something went wrong. Please restart the app.</Text>
+    </View>
+  );
+}
+
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("[ErrorBoundary] Caught error:", error.message);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <ErrorFallback />;
+    }
+    return this.props.children;
+  }
 }
 
 export default function RootLayout() {
@@ -93,42 +177,15 @@ export default function RootLayout() {
     });
   }, []);
 
-  useEffect(() => {
-    if (Platform.OS === "web") return;
-
-    const handleDeepLink = async (event: { url: string }) => {
-      try {
-        const { queryParams } = Linking.parse(event.url);
-        if (queryParams?.access_token && queryParams?.refresh_token) {
-          const { supabase } = await import("@/lib/supabase");
-          await supabase.auth.setSession({
-            access_token: queryParams.access_token as string,
-            refresh_token: queryParams.refresh_token as string,
-          });
-        }
-      } catch (error) {
-        console.error("[Layout] Deep link error:", error);
-      }
-    };
-
-    const subscription = Linking.addEventListener("url", handleDeepLink);
-
-    Linking.getInitialURL()
-      .then((url: string | null) => {
-        if (url) void handleDeepLink({ url });
-      })
-      .catch(() => {});
-
-    return () => {
-      subscription.remove();
-    };
-  }, []);
+  useDeepLinkHandler();
 
   return (
-    <TRPCProvider>
-      <AuthProvider>
-        <RootLayoutNav />
-      </AuthProvider>
-    </TRPCProvider>
+    <ErrorBoundary>
+      <TRPCProvider>
+        <AuthProvider>
+          <RootLayoutNav />
+        </AuthProvider>
+      </TRPCProvider>
+    </ErrorBoundary>
   );
 }
