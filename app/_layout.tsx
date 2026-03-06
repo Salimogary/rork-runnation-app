@@ -2,16 +2,21 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useState } from "react";
-import { View, StyleSheet } from "react-native";
 import { TRPCProvider } from "@/lib/trpc";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Linking from "expo-linking";
 import { supabase } from "@/lib/supabase";
 
-void SplashScreen.preventAutoHideAsync();
+SplashScreen.preventAutoHideAsync().catch(() => {
+  console.warn("[Layout] SplashScreen.preventAutoHideAsync failed");
+});
 
 const queryClient = new QueryClient();
+
+console.log("[Layout] QueryClientProvider:", typeof QueryClientProvider);
+console.log("[Layout] TRPCProvider:", typeof TRPCProvider);
+console.log("[Layout] AuthProvider:", typeof AuthProvider);
 
 function RootLayoutNav() {
   const segments = useSegments();
@@ -65,6 +70,7 @@ function RootLayoutNav() {
       <Stack.Screen name="onboarding" options={{ headerShown: false }} />
       <Stack.Screen name="register" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="modal" options={{ presentation: "modal", title: "Modal" }} />
       <Stack.Screen name="profile" options={{ presentation: "modal", title: "Profile" }} />
       <Stack.Screen name="settings" options={{ presentation: "modal", title: "Settings" }} />
       <Stack.Screen name="admin-login" options={{ presentation: "modal", title: "Admin Login" }} />
@@ -74,36 +80,41 @@ function RootLayoutNav() {
       <Stack.Screen name="participants" options={{ title: "Participants" }} />
       <Stack.Screen name="medal-list" options={{ title: "Medal List" }} />
       <Stack.Screen name="policy" options={{ presentation: "modal", title: "Policy & Terms" }} />
+      <Stack.Screen name="+not-found" />
     </Stack>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-});
-
 export default function RootLayout() {
   useEffect(() => {
-    void SplashScreen.hideAsync();
+    SplashScreen.hideAsync().catch(() => {
+      console.warn("[Layout] SplashScreen.hideAsync failed");
+    });
   }, []);
 
   useEffect(() => {
     const handleDeepLink = async (event: { url: string }) => {
-      const { queryParams } = Linking.parse(event.url);
-      if (queryParams?.access_token && queryParams?.refresh_token) {
-        await supabase.auth.setSession({
-          access_token: queryParams.access_token as string,
-          refresh_token: queryParams.refresh_token as string,
-        });
+      try {
+        const { queryParams } = Linking.parse(event.url);
+        if (queryParams?.access_token && queryParams?.refresh_token) {
+          await supabase.auth.setSession({
+            access_token: queryParams.access_token as string,
+            refresh_token: queryParams.refresh_token as string,
+          });
+        }
+      } catch (error) {
+        console.error("[Layout] Deep link error:", error);
       }
     };
 
     const subscription = Linking.addEventListener('url', handleDeepLink);
 
-    void Linking.getInitialURL().then((url) => {
+    Linking.getInitialURL().then((url) => {
       if (url) {
         void handleDeepLink({ url });
       }
+    }).catch(() => {
+      console.warn("[Layout] getInitialURL failed");
     });
 
     return () => {
@@ -115,9 +126,7 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <TRPCProvider queryClient={queryClient}>
         <AuthProvider>
-          <View style={styles.container}>
-            <RootLayoutNav />
-          </View>
+          <RootLayoutNav />
         </AuthProvider>
       </TRPCProvider>
     </QueryClientProvider>
