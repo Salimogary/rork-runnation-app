@@ -386,6 +386,38 @@ create index IF not exists idx_weight_goal_date on public."weight_goal" using bt
 - Progress percentage is calculated as: (starting_weight - current_weight) / (starting_weight - target_weight) * 100
 - If a weight entry already exists for today, it is updated instead of inserting a duplicate
 
+### 12. Health Goal (NEW - Required)
+Create this table for tracking daily smartwatch health data:
+
+```sql
+create table public."health_goal" (
+  "id" bigserial primary key,
+  "registration_id" text not null,
+  "date" date not null,
+  "steps" integer not null default 0,
+  "heart_rate" integer null,
+  "sleep_hours" double precision null,
+  "calories_burned" integer null,
+  "created_at" timestamp with time zone default now() not null,
+  constraint health_goal_registration_id_fkey foreign key ("registration_id") references "registrations" ("RegistrationID") on delete cascade,
+  constraint unique_health_goal_per_day unique ("registration_id", "date")
+) TABLESPACE pg_default;
+
+create index IF not exists idx_health_goal_registration on public."health_goal" using btree ("registration_id") TABLESPACE pg_default;
+create index IF not exists idx_health_goal_date on public."health_goal" using btree ("date" desc) TABLESPACE pg_default;
+```
+
+**Health Goal Logic:**
+- Users enter daily data from their smartwatch: steps, resting heart rate, sleep hours, calories burned
+- Each user can have one entry per day (unique constraint on registration_id + date)
+- If an entry already exists for today, it is updated instead of inserting a duplicate
+- Overall health score (0-100) is calculated from the last 7 entries:
+  - Steps score (25%): 10,000 steps = 100%
+  - Heart rate score (25%): 60-100 bpm optimal range
+  - Sleep score (25%): 7-9 hours optimal range
+  - Calories score (25%): 500+ calories burned = 100%
+- Health score is displayed as an overall percentage with breakdown by category
+
 ## Notes
 
 - FriendID is hidden from users (system-generated)

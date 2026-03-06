@@ -2,7 +2,7 @@ import { StyleSheet, View, Text, ScrollView, RefreshControl, Animated, Touchable
 import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
-import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight, Plus } from "lucide-react-native";
+import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Flame, Footprints } from "lucide-react-native";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import colors from "@/constants/colors";
@@ -37,6 +37,17 @@ interface FitnessGoal {
   target_date: string;
   created_at: string;
   updated_at: string;
+}
+
+interface HealthGoalEntry {
+  id: number;
+  registration_id: string;
+  date: string;
+  steps: number;
+  heart_rate: number | null;
+  sleep_hours: number | null;
+  calories_burned: number | null;
+  created_at: string;
 }
 
 interface RecentActivity {
@@ -96,6 +107,11 @@ export default function GoalsScreen() {
   const [weightTargetInput, setWeightTargetInput] = useState("");
   const [weightTargetDateInput, setWeightTargetDateInput] = useState("");
   const [weightLogInput, setWeightLogInput] = useState("");
+  const [showHealthForm, setShowHealthForm] = useState(false);
+  const [healthStepsInput, setHealthStepsInput] = useState("");
+  const [healthHeartRateInput, setHealthHeartRateInput] = useState("");
+  const [healthSleepInput, setHealthSleepInput] = useState("");
+  const [healthCaloriesInput, setHealthCaloriesInput] = useState("");
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -404,6 +420,211 @@ export default function GoalsScreen() {
     },
   });
 
+  const { data: healthEntries = [], isLoading: healthLoading, refetch: refetchHealth } = useQuery<HealthGoalEntry[]>({
+    queryKey: ["healthGoalEntries", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      const { data, error } = await supabase
+        .from("health_goal")
+        .select("*")
+        .eq("registration_id", user.id)
+        .order("date", { ascending: false })
+        .limit(7);
+      if (error) {
+        console.error("[Goals] Error fetching health entries:", error);
+        return [];
+      }
+      console.log("[Goals] Health entries:", data?.length);
+      return (data || []) as HealthGoalEntry[];
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
+  const logHealthMutation = useMutation({
+    mutationFn: async ({ steps, heartRate, sleepHours, caloriesBurned }: { steps: number; heartRate: number | null; sleepHours: number | null; caloriesBurned: number | null }) => {
+      if (!user?.id) throw new Error("Not logged in");
+      const today = new Date().toISOString().split("T")[0];
+      const { data: existing } = await supabase
+        .from("health_goal")
+        .select("id")
+        .eq("registration_id", user.id)
+        .eq("date", today)
+        .maybeSingle();
+      if (existing) {
+        const { data, error } = await supabase
+          .from("health_goal")
+          .update({ steps, heart_rate: heartRate, sleep_hours: sleepHours, calories_burned: caloriesBurned })
+          .eq("id", existing.id)
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
+      } else {
+        const { data, error } = await supabase
+          .from("health_goal")
+          .insert({
+            registration_id: user.id,
+            date: today,
+            steps,
+            heart_rate: heartRate,
+            sleep_hours: sleepHours,
+            calories_burned: caloriesBurned,
+          })
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
+      }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["healthGoalEntries", user?.id] });
+      setShowHealthForm(false);
+      setHealthStepsInput("");
+      setHealthHeartRateInput("");
+      setHealthSleepInput("");
+      setHealthCaloriesInput("");
+      Alert.alert("Success", "Health data logged!");
+    },
+    onError: (error: any) => {
+      console.error("[Goals] Log health error:", error);
+      Alert.alert("Error", error?.message || "Failed to log health data");
+    },
+  });
+
+  const healthScore = useMemo(() => {
+    if (healthEntries.length === 0) return null;
+
+    let stepsTotal = 0;
+    let heartRateTotal = 0;
+    let heartRateCount = 0;
+    let sleepTotal = 0;
+    let sleepCount = 0;
+    let caloriesTotal = 0;
+    let caloriesCount = 0;
+
+    healthEntries.forEach((entry) => {
+      stepsTotal += entry.steps || 0;
+      if (entry.heart_rate !== null && entry.heart_rate > 0) {
+        heartRateTotal += entry.heart_rate;
+        heartRateCount++;
+      }
+      if (entry.sleep_hours !== null && entry.sleep_hours > 0) {
+        sleepTotal += entry.sleep_hours;
+        sleepCount++;
+      }
+      if (entry.calories_burned !== null && entry.calories_burned > 0) {
+        caloriesTotal += entry.calories_burned;
+        caloriesCount++;
+      }
+    });
+
+    const count = healthEntries.length;
+    const avgSteps = stepsTotal / count;
+    const avgHeartRate = heartRateCount > 0 ? heartRateTotal / heartRateCount : null;
+    const avgSleep = sleepCount > 0 ? sleepTotal / sleepCount : null;
+    const avgCalories = caloriesCount > 0 ? caloriesTotal / caloriesCount : null;
+
+    const stepsScore = Math.min(100, (avgSteps / 10000) * 100);
+
+    let heartRateScore = 50;
+    if (avgHeartRate !== null) {
+      if (avgHeartRate >= 60 && avgHeartRate <= 100) {
+        const midPoint = 70;
+        const distance = Math.abs(avgHeartRate - midPoint);
+        heartRateScore = Math.max(0, 100 - (distance * 2.5));
+      } else if (avgHeartRate < 60) {
+        heartRateScore = Math.max(20, 100 - ((60 - avgHeartRate) * 3));
+      } else {
+        heartRateScore = Math.max(0, 100 - ((avgHeartRate - 100) * 5));
+      }
+    }
+
+    let sleepScore = 50;
+    if (avgSleep !== null) {
+      if (avgSleep >= 7 && avgSleep <= 9) {
+        sleepScore = 100;
+      } else if (avgSleep >= 6 && avgSleep < 7) {
+        sleepScore = 70;
+      } else if (avgSleep > 9 && avgSleep <= 10) {
+        sleepScore = 80;
+      } else if (avgSleep >= 5 && avgSleep < 6) {
+        sleepScore = 40;
+      } else if (avgSleep > 10) {
+        sleepScore = 50;
+      } else {
+        sleepScore = Math.max(0, avgSleep * 8);
+      }
+    }
+
+    let caloriesScore = 50;
+    if (avgCalories !== null) {
+      caloriesScore = Math.min(100, (avgCalories / 500) * 100);
+    }
+
+    let totalScore = stepsScore * 0.25;
+    if (avgHeartRate !== null) {
+      totalScore += heartRateScore * 0.25;
+    }
+    if (avgSleep !== null) {
+      totalScore += sleepScore * 0.25;
+    }
+    if (avgCalories !== null) {
+      totalScore += caloriesScore * 0.25;
+    }
+
+    const dimensionCount = 1 + (avgHeartRate !== null ? 1 : 0) + (avgSleep !== null ? 1 : 0) + (avgCalories !== null ? 1 : 0);
+    const normalizedScore = dimensionCount > 0 ? (totalScore / dimensionCount) * 4 : 0;
+    const overallScore = Math.min(100, Math.round(normalizedScore));
+
+    return {
+      overall: overallScore,
+      steps: { score: Math.round(stepsScore), avg: Math.round(avgSteps) },
+      heartRate: avgHeartRate !== null ? { score: Math.round(heartRateScore), avg: Math.round(avgHeartRate) } : null,
+      sleep: avgSleep !== null ? { score: Math.round(sleepScore), avg: parseFloat(avgSleep.toFixed(1)) } : null,
+      calories: avgCalories !== null ? { score: Math.round(caloriesScore), avg: Math.round(avgCalories) } : null,
+      entriesUsed: count,
+    };
+  }, [healthEntries]);
+
+  const handleLogHealth = useCallback(() => {
+    const steps = parseInt(healthStepsInput, 10);
+    if (isNaN(steps) || steps < 0) {
+      Alert.alert("Error", "Please enter valid steps (0 or more)");
+      return;
+    }
+    const heartRate = healthHeartRateInput.trim() ? parseInt(healthHeartRateInput, 10) : null;
+    if (heartRate !== null && (isNaN(heartRate) || heartRate < 20 || heartRate > 250)) {
+      Alert.alert("Error", "Please enter a valid heart rate (20-250 bpm)");
+      return;
+    }
+    const sleepHours = healthSleepInput.trim() ? parseFloat(healthSleepInput) : null;
+    if (sleepHours !== null && (isNaN(sleepHours) || sleepHours < 0 || sleepHours > 24)) {
+      Alert.alert("Error", "Please enter valid sleep hours (0-24)");
+      return;
+    }
+    const caloriesBurned = healthCaloriesInput.trim() ? parseInt(healthCaloriesInput, 10) : null;
+    if (caloriesBurned !== null && (isNaN(caloriesBurned) || caloriesBurned < 0)) {
+      Alert.alert("Error", "Please enter valid calories burned");
+      return;
+    }
+    logHealthMutation.mutate({ steps, heartRate, sleepHours, caloriesBurned });
+  }, [healthStepsInput, healthHeartRateInput, healthSleepInput, healthCaloriesInput, logHealthMutation]);
+
+  const getHealthScoreColor = (score: number): string => {
+    if (score >= 80) return "#10B981";
+    if (score >= 60) return "#F59E0B";
+    if (score >= 40) return "#FF6B35";
+    return "#EF4444";
+  };
+
+  const getHealthScoreLabel = (score: number): string => {
+    if (score >= 80) return "Excellent";
+    if (score >= 60) return "Good";
+    if (score >= 40) return "Fair";
+    return "Needs Work";
+  };
+
   const { data: activitySummary, refetch: refetchActivity } = useQuery<ActivitySummary>({
     queryKey: ["goalActivitySummary", user?.id],
     queryFn: async () => {
@@ -559,6 +780,7 @@ export default function GoalsScreen() {
     void refetchEvents();
     void refetchFitnessGoal();
     void refetchRecent();
+    void refetchHealth();
   };
 
   const weightProgress = useMemo(() => {
@@ -671,7 +893,7 @@ export default function GoalsScreen() {
     setShowGoalForm(true);
   }, [fitnessGoal]);
 
-  const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading && !weightTargetLoading;
+  const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading;
 
   return (
     <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
@@ -951,6 +1173,145 @@ export default function GoalsScreen() {
                 <View style={styles.setupGoalButton}>
                   <Text style={[styles.setupGoalButtonText, { color: "#10B981" }]}>Get Started</Text>
                   <ChevronRight size={16} color="#10B981" />
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {healthScore ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Heart size={18} color="#E11D48" />
+              <Text style={styles.sectionTitle}>General Health</Text>
+              <TouchableOpacity onPress={() => setShowHealthForm(true)} style={styles.editButton} activeOpacity={0.7}>
+                <Text style={styles.editButtonText}>Log</Text>
+                <Plus size={14} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.healthCard}>
+              <View style={styles.healthScoreCircleContainer}>
+                <View style={[styles.healthScoreCircle, { borderColor: getHealthScoreColor(healthScore.overall) }]}>
+                  <Text style={[styles.healthScoreNumber, { color: getHealthScoreColor(healthScore.overall) }]}>
+                    {healthScore.overall}
+                  </Text>
+                  <Text style={styles.healthScoreOutOf}>/100</Text>
+                </View>
+                <View style={[styles.healthScorePill, { backgroundColor: getHealthScoreColor(healthScore.overall) + "18" }]}>
+                  <Text style={[styles.healthScorePillText, { color: getHealthScoreColor(healthScore.overall) }]}>
+                    {getHealthScoreLabel(healthScore.overall)}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.healthBreakdown}>
+                <View style={styles.healthMetricRow}>
+                  <View style={styles.healthMetricIcon}>
+                    <Footprints size={16} color="#4A90E2" />
+                  </View>
+                  <View style={styles.healthMetricInfo}>
+                    <Text style={styles.healthMetricLabel}>Steps</Text>
+                    <Text style={styles.healthMetricValue}>{healthScore.steps.avg.toLocaleString()}/day</Text>
+                  </View>
+                  <View style={styles.healthMetricBarContainer}>
+                    <View style={styles.healthMetricBarTrack}>
+                      <View style={[styles.healthMetricBarFill, { width: `${healthScore.steps.score}%`, backgroundColor: "#4A90E2" }]} />
+                    </View>
+                    <Text style={styles.healthMetricScore}>{healthScore.steps.score}</Text>
+                  </View>
+                </View>
+
+                {healthScore.heartRate && (
+                  <View style={styles.healthMetricRow}>
+                    <View style={styles.healthMetricIcon}>
+                      <Heart size={16} color="#E11D48" />
+                    </View>
+                    <View style={styles.healthMetricInfo}>
+                      <Text style={styles.healthMetricLabel}>Heart Rate</Text>
+                      <Text style={styles.healthMetricValue}>{healthScore.heartRate.avg} bpm</Text>
+                    </View>
+                    <View style={styles.healthMetricBarContainer}>
+                      <View style={styles.healthMetricBarTrack}>
+                        <View style={[styles.healthMetricBarFill, { width: `${healthScore.heartRate.score}%`, backgroundColor: "#E11D48" }]} />
+                      </View>
+                      <Text style={styles.healthMetricScore}>{healthScore.heartRate.score}</Text>
+                    </View>
+                  </View>
+                )}
+
+                {healthScore.sleep && (
+                  <View style={styles.healthMetricRow}>
+                    <View style={styles.healthMetricIcon}>
+                      <Moon size={16} color="#8B5CF6" />
+                    </View>
+                    <View style={styles.healthMetricInfo}>
+                      <Text style={styles.healthMetricLabel}>Sleep</Text>
+                      <Text style={styles.healthMetricValue}>{healthScore.sleep.avg}h/night</Text>
+                    </View>
+                    <View style={styles.healthMetricBarContainer}>
+                      <View style={styles.healthMetricBarTrack}>
+                        <View style={[styles.healthMetricBarFill, { width: `${healthScore.sleep.score}%`, backgroundColor: "#8B5CF6" }]} />
+                      </View>
+                      <Text style={styles.healthMetricScore}>{healthScore.sleep.score}</Text>
+                    </View>
+                  </View>
+                )}
+
+                {healthScore.calories && (
+                  <View style={styles.healthMetricRow}>
+                    <View style={styles.healthMetricIcon}>
+                      <Flame size={16} color="#FF6B35" />
+                    </View>
+                    <View style={styles.healthMetricInfo}>
+                      <Text style={styles.healthMetricLabel}>Calories</Text>
+                      <Text style={styles.healthMetricValue}>{healthScore.calories.avg}/day</Text>
+                    </View>
+                    <View style={styles.healthMetricBarContainer}>
+                      <View style={styles.healthMetricBarTrack}>
+                        <View style={[styles.healthMetricBarFill, { width: `${healthScore.calories.score}%`, backgroundColor: "#FF6B35" }]} />
+                      </View>
+                      <Text style={styles.healthMetricScore}>{healthScore.calories.score}</Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+
+              <Text style={styles.fitnessFootnote}>
+                Based on last {healthScore.entriesUsed} {healthScore.entriesUsed === 1 ? "day" : "days"}
+              </Text>
+
+              {healthEntries.length > 0 && (
+                <View style={styles.healthHistorySection}>
+                  <Text style={styles.weightHistoryTitle}>Recent Entries</Text>
+                  {healthEntries.slice(0, 5).map((entry) => (
+                    <View key={entry.id} style={styles.healthHistoryRow}>
+                      <Text style={styles.weightHistoryDate}>{formatGoalDate(entry.date)}</Text>
+                      <View style={styles.healthHistoryStats}>
+                        <Text style={styles.healthHistoryStat}>{entry.steps?.toLocaleString() ?? "-"} steps</Text>
+                        {entry.heart_rate ? <Text style={styles.healthHistoryStatSub}>{entry.heart_rate} bpm</Text> : null}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          </View>
+        ) : !healthLoading ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Heart size={18} color="#E11D48" />
+              <Text style={styles.sectionTitle}>General Health</Text>
+            </View>
+            <TouchableOpacity style={styles.setupGoalCard} onPress={() => setShowHealthForm(true)} activeOpacity={0.8}>
+              <LinearGradient colors={["#E11D48", "#F43F5E"]} style={styles.setupGoalGradient}>
+                <Heart size={32} color={colors.white} />
+                <Text style={styles.setupGoalTitle}>Track Your Health</Text>
+                <Text style={styles.setupGoalSubtext}>
+                  Enter daily data from your smartwatch to get an overall health score based on steps, heart rate, sleep, and calories
+                </Text>
+                <View style={styles.setupGoalButton}>
+                  <Text style={[styles.setupGoalButtonText, { color: "#E11D48" }]}>Log Today</Text>
+                  <ChevronRight size={16} color="#E11D48" />
                 </View>
               </LinearGradient>
             </TouchableOpacity>
@@ -1240,6 +1601,104 @@ export default function GoalsScreen() {
                 <LinearGradient colors={colors.gradient.orange} style={styles.saveButtonGradient}>
                   <Text style={styles.saveButtonText}>
                     {saveFitnessGoalMutation.isPending ? "Saving..." : fitnessGoal ? "Update Goal" : "Save Goal"}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showHealthForm}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowHealthForm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <LinearGradient colors={["#E11D48", "#F43F5E"]} style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Log Health Data</Text>
+              <TouchableOpacity onPress={() => setShowHealthForm(false)}>
+                <X size={24} color={colors.white} />
+              </TouchableOpacity>
+            </LinearGradient>
+
+            <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalSubtitle}>
+                Enter today's data from your smartwatch. Steps are required, other fields are optional.
+              </Text>
+
+              <View style={styles.inputGroup}>
+                <View style={styles.healthInputHeader}>
+                  <Footprints size={16} color="#4A90E2" />
+                  <Text style={styles.inputLabel}>Steps *</Text>
+                </View>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 8500"
+                  value={healthStepsInput}
+                  onChangeText={setHealthStepsInput}
+                  keyboardType="number-pad"
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <View style={styles.healthInputHeader}>
+                  <Heart size={16} color="#E11D48" />
+                  <Text style={styles.inputLabel}>Resting Heart Rate (bpm)</Text>
+                </View>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 68"
+                  value={healthHeartRateInput}
+                  onChangeText={setHealthHeartRateInput}
+                  keyboardType="number-pad"
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <View style={styles.healthInputHeader}>
+                  <Moon size={16} color="#8B5CF6" />
+                  <Text style={styles.inputLabel}>Sleep Hours</Text>
+                </View>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 7.5"
+                  value={healthSleepInput}
+                  onChangeText={setHealthSleepInput}
+                  keyboardType="decimal-pad"
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <View style={styles.healthInputHeader}>
+                  <Flame size={16} color="#FF6B35" />
+                  <Text style={styles.inputLabel}>Calories Burned</Text>
+                </View>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 450"
+                  value={healthCaloriesInput}
+                  onChangeText={setHealthCaloriesInput}
+                  keyboardType="number-pad"
+                  placeholderTextColor={colors.textLight}
+                />
+                <Text style={styles.inputHint}>Today's date will be used automatically</Text>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.saveButton, logHealthMutation.isPending && styles.saveButtonDisabled]}
+                onPress={handleLogHealth}
+                disabled={logHealthMutation.isPending}
+                activeOpacity={0.8}
+              >
+                <LinearGradient colors={["#E11D48", "#F43F5E"]} style={styles.saveButtonGradient}>
+                  <Text style={styles.saveButtonText}>
+                    {logHealthMutation.isPending ? "Saving..." : "Log Health Data"}
                   </Text>
                 </LinearGradient>
               </TouchableOpacity>
@@ -1878,5 +2337,131 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700" as const,
     color: colors.white,
+  },
+  healthCard: {
+    backgroundColor: colors.cardBackground,
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  healthScoreCircleContainer: {
+    alignItems: "center" as const,
+    marginBottom: 20,
+  },
+  healthScoreCircle: {
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    borderWidth: 5,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    marginBottom: 10,
+  },
+  healthScoreNumber: {
+    fontSize: 36,
+    fontWeight: "900" as const,
+  },
+  healthScoreOutOf: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: -4,
+  },
+  healthScorePill: {
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 16,
+  },
+  healthScorePillText: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+  },
+  healthBreakdown: {
+    gap: 14,
+    marginBottom: 14,
+  },
+  healthMetricRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+  },
+  healthMetricIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: colors.extraLightGray,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  healthMetricInfo: {
+    flex: 1,
+  },
+  healthMetricLabel: {
+    fontSize: 13,
+    fontWeight: "600" as const,
+    color: colors.text,
+  },
+  healthMetricValue: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 1,
+  },
+  healthMetricBarContainer: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+    width: 100,
+  },
+  healthMetricBarTrack: {
+    flex: 1,
+    height: 6,
+    backgroundColor: colors.extraLightGray,
+    borderRadius: 3,
+    overflow: "hidden" as const,
+  },
+  healthMetricBarFill: {
+    height: "100%",
+    borderRadius: 3,
+  },
+  healthMetricScore: {
+    fontSize: 12,
+    fontWeight: "700" as const,
+    color: colors.textSecondary,
+    width: 24,
+    textAlign: "right" as const,
+  },
+  healthHistorySection: {
+    marginTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+    paddingTop: 12,
+  },
+  healthHistoryRow: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+    paddingVertical: 6,
+  },
+  healthHistoryStats: {
+    alignItems: "flex-end" as const,
+  },
+  healthHistoryStat: {
+    fontSize: 13,
+    fontWeight: "600" as const,
+    color: colors.text,
+  },
+  healthHistoryStatSub: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 1,
+  },
+  healthInputHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+    marginBottom: 8,
   },
 });
