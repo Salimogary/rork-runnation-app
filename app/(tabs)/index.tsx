@@ -2,7 +2,7 @@ import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Platform, Modal, 
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge, Target, TrendingUp, Clock, Loader } from "lucide-react-native";
+import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge } from "lucide-react-native";
 import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
 import MapView, { Polyline } from "react-native-maps";
@@ -20,11 +20,6 @@ interface Coordinates {
   longitude: number;
 }
 
-interface UserGoal {
-  goal_id: string;
-  name: string;
-}
-
 export default function ExerciseScreen() {
   const { user } = useAuth();
   const [runState, setRunState] = useState<RunState>("idle");
@@ -39,63 +34,6 @@ export default function ExerciseScreen() {
   const [treadmillDistance, setTreadmillDistance] = useState("");
   const [treadmillTime, setTreadmillTime] = useState("");
   const [treadmillImage, setTreadmillImage] = useState<string | null>(null);
-  const [userGoals, setUserGoals] = useState<UserGoal[]>([]);
-  const [goalsLoading, setGoalsLoading] = useState(true);
-
-  const goalGradients: (readonly [string, string])[] = [
-    colors.gradient.orange,
-    colors.gradient.teal,
-    colors.gradient.blue,
-  ];
-  const goalIcons = [TrendingUp, Clock, Gauge];
-
-  useEffect(() => {
-    if (user) {
-      console.log('[DEBUG] Current user RegistrationID:', user.id);
-      console.log('[DEBUG] Is U0101?', user.id === 'U0101');
-      fetchUserGoals();
-    } else {
-      console.log('[DEBUG] No user logged in');
-      setGoalsLoading(false);
-    }
-  }, [user]);
-
-  const fetchUserGoals = async () => {
-    if (!user) return;
-    try {
-      setGoalsLoading(true);
-      const regId = user.id;
-      console.log('[Goals] Fetching goals for registration_id:', regId);
-
-      const { data: gpuRows, error: gpuError } = await supabase
-        .from('user_goals')
-        .select('user_goals_id, goal')
-        .eq('registration_id', regId)
-        .order('user_goals_id', { ascending: true });
-
-      console.log('[Goals] user_goals rows:', JSON.stringify(gpuRows));
-      console.log('[Goals] user_goals error:', JSON.stringify(gpuError));
-
-      if (gpuError || !gpuRows || gpuRows.length === 0) {
-        console.log('[Goals] No rows found in user_goals');
-        setUserGoals([]);
-        return;
-      }
-
-      const resolvedGoals: UserGoal[] = gpuRows.map((row: any) => ({
-        goal_id: String(row.user_goals_id),
-        name: row.goal || 'Unknown',
-      }));
-
-      console.log('[Goals] Resolved goals:', JSON.stringify(resolvedGoals));
-      setUserGoals(resolvedGoals.slice(0, 3));
-    } catch (err) {
-      console.error('[Goals] Fetch error:', err);
-      setUserGoals([]);
-    } finally {
-      setGoalsLoading(false);
-    }
-  };
 
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
   const timerInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -401,7 +339,6 @@ export default function ExerciseScreen() {
 
   const isActivityActive = exerciseType !== null;
   const headerTitle = isActivityActive ? "Exercise" : "Home";
-  const showGoals = runState === "idle" || runState === "finished";
 
   return (
     <View style={styles.container}>
@@ -428,48 +365,6 @@ export default function ExerciseScreen() {
                 />
               )}
             </MapView>
-          </View>
-        )}
-
-        {showGoals && (
-          <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionTitleRow}>
-                <Target size={18} color={colors.primary} />
-                <Text style={styles.sectionTitle}>Goal Tracker</Text>
-              </View>
-            </View>
-
-            {goalsLoading ? (
-              <View style={styles.goalsLoadingContainer}>
-                <Loader size={24} color={colors.textLight} />
-                <Text style={styles.goalsLoadingText}>Loading goals...</Text>
-              </View>
-            ) : userGoals.length === 0 ? (
-              <View style={styles.noGoalsContainer}>
-                <Target size={32} color={colors.textLight} />
-                <Text style={styles.noGoalsText}>No goals set during registration</Text>
-              </View>
-            ) : (
-              <View style={styles.goalsColumn}>
-                {userGoals.map((goal, index) => {
-                  const IconComp = goalIcons[index % goalIcons.length];
-                  const gradient = goalGradients[index % goalGradients.length];
-                  return (
-                    <View key={goal.goal_id} style={styles.goalButton}>
-                      <LinearGradient colors={gradient} style={styles.goalButtonGradient}>
-                        <View style={styles.goalButtonContent}>
-                          <IconComp size={32} color={colors.white} />
-                          <View style={styles.goalButtonTextContainer}>
-                            <Text style={styles.goalButtonText}>{goal.name}</Text>
-                          </View>
-                        </View>
-                      </LinearGradient>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
           </View>
         )}
 
@@ -715,75 +610,7 @@ const styles = StyleSheet.create({
   map: {
     flex: 1,
   },
-  sectionContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 4,
-  },
-  sectionHeader: {
-    flexDirection: "row" as const,
-    justifyContent: "space-between" as const,
-    alignItems: "center" as const,
-    marginBottom: 8,
-  },
-  sectionTitleRow: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: 8,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "800" as const,
-    color: colors.text,
-  },
-  goalsColumn: {
-    gap: 10,
-  },
-  goalButton: {
-    borderRadius: 20,
-    overflow: "hidden" as const,
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  goalButtonGradient: {
-    padding: 14,
-  },
-  goalButtonContent: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: 20,
-  },
-  goalButtonTextContainer: {
-    flex: 1,
-  },
-  goalButtonText: {
-    fontSize: 18,
-    fontWeight: "700" as const,
-    color: colors.white,
-  },
-  goalsLoadingContainer: {
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    paddingVertical: 30,
-    gap: 8,
-  },
-  goalsLoadingText: {
-    fontSize: 14,
-    color: colors.textLight,
-  },
-  noGoalsContainer: {
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-    paddingVertical: 30,
-    gap: 8,
-  },
-  noGoalsText: {
-    fontSize: 14,
-    color: colors.textLight,
-  },
+
   statsContainer: {
     flexDirection: "row",
     paddingHorizontal: 16,
