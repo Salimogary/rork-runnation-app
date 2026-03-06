@@ -57,15 +57,26 @@ interface TRPCProviderProps {
   children: React.ReactNode;
 }
 
+const TRPCProviderInner = trpc.Provider;
+
 export function TRPCProvider({ children }: TRPCProviderProps) {
   const [queryClient] = useState(() => new QueryClient());
   const [trpcClient] = useState(createTRPCClient);
 
-  return (
-    <trpc.Provider client={trpcClient} queryClient={queryClient}>
+  if (!TRPCProviderInner) {
+    console.error("[tRPC] Provider is undefined, falling back to QueryClientProvider only");
+    return (
       <QueryClientProvider client={queryClient}>
         {children}
       </QueryClientProvider>
-    </trpc.Provider>
+    );
+  }
+
+  return (
+    <TRPCProviderInner client={trpcClient} queryClient={queryClient}>
+      <QueryClientProvider client={queryClient}>
+        {children}
+      </QueryClientProvider>
+    </TRPCProviderInner>
   );
 }

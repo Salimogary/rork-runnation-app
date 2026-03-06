@@ -3,6 +3,9 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { TRPCProvider } from "@/lib/trpc";
+import * as SplashScreen from "expo-splash-screen";
+import * as Linking from "expo-linking";
+import { Platform } from "react-native";
 
 function RootLayoutNav() {
   const segments = useSegments();
@@ -85,30 +88,19 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   useEffect(() => {
-    let SplashScreen: typeof import("expo-splash-screen") | null = null;
-    try {
-      SplashScreen = require("expo-splash-screen");
-      SplashScreen?.hideAsync?.().catch(() => {});
-    } catch {
-      console.log("[Layout] SplashScreen not available");
-    }
+    SplashScreen.hideAsync().catch(() => {
+      console.log("[Layout] SplashScreen hide failed");
+    });
   }, []);
 
   useEffect(() => {
-    let Linking: typeof import("expo-linking") | null = null;
-    try {
-      Linking = require("expo-linking");
-    } catch {
-      console.log("[Layout] Linking not available");
-      return;
-    }
+    if (Platform.OS === "web") return;
 
     const handleDeepLink = async (event: { url: string }) => {
       try {
-        if (!Linking) return;
         const { queryParams } = Linking.parse(event.url);
         if (queryParams?.access_token && queryParams?.refresh_token) {
-          const { supabase } = require("@/lib/supabase");
+          const { supabase } = await import("@/lib/supabase");
           await supabase.auth.setSession({
             access_token: queryParams.access_token as string,
             refresh_token: queryParams.refresh_token as string,
@@ -119,9 +111,9 @@ export default function RootLayout() {
       }
     };
 
-    const subscription = Linking!.addEventListener("url", handleDeepLink);
+    const subscription = Linking.addEventListener("url", handleDeepLink);
 
-    Linking!.getInitialURL()
+    Linking.getInitialURL()
       .then((url: string | null) => {
         if (url) void handleDeepLink({ url });
       })
