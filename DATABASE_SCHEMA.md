@@ -386,36 +386,44 @@ create index IF not exists idx_weight_goal_date on public."weight_goal" using bt
 - Progress percentage is calculated as: (starting_weight - current_weight) / (starting_weight - target_weight) * 100
 - If a weight entry already exists for today, it is updated instead of inserting a duplicate
 
-### 12. Health Goal (NEW - Required)
-Create this table for tracking daily smartwatch health data:
+### 12. Health Goal (Existing)
+This table tracks daily smartwatch health data with a computed overall_health_score:
 
 ```sql
-create table public."health_goal" (
-  "id" bigserial primary key,
-  "registration_id" text not null,
-  "date" date not null,
-  "steps" integer not null default 0,
-  "heart_rate" integer null,
-  "sleep_hours" double precision null,
-  "calories_burned" integer null,
-  "created_at" timestamp with time zone default now() not null,
-  constraint health_goal_registration_id_fkey foreign key ("registration_id") references "registrations" ("RegistrationID") on delete cascade,
-  constraint unique_health_goal_per_day unique ("registration_id", "date")
+create table public.health_goal (
+  health_id serial not null,
+  registration_id text not null,
+  record_date date not null,
+  heart_rate_bpm integer null,
+  steps integer null,
+  sleep_hours numeric(4, 2) null,
+  blood_oxygen_spo2 numeric(4, 1) null,
+  overall_health_score numeric GENERATED ALWAYS as (
+    (
+      (
+        (
+          ((COALESCE(heart_rate_bpm, 0))::numeric * 0.25) + ((COALESCE(steps, 0))::numeric * 0.0005)
+        ) + (
+          COALESCE(sleep_hours, (0)::numeric) * (10)::numeric
+        )
+      ) + (COALESCE(blood_oxygen_spo2, (0)::numeric) * 0.5)
+    )
+  ) STORED (6, 2) null,
+  constraint health_goal_pkey primary key (health_id),
+  constraint fk_registration foreign KEY (registration_id) references registrations ("RegistrationID")
 ) TABLESPACE pg_default;
-
-create index IF not exists idx_health_goal_registration on public."health_goal" using btree ("registration_id") TABLESPACE pg_default;
-create index IF not exists idx_health_goal_date on public."health_goal" using btree ("date" desc) TABLESPACE pg_default;
 ```
 
 **Health Goal Logic:**
-- Users enter daily data from their smartwatch: steps, resting heart rate, sleep hours, calories burned
-- Each user can have one entry per day (unique constraint on registration_id + date)
+- Users enter daily data from their smartwatch: steps, resting heart rate (bpm), sleep hours, blood oxygen SpO2 (%)
+- Each user can have one entry per day (registration_id + record_date)
 - If an entry already exists for today, it is updated instead of inserting a duplicate
-- Overall health score (0-100) is calculated from the last 7 entries:
+- The database computes `overall_health_score` automatically using the formula above
+- The app also computes a client-side health score (0-100) from the last 7 entries:
   - Steps score (25%): 10,000 steps = 100%
   - Heart rate score (25%): 60-100 bpm optimal range
   - Sleep score (25%): 7-9 hours optimal range
-  - Calories score (25%): 500+ calories burned = 100%
+  - Blood Oxygen SpO2 score (25%): 95%+ = 100%, 90-95% = good, below 90% = low
 - Health score is displayed as an overall percentage with breakdown by category
 
 ## Notes

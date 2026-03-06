@@ -2,7 +2,7 @@ import { StyleSheet, View, Text, ScrollView, RefreshControl, Animated, Touchable
 import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
-import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Flame, Footprints } from "lucide-react-native";
+import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints } from "lucide-react-native";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import colors from "@/constants/colors";
@@ -40,14 +40,14 @@ interface FitnessGoal {
 }
 
 interface HealthGoalEntry {
-  id: number;
+  health_id: number;
   registration_id: string;
-  date: string;
+  record_date: string;
   steps: number;
-  heart_rate: number | null;
+  heart_rate_bpm: number | null;
   sleep_hours: number | null;
-  calories_burned: number | null;
-  created_at: string;
+  blood_oxygen_spo2: number | null;
+  overall_health_score: number | null;
 }
 
 interface RecentActivity {
@@ -111,7 +111,7 @@ export default function GoalsScreen() {
   const [healthStepsInput, setHealthStepsInput] = useState("");
   const [healthHeartRateInput, setHealthHeartRateInput] = useState("");
   const [healthSleepInput, setHealthSleepInput] = useState("");
-  const [healthCaloriesInput, setHealthCaloriesInput] = useState("");
+  const [healthSpo2Input, setHealthSpo2Input] = useState("");
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -428,7 +428,7 @@ export default function GoalsScreen() {
         .from("health_goal")
         .select("*")
         .eq("registration_id", user.id)
-        .order("date", { ascending: false })
+        .order("record_date", { ascending: false })
         .limit(7);
       if (error) {
         console.error("[Goals] Error fetching health entries:", error);
@@ -442,20 +442,20 @@ export default function GoalsScreen() {
   });
 
   const logHealthMutation = useMutation({
-    mutationFn: async ({ steps, heartRate, sleepHours, caloriesBurned }: { steps: number; heartRate: number | null; sleepHours: number | null; caloriesBurned: number | null }) => {
+    mutationFn: async ({ steps, heartRateBpm, sleepHours, bloodOxygenSpo2 }: { steps: number; heartRateBpm: number | null; sleepHours: number | null; bloodOxygenSpo2: number | null }) => {
       if (!user?.id) throw new Error("Not logged in");
       const today = new Date().toISOString().split("T")[0];
       const { data: existing } = await supabase
         .from("health_goal")
-        .select("id")
+        .select("health_id")
         .eq("registration_id", user.id)
-        .eq("date", today)
+        .eq("record_date", today)
         .maybeSingle();
       if (existing) {
         const { data, error } = await supabase
           .from("health_goal")
-          .update({ steps, heart_rate: heartRate, sleep_hours: sleepHours, calories_burned: caloriesBurned })
-          .eq("id", existing.id)
+          .update({ steps, heart_rate_bpm: heartRateBpm, sleep_hours: sleepHours, blood_oxygen_spo2: bloodOxygenSpo2 })
+          .eq("health_id", existing.health_id)
           .select()
           .single();
         if (error) throw error;
@@ -465,11 +465,11 @@ export default function GoalsScreen() {
           .from("health_goal")
           .insert({
             registration_id: user.id,
-            date: today,
+            record_date: today,
             steps,
-            heart_rate: heartRate,
+            heart_rate_bpm: heartRateBpm,
             sleep_hours: sleepHours,
-            calories_burned: caloriesBurned,
+            blood_oxygen_spo2: bloodOxygenSpo2,
           })
           .select()
           .single();
@@ -483,7 +483,7 @@ export default function GoalsScreen() {
       setHealthStepsInput("");
       setHealthHeartRateInput("");
       setHealthSleepInput("");
-      setHealthCaloriesInput("");
+      setHealthSpo2Input("");
       Alert.alert("Success", "Health data logged!");
     },
     onError: (error: any) => {
@@ -500,22 +500,22 @@ export default function GoalsScreen() {
     let heartRateCount = 0;
     let sleepTotal = 0;
     let sleepCount = 0;
-    let caloriesTotal = 0;
-    let caloriesCount = 0;
+    let spo2Total = 0;
+    let spo2Count = 0;
 
     healthEntries.forEach((entry) => {
       stepsTotal += entry.steps || 0;
-      if (entry.heart_rate !== null && entry.heart_rate > 0) {
-        heartRateTotal += entry.heart_rate;
+      if (entry.heart_rate_bpm !== null && entry.heart_rate_bpm > 0) {
+        heartRateTotal += entry.heart_rate_bpm;
         heartRateCount++;
       }
       if (entry.sleep_hours !== null && entry.sleep_hours > 0) {
         sleepTotal += entry.sleep_hours;
         sleepCount++;
       }
-      if (entry.calories_burned !== null && entry.calories_burned > 0) {
-        caloriesTotal += entry.calories_burned;
-        caloriesCount++;
+      if (entry.blood_oxygen_spo2 !== null && entry.blood_oxygen_spo2 > 0) {
+        spo2Total += entry.blood_oxygen_spo2;
+        spo2Count++;
       }
     });
 
@@ -523,7 +523,7 @@ export default function GoalsScreen() {
     const avgSteps = stepsTotal / count;
     const avgHeartRate = heartRateCount > 0 ? heartRateTotal / heartRateCount : null;
     const avgSleep = sleepCount > 0 ? sleepTotal / sleepCount : null;
-    const avgCalories = caloriesCount > 0 ? caloriesTotal / caloriesCount : null;
+    const avgSpo2 = spo2Count > 0 ? spo2Total / spo2Count : null;
 
     const stepsScore = Math.min(100, (avgSteps / 10000) * 100);
 
@@ -557,9 +557,17 @@ export default function GoalsScreen() {
       }
     }
 
-    let caloriesScore = 50;
-    if (avgCalories !== null) {
-      caloriesScore = Math.min(100, (avgCalories / 500) * 100);
+    let spo2Score = 50;
+    if (avgSpo2 !== null) {
+      if (avgSpo2 >= 95) {
+        spo2Score = 100;
+      } else if (avgSpo2 >= 90) {
+        spo2Score = 70 + ((avgSpo2 - 90) / 5) * 30;
+      } else if (avgSpo2 >= 85) {
+        spo2Score = 40 + ((avgSpo2 - 85) / 5) * 30;
+      } else {
+        spo2Score = Math.max(0, avgSpo2 - 45);
+      }
     }
 
     let totalScore = stepsScore * 0.25;
@@ -569,11 +577,11 @@ export default function GoalsScreen() {
     if (avgSleep !== null) {
       totalScore += sleepScore * 0.25;
     }
-    if (avgCalories !== null) {
-      totalScore += caloriesScore * 0.25;
+    if (avgSpo2 !== null) {
+      totalScore += spo2Score * 0.25;
     }
 
-    const dimensionCount = 1 + (avgHeartRate !== null ? 1 : 0) + (avgSleep !== null ? 1 : 0) + (avgCalories !== null ? 1 : 0);
+    const dimensionCount = 1 + (avgHeartRate !== null ? 1 : 0) + (avgSleep !== null ? 1 : 0) + (avgSpo2 !== null ? 1 : 0);
     const normalizedScore = dimensionCount > 0 ? (totalScore / dimensionCount) * 4 : 0;
     const overallScore = Math.min(100, Math.round(normalizedScore));
 
@@ -582,7 +590,7 @@ export default function GoalsScreen() {
       steps: { score: Math.round(stepsScore), avg: Math.round(avgSteps) },
       heartRate: avgHeartRate !== null ? { score: Math.round(heartRateScore), avg: Math.round(avgHeartRate) } : null,
       sleep: avgSleep !== null ? { score: Math.round(sleepScore), avg: parseFloat(avgSleep.toFixed(1)) } : null,
-      calories: avgCalories !== null ? { score: Math.round(caloriesScore), avg: Math.round(avgCalories) } : null,
+      spo2: avgSpo2 !== null ? { score: Math.round(spo2Score), avg: parseFloat(avgSpo2.toFixed(1)) } : null,
       entriesUsed: count,
     };
   }, [healthEntries]);
@@ -593,8 +601,8 @@ export default function GoalsScreen() {
       Alert.alert("Error", "Please enter valid steps (0 or more)");
       return;
     }
-    const heartRate = healthHeartRateInput.trim() ? parseInt(healthHeartRateInput, 10) : null;
-    if (heartRate !== null && (isNaN(heartRate) || heartRate < 20 || heartRate > 250)) {
+    const heartRateBpm = healthHeartRateInput.trim() ? parseInt(healthHeartRateInput, 10) : null;
+    if (heartRateBpm !== null && (isNaN(heartRateBpm) || heartRateBpm < 20 || heartRateBpm > 250)) {
       Alert.alert("Error", "Please enter a valid heart rate (20-250 bpm)");
       return;
     }
@@ -603,13 +611,13 @@ export default function GoalsScreen() {
       Alert.alert("Error", "Please enter valid sleep hours (0-24)");
       return;
     }
-    const caloriesBurned = healthCaloriesInput.trim() ? parseInt(healthCaloriesInput, 10) : null;
-    if (caloriesBurned !== null && (isNaN(caloriesBurned) || caloriesBurned < 0)) {
-      Alert.alert("Error", "Please enter valid calories burned");
+    const bloodOxygenSpo2 = healthSpo2Input.trim() ? parseFloat(healthSpo2Input) : null;
+    if (bloodOxygenSpo2 !== null && (isNaN(bloodOxygenSpo2) || bloodOxygenSpo2 < 50 || bloodOxygenSpo2 > 100)) {
+      Alert.alert("Error", "Please enter valid SpO2 (50-100%)");
       return;
     }
-    logHealthMutation.mutate({ steps, heartRate, sleepHours, caloriesBurned });
-  }, [healthStepsInput, healthHeartRateInput, healthSleepInput, healthCaloriesInput, logHealthMutation]);
+    logHealthMutation.mutate({ steps, heartRateBpm, sleepHours, bloodOxygenSpo2 });
+  }, [healthStepsInput, healthHeartRateInput, healthSleepInput, healthSpo2Input, logHealthMutation]);
 
   const getHealthScoreColor = (score: number): string => {
     if (score >= 80) return "#10B981";
@@ -1257,20 +1265,20 @@ export default function GoalsScreen() {
                   </View>
                 )}
 
-                {healthScore.calories && (
+                {healthScore.spo2 && (
                   <View style={styles.healthMetricRow}>
                     <View style={styles.healthMetricIcon}>
-                      <Flame size={16} color="#FF6B35" />
+                      <Droplets size={16} color="#0EA5E9" />
                     </View>
                     <View style={styles.healthMetricInfo}>
-                      <Text style={styles.healthMetricLabel}>Calories</Text>
-                      <Text style={styles.healthMetricValue}>{healthScore.calories.avg}/day</Text>
+                      <Text style={styles.healthMetricLabel}>Blood Oxygen</Text>
+                      <Text style={styles.healthMetricValue}>{healthScore.spo2.avg}% SpO2</Text>
                     </View>
                     <View style={styles.healthMetricBarContainer}>
                       <View style={styles.healthMetricBarTrack}>
-                        <View style={[styles.healthMetricBarFill, { width: `${healthScore.calories.score}%`, backgroundColor: "#FF6B35" }]} />
+                        <View style={[styles.healthMetricBarFill, { width: `${healthScore.spo2.score}%`, backgroundColor: "#0EA5E9" }]} />
                       </View>
-                      <Text style={styles.healthMetricScore}>{healthScore.calories.score}</Text>
+                      <Text style={styles.healthMetricScore}>{healthScore.spo2.score}</Text>
                     </View>
                   </View>
                 )}
@@ -1284,11 +1292,12 @@ export default function GoalsScreen() {
                 <View style={styles.healthHistorySection}>
                   <Text style={styles.weightHistoryTitle}>Recent Entries</Text>
                   {healthEntries.slice(0, 5).map((entry) => (
-                    <View key={entry.id} style={styles.healthHistoryRow}>
-                      <Text style={styles.weightHistoryDate}>{formatGoalDate(entry.date)}</Text>
+                    <View key={entry.health_id} style={styles.healthHistoryRow}>
+                      <Text style={styles.weightHistoryDate}>{formatGoalDate(entry.record_date)}</Text>
                       <View style={styles.healthHistoryStats}>
                         <Text style={styles.healthHistoryStat}>{entry.steps?.toLocaleString() ?? "-"} steps</Text>
-                        {entry.heart_rate ? <Text style={styles.healthHistoryStatSub}>{entry.heart_rate} bpm</Text> : null}
+                        {entry.heart_rate_bpm ? <Text style={styles.healthHistoryStatSub}>{entry.heart_rate_bpm} bpm</Text> : null}
+                        {entry.blood_oxygen_spo2 ? <Text style={styles.healthHistoryStatSub}>{entry.blood_oxygen_spo2}% SpO2</Text> : null}
                       </View>
                     </View>
                   ))}
@@ -1307,7 +1316,7 @@ export default function GoalsScreen() {
                 <Heart size={32} color={colors.white} />
                 <Text style={styles.setupGoalTitle}>Track Your Health</Text>
                 <Text style={styles.setupGoalSubtext}>
-                  Enter daily data from your smartwatch to get an overall health score based on steps, heart rate, sleep, and calories
+                  Enter daily data from your smartwatch to get an overall health score based on steps, heart rate, sleep, and blood oxygen
                 </Text>
                 <View style={styles.setupGoalButton}>
                   <Text style={[styles.setupGoalButtonText, { color: "#E11D48" }]}>Log Today</Text>
@@ -1676,15 +1685,15 @@ export default function GoalsScreen() {
 
               <View style={styles.inputGroup}>
                 <View style={styles.healthInputHeader}>
-                  <Flame size={16} color="#FF6B35" />
-                  <Text style={styles.inputLabel}>Calories Burned</Text>
+                  <Droplets size={16} color="#0EA5E9" />
+                  <Text style={styles.inputLabel}>Blood Oxygen SpO2 (%)</Text>
                 </View>
                 <TextInput
                   style={styles.input}
-                  placeholder="e.g. 450"
-                  value={healthCaloriesInput}
-                  onChangeText={setHealthCaloriesInput}
-                  keyboardType="number-pad"
+                  placeholder="e.g. 97.5"
+                  value={healthSpo2Input}
+                  onChangeText={setHealthSpo2Input}
+                  keyboardType="decimal-pad"
                   placeholderTextColor={colors.textLight}
                 />
                 <Text style={styles.inputHint}>Today's date will be used automatically</Text>
