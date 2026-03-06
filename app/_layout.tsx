@@ -1,19 +1,16 @@
+import React, { useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect, useState } from "react";
+import * as Linking from "expo-linking";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { TRPCProvider } from "@/lib/trpc";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Linking from "expo-linking";
 import { supabase } from "@/lib/supabase";
 
-SplashScreen.preventAutoHideAsync().catch(() => {
-  console.warn("[Layout] SplashScreen.preventAutoHideAsync failed");
-});
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 const queryClient = new QueryClient();
-
 
 function RootLayoutNav() {
   const segments = useSegments();
@@ -24,9 +21,14 @@ function RootLayoutNav() {
 
   useEffect(() => {
     const checkOnboarding = async () => {
-      const seen = await AsyncStorage.getItem('hasSeenOnboarding');
-      setHasSeenOnboarding(seen === 'true');
-      setIsReady(true);
+      try {
+        const seen = await AsyncStorage.getItem("hasSeenOnboarding");
+        setHasSeenOnboarding(seen === "true");
+      } catch {
+        setHasSeenOnboarding(false);
+      } finally {
+        setIsReady(true);
+      }
     };
     void checkOnboarding();
   }, []);
@@ -35,28 +37,35 @@ function RootLayoutNav() {
     if (!isReady || authLoading || hasSeenOnboarding === null) return;
 
     const currentSegment = segments[0] as string;
-    const inOnboarding = currentSegment === 'onboarding';
-    const inRegister = currentSegment === 'register';
-    const inTabs = currentSegment === '(tabs)';
-    const inAdminLogin = currentSegment === 'admin-login';
-    const inAdmin = currentSegment === 'admin';
+    const inOnboarding = currentSegment === "onboarding";
+    const inRegister = currentSegment === "register";
+    const inTabs = currentSegment === "(tabs)";
+    const inAdminLogin = currentSegment === "admin-login";
+    const inAdmin = currentSegment === "admin";
 
     if (inAdminLogin || inAdmin) return;
 
-    const inAllowedRoute = currentSegment === 'settings' || currentSegment === 'profile' || currentSegment === 'cart' || currentSegment === 'checkout' || currentSegment === 'participants' || currentSegment === 'medal-list' || currentSegment === 'policy';
+    const inAllowedRoute =
+      currentSegment === "settings" ||
+      currentSegment === "profile" ||
+      currentSegment === "cart" ||
+      currentSegment === "checkout" ||
+      currentSegment === "participants" ||
+      currentSegment === "medal-list" ||
+      currentSegment === "policy";
 
     if (user) {
       if (!inTabs && !inAllowedRoute && !inRegister) {
-        router.replace('/(tabs)');
+        router.replace("/(tabs)");
       }
     } else {
       if (!hasSeenOnboarding) {
         if (!inOnboarding && !inRegister) {
-          router.replace('/onboarding' as any);
+          router.replace("/onboarding" as never);
         }
       } else {
         if (!inRegister) {
-          router.replace('/register' as any);
+          router.replace("/register" as never);
         }
       }
     }
@@ -84,9 +93,7 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   useEffect(() => {
-    SplashScreen.hideAsync().catch(() => {
-      console.warn("[Layout] SplashScreen.hideAsync failed");
-    });
+    SplashScreen.hideAsync().catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -104,15 +111,13 @@ export default function RootLayout() {
       }
     };
 
-    const subscription = Linking.addEventListener('url', handleDeepLink);
+    const subscription = Linking.addEventListener("url", handleDeepLink);
 
-    Linking.getInitialURL().then((url) => {
-      if (url) {
-        void handleDeepLink({ url });
-      }
-    }).catch(() => {
-      console.warn("[Layout] getInitialURL failed");
-    });
+    Linking.getInitialURL()
+      .then((url) => {
+        if (url) void handleDeepLink({ url });
+      })
+      .catch(() => {});
 
     return () => {
       subscription.remove();

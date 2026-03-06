@@ -1,57 +1,48 @@
+import React, { useState } from "react";
 import { createTRPCReact } from "@trpc/react-query";
 import { httpLink } from "@trpc/client";
 import type { AppRouter } from "@/backend/trpc/app-router";
 import superjson from "superjson";
-import React, { useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 
 export const trpc = createTRPCReact<AppRouter>();
 
-const getBaseUrl = () => {
+const getBaseUrl = (): string => {
   const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
-  if (baseUrl) {
-    return baseUrl;
-  }
-  console.warn("[tRPC] EXPO_PUBLIC_RORK_API_BASE_URL not set, using empty string");
+  if (baseUrl) return baseUrl;
+  console.warn("[tRPC] EXPO_PUBLIC_RORK_API_BASE_URL not set");
   return "";
 };
 
-function makeTRPCClient() {
+function createTRPCClient() {
   return trpc.createClient({
     links: [
       httpLink({
         url: `${getBaseUrl()}/api/trpc`,
         transformer: superjson,
-        fetch: async (url, options) => {
-          console.log("[tRPC] Request URL:", url);
+        async fetch(url, options) {
+          console.log("[tRPC] Request:", url);
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 60000);
           try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 60000);
-
             const response = await fetch(url, {
               ...options,
-              headers: Object.assign(
-                {},
-                options?.headers instanceof Headers
+              headers: {
+                ...(options?.headers instanceof Headers
                   ? Object.fromEntries(options.headers.entries())
-                  : options?.headers,
-                { "Content-Type": "application/json" }
-              ),
+                  : (options?.headers as Record<string, string>) ?? {}),
+                "Content-Type": "application/json",
+              },
               signal: controller.signal,
             });
-
             clearTimeout(timeoutId);
-            console.log("[tRPC] Response status:", response.status);
-
-            if (!response.ok) {
-              const text = await response.clone().text();
-              console.error("[tRPC] Error response body:", text.substring(0, 500));
-            }
-
+            console.log("[tRPC] Response:", response.status);
             return response;
-          } catch (error: any) {
-            console.error("[tRPC] Fetch error:", error?.message);
-            if (error.name === "AbortError") {
+          } catch (error: unknown) {
+            clearTimeout(timeoutId);
+            const err = error as Error;
+            console.error("[tRPC] Fetch error:", err?.message);
+            if (err?.name === "AbortError") {
               throw new Error("Request timed out after 60 seconds.");
             }
             throw error;
@@ -62,25 +53,24 @@ function makeTRPCClient() {
   });
 }
 
-const TRPCInternalProvider: React.ComponentType<any> | undefined = (trpc as any).Provider;
-
-export function TRPCProvider({
-  children,
-  queryClient,
-}: {
+interface TRPCProviderProps {
   children: React.ReactNode;
   queryClient: QueryClient;
-}) {
-  const [trpcClient] = useState(() => makeTRPCClient());
+}
 
-  if (!TRPCInternalProvider) {
-    console.warn("[TRPCProvider] trpc.Provider is undefined, rendering without tRPC context");
-    return <React.Fragment>{children}</React.Fragment>;
+export function TRPCProvider({ children, queryClient }: TRPCProviderProps) {
+  const [client] = useState(createTRPCClient);
+
+  const InternalProvider = (trpc as unknown as { Provider: React.ComponentType<{ client: typeof client; queryClient: QueryClient; children: React.ReactNode }> }).Provider;
+
+  if (typeof InternalProvider !== "function" && typeof InternalProvider !== "object") {
+    console.error("[TRPCProvider] trpc.Provider is not available, type:", typeof InternalProvider);
+    return <>{children}</>;
   }
 
   return (
-    <TRPCInternalProvider client={trpcClient} queryClient={queryClient}>
+    <InternalProvider client={client} queryClient={queryClient}>
       {children}
-    </TRPCInternalProvider>
+    </InternalProvider>
   );
 }
