@@ -2,7 +2,7 @@ import { StyleSheet, View, Text, ScrollView, RefreshControl, Animated, Touchable
 import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
-import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints } from "lucide-react-native";
+import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints, Shield, Check, Trash2 } from "lucide-react-native";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import colors from "@/constants/colors";
@@ -48,6 +48,20 @@ interface HealthGoalEntry {
   sleep_hours: number | null;
   blood_oxygen_spo2: number | null;
   overall_health_score: number | null;
+}
+
+interface SelfDisciplineGoal {
+  self_discipline_goal_id: number;
+  created_at: string;
+  goal: string | null;
+  goal_name: string | null;
+}
+
+interface UserSelfDisciplineGoal {
+  id: number;
+  registration_id: string;
+  self_discipline_goal_id: number;
+  selected_at: string;
 }
 
 interface RecentActivity {
@@ -112,6 +126,7 @@ export default function GoalsScreen() {
   const [healthHeartRateInput, setHealthHeartRateInput] = useState("");
   const [healthSleepInput, setHealthSleepInput] = useState("");
   const [healthSpo2Input, setHealthSpo2Input] = useState("");
+  const [showDisciplineModal, setShowDisciplineModal] = useState(false);
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -633,6 +648,112 @@ export default function GoalsScreen() {
     return "Needs Work";
   };
 
+  const { data: availableDisciplineGoals = [], isLoading: disciplineGoalsLoading } = useQuery<SelfDisciplineGoal[]>({
+    queryKey: ["availableDisciplineGoals"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("self_discipline_goal")
+        .select("*")
+        .order("self_discipline_goal_id", { ascending: true });
+      if (error) {
+        console.error("[Goals] Error fetching discipline goals:", error);
+        return [];
+      }
+      console.log("[Goals] Available discipline goals:", data?.length);
+      return (data || []) as SelfDisciplineGoal[];
+    },
+    staleTime: 60000,
+  });
+
+  const { data: userDisciplineGoals = [], isLoading: userDisciplineLoading, refetch: refetchDiscipline } = useQuery<UserSelfDisciplineGoal[]>({
+    queryKey: ["userDisciplineGoals", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      const { data, error } = await supabase
+        .from("user_self_discipline_goals")
+        .select("*")
+        .eq("registration_id", user.id);
+      if (error) {
+        console.error("[Goals] Error fetching user discipline goals:", error);
+        return [];
+      }
+      console.log("[Goals] User discipline goals:", data?.length);
+      return (data || []) as UserSelfDisciplineGoal[];
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
+  const addDisciplineGoalMutation = useMutation({
+    mutationFn: async (goalId: number) => {
+      if (!user?.id) throw new Error("Not logged in");
+      if (userDisciplineGoals.length >= 3) throw new Error("Maximum 3 goals allowed");
+      const { data, error } = await supabase
+        .from("user_self_discipline_goals")
+        .insert({
+          registration_id: user.id,
+          self_discipline_goal_id: goalId,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["userDisciplineGoals", user?.id] });
+    },
+    onError: (error: any) => {
+      console.error("[Goals] Add discipline goal error:", error);
+      Alert.alert("Error", error?.message || "Failed to add goal");
+    },
+  });
+
+  const removeDisciplineGoalMutation = useMutation({
+    mutationFn: async (goalId: number) => {
+      if (!user?.id) throw new Error("Not logged in");
+      const { error } = await supabase
+        .from("user_self_discipline_goals")
+        .delete()
+        .eq("registration_id", user.id)
+        .eq("self_discipline_goal_id", goalId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["userDisciplineGoals", user?.id] });
+    },
+    onError: (error: any) => {
+      console.error("[Goals] Remove discipline goal error:", error);
+      Alert.alert("Error", error?.message || "Failed to remove goal");
+    },
+  });
+
+  const selectedDisciplineGoalIds = useMemo(() => {
+    return new Set(userDisciplineGoals.map((g) => g.self_discipline_goal_id));
+  }, [userDisciplineGoals]);
+
+  const selectedDisciplineDetails = useMemo(() => {
+    return userDisciplineGoals.map((ug) => {
+      const detail = availableDisciplineGoals.find((g) => g.self_discipline_goal_id === ug.self_discipline_goal_id);
+      return {
+        ...ug,
+        goal_name: detail?.goal_name || "Unknown Goal",
+        goal: detail?.goal || "",
+      };
+    });
+  }, [userDisciplineGoals, availableDisciplineGoals]);
+
+  const handleToggleDisciplineGoal = useCallback((goalId: number) => {
+    if (selectedDisciplineGoalIds.has(goalId)) {
+      removeDisciplineGoalMutation.mutate(goalId);
+    } else {
+      if (userDisciplineGoals.length >= 3) {
+        Alert.alert("Limit Reached", "You can select a maximum of 3 discipline goals. Remove one first to add a new one.");
+        return;
+      }
+      addDisciplineGoalMutation.mutate(goalId);
+    }
+  }, [selectedDisciplineGoalIds, userDisciplineGoals.length, addDisciplineGoalMutation, removeDisciplineGoalMutation]);
+
   const { data: activitySummary, refetch: refetchActivity } = useQuery<ActivitySummary>({
     queryKey: ["goalActivitySummary", user?.id],
     queryFn: async () => {
@@ -702,6 +823,16 @@ export default function GoalsScreen() {
     enabled: !!user?.id,
     staleTime: 30000,
   });
+
+  const disciplineActivityProgress = useMemo(() => {
+    if (!activitySummary || userDisciplineGoals.length === 0) return null;
+    return {
+      activeDays: activitySummary?.activeDays ?? 0,
+      streakDays: activitySummary?.streakDays ?? 0,
+      totalDistance: activitySummary?.totalDistance ?? 0,
+      goalsSelected: userDisciplineGoals.length,
+    };
+  }, [activitySummary, userDisciplineGoals]);
 
   const { data: eventGoals = [], refetch: refetchEvents } = useQuery<RegisteredEvent[]>({
     queryKey: ["goalEvents", user?.id],
@@ -789,6 +920,7 @@ export default function GoalsScreen() {
     void refetchFitnessGoal();
     void refetchRecent();
     void refetchHealth();
+    void refetchDiscipline();
   };
 
   const weightProgress = useMemo(() => {
@@ -901,7 +1033,7 @@ export default function GoalsScreen() {
     setShowGoalForm(true);
   }, [fitnessGoal]);
 
-  const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading;
+  const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading && userDisciplineGoals.length === 0 && !userDisciplineLoading;
 
   return (
     <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
@@ -1327,6 +1459,75 @@ export default function GoalsScreen() {
           </View>
         ) : null}
 
+        {selectedDisciplineDetails.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Shield size={18} color="#6366F1" />
+              <Text style={styles.sectionTitle}>Self Discipline</Text>
+              <TouchableOpacity onPress={() => setShowDisciplineModal(true)} style={styles.editButton} activeOpacity={0.7}>
+                <Text style={styles.editButtonText}>Edit</Text>
+                <ChevronRight size={14} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.disciplineCard}>
+              {selectedDisciplineDetails.map((goal, index) => (
+                <View key={goal.id} style={[styles.disciplineGoalRow, index < selectedDisciplineDetails.length - 1 && styles.disciplineGoalBorder]}>
+                  <View style={styles.disciplineGoalIcon}>
+                    <Shield size={16} color="#6366F1" />
+                  </View>
+                  <View style={styles.disciplineGoalInfo}>
+                    <Text style={styles.disciplineGoalName}>{goal.goal_name}</Text>
+                    {goal.goal ? <Text style={styles.disciplineGoalDesc} numberOfLines={2}>{goal.goal}</Text> : null}
+                  </View>
+                </View>
+              ))}
+
+              {disciplineActivityProgress && (
+                <View style={styles.disciplineStatsRow}>
+                  <View style={styles.disciplineStat}>
+                    <Text style={styles.disciplineStatValue}>{disciplineActivityProgress.streakDays}</Text>
+                    <Text style={styles.disciplineStatLabel}>Streak</Text>
+                  </View>
+                  <View style={styles.disciplineStatDivider} />
+                  <View style={styles.disciplineStat}>
+                    <Text style={styles.disciplineStatValue}>{disciplineActivityProgress.activeDays}</Text>
+                    <Text style={styles.disciplineStatLabel}>Active Days</Text>
+                  </View>
+                  <View style={styles.disciplineStatDivider} />
+                  <View style={styles.disciplineStat}>
+                    <Text style={styles.disciplineStatValue}>{disciplineActivityProgress.totalDistance.toFixed(1)}</Text>
+                    <Text style={styles.disciplineStatLabel}>Total km</Text>
+                  </View>
+                </View>
+              )}
+
+              <Text style={styles.fitnessFootnote}>
+                {selectedDisciplineDetails.length} of 3 goals selected
+              </Text>
+            </View>
+          </View>
+        ) : !userDisciplineLoading && !disciplineGoalsLoading ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Shield size={18} color="#6366F1" />
+              <Text style={styles.sectionTitle}>Self Discipline</Text>
+            </View>
+            <TouchableOpacity style={styles.setupGoalCard} onPress={() => setShowDisciplineModal(true)} activeOpacity={0.8}>
+              <LinearGradient colors={["#6366F1", "#818CF8"]} style={styles.setupGoalGradient}>
+                <Shield size={32} color={colors.white} />
+                <Text style={styles.setupGoalTitle}>Build Self Discipline</Text>
+                <Text style={styles.setupGoalSubtext}>
+                  Choose up to 3 discipline goals and track your consistency through daily activity
+                </Text>
+                <View style={styles.setupGoalButton}>
+                  <Text style={[styles.setupGoalButtonText, { color: "#6366F1" }]}>Choose Goals</Text>
+                  <ChevronRight size={16} color="#6366F1" />
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {userGoals.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -1613,6 +1814,90 @@ export default function GoalsScreen() {
                   </Text>
                 </LinearGradient>
               </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showDisciplineModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowDisciplineModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <LinearGradient colors={["#6366F1", "#818CF8"]} style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Self Discipline Goals</Text>
+              <TouchableOpacity onPress={() => setShowDisciplineModal(false)}>
+                <X size={24} color={colors.white} />
+              </TouchableOpacity>
+            </LinearGradient>
+
+            <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalSubtitle}>
+                Select 1 to 3 discipline goals to track. Your progress is measured against your daily exercise activity.
+              </Text>
+
+              <View style={styles.disciplineSelectionCount}>
+                <Text style={styles.disciplineSelectionCountText}>
+                  {userDisciplineGoals.length} / 3 selected
+                </Text>
+              </View>
+
+              {availableDisciplineGoals.map((goal) => {
+                const isSelected = selectedDisciplineGoalIds.has(goal.self_discipline_goal_id);
+                const isDisabled = !isSelected && userDisciplineGoals.length >= 3;
+                return (
+                  <TouchableOpacity
+                    key={goal.self_discipline_goal_id}
+                    style={[
+                      styles.disciplineOptionCard,
+                      isSelected && styles.disciplineOptionSelected,
+                      isDisabled && styles.disciplineOptionDisabled,
+                    ]}
+                    onPress={() => handleToggleDisciplineGoal(goal.self_discipline_goal_id)}
+                    activeOpacity={0.7}
+                    disabled={addDisciplineGoalMutation.isPending || removeDisciplineGoalMutation.isPending}
+                  >
+                    <View style={[
+                      styles.disciplineOptionCheck,
+                      isSelected && styles.disciplineOptionCheckActive,
+                    ]}>
+                      {isSelected ? <Check size={14} color={colors.white} /> : null}
+                    </View>
+                    <View style={styles.disciplineOptionInfo}>
+                      <Text style={[styles.disciplineOptionName, isSelected && styles.disciplineOptionNameActive]}>
+                        {goal.goal_name || "Unnamed Goal"}
+                      </Text>
+                      {goal.goal ? (
+                        <Text style={styles.disciplineOptionDesc} numberOfLines={3}>
+                          {goal.goal}
+                        </Text>
+                      ) : null}
+                    </View>
+                    {isSelected && (
+                      <TouchableOpacity
+                        style={styles.disciplineRemoveBtn}
+                        onPress={() => removeDisciplineGoalMutation.mutate(goal.self_discipline_goal_id)}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <Trash2 size={16} color="#EF4444" />
+                      </TouchableOpacity>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+
+              {availableDisciplineGoals.length === 0 && (
+                <View style={styles.noActivitiesInfo}>
+                  <Shield size={28} color={colors.textLight} />
+                  <Text style={styles.noActivitiesTitle}>No Goals Available</Text>
+                  <Text style={styles.noActivitiesText}>
+                    Discipline goals haven't been set up yet. Please check back later.
+                  </Text>
+                </View>
+              )}
             </ScrollView>
           </View>
         </View>
@@ -2472,5 +2757,140 @@ const styles = StyleSheet.create({
     alignItems: "center" as const,
     gap: 6,
     marginBottom: 8,
+  },
+  disciplineCard: {
+    backgroundColor: colors.cardBackground,
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  disciplineGoalRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 12,
+    paddingVertical: 12,
+  },
+  disciplineGoalBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  disciplineGoalIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "#EEF2FF",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  disciplineGoalInfo: {
+    flex: 1,
+  },
+  disciplineGoalName: {
+    fontSize: 15,
+    fontWeight: "700" as const,
+    color: colors.text,
+  },
+  disciplineGoalDesc: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  disciplineStatsRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-around" as const,
+    backgroundColor: "#F5F3FF",
+    borderRadius: 12,
+    paddingVertical: 14,
+    marginTop: 14,
+    marginBottom: 10,
+  },
+  disciplineStat: {
+    alignItems: "center" as const,
+    flex: 1,
+  },
+  disciplineStatValue: {
+    fontSize: 18,
+    fontWeight: "800" as const,
+    color: "#6366F1",
+  },
+  disciplineStatLabel: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  disciplineStatDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: "#DDD6FE",
+  },
+  disciplineSelectionCount: {
+    alignSelf: "center" as const,
+    backgroundColor: "#EEF2FF",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginBottom: 16,
+  },
+  disciplineSelectionCountText: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+    color: "#6366F1",
+  },
+  disciplineOptionCard: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 12,
+    backgroundColor: colors.extraLightGray,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 10,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  disciplineOptionSelected: {
+    backgroundColor: "#EEF2FF",
+    borderColor: "#6366F1",
+  },
+  disciplineOptionDisabled: {
+    opacity: 0.45,
+  },
+  disciplineOptionCheck: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: colors.lightGray,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  disciplineOptionCheckActive: {
+    backgroundColor: "#6366F1",
+    borderColor: "#6366F1",
+  },
+  disciplineOptionInfo: {
+    flex: 1,
+  },
+  disciplineOptionName: {
+    fontSize: 15,
+    fontWeight: "700" as const,
+    color: colors.text,
+  },
+  disciplineOptionNameActive: {
+    color: "#6366F1",
+  },
+  disciplineOptionDesc: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 3,
+    lineHeight: 16,
+  },
+  disciplineRemoveBtn: {
+    padding: 6,
   },
 });
