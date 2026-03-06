@@ -12,24 +12,20 @@ export function TRPCProvider({
   queryClient,
   children,
 }: {
-  client: ReturnType<typeof trpc.createClient>;
+  client: any;
   queryClient: QueryClient;
   children: React.ReactNode;
 }) {
-  const Provider = (trpc as any).Provider as React.ComponentType<{
-    client: typeof client;
-    queryClient: QueryClient;
-    children: React.ReactNode;
-  }> | undefined;
-
-  if (Provider) {
+  const InternalProvider = (trpc as any).Provider;
+  if (InternalProvider) {
     return (
-      <Provider client={client} queryClient={queryClient}>
+      <InternalProvider client={client} queryClient={queryClient}>
         {children}
-      </Provider>
+      </InternalProvider>
     );
   }
-  return <React.Fragment>{children}</React.Fragment>;
+  console.warn('[tRPC] Provider not found, rendering children without tRPC context');
+  return <>{children}</>;
 }
 
 const getBaseUrl = () => {
@@ -62,10 +58,13 @@ export const trpcClient = trpc.createClient({
           
           const response = await fetch(url, {
             ...options,
-            headers: {
-              ...options?.headers,
-              'Content-Type': 'application/json',
-            },
+            headers: Object.assign(
+              {},
+              options?.headers instanceof Headers
+                ? Object.fromEntries(options.headers.entries())
+                : options?.headers,
+              { 'Content-Type': 'application/json' },
+            ),
             signal: controller.signal,
           });
           

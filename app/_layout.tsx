@@ -9,7 +9,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Linking from "expo-linking";
 import { supabase } from "@/lib/supabase";
 
-SplashScreen.preventAutoHideAsync();
+void SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
@@ -26,7 +26,7 @@ function RootLayoutNav() {
       setHasSeenOnboarding(seen === 'true');
       setIsReady(true);
     };
-    checkOnboarding();
+    void checkOnboarding();
   }, []);
 
   useEffect(() => {
@@ -84,7 +84,7 @@ const styles = StyleSheet.create({
 
 export default function RootLayout() {
   useEffect(() => {
-    SplashScreen.hideAsync();
+    void SplashScreen.hideAsync();
   }, []);
 
   useEffect(() => {
@@ -100,9 +100,9 @@ export default function RootLayout() {
 
     const subscription = Linking.addEventListener('url', handleDeepLink);
 
-    Linking.getInitialURL().then((url) => {
+    void Linking.getInitialURL().then((url) => {
       if (url) {
-        handleDeepLink({ url });
+        void handleDeepLink({ url });
       }
     });
 

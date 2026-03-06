@@ -1,5 +1,5 @@
 import createContextHook from '@nkzw/create-context-hook';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
@@ -68,22 +68,31 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [loginAttempts, setLoginAttempts] = useState<{ [key: string]: { count: number; timestamp: number } }>({});
 
   useEffect(() => {
-    checkAuthStatus();
-    loadPrivateMode();
+    const init = async () => {
+      try {
+        const currentUserJson = await AsyncStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+        if (currentUserJson) {
+          setUser(JSON.parse(currentUserJson));
+        }
+      } catch (error) {
+        console.error('Error checking auth status:', error);
+      } finally {
+        setIsLoading(false);
+      }
+
+      try {
+        const stored = await AsyncStorage.getItem(STORAGE_KEYS.PRIVATE_MODE);
+        if (stored !== null) {
+          setPrivateModeState(stored === 'true');
+        }
+      } catch (error) {
+        console.error('Error loading private mode:', error);
+      }
+    };
+    void init();
   }, []);
 
-  const loadPrivateMode = async () => {
-    try {
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.PRIVATE_MODE);
-      if (stored !== null) {
-        setPrivateModeState(stored === 'true');
-      }
-    } catch (error) {
-      console.error('Error loading private mode:', error);
-    }
-  };
-
-  const setPrivateMode = async (enabled: boolean) => {
+  const setPrivateMode = useCallback(async (enabled: boolean) => {
     try {
       setPrivateModeState(enabled);
       await AsyncStorage.setItem(STORAGE_KEYS.PRIVATE_MODE, enabled ? 'true' : 'false');
@@ -91,72 +100,29 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     } catch (error) {
       console.error('Error saving private mode:', error);
     }
-  };
+  }, []);
 
-  const checkAuthStatus = async () => {
+  const signIn = useCallback(async (username: string, pin: string) => {
     try {
-      const currentUserJson = await AsyncStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-      if (currentUserJson) {
-        setUser(JSON.parse(currentUserJson));
-      }
-    } catch (error) {
-      console.error('Error checking auth status:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const checkLoginAttempts = (username: string): { allowed: boolean; remainingTime?: number } => {
-    const attempts = loginAttempts[username.toLowerCase()];
-    if (!attempts) return { allowed: true };
-
-    const timeSinceLockout = Date.now() - attempts.timestamp;
-    if (attempts.count >= MAX_LOGIN_ATTEMPTS) {
-      if (timeSinceLockout < LOCKOUT_DURATION) {
-        const remainingTime = Math.ceil((LOCKOUT_DURATION - timeSinceLockout) / 60000);
-        return { allowed: false, remainingTime };
-      } else {
-        setLoginAttempts(prev => {
-          const updated = { ...prev };
-          delete updated[username.toLowerCase()];
-          return updated;
-        });
-        return { allowed: true };
-      }
-    }
-    return { allowed: true };
-  };
-
-  const recordLoginAttempt = (username: string, success: boolean) => {
-    if (success) {
-      setLoginAttempts(prev => {
-        const updated = { ...prev };
-        delete updated[username.toLowerCase()];
-        return updated;
-      });
-    } else {
-      setLoginAttempts(prev => {
-        const current = prev[username.toLowerCase()] || { count: 0, timestamp: Date.now() };
-        return {
-          ...prev,
-          [username.toLowerCase()]: {
-            count: current.count + 1,
-            timestamp: Date.now(),
-          },
-        };
-      });
-    }
-  };
-
-  const signIn = async (username: string, pin: string) => {
-    try {
-      const attemptCheck = checkLoginAttempts(username);
-      if (!attemptCheck.allowed) {
-        return { 
-          error: { 
-            message: `Too many failed attempts. Please try again in ${attemptCheck.remainingTime} minutes.` 
-          } 
-        };
+      const attempts = loginAttempts[username.toLowerCase()];
+      if (attempts) {
+        const timeSinceLockout = Date.now() - attempts.timestamp;
+        if (attempts.count >= MAX_LOGIN_ATTEMPTS) {
+          if (timeSinceLockout < LOCKOUT_DURATION) {
+            const remainingTime = Math.ceil((LOCKOUT_DURATION - timeSinceLockout) / 60000);
+            return {
+              error: {
+                message: `Too many failed attempts. Please try again in ${remainingTime} minutes.`,
+              },
+            };
+          } else {
+            setLoginAttempts(prev => {
+              const updated = { ...prev };
+              delete updated[username.toLowerCase()];
+              return updated;
+            });
+          }
+        }
       }
 
       const pinHash = await Crypto.digestStringAsync(
@@ -173,7 +139,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
       if (queryError || !userData) {
         console.log('Sign in query error:', queryError);
-        recordLoginAttempt(username, false);
+        setLoginAttempts(prev => {
+          const current = prev[username.toLowerCase()] || { count: 0, timestamp: Date.now() };
+          return {
+            ...prev,
+            [username.toLowerCase()]: {
+              count: current.count + 1,
+              timestamp: Date.now(),
+            },
+          };
+        });
         return { error: { message: 'Username not found or incorrect PIN' } };
       }
 
@@ -185,17 +160,21 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
       await AsyncStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(userObj));
       await secureStorage.setItem(`biometric_enabled_${username.toLowerCase()}`, 'true');
-      
-      recordLoginAttempt(username, true);
+
+      setLoginAttempts(prev => {
+        const updated = { ...prev };
+        delete updated[username.toLowerCase()];
+        return updated;
+      });
       setUser(userObj);
       return { error: null };
     } catch (error) {
       console.error('Sign in error:', error);
       return { error: { message: 'Sign in failed' } };
     }
-  };
+  }, [loginAttempts]);
 
-  const signUp = async (username: string, pin: string, registrationData?: Partial<RegistrationData>) => {
+  const signUp = useCallback(async (username: string, pin: string, registrationData?: Partial<RegistrationData>) => {
     try {
       const { data: existingUser } = await supabase
         .from('registrations')
@@ -215,7 +194,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (registrationData) {
         let registrationId: string | null = null;
         try {
-          let residenceValue = registrationData.residence;
+          const residenceValue = registrationData.residence;
 
           const email = registrationData.email || `${username.toLowerCase()}@runapp.local`;
 
@@ -315,9 +294,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       console.error('Sign up error:', error);
       return { error: { message: 'Sign up failed' } };
     }
-  };
+  }, []);
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     try {
       await supabase.auth.signOut();
       await AsyncStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
@@ -327,9 +306,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       console.error('Sign out error:', error);
       return { error: { message: 'Sign out failed' } };
     }
-  };
+  }, []);
 
-  const deleteAccount = async (): Promise<{ error: { message: string } | null }> => {
+  const deleteAccount = useCallback(async (): Promise<{ error: { message: string } | null }> => {
     if (!user) return { error: { message: 'No user logged in' } };
     const regId = user.id;
     try {
@@ -373,18 +352,18 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       console.error('[AuthContext] Delete account error:', error);
       return { error: { message: 'Failed to delete account. Please try again.' } };
     }
-  };
+  }, [user]);
 
-  const getBiometricStatus = async (username: string): Promise<boolean> => {
+  const getBiometricStatus = useCallback(async (username: string): Promise<boolean> => {
     const status = await secureStorage.getItem(`biometric_enabled_${username.toLowerCase()}`);
     return status === 'true';
-  };
+  }, []);
 
-  const disableBiometric = async (username: string) => {
+  const disableBiometric = useCallback(async (username: string) => {
     await secureStorage.deleteItem(`biometric_enabled_${username.toLowerCase()}`);
-  };
+  }, []);
 
-  const verifyPin = async (pin: string): Promise<boolean> => {
+  const verifyPin = useCallback(async (pin: string): Promise<boolean> => {
     if (!user) return false;
     try {
       const pinHash = await Crypto.digestStringAsync(
@@ -407,9 +386,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       console.error('[AuthContext] PIN verification error:', error);
       return false;
     }
-  };
+  }, [user]);
 
-  return {
+  return useMemo(() => ({
     user,
     isLoading,
     registrationId: user?.id || '',
@@ -422,5 +401,5 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     verifyPin,
     getBiometricStatus,
     disableBiometric,
-  };
+  }), [user, isLoading, privateMode, setPrivateMode, signIn, signUp, signOut, deleteAccount, verifyPin, getBiometricStatus, disableBiometric]);
 });
