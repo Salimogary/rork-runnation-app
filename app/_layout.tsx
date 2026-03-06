@@ -111,23 +111,6 @@ export default function RootLayout() {
     };
   }, []);
 
-  console.log('[RootLayout] TRPCProvider type:', typeof TRPCProvider);
-  console.log('[RootLayout] AuthProvider type:', typeof AuthProvider);
-  console.log('[RootLayout] QueryClientProvider type:', typeof QueryClientProvider);
-
-  if (!QueryClientProvider || !TRPCProvider || !AuthProvider) {
-    console.error('[RootLayout] Missing provider:', {
-      QueryClientProvider: typeof QueryClientProvider,
-      TRPCProvider: typeof TRPCProvider,
-      AuthProvider: typeof AuthProvider,
-    });
-    return (
-      <View style={styles.container}>
-        <RootLayoutNav />
-      </View>
-    );
-  }
-
   return (
     <QueryClientProvider client={queryClient}>
       <TRPCProvider client={trpcClient} queryClient={queryClient}>

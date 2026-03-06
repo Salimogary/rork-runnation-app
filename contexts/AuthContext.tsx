@@ -1,5 +1,4 @@
-import createContextHook from '@nkzw/create-context-hook';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useCallback, useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
@@ -27,6 +26,21 @@ interface RegistrationData {
   pin: string;
   confirmPin: string;
   photoUri?: string;
+}
+
+interface AuthContextValue {
+  user: UserData | null;
+  isLoading: boolean;
+  registrationId: string;
+  privateMode: boolean;
+  setPrivateMode: (enabled: boolean) => Promise<void>;
+  signIn: (username: string, pin: string) => Promise<{ error: { message: string } | null }>;
+  signUp: (username: string, pin: string, registrationData?: Partial<RegistrationData>) => Promise<{ error: { message: string } | null; registrationId?: string }>;
+  signOut: () => Promise<{ error: { message: string } | null }>;
+  deleteAccount: () => Promise<{ error: { message: string } | null }>;
+  verifyPin: (pin: string) => Promise<boolean>;
+  getBiometricStatus: (username: string) => Promise<boolean>;
+  disableBiometric: (username: string) => Promise<void>;
 }
 
 const STORAGE_KEYS = {
@@ -61,7 +75,9 @@ const secureStorage = {
   },
 };
 
-export const [AuthProvider, useAuth] = createContextHook(() => {
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [privateMode, setPrivateModeState] = useState(false);
@@ -195,7 +211,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         let registrationId: string | null = null;
         try {
           const residenceValue = registrationData.residence;
-
           const email = registrationData.email || `${username.toLowerCase()}@runapp.local`;
 
           const { data: newUserData, error: insertError } = await supabase
@@ -227,7 +242,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             try {
               const photoUri = registrationData.photoUri;
               const photoFileName = `${registrationId}_${Date.now()}.jpg`;
-              
+
               const response = await fetch(photoUri);
               const blob = await response.blob();
               const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
@@ -261,7 +276,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
                     mime_type: 'image/jpeg',
                     is_profile_photo: true,
                   });
-                
+
                 if (photoError) {
                   console.error('Photo insert error:', JSON.stringify(photoError, null, 2));
                 }
@@ -388,7 +403,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   }, [user]);
 
-  return useMemo(() => ({
+  const value = useMemo<AuthContextValue>(() => ({
     user,
     isLoading,
     registrationId: user?.id || '',
@@ -402,4 +417,18 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     getBiometricStatus,
     disableBiometric,
   }), [user, isLoading, privateMode, setPrivateMode, signIn, signUp, signOut, deleteAccount, verifyPin, getBiometricStatus, disableBiometric]);
-});
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth(): AuthContextValue {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+}
