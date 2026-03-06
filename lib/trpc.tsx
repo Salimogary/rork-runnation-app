@@ -16,16 +16,11 @@ export function TRPCProvider({
   queryClient: QueryClient;
   children: React.ReactNode;
 }) {
-  const InternalProvider = (trpc as any).Provider;
-  if (InternalProvider) {
-    return (
-      <InternalProvider client={client} queryClient={queryClient}>
-        {children}
-      </InternalProvider>
-    );
-  }
-  console.warn('[tRPC] Provider not found, rendering children without tRPC context');
-  return <>{children}</>;
+  return (
+    <trpc.Provider client={client} queryClient={queryClient}>
+      {children}
+    </trpc.Provider>
+  );
 }
 
 const getBaseUrl = () => {
