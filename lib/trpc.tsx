@@ -7,6 +7,8 @@ import type { QueryClient } from "@tanstack/react-query";
 
 export const trpc = createTRPCReact<AppRouter>();
 
+const InternalProvider = trpc.Provider;
+
 export function TRPCProvider({
   client,
   queryClient,
@@ -16,10 +18,14 @@ export function TRPCProvider({
   queryClient: QueryClient;
   children: React.ReactNode;
 }) {
+  if (!InternalProvider) {
+    console.warn('[TRPCProvider] trpc.Provider is undefined, rendering children without tRPC context');
+    return <>{children}</>;
+  }
   return (
-    <trpc.Provider client={client} queryClient={queryClient}>
+    <InternalProvider client={client} queryClient={queryClient}>
       {children}
-    </trpc.Provider>
+    </InternalProvider>
   );
 }
 
