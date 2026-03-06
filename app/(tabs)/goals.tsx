@@ -58,7 +58,7 @@ interface SelfDisciplineGoal {
 }
 
 interface UserSelfDisciplineGoal {
-  id: number;
+  user_self_discipline_id: number;
   registration_id: string;
   self_discipline_goal_id: number;
   selected_at: string;
@@ -1471,7 +1471,7 @@ export default function GoalsScreen() {
             </View>
             <View style={styles.disciplineCard}>
               {selectedDisciplineDetails.map((goal, index) => (
-                <View key={goal.id} style={[styles.disciplineGoalRow, index < selectedDisciplineDetails.length - 1 && styles.disciplineGoalBorder]}>
+                <View key={goal.user_self_discipline_id} style={[styles.disciplineGoalRow, index < selectedDisciplineDetails.length - 1 && styles.disciplineGoalBorder]}>
                   <View style={styles.disciplineGoalIcon}>
                     <Shield size={16} color="#6366F1" />
                   </View>
