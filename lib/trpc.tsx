@@ -7,12 +7,6 @@ import type { QueryClient } from "@tanstack/react-query";
 
 export const trpc = createTRPCReact<AppRouter>();
 
-const TRPCInternalProvider = trpc.Provider as React.ComponentType<{
-  client: ReturnType<typeof trpc.createClient>;
-  queryClient: QueryClient;
-  children: React.ReactNode;
-}> | undefined;
-
 export function TRPCProvider({
   client,
   queryClient,
@@ -22,14 +16,20 @@ export function TRPCProvider({
   queryClient: QueryClient;
   children: React.ReactNode;
 }) {
-  if (TRPCInternalProvider) {
+  const Provider = (trpc as any).Provider as React.ComponentType<{
+    client: typeof client;
+    queryClient: QueryClient;
+    children: React.ReactNode;
+  }> | undefined;
+
+  if (Provider) {
     return (
-      <TRPCInternalProvider client={client} queryClient={queryClient}>
+      <Provider client={client} queryClient={queryClient}>
         {children}
-      </TRPCInternalProvider>
+      </Provider>
     );
   }
-  return <>{children}</>;
+  return <React.Fragment>{children}</React.Fragment>;
 }
 
 const getBaseUrl = () => {
