@@ -342,6 +342,50 @@ create index IF not exists idx_fitness_goal_registration on public."fitness_goal
 - Progress is measured as the average pace of the last 5 activities (or all activities if fewer than 5)
 - Pace is stored as km/h but displayed as min/km in the UI
 
+### 10. Weight Target Goal (NEW - Required)
+Create this table for storing user weight loss targets:
+
+```sql
+create table public."weight_target_goal" (
+  "id" bigserial primary key,
+  "registration_id" text not null,
+  "target_weight" double precision not null,
+  "target_date" date not null,
+  "created_at" timestamp with time zone default now() not null,
+  "updated_at" timestamp with time zone default now() not null,
+  constraint weight_target_goal_registration_id_fkey foreign key ("registration_id") references "registrations" ("RegistrationID") on delete cascade,
+  constraint unique_weight_target_per_user unique ("registration_id")
+) TABLESPACE pg_default;
+
+create index IF not exists idx_weight_target_goal_registration on public."weight_target_goal" using btree ("registration_id") TABLESPACE pg_default;
+```
+
+### 11. Weight Goal Entries (NEW - Required)
+Create this table for tracking weekly weight entries:
+
+```sql
+create table public."weight_goal" (
+  "id" bigserial primary key,
+  "registration_id" text not null,
+  "weight" double precision not null,
+  "date" date not null,
+  "created_at" timestamp with time zone default now() not null,
+  constraint weight_goal_registration_id_fkey foreign key ("registration_id") references "registrations" ("RegistrationID") on delete cascade
+) TABLESPACE pg_default;
+
+create index IF not exists idx_weight_goal_registration on public."weight_goal" using btree ("registration_id") TABLESPACE pg_default;
+create index IF not exists idx_weight_goal_date on public."weight_goal" using btree ("date" desc) TABLESPACE pg_default;
+```
+
+**Weight Loss Goal Logic:**
+- Each user can have one active weight target (unique constraint on registration_id in `weight_target_goal`)
+- `target_weight`: The target weight in kg the user wants to reach
+- `target_date`: The date by which the user wants to reach this weight
+- Users log their weight on a weekly basis into the `weight_goal` table
+- Progress is measured by comparing the latest weight entry against the target weight
+- Progress percentage is calculated as: (starting_weight - current_weight) / (starting_weight - target_weight) * 100
+- If a weight entry already exists for today, it is updated instead of inserting a duplicate
+
 ## Notes
 
 - FriendID is hidden from users (system-generated)

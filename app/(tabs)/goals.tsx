@@ -2,7 +2,7 @@ import { StyleSheet, View, Text, ScrollView, RefreshControl, Animated, Touchable
 import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
-import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight } from "lucide-react-native";
+import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight, Plus } from "lucide-react-native";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import colors from "@/constants/colors";
@@ -13,9 +13,21 @@ interface UserGoal {
   goal: string;
 }
 
-interface ProfileData {
-  "Weight Current"?: number;
-  "Weight Target"?: number;
+interface WeightTargetGoal {
+  id: number;
+  registration_id: string;
+  target_weight: number;
+  target_date: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface WeightGoalEntry {
+  id: number;
+  registration_id: string;
+  weight: number;
+  date: string;
+  created_at: string;
 }
 
 interface FitnessGoal {
@@ -79,6 +91,11 @@ export default function GoalsScreen() {
   const [targetPaceMin, setTargetPaceMin] = useState("");
   const [targetPaceSec, setTargetPaceSec] = useState("");
   const [targetDate, setTargetDate] = useState("");
+  const [showWeightTargetForm, setShowWeightTargetForm] = useState(false);
+  const [showWeightLogForm, setShowWeightLogForm] = useState(false);
+  const [weightTargetInput, setWeightTargetInput] = useState("");
+  const [weightTargetDateInput, setWeightTargetDateInput] = useState("");
+  const [weightLogInput, setWeightLogInput] = useState("");
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -259,23 +276,132 @@ export default function GoalsScreen() {
     staleTime: 30000,
   });
 
-  const { data: profile, refetch: refetchProfile } = useQuery<ProfileData | null>({
-    queryKey: ["goalProfile", user?.id],
+  const { data: weightTargetGoal, isLoading: weightTargetLoading, refetch: refetchWeightTarget } = useQuery<WeightTargetGoal | null>({
+    queryKey: ["weightTargetGoal", user?.id],
     queryFn: async () => {
       if (!user?.id) return null;
       const { data, error } = await supabase
-        .from("registrations")
-        .select('"Weight Current", "Weight Target"')
-        .eq("RegistrationID", user.id)
+        .from("weight_target_goal")
+        .select("*")
+        .eq("registration_id", user.id)
         .maybeSingle();
       if (error) {
-        console.error("[Goals] Error fetching profile:", error);
+        console.error("[Goals] Error fetching weight target goal:", error);
         return null;
       }
-      return data as ProfileData;
+      console.log("[Goals] Weight target goal:", data);
+      return data as WeightTargetGoal | null;
     },
     enabled: !!user?.id,
     staleTime: 30000,
+  });
+
+  const { data: weightEntries = [], refetch: refetchWeightEntries } = useQuery<WeightGoalEntry[]>({
+    queryKey: ["weightGoalEntries", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      const { data, error } = await supabase
+        .from("weight_goal")
+        .select("*")
+        .eq("registration_id", user.id)
+        .order("date", { ascending: true });
+      if (error) {
+        console.error("[Goals] Error fetching weight entries:", error);
+        return [];
+      }
+      console.log("[Goals] Weight entries:", data?.length);
+      return (data || []) as WeightGoalEntry[];
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
+  const saveWeightTargetMutation = useMutation({
+    mutationFn: async ({ targetWeight, targetDateStr }: { targetWeight: number; targetDateStr: string }) => {
+      if (!user?.id) throw new Error("Not logged in");
+      if (weightTargetGoal) {
+        const { data, error } = await supabase
+          .from("weight_target_goal")
+          .update({
+            target_weight: targetWeight,
+            target_date: targetDateStr,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("registration_id", user.id)
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
+      } else {
+        const { data, error } = await supabase
+          .from("weight_target_goal")
+          .insert({
+            registration_id: user.id,
+            target_weight: targetWeight,
+            target_date: targetDateStr,
+          })
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
+      }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["weightTargetGoal", user?.id] });
+      setShowWeightTargetForm(false);
+      setWeightTargetInput("");
+      setWeightTargetDateInput("");
+      Alert.alert("Success", "Weight target saved!");
+    },
+    onError: (error: any) => {
+      console.error("[Goals] Save weight target error:", error);
+      Alert.alert("Error", error?.message || "Failed to save weight target");
+    },
+  });
+
+  const logWeightMutation = useMutation({
+    mutationFn: async ({ weight }: { weight: number }) => {
+      if (!user?.id) throw new Error("Not logged in");
+      const today = new Date().toISOString().split("T")[0];
+      const { data: existing } = await supabase
+        .from("weight_goal")
+        .select("id")
+        .eq("registration_id", user.id)
+        .eq("date", today)
+        .maybeSingle();
+      if (existing) {
+        const { data, error } = await supabase
+          .from("weight_goal")
+          .update({ weight })
+          .eq("id", existing.id)
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
+      } else {
+        const { data, error } = await supabase
+          .from("weight_goal")
+          .insert({
+            registration_id: user.id,
+            weight,
+            date: today,
+          })
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
+      }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["weightGoalEntries", user?.id] });
+      setShowWeightLogForm(false);
+      setWeightLogInput("");
+      Alert.alert("Success", "Weight logged!");
+    },
+    onError: (error: any) => {
+      console.error("[Goals] Log weight error:", error);
+      Alert.alert("Error", error?.message || "Failed to log weight");
+    },
   });
 
   const { data: activitySummary, refetch: refetchActivity } = useQuery<ActivitySummary>({
@@ -427,7 +553,8 @@ export default function GoalsScreen() {
 
   const handleRefresh = () => {
     void refetchGoals();
-    void refetchProfile();
+    void refetchWeightTarget();
+    void refetchWeightEntries();
     void refetchActivity();
     void refetchEvents();
     void refetchFitnessGoal();
@@ -435,16 +562,81 @@ export default function GoalsScreen() {
   };
 
   const weightProgress = useMemo(() => {
-    if (!profile?.["Weight Current"] || !profile?.["Weight Target"]) return null;
-    const current = profile["Weight Current"];
-    const target = profile["Weight Target"];
-    const diff = current - target;
-    const isLosing = diff > 0;
-    const progressPercent = isLosing
-      ? Math.min(100, Math.max(0, ((current - target) / current) * 100))
-      : 100;
-    return { current, target, diff: Math.abs(diff), isLosing, progressPercent };
-  }, [profile]);
+    if (!weightTargetGoal) return null;
+
+    const target = weightTargetGoal.target_weight;
+    const targetDateStr = weightTargetGoal.target_date;
+
+    const latestEntry = weightEntries.length > 0 ? weightEntries[weightEntries.length - 1] : null;
+    const firstEntry = weightEntries.length > 0 ? weightEntries[0] : null;
+    const current = latestEntry?.weight ?? null;
+
+    if (current === null) {
+      return { current: null, target, targetDate: targetDateStr, diff: 0, isLosing: true, progressPercent: 0, entries: weightEntries, firstEntry, latestEntry, daysLeft: 0 };
+    }
+
+    const startWeight = firstEntry?.weight ?? current;
+    const totalToLose = startWeight - target;
+    const lostSoFar = startWeight - current;
+    const isLosing = current > target;
+    const progressPercent = totalToLose > 0
+      ? Math.min(100, Math.max(0, (lostSoFar / totalToLose) * 100))
+      : current <= target ? 100 : 0;
+
+    const daysLeft = Math.max(0, Math.ceil((new Date(targetDateStr + "T00:00:00").getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+
+    return {
+      current,
+      target,
+      targetDate: targetDateStr,
+      diff: Math.abs(current - target),
+      isLosing,
+      progressPercent,
+      entries: weightEntries,
+      firstEntry,
+      latestEntry,
+      daysLeft,
+    };
+  }, [weightTargetGoal, weightEntries]);
+
+  const handleSaveWeightTarget = useCallback(() => {
+    const weight = parseFloat(weightTargetInput);
+    if (isNaN(weight) || weight <= 0 || weight > 500) {
+      Alert.alert("Error", "Please enter a valid target weight (1-500 kg)");
+      return;
+    }
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(weightTargetDateInput)) {
+      Alert.alert("Error", "Please enter date in YYYY-MM-DD format");
+      return;
+    }
+    const dateObj = new Date(weightTargetDateInput + "T00:00:00");
+    if (isNaN(dateObj.getTime())) {
+      Alert.alert("Error", "Please enter a valid date");
+      return;
+    }
+    saveWeightTargetMutation.mutate({ targetWeight: weight, targetDateStr: weightTargetDateInput });
+  }, [weightTargetInput, weightTargetDateInput, saveWeightTargetMutation]);
+
+  const handleLogWeight = useCallback(() => {
+    const weight = parseFloat(weightLogInput);
+    if (isNaN(weight) || weight <= 0 || weight > 500) {
+      Alert.alert("Error", "Please enter a valid weight (1-500 kg)");
+      return;
+    }
+    logWeightMutation.mutate({ weight });
+  }, [weightLogInput, logWeightMutation]);
+
+  const openEditWeightTarget = useCallback(() => {
+    if (weightTargetGoal) {
+      setWeightTargetInput(weightTargetGoal.target_weight.toString());
+      setWeightTargetDateInput(weightTargetGoal.target_date);
+    } else {
+      setWeightTargetInput("");
+      setWeightTargetDateInput("");
+    }
+    setShowWeightTargetForm(true);
+  }, [weightTargetGoal]);
 
   const formatTime = (minutes: number): string => {
     const hours = Math.floor(minutes / 60);
@@ -479,7 +671,7 @@ export default function GoalsScreen() {
     setShowGoalForm(true);
   }, [fitnessGoal]);
 
-  const hasNoGoals = userGoals.length === 0 && !weightProgress && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading;
+  const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading && !weightTargetLoading;
 
   return (
     <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
@@ -634,46 +826,136 @@ export default function GoalsScreen() {
           </View>
         ) : null}
 
-        {weightProgress && (
+        {weightTargetGoal && weightProgress ? (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Scale size={18} color={colors.text} />
-              <Text style={styles.sectionTitle}>Weight Goal</Text>
+              <Scale size={18} color={colors.primary} />
+              <Text style={styles.sectionTitle}>Weight Loss</Text>
+              <TouchableOpacity onPress={openEditWeightTarget} style={styles.editButton} activeOpacity={0.7}>
+                <Text style={styles.editButtonText}>Edit</Text>
+                <ChevronRight size={14} color={colors.primary} />
+              </TouchableOpacity>
             </View>
             <View style={styles.weightCard}>
               <View style={styles.weightRow}>
                 <View style={styles.weightItem}>
-                  <Text style={styles.weightValue}>{weightProgress.current}</Text>
+                  <Text style={[styles.weightValue, weightProgress.current !== null && weightProgress.current <= weightProgress.target ? styles.paceGood : styles.paceBehind]}>
+                    {weightProgress.current !== null ? weightProgress.current.toFixed(1) : "--"}
+                  </Text>
                   <Text style={styles.weightLabel}>Current (kg)</Text>
                 </View>
                 <View style={styles.weightArrow}>
-                  {weightProgress.isLosing ? (
-                    <TrendingDown size={24} color={colors.success} />
+                  {weightProgress.current !== null && weightProgress.progressPercent >= 50 ? (
+                    <View style={styles.statusPillGood}>
+                      <TrendingDown size={14} color="#10B981" />
+                      <Text style={styles.statusPillTextGood}>On Track</Text>
+                    </View>
+                  ) : weightProgress.current !== null ? (
+                    <View style={styles.statusPillBehind}>
+                      <TrendingUp size={14} color="#EF4444" />
+                      <Text style={styles.statusPillTextBehind}>Behind</Text>
+                    </View>
                   ) : (
-                    <TrendingUp size={24} color={colors.secondary} />
+                    <Scale size={24} color={colors.textLight} />
                   )}
                 </View>
                 <View style={styles.weightItem}>
-                  <Text style={styles.weightValue}>{weightProgress.target}</Text>
+                  <Text style={styles.weightValueTarget}>{weightProgress.target.toFixed(1)}</Text>
                   <Text style={styles.weightLabel}>Target (kg)</Text>
                 </View>
               </View>
-              <View style={styles.weightProgressBar}>
-                <View style={styles.weightProgressTrack}>
-                  <LinearGradient
-                    colors={weightProgress.isLosing ? ["#10B981", "#34D399"] : ["#00C9A7", "#00E5BE"]}
-                    style={[styles.weightProgressFill, { width: `${Math.min(100, 100 - (weightProgress.diff / weightProgress.current) * 100)}%` }]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                  />
+
+              {weightProgress.current !== null && (
+                <View style={styles.fitnessProgressSection}>
+                  <View style={styles.fitnessProgressInfo}>
+                    <Text style={styles.fitnessProgressLabel}>Progress</Text>
+                    <Text style={styles.fitnessProgressPercent}>{Math.round(weightProgress.progressPercent)}%</Text>
+                  </View>
+                  <View style={styles.fitnessProgressTrack}>
+                    <LinearGradient
+                      colors={weightProgress.progressPercent >= 50 ? ["#10B981", "#34D399"] : ["#F59E0B", "#FBBF24"]}
+                      style={[styles.fitnessProgressFill, { width: `${weightProgress.progressPercent}%` }]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                    />
+                  </View>
+                </View>
+              )}
+
+              <View style={styles.fitnessMetaRow}>
+                <View style={styles.fitnessMetaItem}>
+                  <Clock size={12} color={colors.textSecondary} />
+                  <Text style={styles.fitnessMetaText}>
+                    {weightProgress.daysLeft > 0 ? `${weightProgress.daysLeft} days left` : "Target date passed"}
+                  </Text>
+                </View>
+                <View style={styles.fitnessMetaItem}>
+                  <Calendar size={12} color={colors.textSecondary} />
+                  <Text style={styles.fitnessMetaText}>
+                    By {formatGoalDate(weightProgress.targetDate)}
+                  </Text>
                 </View>
               </View>
-              <Text style={styles.weightDiff}>
-                {weightProgress.diff.toFixed(1)} kg {weightProgress.isLosing ? "to lose" : "to gain"}
-              </Text>
+
+              {weightProgress.current !== null && (
+                <Text style={styles.weightDiff}>
+                  {weightProgress.diff.toFixed(1)} kg {weightProgress.isLosing ? "to lose" : "reached target!"}
+                </Text>
+              )}
+
+              {weightProgress.entries.length > 1 && (
+                <View style={styles.weightHistorySection}>
+                  <Text style={styles.weightHistoryTitle}>Recent Entries</Text>
+                  {weightProgress.entries.slice(-5).reverse().map((entry) => (
+                    <View key={entry.id} style={styles.weightHistoryRow}>
+                      <Text style={styles.weightHistoryDate}>{formatGoalDate(entry.date)}</Text>
+                      <Text style={styles.weightHistoryValue}>{entry.weight.toFixed(1)} kg</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {weightProgress.current === null && (
+                <View style={styles.noActivitiesInfo}>
+                  <Scale size={28} color={colors.textLight} />
+                  <Text style={styles.noActivitiesTitle}>No Weight Logged Yet</Text>
+                  <Text style={styles.noActivitiesText}>
+                    Log your first weight entry to start tracking your progress toward {weightProgress.target.toFixed(1)} kg
+                  </Text>
+                </View>
+              )}
+
+              <TouchableOpacity
+                style={styles.logWeightButton}
+                onPress={() => setShowWeightLogForm(true)}
+                activeOpacity={0.8}
+              >
+                <Plus size={16} color={colors.white} />
+                <Text style={styles.logWeightButtonText}>Log Weight</Text>
+              </TouchableOpacity>
             </View>
           </View>
-        )}
+        ) : !weightTargetGoal && !weightTargetLoading ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Scale size={18} color={colors.primary} />
+              <Text style={styles.sectionTitle}>Weight Loss</Text>
+            </View>
+            <TouchableOpacity style={styles.setupGoalCard} onPress={openEditWeightTarget} activeOpacity={0.8}>
+              <LinearGradient colors={["#10B981", "#34D399"]} style={styles.setupGoalGradient}>
+                <Scale size={32} color={colors.white} />
+                <Text style={styles.setupGoalTitle}>Set Your Weight Goal</Text>
+                <Text style={styles.setupGoalSubtext}>
+                  Track your weight loss by logging your weight weekly and measuring progress toward your target
+                </Text>
+                <View style={styles.setupGoalButton}>
+                  <Text style={[styles.setupGoalButtonText, { color: "#10B981" }]}>Get Started</Text>
+                  <ChevronRight size={16} color="#10B981" />
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         {userGoals.length > 0 && (
           <View style={styles.section}>
@@ -771,6 +1053,118 @@ export default function GoalsScreen() {
           </View>
         )}
       </ScrollView>
+
+      <Modal
+        visible={showWeightTargetForm}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowWeightTargetForm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <LinearGradient colors={["#10B981", "#34D399"]} style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {weightTargetGoal ? "Update Weight Goal" : "Set Weight Goal"}
+              </Text>
+              <TouchableOpacity onPress={() => setShowWeightTargetForm(false)}>
+                <X size={24} color={colors.white} />
+              </TouchableOpacity>
+            </LinearGradient>
+
+            <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalSubtitle}>
+                Set your target weight and the date you want to achieve it by
+              </Text>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Target Weight (kg) *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 70"
+                  value={weightTargetInput}
+                  onChangeText={setWeightTargetInput}
+                  keyboardType="decimal-pad"
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Target Date *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="YYYY-MM-DD (e.g. 2026-06-30)"
+                  value={weightTargetDateInput}
+                  onChangeText={setWeightTargetDateInput}
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.saveButton, saveWeightTargetMutation.isPending && styles.saveButtonDisabled]}
+                onPress={handleSaveWeightTarget}
+                disabled={saveWeightTargetMutation.isPending}
+                activeOpacity={0.8}
+              >
+                <LinearGradient colors={["#10B981", "#34D399"]} style={styles.saveButtonGradient}>
+                  <Text style={styles.saveButtonText}>
+                    {saveWeightTargetMutation.isPending ? "Saving..." : weightTargetGoal ? "Update Goal" : "Save Goal"}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showWeightLogForm}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowWeightLogForm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <LinearGradient colors={["#10B981", "#34D399"]} style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Log Your Weight</Text>
+              <TouchableOpacity onPress={() => setShowWeightLogForm(false)}>
+                <X size={24} color={colors.white} />
+              </TouchableOpacity>
+            </LinearGradient>
+
+            <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalSubtitle}>
+                Enter your current weight. Log weekly for best tracking.
+              </Text>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Weight (kg) *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 75.5"
+                  value={weightLogInput}
+                  onChangeText={setWeightLogInput}
+                  keyboardType="decimal-pad"
+                  placeholderTextColor={colors.textLight}
+                />
+                <Text style={styles.inputHint}>Today's date will be used automatically</Text>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.saveButton, logWeightMutation.isPending && styles.saveButtonDisabled]}
+                onPress={handleLogWeight}
+                disabled={logWeightMutation.isPending}
+                activeOpacity={0.8}
+              >
+                <LinearGradient colors={["#10B981", "#34D399"]} style={styles.saveButtonGradient}>
+                  <Text style={styles.saveButtonText}>
+                    {logWeightMutation.isPending ? "Saving..." : "Log Weight"}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={showGoalForm}
@@ -1179,10 +1573,60 @@ const styles = StyleSheet.create({
     height: "100%",
     borderRadius: 4,
   },
+  weightValueTarget: {
+    fontSize: 28,
+    fontWeight: "800" as const,
+    color: colors.text,
+  },
   weightDiff: {
     fontSize: 13,
     color: colors.textSecondary,
     textAlign: "center" as const,
+    marginTop: 8,
+  },
+  weightHistorySection: {
+    marginTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+    paddingTop: 12,
+  },
+  weightHistoryTitle: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+    color: colors.textSecondary,
+    marginBottom: 8,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+  },
+  weightHistoryRow: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+    paddingVertical: 6,
+  },
+  weightHistoryDate: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  weightHistoryValue: {
+    fontSize: 14,
+    fontWeight: "700" as const,
+    color: colors.text,
+  },
+  logWeightButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 6,
+    backgroundColor: "#10B981",
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginTop: 16,
+  },
+  logWeightButtonText: {
+    fontSize: 15,
+    fontWeight: "700" as const,
+    color: colors.white,
   },
   goalsContainer: {
     flexDirection: "row" as const,
