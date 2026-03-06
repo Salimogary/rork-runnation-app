@@ -316,6 +316,32 @@ create index IF not exists idx_external_submissions_date on public."External Act
    - Activity details (date, type, start time, duration, distance)
 3. Admin is notified when new submissions are added
 
+### 9. Fitness Goals (NEW - Required)
+Create this table for tracking user fitness pace goals:
+
+```sql
+create table public."fitness_goal" (
+  "id" bigserial primary key,
+  "registration_id" text not null,
+  "target_pace_kmh" double precision not null,
+  "target_date" date not null,
+  "created_at" timestamp with time zone default now() not null,
+  "updated_at" timestamp with time zone default now() not null,
+  constraint fitness_goal_registration_id_fkey foreign key ("registration_id") references "registrations" ("RegistrationID") on delete cascade,
+  constraint unique_fitness_goal_per_user unique ("registration_id")
+) TABLESPACE pg_default;
+
+-- Create index for faster queries
+create index IF not exists idx_fitness_goal_registration on public."fitness_goal" using btree ("registration_id") TABLESPACE pg_default;
+```
+
+**Fitness Goal Logic:**
+- Each user can have one active fitness goal (unique constraint on registration_id)
+- `target_pace_kmh`: The target pace in km/h the user wants to achieve
+- `target_date`: The date by which the user wants to achieve this pace
+- Progress is measured as the average pace of the last 5 activities (or all activities if fewer than 5)
+- Pace is stored as km/h but displayed as min/km in the UI
+
 ## Notes
 
 - FriendID is hidden from users (system-generated)

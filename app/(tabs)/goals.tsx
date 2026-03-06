@@ -1,8 +1,8 @@
-import { StyleSheet, View, Text, ScrollView, RefreshControl, Animated } from "react-native";
-import { useEffect, useRef, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { StyleSheet, View, Text, ScrollView, RefreshControl, Animated, TouchableOpacity, TextInput, Alert, Modal } from "react-native";
+import { useEffect, useRef, useMemo, useState, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
-import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale } from "lucide-react-native";
+import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight } from "lucide-react-native";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import colors from "@/constants/colors";
@@ -16,6 +16,20 @@ interface UserGoal {
 interface ProfileData {
   "Weight Current"?: number;
   "Weight Target"?: number;
+}
+
+interface FitnessGoal {
+  id: number;
+  registration_id: string;
+  target_pace_kmh: number;
+  target_date: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface RecentActivity {
+  Pace_km_h: number;
+  Activity_Date: string;
 }
 
 interface ActivitySummary {
@@ -39,9 +53,32 @@ interface RegisteredEvent {
   currentDistance: number;
 }
 
+const convertKmhToMinPerKm = (kmh: number): number => {
+  if (kmh <= 0) return 0;
+  return 60 / kmh;
+};
+
+const formatPaceMinPerKm = (kmh: number): string => {
+  if (kmh <= 0) return "--:--";
+  const minPerKm = 60 / kmh;
+  const minutes = Math.floor(minPerKm);
+  const seconds = Math.round((minPerKm - minutes) * 60);
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+};
+
+const convertMinPerKmToKmh = (minPerKm: number): number => {
+  if (minPerKm <= 0) return 0;
+  return 60 / minPerKm;
+};
+
 export default function GoalsScreen() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [showGoalForm, setShowGoalForm] = useState(false);
+  const [targetPaceMin, setTargetPaceMin] = useState("");
+  const [targetPaceSec, setTargetPaceSec] = useState("");
+  const [targetDate, setTargetDate] = useState("");
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -50,6 +87,159 @@ export default function GoalsScreen() {
       useNativeDriver: true,
     }).start();
   }, [fadeAnim]);
+
+  const { data: fitnessGoal, isLoading: fitnessGoalLoading, refetch: refetchFitnessGoal } = useQuery<FitnessGoal | null>({
+    queryKey: ["fitnessGoal", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      const { data, error } = await supabase
+        .from("fitness_goal")
+        .select("*")
+        .eq("registration_id", user.id)
+        .maybeSingle();
+      if (error) {
+        console.error("[Goals] Error fetching fitness goal:", error);
+        return null;
+      }
+      console.log("[Goals] Fitness goal:", data);
+      return data as FitnessGoal | null;
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
+  const { data: recentActivities = [], refetch: refetchRecent } = useQuery<RecentActivity[]>({
+    queryKey: ["recentPaceActivities", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      const { data, error } = await supabase
+        .from("activities")
+        .select("Pace_km_h, Activity_Date")
+        .eq("RegistrationID", user.id)
+        .order("Activity_Date", { ascending: false })
+        .limit(5);
+      if (error) {
+        console.error("[Goals] Error fetching recent activities for pace:", error);
+        return [];
+      }
+      console.log("[Goals] Recent activities for pace:", data?.length);
+      return (data || []) as RecentActivity[];
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
+  const saveFitnessGoalMutation = useMutation({
+    mutationFn: async ({ paceKmh, date }: { paceKmh: number; date: string }) => {
+      if (!user?.id) throw new Error("Not logged in");
+
+      if (fitnessGoal) {
+        const { data, error } = await supabase
+          .from("fitness_goal")
+          .update({
+            target_pace_kmh: paceKmh,
+            target_date: date,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("registration_id", user.id)
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
+      } else {
+        const { data, error } = await supabase
+          .from("fitness_goal")
+          .insert({
+            registration_id: user.id,
+            target_pace_kmh: paceKmh,
+            target_date: date,
+          })
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
+      }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["fitnessGoal", user?.id] });
+      setShowGoalForm(false);
+      setTargetPaceMin("");
+      setTargetPaceSec("");
+      setTargetDate("");
+      Alert.alert("Success", "Fitness goal saved!");
+    },
+    onError: (error: any) => {
+      console.error("[Goals] Save fitness goal error:", error);
+      Alert.alert("Error", error?.message || "Failed to save fitness goal");
+    },
+  });
+
+  const handleSaveFitnessGoal = useCallback(() => {
+    const mins = parseInt(targetPaceMin, 10);
+    const secs = parseInt(targetPaceSec || "0", 10);
+
+    if (isNaN(mins) || mins < 0 || mins > 30) {
+      Alert.alert("Error", "Please enter valid minutes (0-30)");
+      return;
+    }
+    if (isNaN(secs) || secs < 0 || secs > 59) {
+      Alert.alert("Error", "Please enter valid seconds (0-59)");
+      return;
+    }
+
+    const totalMinPerKm = mins + secs / 60;
+    if (totalMinPerKm <= 0) {
+      Alert.alert("Error", "Pace must be greater than 0");
+      return;
+    }
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(targetDate)) {
+      Alert.alert("Error", "Please enter date in YYYY-MM-DD format");
+      return;
+    }
+
+    const targetDateObj = new Date(targetDate + "T00:00:00");
+    if (isNaN(targetDateObj.getTime())) {
+      Alert.alert("Error", "Please enter a valid date");
+      return;
+    }
+
+    const paceKmh = convertMinPerKmToKmh(totalMinPerKm);
+    saveFitnessGoalMutation.mutate({ paceKmh, date: targetDate });
+  }, [targetPaceMin, targetPaceSec, targetDate, saveFitnessGoalMutation]);
+
+  const fitnessProgress = useMemo(() => {
+    if (!fitnessGoal || recentActivities.length === 0) return null;
+
+    const validActivities = recentActivities.filter((a) => a.Pace_km_h > 0);
+    if (validActivities.length === 0) return null;
+
+    const avgPaceKmh = validActivities.reduce((sum, a) => sum + a.Pace_km_h, 0) / validActivities.length;
+    const targetPaceKmh = fitnessGoal.target_pace_kmh;
+
+    const avgMinPerKm = convertKmhToMinPerKm(avgPaceKmh);
+    const targetMinPerKm = convertKmhToMinPerKm(targetPaceKmh);
+
+    const progressPercent = targetMinPerKm > 0
+      ? Math.min(100, Math.max(0, (targetMinPerKm / avgMinPerKm) * 100))
+      : 0;
+
+    const daysLeft = Math.max(0, Math.ceil((new Date(fitnessGoal.target_date + "T00:00:00").getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+
+    const isAhead = avgPaceKmh >= targetPaceKmh;
+
+    return {
+      avgPaceKmh,
+      targetPaceKmh,
+      avgMinPerKm,
+      targetMinPerKm,
+      progressPercent,
+      daysLeft,
+      isAhead,
+      activitiesUsed: validActivities.length,
+    };
+  }, [fitnessGoal, recentActivities]);
 
   const { data: userGoals = [], isLoading: goalsLoading, refetch: refetchGoals } = useQuery<UserGoal[]>({
     queryKey: ["userGoals", user?.id],
@@ -240,6 +430,8 @@ export default function GoalsScreen() {
     void refetchProfile();
     void refetchActivity();
     void refetchEvents();
+    void refetchFitnessGoal();
+    void refetchRecent();
   };
 
   const weightProgress = useMemo(() => {
@@ -261,7 +453,33 @@ export default function GoalsScreen() {
     return `${mins}m`;
   };
 
+  const formatGoalDate = (dateString: string): string => {
+    const date = new Date(dateString + "T00:00:00");
+    const day = date.getDate();
+    const month = date.toLocaleDateString("en-US", { month: "short" });
+    const year = date.getFullYear();
+    return `${day} ${month} ${year}`;
+  };
+
   const ongoingEvents = eventGoals.filter((e) => e.status === "ongoing");
+
+  const openEditGoalForm = useCallback(() => {
+    if (fitnessGoal) {
+      const minPerKm = convertKmhToMinPerKm(fitnessGoal.target_pace_kmh);
+      const mins = Math.floor(minPerKm);
+      const secs = Math.round((minPerKm - mins) * 60);
+      setTargetPaceMin(mins.toString());
+      setTargetPaceSec(secs.toString().padStart(2, "0"));
+      setTargetDate(fitnessGoal.target_date);
+    } else {
+      setTargetPaceMin("");
+      setTargetPaceSec("");
+      setTargetDate("");
+    }
+    setShowGoalForm(true);
+  }, [fitnessGoal]);
+
+  const hasNoGoals = userGoals.length === 0 && !weightProgress && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading;
 
   return (
     <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
@@ -297,6 +515,124 @@ export default function GoalsScreen() {
             </LinearGradient>
           </View>
         )}
+
+        {fitnessGoal && fitnessProgress ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Zap size={18} color={colors.primary} />
+              <Text style={styles.sectionTitle}>Improve Fitness</Text>
+              <TouchableOpacity onPress={openEditGoalForm} style={styles.editButton} activeOpacity={0.7}>
+                <Text style={styles.editButtonText}>Edit</Text>
+                <ChevronRight size={14} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.fitnessCard}>
+              <View style={styles.paceComparisonRow}>
+                <View style={styles.paceBlock}>
+                  <Text style={styles.paceBlockLabel}>Current Avg</Text>
+                  <Text style={[styles.paceBlockValue, fitnessProgress.isAhead ? styles.paceGood : styles.paceBehind]}>
+                    {formatPaceMinPerKm(fitnessProgress.avgPaceKmh)}
+                  </Text>
+                  <Text style={styles.paceBlockUnit}>min/km</Text>
+                </View>
+                <View style={styles.paceArrowContainer}>
+                  {fitnessProgress.isAhead ? (
+                    <View style={styles.statusPillGood}>
+                      <TrendingUp size={14} color="#10B981" />
+                      <Text style={styles.statusPillTextGood}>On Track</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.statusPillBehind}>
+                      <TrendingDown size={14} color="#EF4444" />
+                      <Text style={styles.statusPillTextBehind}>Behind</Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.paceBlock}>
+                  <Text style={styles.paceBlockLabel}>Target</Text>
+                  <Text style={styles.paceBlockValueTarget}>
+                    {formatPaceMinPerKm(fitnessProgress.targetPaceKmh)}
+                  </Text>
+                  <Text style={styles.paceBlockUnit}>min/km</Text>
+                </View>
+              </View>
+
+              <View style={styles.fitnessProgressSection}>
+                <View style={styles.fitnessProgressInfo}>
+                  <Text style={styles.fitnessProgressLabel}>Progress</Text>
+                  <Text style={styles.fitnessProgressPercent}>{Math.round(fitnessProgress.progressPercent)}%</Text>
+                </View>
+                <View style={styles.fitnessProgressTrack}>
+                  <LinearGradient
+                    colors={fitnessProgress.isAhead ? ["#10B981", "#34D399"] : ["#F59E0B", "#FBBF24"]}
+                    style={[styles.fitnessProgressFill, { width: `${fitnessProgress.progressPercent}%` }]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.fitnessMetaRow}>
+                <View style={styles.fitnessMetaItem}>
+                  <Clock size={12} color={colors.textSecondary} />
+                  <Text style={styles.fitnessMetaText}>
+                    {fitnessProgress.daysLeft > 0 ? `${fitnessProgress.daysLeft} days left` : "Target date passed"}
+                  </Text>
+                </View>
+                <View style={styles.fitnessMetaItem}>
+                  <Calendar size={12} color={colors.textSecondary} />
+                  <Text style={styles.fitnessMetaText}>
+                    By {formatGoalDate(fitnessGoal.target_date)}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={styles.fitnessFootnote}>
+                Based on last {fitnessProgress.activitiesUsed} {fitnessProgress.activitiesUsed === 1 ? "activity" : "activities"}
+              </Text>
+            </View>
+          </View>
+        ) : fitnessGoal && recentActivities.length === 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Zap size={18} color={colors.primary} />
+              <Text style={styles.sectionTitle}>Improve Fitness</Text>
+              <TouchableOpacity onPress={openEditGoalForm} style={styles.editButton} activeOpacity={0.7}>
+                <Text style={styles.editButtonText}>Edit</Text>
+                <ChevronRight size={14} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.fitnessCard}>
+              <View style={styles.noActivitiesInfo}>
+                <Zap size={28} color={colors.textLight} />
+                <Text style={styles.noActivitiesTitle}>No Activities Yet</Text>
+                <Text style={styles.noActivitiesText}>
+                  Complete your first activity to start tracking your pace against your target of {formatPaceMinPerKm(fitnessGoal.target_pace_kmh)} min/km
+                </Text>
+              </View>
+            </View>
+          </View>
+        ) : !fitnessGoal && !fitnessGoalLoading ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Zap size={18} color={colors.primary} />
+              <Text style={styles.sectionTitle}>Improve Fitness</Text>
+            </View>
+            <TouchableOpacity style={styles.setupGoalCard} onPress={openEditGoalForm} activeOpacity={0.8}>
+              <LinearGradient colors={["#FF6B35", "#FF8C42"]} style={styles.setupGoalGradient}>
+                <Zap size={32} color={colors.white} />
+                <Text style={styles.setupGoalTitle}>Set Your Pace Goal</Text>
+                <Text style={styles.setupGoalSubtext}>
+                  Track your average pace against a target to improve your fitness over time
+                </Text>
+                <View style={styles.setupGoalButton}>
+                  <Text style={styles.setupGoalButtonText}>Get Started</Text>
+                  <ChevronRight size={16} color={colors.primary} />
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         {weightProgress && (
           <View style={styles.section}>
@@ -425,7 +761,7 @@ export default function GoalsScreen() {
           </View>
         )}
 
-        {userGoals.length === 0 && !weightProgress && ongoingEvents.length === 0 && (
+        {hasNoGoals && (
           <View style={styles.emptyContainer}>
             <Target size={48} color={colors.lightGray} />
             <Text style={styles.emptyTitle}>No Goals Set Yet</Text>
@@ -435,6 +771,88 @@ export default function GoalsScreen() {
           </View>
         )}
       </ScrollView>
+
+      <Modal
+        visible={showGoalForm}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowGoalForm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <LinearGradient colors={colors.gradient.orange} style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {fitnessGoal ? "Update Pace Goal" : "Set Pace Goal"}
+              </Text>
+              <TouchableOpacity onPress={() => setShowGoalForm(false)}>
+                <X size={24} color={colors.white} />
+              </TouchableOpacity>
+            </LinearGradient>
+
+            <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalSubtitle}>
+                Set your target pace and the date you want to achieve it by
+              </Text>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Target Pace (min/km) *</Text>
+                <View style={styles.paceInputRow}>
+                  <View style={styles.paceInputBlock}>
+                    <TextInput
+                      style={styles.paceInput}
+                      placeholder="5"
+                      value={targetPaceMin}
+                      onChangeText={setTargetPaceMin}
+                      keyboardType="number-pad"
+                      maxLength={2}
+                      placeholderTextColor={colors.textLight}
+                    />
+                    <Text style={styles.paceInputLabel}>min</Text>
+                  </View>
+                  <Text style={styles.paceColon}>:</Text>
+                  <View style={styles.paceInputBlock}>
+                    <TextInput
+                      style={styles.paceInput}
+                      placeholder="30"
+                      value={targetPaceSec}
+                      onChangeText={setTargetPaceSec}
+                      keyboardType="number-pad"
+                      maxLength={2}
+                      placeholderTextColor={colors.textLight}
+                    />
+                    <Text style={styles.paceInputLabel}>sec</Text>
+                  </View>
+                </View>
+                <Text style={styles.inputHint}>e.g. 5:30 means 5 minutes 30 seconds per km</Text>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Target Date *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="YYYY-MM-DD (e.g. 2026-06-30)"
+                  value={targetDate}
+                  onChangeText={setTargetDate}
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.saveButton, saveFitnessGoalMutation.isPending && styles.saveButtonDisabled]}
+                onPress={handleSaveFitnessGoal}
+                disabled={saveFitnessGoalMutation.isPending}
+                activeOpacity={0.8}
+              >
+                <LinearGradient colors={colors.gradient.orange} style={styles.saveButtonGradient}>
+                  <Text style={styles.saveButtonText}>
+                    {saveFitnessGoalMutation.isPending ? "Saving..." : fitnessGoal ? "Update Goal" : "Save Goal"}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </Animated.View>
   );
 }
@@ -517,6 +935,203 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "700" as const,
     color: colors.text,
+    flex: 1,
+  },
+  editButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 2,
+  },
+  editButtonText: {
+    fontSize: 13,
+    fontWeight: "600" as const,
+    color: colors.primary,
+  },
+  fitnessCard: {
+    backgroundColor: colors.cardBackground,
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  paceComparisonRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    marginBottom: 20,
+  },
+  paceBlock: {
+    alignItems: "center" as const,
+    flex: 1,
+  },
+  paceBlockLabel: {
+    fontSize: 11,
+    fontWeight: "600" as const,
+    color: colors.textSecondary,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  paceBlockValue: {
+    fontSize: 26,
+    fontWeight: "800" as const,
+  },
+  paceGood: {
+    color: "#10B981",
+  },
+  paceBehind: {
+    color: "#EF4444",
+  },
+  paceBlockValueTarget: {
+    fontSize: 26,
+    fontWeight: "800" as const,
+    color: colors.text,
+  },
+  paceBlockUnit: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  paceArrowContainer: {
+    paddingHorizontal: 8,
+  },
+  statusPillGood: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 4,
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  statusPillTextGood: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+    color: "#10B981",
+  },
+  statusPillBehind: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 4,
+    backgroundColor: "#FEF2F2",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  statusPillTextBehind: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+    color: "#EF4444",
+  },
+  fitnessProgressSection: {
+    marginBottom: 14,
+  },
+  fitnessProgressInfo: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+    marginBottom: 6,
+  },
+  fitnessProgressLabel: {
+    fontSize: 13,
+    fontWeight: "600" as const,
+    color: colors.textSecondary,
+  },
+  fitnessProgressPercent: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+    color: colors.text,
+  },
+  fitnessProgressTrack: {
+    height: 8,
+    backgroundColor: colors.extraLightGray,
+    borderRadius: 4,
+    overflow: "hidden" as const,
+  },
+  fitnessProgressFill: {
+    height: "100%",
+    borderRadius: 4,
+  },
+  fitnessMetaRow: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    marginBottom: 10,
+  },
+  fitnessMetaItem: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 4,
+  },
+  fitnessMetaText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  fitnessFootnote: {
+    fontSize: 11,
+    color: colors.textLight,
+    textAlign: "center" as const,
+    fontStyle: "italic" as const,
+  },
+  noActivitiesInfo: {
+    alignItems: "center" as const,
+    paddingVertical: 16,
+    gap: 8,
+  },
+  noActivitiesTitle: {
+    fontSize: 16,
+    fontWeight: "700" as const,
+    color: colors.text,
+  },
+  noActivitiesText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    textAlign: "center" as const,
+    lineHeight: 18,
+  },
+  setupGoalCard: {
+    borderRadius: 16,
+    overflow: "hidden" as const,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  setupGoalGradient: {
+    padding: 24,
+    alignItems: "center" as const,
+  },
+  setupGoalTitle: {
+    fontSize: 20,
+    fontWeight: "800" as const,
+    color: colors.white,
+    marginTop: 12,
+  },
+  setupGoalSubtext: {
+    fontSize: 13,
+    color: colors.white,
+    opacity: 0.9,
+    textAlign: "center" as const,
+    marginTop: 8,
+    lineHeight: 18,
+  },
+  setupGoalButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    backgroundColor: colors.white,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 24,
+    marginTop: 16,
+    gap: 4,
+  },
+  setupGoalButtonText: {
+    fontSize: 14,
+    fontWeight: "700" as const,
+    color: colors.primary,
   },
   weightCard: {
     backgroundColor: colors.cardBackground,
@@ -713,5 +1328,111 @@ const styles = StyleSheet.create({
     textAlign: "center" as const,
     marginTop: 8,
     lineHeight: 20,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end" as const,
+  },
+  modalContent: {
+    backgroundColor: colors.white,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: "80%",
+  },
+  modalHeader: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "700" as const,
+    color: colors.white,
+  },
+  modalBody: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 32,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  inputGroup: {
+    marginBottom: 20,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: "600" as const,
+    color: colors.text,
+    marginBottom: 8,
+  },
+  paceInputRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+  },
+  paceInputBlock: {
+    flex: 1,
+    alignItems: "center" as const,
+  },
+  paceInput: {
+    backgroundColor: colors.extraLightGray,
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 24,
+    fontWeight: "700" as const,
+    color: colors.text,
+    textAlign: "center" as const,
+    width: "100%",
+  },
+  paceInputLabel: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 4,
+  },
+  paceColon: {
+    fontSize: 28,
+    fontWeight: "700" as const,
+    color: colors.text,
+    marginTop: -16,
+  },
+  inputHint: {
+    fontSize: 12,
+    color: colors.textLight,
+    marginTop: 6,
+  },
+  input: {
+    backgroundColor: colors.extraLightGray,
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 16,
+    color: colors.text,
+  },
+  saveButton: {
+    borderRadius: 14,
+    overflow: "hidden" as const,
+    marginTop: 8,
+    marginBottom: 24,
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveButtonGradient: {
+    paddingVertical: 16,
+    alignItems: "center" as const,
+    borderRadius: 14,
+  },
+  saveButtonText: {
+    fontSize: 16,
+    fontWeight: "700" as const,
+    color: colors.white,
   },
 });
