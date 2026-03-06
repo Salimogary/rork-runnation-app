@@ -3,7 +3,7 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useState } from "react";
 import { View, StyleSheet } from "react-native";
-import { trpcClient, TRPCProvider } from "@/lib/trpc";
+import { TRPCProvider } from "@/lib/trpc";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Linking from "expo-linking";
@@ -113,7 +113,7 @@ export default function RootLayout() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <TRPCProvider client={trpcClient} queryClient={queryClient}>
+      <TRPCProvider queryClient={queryClient}>
         <AuthProvider>
           <View style={styles.container}>
             <RootLayoutNav />
