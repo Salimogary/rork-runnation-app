@@ -2,7 +2,7 @@ import { StyleSheet, View, Text, ScrollView, RefreshControl, Animated, Touchable
 import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
-import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints, Shield, Check, Trash2, Users, ArrowUp, ArrowDown, Minus } from "lucide-react-native";
+import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints, Shield, Check, Trash2, Users, ArrowUp, ArrowDown, Minus, Trophy } from "lucide-react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -82,6 +82,19 @@ interface StoredRankSnapshot {
   rank: number;
   totalParticipants: number;
   timestamp: string;
+}
+
+interface MedalGoalData {
+  totalEvents: number;
+  enrolledEvents: number;
+  medalsEarned: number;
+  enrollmentRatio: number;
+  medalRatio: number;
+  events: {
+    eventName: string;
+    isEnrolled: boolean;
+    isOnMedalList: boolean;
+  }[];
 }
 
 interface ActivitySummary {
@@ -997,6 +1010,82 @@ export default function GoalsScreen() {
     };
   }, [communityRanking, previousRank]);
 
+  const { data: medalGoalData, isLoading: medalGoalLoading, refetch: refetchMedalGoal } = useQuery<MedalGoalData | null>({
+    queryKey: ["medalGoalData", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      try {
+        const { data: allEvents, error: eventsError } = await supabase
+          .from("events")
+          .select("eventId, eventName, startsAt, endsAt, medal_min_cumulative_distance, medal_date_start, medal_date_end");
+        if (eventsError) {
+          console.error("[Goals] Medal goal - events fetch error:", eventsError);
+          return null;
+        }
+        if (!allEvents || allEvents.length === 0) return null;
+
+        const { data: participantData, error: partError } = await supabase
+          .from("events_participants")
+          .select("eventId")
+          .eq("RegistrationID", user.id);
+        if (partError) {
+          console.error("[Goals] Medal goal - participants fetch error:", partError);
+          return null;
+        }
+
+        const enrolledEventIds = new Set((participantData || []).map((p: any) => p.eventId));
+        const totalEvents = allEvents.length;
+        const enrolledEvents = enrolledEventIds.size;
+
+        let medalsEarned = 0;
+        const eventsDetail: MedalGoalData["events"] = [];
+
+        for (const event of allEvents) {
+          const isEnrolled = enrolledEventIds.has(event.eventId);
+          let isOnMedalList = false;
+
+          if (isEnrolled) {
+            const medalStart = event.medal_date_start || event.startsAt;
+            const medalEnd = event.medal_date_end || event.endsAt;
+
+            if (medalStart && event.medal_min_cumulative_distance) {
+              const { data: acts } = await supabase
+                .from("activities")
+                .select("Distance_km")
+                .eq("RegistrationID", user.id)
+                .gte("Activity_Date", medalStart)
+                .lte("Activity_Date", medalEnd);
+
+              const totalDist = (acts || []).reduce((sum: number, a: any) => sum + (a.Distance_km || 0), 0);
+              isOnMedalList = totalDist >= event.medal_min_cumulative_distance;
+            } else if (isEnrolled && !event.medal_min_cumulative_distance) {
+              isOnMedalList = true;
+            }
+
+            if (isOnMedalList) medalsEarned++;
+          }
+
+          eventsDetail.push({
+            eventName: event.eventName || "Unnamed Event",
+            isEnrolled,
+            isOnMedalList,
+          });
+        }
+
+        const enrollmentRatio = totalEvents > 0 ? (enrolledEvents / totalEvents) * 100 : 0;
+        const medalRatio = enrolledEvents > 0 ? (medalsEarned / enrolledEvents) * 100 : 0;
+
+        console.log("[Goals] Medal goal data:", { totalEvents, enrolledEvents, medalsEarned, enrollmentRatio, medalRatio });
+        return { totalEvents, enrolledEvents, medalsEarned, enrollmentRatio, medalRatio, events: eventsDetail };
+      } catch (error) {
+        console.error("[Goals] Medal goal query failed:", error);
+        return null;
+      }
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
   const { data: eventGoals = [], refetch: refetchEvents } = useQuery<RegisteredEvent[]>({
     queryKey: ["goalEvents", user?.id],
     queryFn: async () => {
@@ -1085,6 +1174,7 @@ export default function GoalsScreen() {
     void refetchHealth();
     void refetchDiscipline();
     void refetchCommunityRank();
+    void refetchMedalGoal();
   };
 
   const weightProgress = useMemo(() => {
@@ -1197,7 +1287,7 @@ export default function GoalsScreen() {
     setShowGoalForm(true);
   }, [fitnessGoal]);
 
-  const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading && userDisciplineGoals.length === 0 && !userDisciplineLoading && !communityRanking && !communityRankLoading;
+  const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading && userDisciplineGoals.length === 0 && !userDisciplineLoading && !communityRanking && !communityRankLoading && !medalGoalData && !medalGoalLoading;
 
   return (
     <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
@@ -1689,6 +1779,98 @@ export default function GoalsScreen() {
                 </View>
               </LinearGradient>
             </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {medalGoalData ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Trophy size={18} color="#D97706" />
+              <Text style={styles.sectionTitle}>Earn Medals</Text>
+            </View>
+            <View style={styles.medalGoalCard}>
+              <View style={styles.medalRatiosRow}>
+                <View style={styles.medalRatioBlock}>
+                  <View style={styles.medalRatioCircle}>
+                    <Text style={styles.medalRatioNumber}>{medalGoalData.enrolledEvents}</Text>
+                    <Text style={styles.medalRatioOf}>/ {medalGoalData.totalEvents}</Text>
+                  </View>
+                  <Text style={styles.medalRatioLabel}>Races Enrolled</Text>
+                  <View style={styles.medalRatioBarTrack}>
+                    <View style={[styles.medalRatioBarFill, { width: `${medalGoalData.enrollmentRatio}%`, backgroundColor: "#D97706" }]} />
+                  </View>
+                  <Text style={styles.medalRatioPercent}>{Math.round(medalGoalData.enrollmentRatio)}%</Text>
+                </View>
+
+                <View style={styles.medalRatioDivider} />
+
+                <View style={styles.medalRatioBlock}>
+                  <View style={styles.medalRatioCircle}>
+                    <Text style={[styles.medalRatioNumber, { color: "#059669" }]}>{medalGoalData.medalsEarned}</Text>
+                    <Text style={styles.medalRatioOf}>/ {medalGoalData.enrolledEvents}</Text>
+                  </View>
+                  <Text style={styles.medalRatioLabel}>Medals Earned</Text>
+                  <View style={styles.medalRatioBarTrack}>
+                    <View style={[styles.medalRatioBarFill, { width: `${medalGoalData.medalRatio}%`, backgroundColor: "#059669" }]} />
+                  </View>
+                  <Text style={styles.medalRatioPercent}>{Math.round(medalGoalData.medalRatio)}%</Text>
+                </View>
+              </View>
+
+              {medalGoalData.events.filter(e => e.isEnrolled).length > 0 && (
+                <View style={styles.medalEventsList}>
+                  <Text style={styles.weightHistoryTitle}>Enrolled Events</Text>
+                  {medalGoalData.events.filter(e => e.isEnrolled).map((event, index) => (
+                    <View key={index} style={styles.medalEventRow}>
+                      <View style={styles.medalEventInfo}>
+                        <Text style={styles.medalEventName} numberOfLines={1}>{event.eventName}</Text>
+                      </View>
+                      <View style={[
+                        styles.medalEventBadge,
+                        event.isOnMedalList ? styles.medalEventBadgeEarned : styles.medalEventBadgePending,
+                      ]}>
+                        <Award size={12} color={event.isOnMedalList ? "#D97706" : colors.textLight} />
+                        <Text style={[
+                          styles.medalEventBadgeText,
+                          event.isOnMedalList ? styles.medalEventBadgeTextEarned : styles.medalEventBadgeTextPending,
+                        ]}>
+                          {event.isOnMedalList ? "Earned" : "Pending"}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {medalGoalData.enrolledEvents === 0 && (
+                <View style={styles.noActivitiesInfo}>
+                  <Trophy size={24} color={colors.textLight} />
+                  <Text style={styles.noActivitiesText}>
+                    Enroll in races from the Events tab to start earning medals
+                  </Text>
+                </View>
+              )}
+
+              <Text style={styles.fitnessFootnote}>
+                {medalGoalData.totalEvents} {medalGoalData.totalEvents === 1 ? "race" : "races"} available
+              </Text>
+            </View>
+          </View>
+        ) : !medalGoalLoading ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Trophy size={18} color="#D97706" />
+              <Text style={styles.sectionTitle}>Earn Medals</Text>
+            </View>
+            <View style={styles.medalGoalCard}>
+              <View style={styles.noActivitiesInfo}>
+                <Trophy size={28} color={colors.textLight} />
+                <Text style={styles.noActivitiesTitle}>No Races Available</Text>
+                <Text style={styles.noActivitiesText}>
+                  When races are added, you can track your enrollment and medal progress here
+                </Text>
+              </View>
+            </View>
           </View>
         ) : null}
 
@@ -3263,5 +3445,112 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700" as const,
     color: colors.text,
+  },
+  medalGoalCard: {
+    backgroundColor: colors.cardBackground,
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  medalRatiosRow: {
+    flexDirection: "row" as const,
+    alignItems: "flex-start" as const,
+    marginBottom: 16,
+  },
+  medalRatioBlock: {
+    flex: 1,
+    alignItems: "center" as const,
+  },
+  medalRatioCircle: {
+    alignItems: "center" as const,
+    marginBottom: 8,
+  },
+  medalRatioNumber: {
+    fontSize: 32,
+    fontWeight: "900" as const,
+    color: "#D97706",
+  },
+  medalRatioOf: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: -4,
+  },
+  medalRatioLabel: {
+    fontSize: 12,
+    fontWeight: "600" as const,
+    color: colors.textSecondary,
+    marginBottom: 8,
+  },
+  medalRatioBarTrack: {
+    width: "80%" as const,
+    height: 6,
+    backgroundColor: colors.extraLightGray,
+    borderRadius: 3,
+    overflow: "hidden" as const,
+    marginBottom: 4,
+  },
+  medalRatioBarFill: {
+    height: "100%" as const,
+    borderRadius: 3,
+  },
+  medalRatioPercent: {
+    fontSize: 12,
+    fontWeight: "700" as const,
+    color: colors.textSecondary,
+  },
+  medalRatioDivider: {
+    width: 1,
+    height: 80,
+    backgroundColor: colors.divider,
+    alignSelf: "center" as const,
+  },
+  medalEventsList: {
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+    paddingTop: 12,
+    marginBottom: 10,
+  },
+  medalEventRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    paddingVertical: 8,
+  },
+  medalEventInfo: {
+    flex: 1,
+    marginRight: 10,
+  },
+  medalEventName: {
+    fontSize: 14,
+    fontWeight: "600" as const,
+    color: colors.text,
+  },
+  medalEventBadge: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  medalEventBadgeEarned: {
+    backgroundColor: "#FEF3C7",
+  },
+  medalEventBadgePending: {
+    backgroundColor: colors.extraLightGray,
+  },
+  medalEventBadgeText: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+  },
+  medalEventBadgeTextEarned: {
+    color: "#B45309",
+  },
+  medalEventBadgeTextPending: {
+    color: colors.textLight,
   },
 });
