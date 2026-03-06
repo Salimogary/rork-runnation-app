@@ -7,6 +7,7 @@ import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
 import MapView, { Polyline } from "react-native-maps";
 import { LinearGradient } from "expo-linear-gradient";
+import { Stack } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import colors from "@/constants/colors";
@@ -398,8 +399,13 @@ export default function ExerciseScreen() {
     }
   }, [distance, duration]);
 
+  const isActivityActive = exerciseType !== null;
+  const headerTitle = isActivityActive ? "Exercise" : "Home";
+  const showGoals = runState === "idle" || runState === "finished";
+
   return (
     <View style={styles.container}>
+      <Stack.Screen options={{ title: headerTitle }} />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {Platform.OS !== 'web' && currentLocation && runState !== 'idle' && (
           <View style={styles.mapContainer}>
@@ -425,45 +431,47 @@ export default function ExerciseScreen() {
           </View>
         )}
 
-        <View style={styles.sectionContainer}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionTitleRow}>
-              <Target size={18} color={colors.primary} />
-              <Text style={styles.sectionTitle}>Goal Tracker</Text>
+        {showGoals && (
+          <View style={styles.sectionContainer}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleRow}>
+                <Target size={18} color={colors.primary} />
+                <Text style={styles.sectionTitle}>Goal Tracker</Text>
+              </View>
             </View>
-          </View>
 
-          {goalsLoading ? (
-            <View style={styles.goalsLoadingContainer}>
-              <Loader size={24} color={colors.textLight} />
-              <Text style={styles.goalsLoadingText}>Loading goals...</Text>
-            </View>
-          ) : userGoals.length === 0 ? (
-            <View style={styles.noGoalsContainer}>
-              <Target size={32} color={colors.textLight} />
-              <Text style={styles.noGoalsText}>No goals set during registration</Text>
-            </View>
-          ) : (
-            <View style={styles.goalsColumn}>
-              {userGoals.map((goal, index) => {
-                const IconComp = goalIcons[index % goalIcons.length];
-                const gradient = goalGradients[index % goalGradients.length];
-                return (
-                  <View key={goal.goal_id} style={styles.goalButton}>
-                    <LinearGradient colors={gradient} style={styles.goalButtonGradient}>
-                      <View style={styles.goalButtonContent}>
-                        <IconComp size={32} color={colors.white} />
-                        <View style={styles.goalButtonTextContainer}>
-                          <Text style={styles.goalButtonText}>{goal.name}</Text>
+            {goalsLoading ? (
+              <View style={styles.goalsLoadingContainer}>
+                <Loader size={24} color={colors.textLight} />
+                <Text style={styles.goalsLoadingText}>Loading goals...</Text>
+              </View>
+            ) : userGoals.length === 0 ? (
+              <View style={styles.noGoalsContainer}>
+                <Target size={32} color={colors.textLight} />
+                <Text style={styles.noGoalsText}>No goals set during registration</Text>
+              </View>
+            ) : (
+              <View style={styles.goalsColumn}>
+                {userGoals.map((goal, index) => {
+                  const IconComp = goalIcons[index % goalIcons.length];
+                  const gradient = goalGradients[index % goalGradients.length];
+                  return (
+                    <View key={goal.goal_id} style={styles.goalButton}>
+                      <LinearGradient colors={gradient} style={styles.goalButtonGradient}>
+                        <View style={styles.goalButtonContent}>
+                          <IconComp size={32} color={colors.white} />
+                          <View style={styles.goalButtonTextContainer}>
+                            <Text style={styles.goalButtonText}>{goal.name}</Text>
+                          </View>
                         </View>
-                      </View>
-                    </LinearGradient>
-                  </View>
-                );
-              })}
-            </View>
-          )}
-        </View>
+                      </LinearGradient>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+        )}
 
         {runState !== 'idle' && (
           <View style={styles.statsContainer}>
