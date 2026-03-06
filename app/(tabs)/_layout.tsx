@@ -1,5 +1,5 @@
 import { Tabs, useRouter } from "expo-router";
-import { Activity, Users, MessageCircle, ShoppingBag, Settings, Calendar } from "lucide-react-native";
+import { Activity, Users, MessageCircle, ShoppingBag, Settings, Calendar, Target } from "lucide-react-native";
 import React from "react";
 import { TouchableOpacity } from "react-native";
 import HeaderProfile from "@/components/HeaderProfile";
@@ -21,7 +21,7 @@ export default function TabLayout() {
           shadowOffset: { width: 0, height: -4 },
           shadowOpacity: 0.1,
           shadowRadius: 8,
-          paddingTop: 4,
+
         },
         headerShown: true,
         headerStyle: {
@@ -46,8 +46,15 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Home",
+          title: "Exercise",
           tabBarIcon: ({ color }) => <Activity color={color} size={24} />,
+        }}
+      />
+      <Tabs.Screen
+        name="goals"
+        options={{
+          title: "Goals",
+          tabBarIcon: ({ color }) => <Target color={color} size={24} />,
         }}
       />
       <Tabs.Screen

@@ -50,7 +50,7 @@ export default function ExerciseScreen() {
   }, []);
 
   useEffect(() => {
-    requestLocationPermission();
+    void requestLocationPermission();
 
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
@@ -337,12 +337,9 @@ export default function ExerciseScreen() {
     }
   }, [distance, duration]);
 
-  const isActivityActive = exerciseType !== null;
-  const headerTitle = isActivityActive ? "Exercise" : "Home";
-
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: headerTitle }} />
+      <Stack.Screen options={{ title: "Exercise" }} />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {Platform.OS !== 'web' && currentLocation && runState !== 'idle' && (
           <View style={styles.mapContainer}>
