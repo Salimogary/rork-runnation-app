@@ -242,8 +242,8 @@ export default function SubscriptionScreen() {
           <Text style={styles.heroTitle}>Go Premium</Text>
           <Text style={styles.heroSubtitle}>
             {trialExpired
-              ? 'Your free trial has ended. Subscribe to continue using all features.'
-              : `You have ${trialDaysRemaining} day${trialDaysRemaining !== 1 ? 's' : ''} left on your free trial.`}
+              ? 'Your free plan has ended. Subscribe to continue using all features.'
+              : `You have ${trialDaysRemaining} day${trialDaysRemaining !== 1 ? 's' : ''} left on your free plan.`}
           </Text>
         </Animated.View>
 
@@ -421,7 +421,7 @@ export default function SubscriptionScreen() {
             }}
           >
             <Text style={styles.skipButtonText}>
-              Continue with Free Trial ({trialDaysRemaining} days left)
+              Continue with Free Plan ({trialDaysRemaining} days left)
             </Text>
           </TouchableOpacity>
         )}

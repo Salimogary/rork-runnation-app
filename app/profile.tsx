@@ -1064,11 +1064,11 @@ export default function ProfileScreen() {
           <View style={styles.subBannerContent}>
             <View style={styles.subBannerRow}>
               <View style={styles.subBannerTrialChip}>
-                <Text style={styles.subBannerTrialChipText}>FREE TRIAL</Text>
+                <Text style={styles.subBannerTrialChipText}>FREE PLAN</Text>
               </View>
               <Text style={styles.subBannerDays}>{trialDaysRemaining} days left</Text>
             </View>
-            <Text style={styles.subBannerDate}>Trial ends: {getTrialEndDate()}</Text>
+            <Text style={styles.subBannerDate}>Free plan ends: {getTrialEndDate()}</Text>
           </View>
         </View>
       );

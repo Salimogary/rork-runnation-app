@@ -363,7 +363,7 @@ export default function SettingsScreen() {
                 {subscriptionStatus === 'active'
                   ? 'Premium Active'
                   : subscriptionStatus === 'trial'
-                    ? 'Free Trial'
+                    ? 'Free Plan'
                     : subscriptionStatus === 'pending'
                       ? 'Payment Pending'
                       : 'Subscribe'}
@@ -375,7 +375,7 @@ export default function SettingsScreen() {
                     ? `${trialDaysRemaining} day${trialDaysRemaining !== 1 ? 's' : ''} remaining`
                     : subscriptionStatus === 'pending'
                       ? 'Awaiting payment confirmation'
-                      : 'Your trial has ended — subscribe now'}
+                      : 'Your free plan has ended — subscribe now'}
               </Text>
             </View>
           </View>
@@ -388,7 +388,7 @@ export default function SettingsScreen() {
           ]}>
             <Text style={styles.subscriptionBadgeText}>
               {subscriptionStatus === 'active' ? 'PRO'
-                : subscriptionStatus === 'trial' ? 'TRIAL'
+                : subscriptionStatus === 'trial' ? 'FREE'
                 : subscriptionStatus === 'pending' ? 'PENDING'
                 : 'EXPIRED'}
             </Text>
