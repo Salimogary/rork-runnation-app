@@ -49,6 +49,7 @@ interface UserProfile {
   Country?: string;
   "Academic Year"?: string;
   FriendID?: string;
+  "Date of Birth"?: string;
 }
 
 interface GoalItem {
@@ -869,36 +870,35 @@ export default function ProfileScreen() {
     );
   };
 
+  const formatDateOfBirth = (dob?: string) => {
+    if (!dob) return "Not set";
+    try {
+      const date = new Date(dob);
+      return date.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+    } catch {
+      return dob;
+    }
+  };
+
   const renderProfileView = () => (
     <View style={styles.infoContainer}>
-      {([
-        { label: "First Name", value: profile["First Name"] },
-        { label: "Other Names", value: profile["Other Names"] },
-        { label: "Username", value: profile.Username ? `@${profile.Username}` : undefined },
-        { label: "Email", value: profile.Email },
-        { label: "Sex", value: profile.Sex },
-        { label: "Age", value: profile.Age?.toString() },
-        { label: "Residence", value: profile.Residence },
-        { label: "Occupation", value: profile.Occupation },
-        { label: "Country", value: profile.Country },
-        { label: "Academic Year", value: profile["Academic Year"] },
-      ]).map((field) => (
-        <View key={field.label} style={styles.field}>
-          <Text style={styles.fieldLabel}>{field.label}</Text>
-          <Text style={styles.fieldValue}>{field.value || "Not set"}</Text>
-        </View>
-      ))}
-
-      <View style={styles.weightSection}>
-        <Text style={styles.sectionTitle}>Weight Goals</Text>
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Weight Current (kg)</Text>
-          <Text style={styles.fieldValue}>{profile["Weight Current"] || "Not set"}</Text>
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Weight Target (kg)</Text>
-          <Text style={styles.fieldValue}>{profile["Weight Target"] || "Not set"}</Text>
-        </View>
+      <View style={styles.bioSection}>
+        <Text style={styles.sectionTitle}>Bio</Text>
+        {([
+          { label: "First Name", value: profile["First Name"] },
+          { label: "Other Names", value: profile["Other Names"] },
+          { label: "Username", value: profile.Username ? `@${profile.Username}` : undefined },
+          { label: "Email", value: profile.Email },
+          { label: "Sex", value: profile.Sex },
+          { label: "Residence", value: profile.Residence },
+          { label: "Country", value: profile.Country },
+          { label: "Date of Birth", value: formatDateOfBirth(profile["Date of Birth"]) },
+        ]).map((field) => (
+          <View key={field.label} style={styles.field}>
+            <Text style={styles.fieldLabel}>{field.label}</Text>
+            <Text style={styles.fieldValue}>{field.value || "Not set"}</Text>
+          </View>
+        ))}
       </View>
 
       {userGoals.length > 0 && (
@@ -1088,6 +1088,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 2,
     borderColor: "#10b981",
+  },
+  bioSection: {
+    gap: 12,
   },
   weightSection: {
     marginTop: 8,
