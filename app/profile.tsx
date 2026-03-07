@@ -300,7 +300,7 @@ export default function ProfileScreen() {
     onSuccess: () => {
       setShowVerifyModal(false);
       setVerificationCode("");
-      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      void queryClient.invalidateQueries({ queryKey: ["profile"] });
       Alert.alert("Verified!", "Your email has been verified successfully.");
     },
     onError: (error) => {
@@ -319,7 +319,7 @@ export default function ProfileScreen() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      void queryClient.invalidateQueries({ queryKey: ["profile"] });
       setEditSection(null);
       Alert.alert("Success", "Profile updated successfully!");
     },
@@ -345,7 +345,7 @@ export default function ProfileScreen() {
       }
     },
     onSuccess: () => {
-      refetchUserGoals();
+      void refetchUserGoals();
       setEditSection(null);
       Alert.alert("Success", "Goals updated successfully!");
     },
@@ -373,7 +373,7 @@ export default function ProfileScreen() {
       }
     },
     onSuccess: () => {
-      refetchClubMembership();
+      void refetchClubMembership();
       setEditSection(null);
       Alert.alert("Success", "Club membership updated!");
     },
@@ -421,8 +421,8 @@ export default function ProfileScreen() {
       if (insertError) throw insertError;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["profilePhoto"] });
-      queryClient.invalidateQueries({ queryKey: ["headerProfilePhoto"] });
+      void queryClient.invalidateQueries({ queryKey: ["profilePhoto"] });
+      void queryClient.invalidateQueries({ queryKey: ["headerProfilePhoto"] });
       Alert.alert("Success", "Profile photo updated!");
     },
     onError: (error) => {
@@ -576,6 +576,21 @@ export default function ProfileScreen() {
     const goal = goals.find((g) => g.goal_id === id);
     return goal?.Goal?.toLowerCase() === "other";
   });
+
+  const getTrialEndDate = useCallback(() => {
+    if (!profile) return "";
+    const createdAt = (profile as any).Created_At || (profile as any).created_at;
+    if (!createdAt) return "";
+    const created = new Date(createdAt);
+    const trialEnd = new Date(created.getTime() + 90 * 24 * 60 * 60 * 1000);
+    return trialEnd.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  }, [profile]);
+
+  const getSubscriptionEndDate = useCallback(() => {
+    if (!subscription?.expires_at) return "";
+    const expires = new Date(subscription.expires_at);
+    return expires.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  }, [subscription]);
 
   if (isLoading || !profile) {
     return (
@@ -1036,21 +1051,6 @@ export default function ProfileScreen() {
       return dob;
     }
   };
-
-  const getTrialEndDate = useCallback(() => {
-    if (!profile) return "";
-    const createdAt = (profile as any).Created_At || (profile as any).created_at;
-    if (!createdAt) return "";
-    const created = new Date(createdAt);
-    const trialEnd = new Date(created.getTime() + 90 * 24 * 60 * 60 * 1000);
-    return trialEnd.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-  }, [profile]);
-
-  const getSubscriptionEndDate = useCallback(() => {
-    if (!subscription?.expires_at) return "";
-    const expires = new Date(subscription.expires_at);
-    return expires.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-  }, [subscription]);
 
   const renderSubscriptionBanner = () => {
     if (subLoading) return null;
