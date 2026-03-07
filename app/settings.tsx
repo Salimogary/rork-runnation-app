@@ -1,7 +1,8 @@
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, Image, TextInput, ActivityIndicator } from "react-native";
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, Image, TextInput, ActivityIndicator, Share } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, Bell, MapPin, Moon, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff, Lock, Trash2, AlertTriangle } from "lucide-react-native";
+import { LogOut, Bell, MapPin, Moon, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff, Lock, Trash2, AlertTriangle, Star, Share2 } from "lucide-react-native";
+import * as Linking from 'expo-linking';
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useState, useEffect } from "react";
@@ -359,6 +360,60 @@ export default function SettingsScreen() {
             <View style={styles.settingTextContainer}>
               <Text style={styles.settingTitle}>Send Feedback</Text>
               <Text style={styles.settingSubtitle}>Share your thoughts and suggestions</Text>
+            </View>
+          </View>
+          <ChevronRight size={20} color="#999" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.settingItem}
+          onPress={() => {
+            const PLAY_STORE_URL = '';
+            if (PLAY_STORE_URL) {
+              void Linking.openURL(PLAY_STORE_URL);
+            } else {
+              showComingSoon('Rate Us');
+            }
+          }}
+        >
+          <View style={styles.settingLeft}>
+            <View style={[styles.iconContainer, { backgroundColor: '#FFF7ED' }]}>
+              <Star size={22} color="#f59e0b" />
+            </View>
+            <View style={styles.settingTextContainer}>
+              <Text style={styles.settingTitle}>Rate Us</Text>
+              <Text style={styles.settingSubtitle}>Love the app? Leave us a rating</Text>
+            </View>
+          </View>
+          <ChevronRight size={20} color="#999" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.settingItem}
+          onPress={() => {
+            const APP_LINK = '';
+            const shareMessage = APP_LINK
+              ? `Check out this app! ${APP_LINK}`
+              : 'Check out this app! Download link coming soon.';
+            if (Platform.OS === 'web') {
+              if (navigator.clipboard) {
+                void navigator.clipboard.writeText(shareMessage);
+                alert('Link copied to clipboard!');
+              } else {
+                alert(shareMessage);
+              }
+            } else {
+              void Share.share({ message: shareMessage });
+            }
+          }}
+        >
+          <View style={styles.settingLeft}>
+            <View style={[styles.iconContainer, { backgroundColor: '#EFF6FF' }]}>
+              <Share2 size={22} color="#3b82f6" />
+            </View>
+            <View style={styles.settingTextContainer}>
+              <Text style={styles.settingTitle}>Share App</Text>
+              <Text style={styles.settingSubtitle}>Invite friends to join</Text>
             </View>
           </View>
           <ChevronRight size={20} color="#999" />
