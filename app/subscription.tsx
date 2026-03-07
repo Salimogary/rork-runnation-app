@@ -207,14 +207,12 @@ export default function SubscriptionScreen() {
           >
             <Text style={styles.refreshButtonText}>Refresh Status</Text>
           </TouchableOpacity>
-          {router.canGoBack() && (
-            <TouchableOpacity
-              style={styles.backLink}
-              onPress={() => router.back()}
-            >
-              <Text style={styles.backLinkText}>Go Back</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={styles.backLink}
+            onPress={() => router.replace('/(tabs)' as never)}
+          >
+            <Text style={styles.backLinkText}>Go Back</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -413,11 +411,7 @@ export default function SubscriptionScreen() {
           <TouchableOpacity
             style={styles.skipButton}
             onPress={() => {
-              if (router.canGoBack()) {
-                router.back();
-              } else {
-                router.replace('/(tabs)' as never);
-              }
+              router.replace('/(tabs)' as never);
             }}
           >
             <Text style={styles.skipButtonText}>
