@@ -4,7 +4,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { LogOut, Bell, MapPin, Moon, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff, Lock, Trash2, AlertTriangle } from "lucide-react-native";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 
 interface PendingActivity {
@@ -43,7 +44,20 @@ export default function SettingsScreen() {
   const [deletePinError, setDeletePinError] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteStep, setDeleteStep] = useState<'confirm' | 'pin'>('confirm');
-  const IS_ADMIN = true;
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    const checkAdmin = async () => {
+      try {
+        const adminStatus = await AsyncStorage.getItem('admin_logged_in');
+        setIsAdmin(adminStatus === 'true');
+      } catch (error) {
+        console.error('Error checking admin status:', error);
+        setIsAdmin(false);
+      }
+    };
+    checkAdmin();
+  }, []);
 
   const handleSignOut = () => {
     setShowPinModal(true);
@@ -103,7 +117,7 @@ export default function SettingsScreen() {
 
       return data || [];
     },
-    enabled: IS_ADMIN,
+    enabled: isAdmin,
   });
 
   const approveMutation = useMutation({
@@ -199,7 +213,7 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView style={styles.container}>
-      {IS_ADMIN && (
+      {isAdmin && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Admin</Text>
           
