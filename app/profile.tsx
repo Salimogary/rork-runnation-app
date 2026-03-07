@@ -33,6 +33,8 @@ import {
   FileText,
   Download,
   Award,
+  BadgeCheck,
+  Mail,
 } from "lucide-react-native";
 import { getAllBadges, getEarnedBadgeCount } from "@/utils/badges";
 import type { Badge } from "@/utils/badges";
@@ -53,6 +55,7 @@ interface UserProfile {
   "Academic Year"?: string;
   FriendID?: string;
   "Date of Birth"?: string;
+  email_verified?: boolean;
 }
 
 interface GoalItem {
@@ -97,6 +100,8 @@ export default function ProfileScreen() {
 
   const [clubChoice, setClubChoice] = useState<ClubChoice>(null);
   const [selectedClubId, setSelectedClubId] = useState<number | null>(null);
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [verificationCode, setVerificationCode] = useState("");
 
   const { data: profile, isLoading } = useQuery<UserProfile>({
     queryKey: ["profile", user?.id, user],
@@ -232,6 +237,73 @@ export default function ProfileScreen() {
       return data as ClubMembership | null;
     },
     enabled: !!user,
+  });
+
+  const isEmailVerified = profile?.email_verified === true;
+
+  const sendVerificationMutation = useMutation({
+    mutationFn: async () => {
+      if (!user || !profile?.Email) throw new Error("No email found");
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const { error } = await supabase
+        .from("email_verification_codes")
+        .insert({
+          registration_id: user.id,
+          email: profile.Email,
+          code,
+        });
+      if (error) throw error;
+      return code;
+    },
+    onSuccess: (code) => {
+      console.log("[EmailVerify] Code generated:", code);
+      Alert.alert(
+        "Verification Code Sent",
+        `A 6-digit verification code has been generated for ${profile?.Email}.\n\nFor testing, your code is: ${code}`,
+        [{ text: "Enter Code", onPress: () => setShowVerifyModal(true) }]
+      );
+    },
+    onError: (error) => {
+      console.error("[EmailVerify] Send error:", error);
+      Alert.alert("Error", "Failed to send verification code. Please try again.");
+    },
+  });
+
+  const verifyCodeMutation = useMutation({
+    mutationFn: async (code: string) => {
+      if (!user) throw new Error("Not authenticated");
+      const { data, error } = await supabase
+        .from("email_verification_codes")
+        .select("*")
+        .eq("registration_id", user.id)
+        .eq("code", code)
+        .eq("used", false)
+        .gte("expires_at", new Date().toISOString())
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error("Invalid or expired code");
+      await supabase
+        .from("email_verification_codes")
+        .update({ used: true })
+        .eq("id", data.id);
+      const { error: updateError } = await supabase
+        .from("registrations")
+        .update({ email_verified: true })
+        .eq("RegistrationID", user.id);
+      if (updateError) throw updateError;
+    },
+    onSuccess: () => {
+      setShowVerifyModal(false);
+      setVerificationCode("");
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      Alert.alert("Verified!", "Your email has been verified successfully.");
+    },
+    onError: (error) => {
+      console.error("[EmailVerify] Verify error:", error);
+      Alert.alert("Verification Failed", "Invalid or expired code. Please try again.");
+    },
   });
 
   const updateProfileMutation = useMutation({
@@ -593,13 +665,7 @@ export default function ProfileScreen() {
         { label: "First Name", key: "First Name" as const, keyboard: "default" as const },
         { label: "Other Names", key: "Other Names" as const, keyboard: "default" as const },
         { label: "Username", key: "Username" as const, keyboard: "default" as const },
-        { label: "Email", key: "Email" as const, keyboard: "email-address" as const },
-        { label: "Sex", key: "Sex" as const, keyboard: "default" as const },
-        { label: "Residence", key: "Residence" as const, keyboard: "default" as const },
-        { label: "Occupation", key: "Occupation" as const, keyboard: "default" as const },
-        { label: "Country", key: "Country" as const, keyboard: "default" as const },
-        { label: "Academic Year", key: "Academic Year" as const, keyboard: "default" as const },
-      ]).map((field) => (
+      ] as const).map((field) => (
         <View key={field.key} style={styles.field}>
           <Text style={styles.fieldLabel}>{field.label}</Text>
           <TextInput
@@ -608,7 +674,58 @@ export default function ProfileScreen() {
             onChangeText={(text) => setFormData({ ...formData, [field.key]: text })}
             placeholder={`Enter ${field.label.toLowerCase()}`}
             keyboardType={field.keyboard}
-            autoCapitalize={field.key === "Email" || field.key === "Username" ? "none" : "sentences"}
+            autoCapitalize={field.key === "Username" ? "none" : "sentences"}
+          />
+        </View>
+      ))}
+
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Email</Text>
+        <View style={styles.emailFieldRow}>
+          <TextInput
+            style={[styles.input, styles.emailInput]}
+            value={String(formData.Email ?? "")}
+            onChangeText={(text) => setFormData({ ...formData, Email: text })}
+            placeholder="Enter email"
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+          {isEmailVerified ? (
+            <View style={styles.verifiedBadge}>
+              <BadgeCheck size={24} color="#1d9bf0" />
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.verifyButton}
+              onPress={() => sendVerificationMutation.mutate()}
+              disabled={sendVerificationMutation.isPending}
+              activeOpacity={0.7}
+            >
+              {sendVerificationMutation.isPending ? (
+                <ActivityIndicator size="small" color="#1d9bf0" />
+              ) : (
+                <Text style={styles.verifyButtonText}>Verify</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {([
+        { label: "Sex", key: "Sex" as const, keyboard: "default" as const },
+        { label: "Residence", key: "Residence" as const, keyboard: "default" as const },
+        { label: "Occupation", key: "Occupation" as const, keyboard: "default" as const },
+        { label: "Country", key: "Country" as const, keyboard: "default" as const },
+        { label: "Academic Year", key: "Academic Year" as const, keyboard: "default" as const },
+      ] as const).map((field) => (
+        <View key={field.key} style={styles.field}>
+          <Text style={styles.fieldLabel}>{field.label}</Text>
+          <TextInput
+            style={styles.input}
+            value={String(formData[field.key] ?? "")}
+            onChangeText={(text) => setFormData({ ...formData, [field.key]: text })}
+            placeholder={`Enter ${field.label.toLowerCase()}`}
+            keyboardType={field.keyboard}
           />
         </View>
       ))}
@@ -984,7 +1101,6 @@ export default function ProfileScreen() {
           { label: "First Name", value: profile["First Name"] },
           { label: "Other Names", value: profile["Other Names"] },
           { label: "Username", value: profile.Username ? `@${profile.Username}` : undefined },
-          { label: "Email", value: profile.Email },
           { label: "Sex", value: profile.Sex },
           { label: "Residence", value: profile.Residence },
           { label: "Country", value: profile.Country },
@@ -995,6 +1111,33 @@ export default function ProfileScreen() {
             <Text style={styles.fieldValue}>{field.value || "Not set"}</Text>
           </View>
         ))}
+
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>Email</Text>
+          <View style={styles.emailViewRow}>
+            <Text style={[styles.fieldValue, styles.emailViewValue]}>
+              {profile.Email || "Not set"}
+            </Text>
+            {isEmailVerified ? (
+              <View style={styles.verifiedBadgeView}>
+                <BadgeCheck size={20} color="#1d9bf0" />
+              </View>
+            ) : profile.Email ? (
+              <TouchableOpacity
+                style={styles.verifyButtonSmall}
+                onPress={() => sendVerificationMutation.mutate()}
+                disabled={sendVerificationMutation.isPending}
+                activeOpacity={0.7}
+              >
+                {sendVerificationMutation.isPending ? (
+                  <ActivityIndicator size="small" color="#1d9bf0" />
+                ) : (
+                  <Text style={styles.verifyButtonSmallText}>Verify</Text>
+                )}
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
       </View>
 
       {renderBadgesSection()}
@@ -1065,6 +1208,73 @@ export default function ProfileScreen() {
       {!editSection && renderProfileView()}
 
       {renderEditMenu()}
+
+      <Modal
+        visible={showVerifyModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowVerifyModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowVerifyModal(false)}
+        >
+          <View style={styles.verifyModalContainer}>
+            <View style={styles.verifyModalIconWrap}>
+              <Mail size={32} color="#1d9bf0" />
+            </View>
+            <Text style={styles.verifyModalTitle}>Enter Verification Code</Text>
+            <Text style={styles.verifyModalDesc}>
+              Enter the 6-digit code for {profile?.Email}
+            </Text>
+            <TextInput
+              style={styles.verifyCodeInput}
+              value={verificationCode}
+              onChangeText={setVerificationCode}
+              placeholder="000000"
+              keyboardType="number-pad"
+              maxLength={6}
+              textAlign="center"
+              autoFocus
+            />
+            <View style={styles.verifyModalActions}>
+              <TouchableOpacity
+                style={styles.verifyModalCancel}
+                onPress={() => {
+                  setShowVerifyModal(false);
+                  setVerificationCode("");
+                }}
+              >
+                <Text style={styles.verifyModalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.verifyModalSubmit,
+                  verificationCode.length !== 6 && styles.verifyModalSubmitDisabled,
+                ]}
+                onPress={() => verifyCodeMutation.mutate(verificationCode)}
+                disabled={verificationCode.length !== 6 || verifyCodeMutation.isPending}
+              >
+                {verifyCodeMutation.isPending ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.verifyModalSubmitText}>Verify</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={styles.resendButton}
+              onPress={() => sendVerificationMutation.mutate()}
+              disabled={sendVerificationMutation.isPending}
+            >
+              <Text style={styles.resendButtonText}>
+                {sendVerificationMutation.isPending ? "Sending..." : "Resend Code"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </ScrollView>
   );
 }
@@ -1640,5 +1850,140 @@ const styles = StyleSheet.create({
   },
   badgeLockIcon: {
     fontSize: 10,
+  },
+  emailFieldRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  emailInput: {
+    flex: 1,
+  },
+  verifyButton: {
+    backgroundColor: "#e8f5fd",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "#1d9bf0",
+    minWidth: 64,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  verifyButtonText: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+    color: "#1d9bf0",
+  },
+  verifiedBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+  },
+  emailViewRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  emailViewValue: {
+    flex: 1,
+  },
+  verifiedBadgeView: {
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
+  verifyButtonSmall: {
+    backgroundColor: "#e8f5fd",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#1d9bf0",
+  },
+  verifyButtonSmallText: {
+    fontSize: 12,
+    fontWeight: "700" as const,
+    color: "#1d9bf0",
+  },
+  verifyModalContainer: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 28,
+    width: "100%",
+    maxWidth: 360,
+    alignItems: "center",
+    gap: 12,
+  },
+  verifyModalIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#e8f5fd",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+  },
+  verifyModalTitle: {
+    fontSize: 20,
+    fontWeight: "700" as const,
+    color: "#111",
+  },
+  verifyModalDesc: {
+    fontSize: 14,
+    color: "#666",
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  verifyCodeInput: {
+    fontSize: 28,
+    fontWeight: "700" as const,
+    color: "#111",
+    backgroundColor: "#f5f5f5",
+    borderRadius: 14,
+    padding: 16,
+    width: "100%",
+    letterSpacing: 8,
+    borderWidth: 2,
+    borderColor: "#1d9bf0",
+  },
+  verifyModalActions: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+    marginTop: 4,
+  },
+  verifyModalCancel: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    backgroundColor: "#f5f5f5",
+  },
+  verifyModalCancelText: {
+    fontSize: 15,
+    fontWeight: "600" as const,
+    color: "#666",
+  },
+  verifyModalSubmit: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    backgroundColor: "#1d9bf0",
+  },
+  verifyModalSubmitDisabled: {
+    opacity: 0.5,
+  },
+  verifyModalSubmitText: {
+    fontSize: 15,
+    fontWeight: "700" as const,
+    color: "#fff",
+  },
+  resendButton: {
+    paddingVertical: 8,
+  },
+  resendButtonText: {
+    fontSize: 14,
+    color: "#1d9bf0",
+    fontWeight: "600" as const,
   },
 });
