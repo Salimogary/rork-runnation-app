@@ -15,6 +15,7 @@ import { Edit2, LogOut } from "lucide-react-native";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
+import { getEarnedBadgeCount } from "@/utils/badges";
 
 interface UserProfile {
   "First Name": string;
@@ -58,6 +59,26 @@ export default function HeaderProfile() {
       return data?.file_path || null;
     },
     enabled: !!user,
+  });
+
+  const { data: badgeCount = 0 } = useQuery<number>({
+    queryKey: ["headerBadgeCount", user?.id],
+    queryFn: async () => {
+      if (!user) return 0;
+      const { data, error } = await supabase
+        .from("activities")
+        .select("Distance_km")
+        .eq("RegistrationID", user.id);
+      if (error) {
+        console.error("[HeaderBadges] Error:", error);
+        return 0;
+      }
+      const totalDistance = (data || []).reduce((sum, a) => sum + (a.Distance_km || 0), 0);
+      const totalActivities = (data || []).length;
+      return getEarnedBadgeCount(totalDistance, totalActivities);
+    },
+    enabled: !!user,
+    staleTime: 60000,
   });
 
   const handleEdit = () => {
@@ -104,17 +125,24 @@ export default function HeaderProfile() {
         onPress={() => setMenuVisible(true)}
         activeOpacity={0.7}
       >
-        {profilePhoto ? (
-          <Image
-            source={{ uri: profilePhoto }}
-            style={styles.profileImage}
-            contentFit="cover"
-          />
-        ) : (
-          <View style={styles.profilePlaceholder}>
-            <Text style={styles.placeholderText}>{firstLetter}</Text>
-          </View>
-        )}
+        <View style={styles.avatarWrapper}>
+          {profilePhoto ? (
+            <Image
+              source={{ uri: profilePhoto }}
+              style={styles.profileImage}
+              contentFit="cover"
+            />
+          ) : (
+            <View style={styles.profilePlaceholder}>
+              <Text style={styles.placeholderText}>{firstLetter}</Text>
+            </View>
+          )}
+          {badgeCount > 0 && (
+            <View style={styles.badgeCountBubble}>
+              <Text style={styles.badgeCountText}>{badgeCount}</Text>
+            </View>
+          )}
+        </View>
         <Text style={styles.nameText} numberOfLines={1}>
           {firstName}
         </Text>
@@ -173,11 +201,33 @@ const styles = StyleSheet.create({
     backgroundColor: "#f0f0f0",
     borderRadius: 20,
   },
+  avatarWrapper: {
+    position: "relative" as const,
+  },
   profileImage: {
     width: 32,
     height: 32,
     borderRadius: 16,
     backgroundColor: "#e0e0e0",
+  },
+  badgeCountBubble: {
+    position: "absolute" as const,
+    top: -4,
+    right: -6,
+    backgroundColor: "#FF6B35",
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    borderWidth: 2,
+    borderColor: "#f0f0f0",
+    paddingHorizontal: 3,
+  },
+  badgeCountText: {
+    fontSize: 10,
+    fontWeight: "800" as const,
+    color: "#fff",
   },
   profilePlaceholder: {
     width: 32,

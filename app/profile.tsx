@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   Modal,
 } from "react-native";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -32,7 +32,10 @@ import {
   PlusCircle,
   FileText,
   Download,
+  Award,
 } from "lucide-react-native";
+import { getAllBadges, getEarnedBadgeCount } from "@/utils/badges";
+import type { Badge } from "@/utils/badges";
 
 interface UserProfile {
   RegistrationID: string;
@@ -131,6 +134,40 @@ export default function ProfileScreen() {
     },
     enabled: !!user,
   });
+
+  const { data: activityStats } = useQuery<{ totalDistance: number; totalActivities: number }>({
+    queryKey: ["badgeStats", user?.id],
+    queryFn: async () => {
+      if (!user) return { totalDistance: 0, totalActivities: 0 };
+      const { data, error } = await supabase
+        .from("activities")
+        .select("Distance_km, Exercise_Type")
+        .eq("RegistrationID", user.id);
+      if (error) {
+        console.error("[BadgeStats] Error:", error);
+        return { totalDistance: 0, totalActivities: 0 };
+      }
+      const validTypes = ["Run", "Walk", "Treadmill", "Tredmill"];
+      const filtered = (data || []).filter((a) => validTypes.includes(a.Exercise_Type || ""));
+      const totalDistance = filtered.reduce((sum, a) => sum + (a.Distance_km || 0), 0);
+      return { totalDistance, totalActivities: filtered.length };
+    },
+    enabled: !!user,
+    staleTime: 60000,
+  });
+
+  const badges = useMemo(() => {
+    if (!activityStats) return [];
+    return getAllBadges(activityStats.totalDistance, activityStats.totalActivities);
+  }, [activityStats]);
+
+  const earnedBadgeCount = useMemo(() => {
+    if (!activityStats) return 0;
+    return getEarnedBadgeCount(activityStats.totalDistance, activityStats.totalActivities);
+  }, [activityStats]);
+
+  const distanceBadges = useMemo(() => badges.filter((b) => b.type === "distance"), [badges]);
+  const activityBadges = useMemo(() => badges.filter((b) => b.type === "activity_count"), [badges]);
 
   const { data: goals = [] } = useQuery<GoalItem[]>({
     queryKey: ["allGoals", user?.id, user],
@@ -880,6 +917,65 @@ export default function ProfileScreen() {
     }
   };
 
+  const renderBadgeItem = (badge: Badge) => (
+    <View
+      key={badge.id}
+      style={[styles.badgeItem, !badge.earned && styles.badgeItemLocked]}
+    >
+      <Text style={styles.badgeEmoji}>{badge.icon}</Text>
+      <Text
+        style={[styles.badgeTitle, !badge.earned && styles.badgeTitleLocked]}
+        numberOfLines={1}
+      >
+        {badge.title}
+      </Text>
+      {!badge.earned && (
+        <View style={styles.badgeLockOverlay}>
+          <Text style={styles.badgeLockIcon}>🔒</Text>
+        </View>
+      )}
+    </View>
+  );
+
+  const renderBadgesSection = () => (
+    <View style={styles.badgesContainer}>
+      <View style={styles.badgesHeader}>
+        <View style={styles.badgesHeaderLeft}>
+          <Award size={20} color="#FF6B35" />
+          <Text style={styles.badgesSectionTitle}>Badges</Text>
+        </View>
+        <View style={styles.badgesCountChip}>
+          <Text style={styles.badgesCountText}>{earnedBadgeCount} earned</Text>
+        </View>
+      </View>
+
+      <View style={styles.badgesStatsRow}>
+        <View style={styles.badgesStatCard}>
+          <Text style={styles.badgesStatValue}>
+            {activityStats?.totalDistance.toFixed(1) ?? "0"} km
+          </Text>
+          <Text style={styles.badgesStatLabel}>Total Distance</Text>
+        </View>
+        <View style={styles.badgesStatCard}>
+          <Text style={styles.badgesStatValue}>
+            {activityStats?.totalActivities ?? 0}
+          </Text>
+          <Text style={styles.badgesStatLabel}>Total Activities</Text>
+        </View>
+      </View>
+
+      <Text style={styles.badgeCategoryTitle}>🏅 Distance Milestones</Text>
+      <View style={styles.badgesGrid}>
+        {distanceBadges.map(renderBadgeItem)}
+      </View>
+
+      <Text style={styles.badgeCategoryTitle}>💪 Activity Milestones</Text>
+      <View style={styles.badgesGrid}>
+        {activityBadges.map(renderBadgeItem)}
+      </View>
+    </View>
+  );
+
   const renderProfileView = () => (
     <View style={styles.infoContainer}>
       <View style={styles.bioSection}>
@@ -900,6 +996,8 @@ export default function ProfileScreen() {
           </View>
         ))}
       </View>
+
+      {renderBadgesSection()}
 
       {userGoals.length > 0 && (
         <View style={styles.weightSection}>
@@ -1433,5 +1531,114 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#666",
     textAlign: "center",
+  },
+  badgesContainer: {
+    marginTop: 12,
+    gap: 14,
+  },
+  badgesHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  badgesHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  badgesSectionTitle: {
+    fontSize: 18,
+    fontWeight: "700" as const,
+    color: "#000",
+  },
+  badgesCountChip: {
+    backgroundColor: "#FFF3ED",
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#FFDACB",
+  },
+  badgesCountText: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+    color: "#FF6B35",
+  },
+  badgesStatsRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  badgesStatCard: {
+    flex: 1,
+    backgroundColor: "#fff",
+    padding: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: "#f0f0f0",
+  },
+  badgesStatValue: {
+    fontSize: 18,
+    fontWeight: "800" as const,
+    color: "#111",
+  },
+  badgesStatLabel: {
+    fontSize: 12,
+    color: "#888",
+    fontWeight: "500" as const,
+  },
+  badgeCategoryTitle: {
+    fontSize: 15,
+    fontWeight: "600" as const,
+    color: "#333",
+    marginTop: 4,
+  },
+  badgesGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  badgeItem: {
+    width: 80,
+    height: 80,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    borderWidth: 2,
+    borderColor: "#FFD23F",
+    shadowColor: "#FFD23F",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  badgeItemLocked: {
+    borderColor: "#e5e7eb",
+    backgroundColor: "#f9fafb",
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  badgeEmoji: {
+    fontSize: 24,
+  },
+  badgeTitle: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+    color: "#333",
+    textAlign: "center",
+  },
+  badgeTitleLocked: {
+    color: "#bbb",
+  },
+  badgeLockOverlay: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+  },
+  badgeLockIcon: {
+    fontSize: 10,
   },
 });
