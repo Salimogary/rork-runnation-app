@@ -40,7 +40,9 @@ import {
 import { getAllBadges, getEarnedBadgeCount } from "@/utils/badges";
 import type { Badge } from "@/utils/badges";
 import { useSubscription } from "@/contexts/SubscriptionContext";
-import { Clock, CreditCard, Zap } from "lucide-react-native";
+import { Clock, CreditCard, Zap, Circle } from "lucide-react-native";
+import { calculateProfileCompletion } from "@/utils/profileCompletion";
+import type { ProfileCompletionInputs } from "@/utils/profileCompletion";
 
 interface UserProfile {
   RegistrationID: string;
@@ -245,6 +247,72 @@ export default function ProfileScreen() {
   });
 
   const isEmailVerified = profile?.email_verified === true;
+
+  const [showCompletionModal, setShowCompletionModal] = useState(false);
+
+  const { data: completionInputs } = useQuery<ProfileCompletionInputs>({
+    queryKey: ["profileCompletionPage", user?.id],
+    queryFn: async () => {
+      if (!user) {
+        return {
+          allFieldsFilled: false, hasProfilePhoto: false, hasGoal: false,
+          hasClub: false, hasFiveActivities: false, hasSubscription: false,
+          hasTargets: false, hasEventEnrollment: false, hasVerifiedEmail: false,
+          hasAtLeastOneBadge: false,
+        };
+      }
+      const [
+        profileRes, photoRes, goalsRes, clubRes, activitiesRes,
+        subscriptionRes, fitnessGoalRes, weightTargetRes, enrollmentRes,
+      ] = await Promise.all([
+        supabase.from("registrations")
+          .select('"First Name", "Other Names", "Username", "Email", "Sex", "Residence", "Country", "Date of Birth", "email_verified"')
+          .eq("RegistrationID", user.id).maybeSingle(),
+        supabase.from("user_photos").select("file_path")
+          .eq("registration_id", user.id).eq("is_profile_photo", true).maybeSingle(),
+        supabase.from("user_goals").select("user_goals_id")
+          .eq("registration_id", user.id).limit(1),
+        supabase.from("club_membership_request").select("club")
+          .eq("registration_id", user.id).maybeSingle(),
+        supabase.from("activities").select("Distance_km, Exercise_Type")
+          .eq("RegistrationID", user.id),
+        supabase.from("subscriptions").select("status, expires_at")
+          .eq("registration_id", user.id).maybeSingle(),
+        supabase.from("fitness_goal").select("id")
+          .eq("registration_id", user.id).limit(1),
+        supabase.from("weight_target_goal").select("id")
+          .eq("registration_id", user.id).limit(1),
+        supabase.from("event_enrollments").select("EnrollmentID")
+          .eq("RegistrationID", user.id).limit(1),
+      ]);
+      const p = profileRes.data as any;
+      const allFieldsFilled = !!(p && p["First Name"] && p["Other Names"] && p.Username && p.Email && p.Sex && p.Residence && p.Country && p["Date of Birth"]);
+      const hasProfilePhoto = !!photoRes.data?.file_path;
+      const hasGoal = (goalsRes.data?.length ?? 0) > 0;
+      const hasClub = !!(clubRes.data?.club && clubRes.data.club !== "");
+      const validTypes = ["Run", "Walk", "Treadmill", "Tredmill"];
+      const filtered = (activitiesRes.data || []).filter((a: any) => validTypes.includes(a.Exercise_Type || ""));
+      const hasFiveActivities = filtered.length >= 5;
+      const totalDist = filtered.reduce((s: number, a: any) => s + (a.Distance_km || 0), 0);
+      const hasAtLeastOneBadge = getEarnedBadgeCount(totalDist, filtered.length) > 0;
+      const sub = subscriptionRes.data;
+      let hasSubscription = false;
+      if (sub && sub.status === "active") {
+        hasSubscription = sub.expires_at ? new Date(sub.expires_at) > new Date() : true;
+      }
+      const hasTargets = (fitnessGoalRes.data?.length ?? 0) > 0 || (weightTargetRes.data?.length ?? 0) > 0;
+      const hasEventEnrollment = (enrollmentRes.data?.length ?? 0) > 0;
+      const hasVerifiedEmail = p?.email_verified === true;
+      return { allFieldsFilled, hasProfilePhoto, hasGoal, hasClub, hasFiveActivities, hasSubscription, hasTargets, hasEventEnrollment, hasVerifiedEmail, hasAtLeastOneBadge };
+    },
+    enabled: !!user,
+    staleTime: 30000,
+  });
+
+  const completion = useMemo(() => {
+    if (!completionInputs) return null;
+    return calculateProfileCompletion(completionInputs);
+  }, [completionInputs]);
 
   const sendVerificationMutation = useMutation({
     mutationFn: async () => {
@@ -1279,6 +1347,19 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
+        {completion && (
+          <TouchableOpacity
+            style={styles.completionPill}
+            onPress={() => setShowCompletionModal(true)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.completionCircle}>
+              <Text style={styles.completionCircleText}>{completion.percentage}%</Text>
+            </View>
+            <Text style={styles.completionLabel}>Profile Complete</Text>
+          </TouchableOpacity>
+        )}
+
         {!editSection && (
           <TouchableOpacity
             style={styles.editButton}
@@ -1298,6 +1379,78 @@ export default function ProfileScreen() {
       {!editSection && renderProfileView()}
 
       {renderEditMenu()}
+
+      <Modal
+        visible={showCompletionModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowCompletionModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowCompletionModal(false)}
+        >
+          <View style={styles.completionModalContainer}>
+            <View style={styles.completionModalHeader}>
+              <Text style={styles.completionModalTitle}>Profile Completion</Text>
+              <TouchableOpacity onPress={() => setShowCompletionModal(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <X size={22} color="#666" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.completionProgressBarOuter}>
+              <View
+                style={[
+                  styles.completionProgressBarInner,
+                  {
+                    width: `${completion?.percentage ?? 0}%`,
+                    backgroundColor:
+                      (completion?.percentage ?? 0) >= 80
+                        ? "#10b981"
+                        : (completion?.percentage ?? 0) >= 50
+                        ? "#f59e0b"
+                        : "#ef4444",
+                  },
+                ]}
+              />
+            </View>
+            <Text
+              style={[
+                styles.completionProgressText,
+                {
+                  color:
+                    (completion?.percentage ?? 0) >= 80
+                      ? "#10b981"
+                      : (completion?.percentage ?? 0) >= 50
+                      ? "#f59e0b"
+                      : "#ef4444",
+                },
+              ]}
+            >
+              {completion?.percentage ?? 0}% complete ({completion?.completedCount ?? 0}/{completion?.totalCount ?? 10})
+            </Text>
+            <View style={styles.completionList}>
+              {completion?.items.map((item, index) => (
+                <View key={item.id} style={styles.completionItem}>
+                  <Text style={styles.completionItemNum}>{index + 1}</Text>
+                  {item.completed ? (
+                    <View style={styles.completionIconDone}>
+                      <Check size={13} color="#fff" />
+                    </View>
+                  ) : (
+                    <View style={styles.completionIconPending}>
+                      <Circle size={13} color="#d1d5db" />
+                    </View>
+                  )}
+                  <Text style={[styles.completionItemLabel, item.completed && styles.completionItemLabelDone]}>
+                    {item.label}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       <Modal
         visible={showVerifyModal}
@@ -2171,5 +2324,110 @@ const styles = StyleSheet.create({
   subBannerDateExpired: {
     fontSize: 12,
     color: "#B91C1C",
+  },
+  completionPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  completionCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  completionCircleText: {
+    fontSize: 13,
+    fontWeight: "800" as const,
+    color: "#10b981",
+  },
+  completionLabel: {
+    fontSize: 13,
+    fontWeight: "600" as const,
+    color: "#fff",
+  },
+  completionModalContainer: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 24,
+    width: "100%",
+    maxWidth: 380,
+  },
+  completionModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  completionModalTitle: {
+    fontSize: 19,
+    fontWeight: "700" as const,
+    color: "#111",
+  },
+  completionProgressBarOuter: {
+    height: 8,
+    backgroundColor: "#f0f0f0",
+    borderRadius: 4,
+    overflow: "hidden",
+    marginBottom: 8,
+  },
+  completionProgressBarInner: {
+    height: "100%",
+    borderRadius: 4,
+  },
+  completionProgressText: {
+    fontSize: 13,
+    fontWeight: "600" as const,
+    marginBottom: 14,
+  },
+  completionList: {
+    gap: 2,
+  },
+  completionItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f5f5f5",
+  },
+  completionItemNum: {
+    width: 20,
+    fontSize: 12,
+    fontWeight: "700" as const,
+    color: "#aaa",
+    textAlign: "center" as const,
+  },
+  completionIconDone: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#10b981",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  completionIconPending: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#f5f5f5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  completionItemLabel: {
+    flex: 1,
+    fontSize: 14,
+    color: "#555",
+    fontWeight: "500" as const,
+  },
+  completionItemLabelDone: {
+    color: "#111",
+    fontWeight: "600" as const,
   },
 });
