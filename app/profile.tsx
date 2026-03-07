@@ -13,6 +13,7 @@ import { useState, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import {
@@ -91,6 +92,7 @@ type ClubChoice = "join" | "existing" | "start" | "none" | null;
 
 export default function ProfileScreen() {
   const { user } = useAuth();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { subscriptionStatus, trialDaysRemaining, subscription, isLoading: subLoading } = useSubscription();
   const [editSection, setEditSection] = useState<EditSection>(null);
@@ -1057,7 +1059,7 @@ export default function ProfileScreen() {
 
     if (subscriptionStatus === "trial") {
       return (
-        <View style={styles.subBanner}>
+        <TouchableOpacity style={styles.subBanner} onPress={() => router.push('/subscription')} activeOpacity={0.7}>
           <View style={styles.subBannerIconWrap}>
             <Clock size={18} color="#f59e0b" />
           </View>
@@ -1070,13 +1072,14 @@ export default function ProfileScreen() {
             </View>
             <Text style={styles.subBannerDate}>Free plan ends: {getTrialEndDate()}</Text>
           </View>
-        </View>
+          <ChevronRight size={18} color="#A16207" />
+        </TouchableOpacity>
       );
     }
 
     if (subscriptionStatus === "active") {
       return (
-        <View style={[styles.subBanner, styles.subBannerActive]}>
+        <TouchableOpacity style={[styles.subBanner, styles.subBannerActive]} onPress={() => router.push('/subscription')} activeOpacity={0.7}>
           <View style={[styles.subBannerIconWrap, styles.subBannerIconActive]}>
             <Zap size={18} color="#10b981" />
           </View>
@@ -1092,13 +1095,14 @@ export default function ProfileScreen() {
               <Text style={styles.subBannerDateActive}>Active subscription</Text>
             )}
           </View>
-        </View>
+          <ChevronRight size={18} color="#047857" />
+        </TouchableOpacity>
       );
     }
 
     if (subscriptionStatus === "expired") {
       return (
-        <View style={[styles.subBanner, styles.subBannerExpired]}>
+        <TouchableOpacity style={[styles.subBanner, styles.subBannerExpired]} onPress={() => router.push('/subscription')} activeOpacity={0.7}>
           <View style={[styles.subBannerIconWrap, styles.subBannerIconExpired]}>
             <CreditCard size={18} color="#ef4444" />
           </View>
@@ -1110,7 +1114,8 @@ export default function ProfileScreen() {
             </View>
             <Text style={styles.subBannerDateExpired}>Please renew your subscription</Text>
           </View>
-        </View>
+          <ChevronRight size={18} color="#B91C1C" />
+        </TouchableOpacity>
       );
     }
 
