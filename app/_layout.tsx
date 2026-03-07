@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { SubscriptionProvider, useSubscription } from "@/contexts/SubscriptionContext";
 import { TRPCProvider } from "@/lib/trpc";
 import * as SplashScreen from "expo-splash-screen";
 import * as Linking from "expo-linking";
@@ -71,6 +72,7 @@ function NavigationGuard() {
   const router = useRouter();
   const { user, isLoading: authLoading } = useAuth();
   const { hasSeenOnboarding, isReady } = useOnboardingCheck();
+  const { trialExpired, isSubscribed, isLoading: subLoading } = useSubscription();
 
   useEffect(() => {
     if (!isReady || authLoading || hasSeenOnboarding === null) return;
@@ -81,6 +83,7 @@ function NavigationGuard() {
     const inTabs = currentSegment === "(tabs)";
     const inAdminLogin = currentSegment === "admin-login";
     const inAdmin = currentSegment === "admin";
+    const inSubscription = currentSegment === "subscription";
 
     if (inAdminLogin || inAdmin) return;
 
@@ -91,9 +94,14 @@ function NavigationGuard() {
       currentSegment === "checkout" ||
       currentSegment === "participants" ||
       currentSegment === "medal-list" ||
-      currentSegment === "policy";
+      currentSegment === "policy" ||
+      currentSegment === "subscription";
 
     if (user) {
+      if (!subLoading && trialExpired && !isSubscribed && !inSubscription && !inAllowedRoute) {
+        router.replace("/subscription" as never);
+        return;
+      }
       if (!inTabs && !inAllowedRoute && !inRegister) {
         router.replace("/(tabs)");
       }
@@ -108,7 +116,7 @@ function NavigationGuard() {
         }
       }
     }
-  }, [user, isReady, authLoading, hasSeenOnboarding, segments, router]);
+  }, [user, isReady, authLoading, hasSeenOnboarding, segments, router, trialExpired, isSubscribed, subLoading]);
 
   return null;
 }
@@ -131,6 +139,7 @@ function RootLayoutNav() {
         <Stack.Screen name="participants" options={{ title: "Participants" }} />
         <Stack.Screen name="medal-list" options={{ title: "Medal List" }} />
         <Stack.Screen name="policy" options={{ presentation: "modal", title: "Policy & Terms" }} />
+        <Stack.Screen name="subscription" options={{ presentation: "modal", title: "Subscription" }} />
         <Stack.Screen name="+not-found" />
       </Stack>
     </>
@@ -183,7 +192,9 @@ export default function RootLayout() {
     <ErrorBoundary>
       <TRPCProvider>
         <AuthProvider>
-          <RootLayoutNav />
+          <SubscriptionProvider>
+            <RootLayoutNav />
+          </SubscriptionProvider>
         </AuthProvider>
       </TRPCProvider>
     </ErrorBoundary>

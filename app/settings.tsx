@@ -1,7 +1,8 @@
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, Image, TextInput, ActivityIndicator, Share } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, Bell, MapPin, Moon, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff, Lock, Trash2, AlertTriangle, Star, Share2 } from "lucide-react-native";
+import { LogOut, Bell, MapPin, Moon, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff, Lock, Trash2, AlertTriangle, Star, Share2, Crown } from "lucide-react-native";
+import { useSubscription } from '@/contexts/SubscriptionContext';
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
@@ -49,6 +50,7 @@ export default function SettingsScreen() {
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [selectedRating, setSelectedRating] = useState<number>(0);
   const [ratingFeedback, setRatingFeedback] = useState('');
+  const { subscriptionStatus, trialDaysRemaining, subscription } = useSubscription();
 
   useEffect(() => {
     const checkAdmin = async () => {
@@ -345,6 +347,54 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
       )}
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Subscription</Text>
+        <TouchableOpacity
+          style={styles.settingItem}
+          onPress={() => router.push('/subscription' as any)}
+        >
+          <View style={styles.settingLeft}>
+            <View style={[styles.iconContainer, { backgroundColor: '#FFF8E7' }]}>
+              <Crown size={22} color="#FFD700" />
+            </View>
+            <View style={styles.settingTextContainer}>
+              <Text style={styles.settingTitle}>
+                {subscriptionStatus === 'active'
+                  ? 'Premium Active'
+                  : subscriptionStatus === 'trial'
+                    ? 'Free Trial'
+                    : subscriptionStatus === 'pending'
+                      ? 'Payment Pending'
+                      : 'Subscribe'}
+              </Text>
+              <Text style={styles.settingSubtitle}>
+                {subscriptionStatus === 'active' && subscription?.expires_at
+                  ? `Expires ${new Date(subscription.expires_at).toLocaleDateString()}`
+                  : subscriptionStatus === 'trial'
+                    ? `${trialDaysRemaining} day${trialDaysRemaining !== 1 ? 's' : ''} remaining`
+                    : subscriptionStatus === 'pending'
+                      ? 'Awaiting payment confirmation'
+                      : 'Your trial has ended — subscribe now'}
+              </Text>
+            </View>
+          </View>
+          <View style={[
+            styles.subscriptionBadge,
+            subscriptionStatus === 'active' && styles.subscriptionBadgeActive,
+            subscriptionStatus === 'trial' && styles.subscriptionBadgeTrial,
+            subscriptionStatus === 'pending' && styles.subscriptionBadgePending,
+            subscriptionStatus === 'expired' && styles.subscriptionBadgeExpired,
+          ]}>
+            <Text style={styles.subscriptionBadgeText}>
+              {subscriptionStatus === 'active' ? 'PRO'
+                : subscriptionStatus === 'trial' ? 'TRIAL'
+                : subscriptionStatus === 'pending' ? 'PENDING'
+                : 'EXPIRED'}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Preferences</Text>
@@ -1665,5 +1715,29 @@ const styles = StyleSheet.create({
     backgroundColor: "#f59e0b",
     alignItems: "center" as const,
     justifyContent: "center" as const,
+  },
+  subscriptionBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: "#e5e7eb",
+  },
+  subscriptionBadgeActive: {
+    backgroundColor: "#D1FAE5",
+  },
+  subscriptionBadgeTrial: {
+    backgroundColor: "#FFF8E7",
+  },
+  subscriptionBadgePending: {
+    backgroundColor: "#FFF3E0",
+  },
+  subscriptionBadgeExpired: {
+    backgroundColor: "#FEE2E2",
+  },
+  subscriptionBadgeText: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+    color: "#333",
+    letterSpacing: 0.5,
   },
 });
