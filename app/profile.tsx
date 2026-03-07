@@ -38,6 +38,8 @@ import {
 } from "lucide-react-native";
 import { getAllBadges, getEarnedBadgeCount } from "@/utils/badges";
 import type { Badge } from "@/utils/badges";
+import { useSubscription } from "@/contexts/SubscriptionContext";
+import { Clock, CreditCard, Zap } from "lucide-react-native";
 
 interface UserProfile {
   RegistrationID: string;
@@ -90,6 +92,7 @@ type ClubChoice = "join" | "existing" | "start" | "none" | null;
 export default function ProfileScreen() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const { subscriptionStatus, trialDaysRemaining, subscription, isLoading: subLoading } = useSubscription();
   const [editSection, setEditSection] = useState<EditSection>(null);
   const [showEditMenu, setShowEditMenu] = useState(false);
   const [formData, setFormData] = useState<Partial<UserProfile>>({});
@@ -1034,6 +1037,86 @@ export default function ProfileScreen() {
     }
   };
 
+  const getTrialEndDate = useCallback(() => {
+    if (!profile) return "";
+    const createdAt = (profile as any).Created_At || (profile as any).created_at;
+    if (!createdAt) return "";
+    const created = new Date(createdAt);
+    const trialEnd = new Date(created.getTime() + 90 * 24 * 60 * 60 * 1000);
+    return trialEnd.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  }, [profile]);
+
+  const getSubscriptionEndDate = useCallback(() => {
+    if (!subscription?.expires_at) return "";
+    const expires = new Date(subscription.expires_at);
+    return expires.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  }, [subscription]);
+
+  const renderSubscriptionBanner = () => {
+    if (subLoading) return null;
+
+    if (subscriptionStatus === "trial") {
+      return (
+        <View style={styles.subBanner}>
+          <View style={styles.subBannerIconWrap}>
+            <Clock size={18} color="#f59e0b" />
+          </View>
+          <View style={styles.subBannerContent}>
+            <View style={styles.subBannerRow}>
+              <View style={styles.subBannerTrialChip}>
+                <Text style={styles.subBannerTrialChipText}>FREE TRIAL</Text>
+              </View>
+              <Text style={styles.subBannerDays}>{trialDaysRemaining} days left</Text>
+            </View>
+            <Text style={styles.subBannerDate}>Trial ends: {getTrialEndDate()}</Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (subscriptionStatus === "active") {
+      return (
+        <View style={[styles.subBanner, styles.subBannerActive]}>
+          <View style={[styles.subBannerIconWrap, styles.subBannerIconActive]}>
+            <Zap size={18} color="#10b981" />
+          </View>
+          <View style={styles.subBannerContent}>
+            <View style={styles.subBannerRow}>
+              <View style={styles.subBannerActiveChip}>
+                <Text style={styles.subBannerActiveChipText}>SUBSCRIBED</Text>
+              </View>
+            </View>
+            {subscription?.expires_at ? (
+              <Text style={styles.subBannerDateActive}>Renews: {getSubscriptionEndDate()}</Text>
+            ) : (
+              <Text style={styles.subBannerDateActive}>Active subscription</Text>
+            )}
+          </View>
+        </View>
+      );
+    }
+
+    if (subscriptionStatus === "expired") {
+      return (
+        <View style={[styles.subBanner, styles.subBannerExpired]}>
+          <View style={[styles.subBannerIconWrap, styles.subBannerIconExpired]}>
+            <CreditCard size={18} color="#ef4444" />
+          </View>
+          <View style={styles.subBannerContent}>
+            <View style={styles.subBannerRow}>
+              <View style={styles.subBannerExpiredChip}>
+                <Text style={styles.subBannerExpiredChipText}>EXPIRED</Text>
+              </View>
+            </View>
+            <Text style={styles.subBannerDateExpired}>Please renew your subscription</Text>
+          </View>
+        </View>
+      );
+    }
+
+    return null;
+  };
+
   const renderBadgeItem = (badge: Badge) => (
     <View
       key={badge.id}
@@ -1201,6 +1284,8 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      {renderSubscriptionBanner()}
 
       {editSection === "profile" && renderProfileEdit()}
       {editSection === "goals" && renderGoalsEdit()}
@@ -1985,5 +2070,101 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#1d9bf0",
     fontWeight: "600" as const,
+  },
+  subBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginHorizontal: 16,
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: "#FFFBEB",
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+  },
+  subBannerActive: {
+    backgroundColor: "#ECFDF5",
+    borderColor: "#A7F3D0",
+  },
+  subBannerExpired: {
+    backgroundColor: "#FEF2F2",
+    borderColor: "#FECACA",
+  },
+  subBannerIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "#FEF3C7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  subBannerIconActive: {
+    backgroundColor: "#D1FAE5",
+  },
+  subBannerIconExpired: {
+    backgroundColor: "#FEE2E2",
+  },
+  subBannerContent: {
+    flex: 1,
+    gap: 3,
+  },
+  subBannerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  subBannerTrialChip: {
+    backgroundColor: "#F59E0B",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  subBannerTrialChipText: {
+    fontSize: 11,
+    fontWeight: "800" as const,
+    color: "#fff",
+    letterSpacing: 0.5,
+  },
+  subBannerDays: {
+    fontSize: 13,
+    fontWeight: "600" as const,
+    color: "#92400E",
+  },
+  subBannerDate: {
+    fontSize: 12,
+    color: "#A16207",
+  },
+  subBannerActiveChip: {
+    backgroundColor: "#10B981",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  subBannerActiveChipText: {
+    fontSize: 11,
+    fontWeight: "800" as const,
+    color: "#fff",
+    letterSpacing: 0.5,
+  },
+  subBannerDateActive: {
+    fontSize: 12,
+    color: "#047857",
+  },
+  subBannerExpiredChip: {
+    backgroundColor: "#EF4444",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  subBannerExpiredChipText: {
+    fontSize: 11,
+    fontWeight: "800" as const,
+    color: "#fff",
+    letterSpacing: 0.5,
+  },
+  subBannerDateExpired: {
+    fontSize: 12,
+    color: "#B91C1C",
   },
 });
