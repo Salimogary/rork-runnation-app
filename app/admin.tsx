@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { trpc } from "@/lib/trpc";
-import { Package, ChevronRight, Edit, X, ClipboardCheck, LogOut, CheckCircle, XCircle, Calendar, Plus, Users, Download, ShoppingBag, Dumbbell, UserPlus, Upload, Activity } from "lucide-react-native";
+import { Package, ChevronRight, Edit, X, ClipboardCheck, LogOut, CheckCircle, XCircle, Calendar, Plus, Users, Download, ShoppingBag, Dumbbell, UserPlus, Upload, Activity, Star } from "lucide-react-native";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
@@ -35,7 +35,7 @@ interface PendingActivity {
 
 export default function AdminScreen() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"orders" | "stock" | "approvals" | "events" | "enrollments" | "activityUploads" | "externalActivities">("orders");
+  const [activeTab, setActiveTab] = useState<"orders" | "stock" | "approvals" | "events" | "enrollments" | "activityUploads" | "externalActivities" | "ratings">("orders");
   const [eventsSubTab, setEventsSubTab] = useState<"calendar" | "participants">("calendar");
   const [selectedEventId, setSelectedEventId] = useState<string>("");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -76,7 +76,7 @@ export default function AdminScreen() {
   }, [router]);
 
   useEffect(() => {
-    checkAuth();
+    void checkAuth();
   }, [checkAuth]);
 
   const handleLogout = () => {
@@ -97,7 +97,7 @@ export default function AdminScreen() {
       );
     } else {
       if (confirm("Are you sure you want to logout?")) {
-        confirmLogout();
+        void confirmLogout();
       }
     }
   };
@@ -139,6 +139,42 @@ export default function AdminScreen() {
       refetchOnMount: true,
     }
   );
+
+  interface AppRating {
+    rating_id: number;
+    registration_id: string;
+    rating: number;
+    feedback: string | null;
+    created_at: string;
+  }
+
+  const { data: appRatings = [], isLoading: ratingsLoading } = useQuery<AppRating[]>({
+    queryKey: ['adminAppRatings'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('app_ratings')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) {
+        console.error('Error fetching app ratings:', error);
+        throw error;
+      }
+      return data || [];
+    },
+    enabled: isAuthenticated && activeTab === 'ratings',
+  });
+
+  const averageRating = appRatings.length > 0
+    ? appRatings.reduce((sum, r) => sum + r.rating, 0) / appRatings.length
+    : 0;
+
+  const ratingBreakdown = [5, 4, 3, 2, 1].map((star) => ({
+    star,
+    count: appRatings.filter((r) => r.rating === star).length,
+    percentage: appRatings.length > 0
+      ? (appRatings.filter((r) => r.rating === star).length / appRatings.length) * 100
+      : 0,
+  }));
 
   const { data: externalSubmissions, isLoading: externalSubmissionsLoading } = trpc.activities.getExternalSubmissions.useQuery(
     undefined,
@@ -238,7 +274,7 @@ const { data: pendingActivities = [], error: pendingActivitiesError, isLoading: 
       return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["pendingActivities"] });
+      void queryClient.invalidateQueries({ queryKey: ["pendingActivities"] });
       setSelectedActivity(null);
       setShowActivityModal(false);
       Alert.alert("Success", "Activity approved and added to records");
@@ -259,7 +295,7 @@ const { data: pendingActivities = [], error: pendingActivitiesError, isLoading: 
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["pendingActivities"] });
+      void queryClient.invalidateQueries({ queryKey: ["pendingActivities"] });
       setSelectedActivity(null);
       setShowActivityModal(false);
       Alert.alert("Success", "Activity rejected");
@@ -272,7 +308,7 @@ const { data: pendingActivities = [], error: pendingActivitiesError, isLoading: 
 
   const updateStatusMutation = trpc.admin.updateOrderStatus.useMutation({
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [["admin", "getAllOrders"]] });
+      void queryClient.invalidateQueries({ queryKey: [["admin", "getAllOrders"]] });
       setShowStatusModal(false);
       Alert.alert("Success", "Order status updated");
     },
@@ -283,7 +319,7 @@ const { data: pendingActivities = [], error: pendingActivitiesError, isLoading: 
 
   const updateStockMutation = trpc.admin.updateStock.useMutation({
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [["catalogue"]] });
+      void queryClient.invalidateQueries({ queryKey: [["catalogue"]] });
       setShowStockModal(false);
       Alert.alert("Success", "Stock updated successfully");
     },
@@ -294,7 +330,7 @@ const { data: pendingActivities = [], error: pendingActivitiesError, isLoading: 
 
   const addEventMutation = trpc.admin.addEvent.useMutation({
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [["admin", "getEvents"]] });
+      void queryClient.invalidateQueries({ queryKey: [["admin", "getEvents"]] });
       setShowEventModal(false);
       setEventName("");
       setStartsAt("");
@@ -534,6 +570,21 @@ const getStatusColor = (status: string) => {
           {(externalSubmissions?.length || 0) > 0 && (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{externalSubmissions?.length || 0}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.menuButton, activeTab === "ratings" && styles.menuButtonActive]}
+          onPress={() => setActiveTab("ratings")}
+        >
+          <View style={[styles.iconCircle, activeTab === "ratings" && styles.iconCircleActive]}>
+            <Star size={24} color={activeTab === "ratings" ? "#fff" : "#10b981"} />
+          </View>
+          <Text style={[styles.menuButtonText, activeTab === "ratings" && styles.menuButtonTextActive]}>Ratings</Text>
+          {appRatings.length > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{appRatings.length}</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -906,6 +957,73 @@ const getStatusColor = (status: string) => {
                 </View>
               </View>
             ))
+          )}
+        </ScrollView>
+      ) : activeTab === "ratings" ? (
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          {ratingsLoading ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Loading ratings...</Text>
+            </View>
+          ) : appRatings.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Star size={64} color="#d1d5db" />
+              <Text style={styles.emptyText}>No ratings yet</Text>
+              <Text style={styles.emptySubtext}>User ratings will appear here</Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.ratingSummaryCard}>
+                <View style={styles.ratingSummaryLeft}>
+                  <Text style={styles.ratingSummaryScore}>{averageRating.toFixed(1)}</Text>
+                  <View style={styles.ratingSummaryStars}>
+                    {[1, 2, 3, 4, 5].map((s) => (
+                      <Star
+                        key={s}
+                        size={16}
+                        color={s <= Math.round(averageRating) ? '#f59e0b' : '#d1d5db'}
+                        fill={s <= Math.round(averageRating) ? '#f59e0b' : 'transparent'}
+                      />
+                    ))}
+                  </View>
+                  <Text style={styles.ratingSummaryCount}>{appRatings.length} {appRatings.length === 1 ? 'rating' : 'ratings'}</Text>
+                </View>
+                <View style={styles.ratingSummaryRight}>
+                  {ratingBreakdown.map((item) => (
+                    <View key={item.star} style={styles.ratingBarRow}>
+                      <Text style={styles.ratingBarLabel}>{item.star}</Text>
+                      <Star size={12} color="#f59e0b" fill="#f59e0b" />
+                      <View style={styles.ratingBarTrack}>
+                        <View style={[styles.ratingBarFill, { width: `${item.percentage}%` }]} />
+                      </View>
+                      <Text style={styles.ratingBarCount}>{item.count}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+
+              {appRatings.map((rating) => (
+                <View key={rating.rating_id} style={styles.ratingCard}>
+                  <View style={styles.ratingCardHeader}>
+                    <View style={styles.ratingCardStars}>
+                      {[1, 2, 3, 4, 5].map((s) => (
+                        <Star
+                          key={s}
+                          size={14}
+                          color={s <= rating.rating ? '#f59e0b' : '#d1d5db'}
+                          fill={s <= rating.rating ? '#f59e0b' : 'transparent'}
+                        />
+                      ))}
+                    </View>
+                    <Text style={styles.ratingCardDate}>{formatDate(rating.created_at)}</Text>
+                  </View>
+                  <Text style={styles.ratingCardUser}>{rating.registration_id}</Text>
+                  {rating.feedback && (
+                    <Text style={styles.ratingCardFeedback}>{rating.feedback}</Text>
+                  )}
+                </View>
+              ))}
+            </>
           )}
         </ScrollView>
       ) : activeTab === "externalActivities" ? (
@@ -2201,5 +2319,109 @@ const styles = StyleSheet.create({
     fontWeight: "700" as const,
     color: "#6b7280",
     paddingTop: 8,
+  },
+  ratingSummaryCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 20,
+    flexDirection: "row" as const,
+    gap: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+    marginBottom: 8,
+  },
+  ratingSummaryLeft: {
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 6,
+    minWidth: 80,
+  },
+  ratingSummaryScore: {
+    fontSize: 40,
+    fontWeight: "800" as const,
+    color: "#111827",
+    lineHeight: 44,
+  },
+  ratingSummaryStars: {
+    flexDirection: "row" as const,
+    gap: 2,
+  },
+  ratingSummaryCount: {
+    fontSize: 13,
+    color: "#6b7280",
+    marginTop: 2,
+  },
+  ratingSummaryRight: {
+    flex: 1,
+    gap: 6,
+    justifyContent: "center" as const,
+  },
+  ratingBarRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+  },
+  ratingBarLabel: {
+    fontSize: 13,
+    fontWeight: "600" as const,
+    color: "#374151",
+    width: 14,
+    textAlign: "right" as const,
+  },
+  ratingBarTrack: {
+    flex: 1,
+    height: 8,
+    backgroundColor: "#f3f4f6",
+    borderRadius: 4,
+    overflow: "hidden" as const,
+  },
+  ratingBarFill: {
+    height: 8,
+    backgroundColor: "#f59e0b",
+    borderRadius: 4,
+  },
+  ratingBarCount: {
+    fontSize: 12,
+    color: "#6b7280",
+    width: 24,
+    textAlign: "right" as const,
+  },
+  ratingCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+    gap: 8,
+  },
+  ratingCardHeader: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+  },
+  ratingCardStars: {
+    flexDirection: "row" as const,
+    gap: 2,
+  },
+  ratingCardDate: {
+    fontSize: 13,
+    color: "#6b7280",
+  },
+  ratingCardUser: {
+    fontSize: 13,
+    color: "#6b7280",
+    fontWeight: "500" as const,
+  },
+  ratingCardFeedback: {
+    fontSize: 15,
+    color: "#111827",
+    lineHeight: 22,
+    marginTop: 2,
   },
 });

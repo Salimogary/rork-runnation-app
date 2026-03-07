@@ -2,7 +2,7 @@ import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, 
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { LogOut, Bell, MapPin, Moon, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff, Lock, Trash2, AlertTriangle, Star, Share2 } from "lucide-react-native";
-import * as Linking from 'expo-linking';
+
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useState, useEffect } from "react";
@@ -46,6 +46,9 @@ export default function SettingsScreen() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteStep, setDeleteStep] = useState<'confirm' | 'pin'>('confirm');
   const [isAdmin, setIsAdmin] = useState(false);
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [selectedRating, setSelectedRating] = useState<number>(0);
+  const [ratingFeedback, setRatingFeedback] = useState('');
 
   useEffect(() => {
     const checkAdmin = async () => {
@@ -57,7 +60,7 @@ export default function SettingsScreen() {
         setIsAdmin(false);
       }
     };
-    checkAdmin();
+    void checkAdmin();
   }, []);
 
   const handleSignOut = () => {
@@ -76,13 +79,13 @@ export default function SettingsScreen() {
     try {
       const valid = await verifyPin(signOutPin);
       if (valid) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setShowPinModal(false);
         setSignOutPin('');
         await signOut();
         router.replace('/(tabs)' as any);
       } else {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         setSignOutPinError('Incorrect PIN. Please try again.');
         setSignOutPin('');
       }
@@ -99,6 +102,111 @@ export default function SettingsScreen() {
       Alert.alert("Coming Soon", `${feature} will be available in a future update.`);
     } else {
       alert(`${feature} will be available in a future update.`);
+    }
+  };
+
+  const APP_STORE_URL = '';
+  const APP_DOWNLOAD_LINK = '';
+
+  const { data: existingRating } = useQuery<{ rating: number; feedback: string | null } | null>({
+    queryKey: ['appRating', user?.id],
+    queryFn: async () => {
+      if (!user) return null;
+      const regId = await AsyncStorage.getItem('registrationId');
+      if (!regId) return null;
+      const { data, error } = await supabase
+        .from('app_ratings')
+        .select('rating, feedback')
+        .eq('registration_id', regId)
+        .maybeSingle();
+      if (error) {
+        console.log('Error fetching existing rating:', error);
+        return null;
+      }
+      return data;
+    },
+    enabled: !!user,
+  });
+
+  const ratingMutation = useMutation({
+    mutationFn: async ({ rating, feedback }: { rating: number; feedback: string }) => {
+      const regId = await AsyncStorage.getItem('registrationId');
+      if (!regId) throw new Error('Not registered');
+      const { error } = await supabase
+        .from('app_ratings')
+        .upsert({
+          registration_id: regId,
+          rating,
+          feedback: feedback.trim() || null,
+        }, { onConflict: 'registration_id' });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['appRating'] });
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setShowRatingModal(false);
+      setSelectedRating(0);
+      setRatingFeedback('');
+      if (Platform.OS !== 'web') {
+        Alert.alert('Thank You!', 'Your rating has been submitted. We appreciate your feedback!');
+      } else {
+        alert('Thank you! Your rating has been submitted.');
+      }
+    },
+    onError: (error) => {
+      console.error('Error submitting rating:', error);
+      if (Platform.OS !== 'web') {
+        Alert.alert('Error', 'Failed to submit rating. Please try again.');
+      } else {
+        alert('Failed to submit rating. Please try again.');
+      }
+    },
+  });
+
+  const handleRateUs = () => {
+    if (!user) {
+      if (Platform.OS !== 'web') {
+        Alert.alert('Sign In Required', 'Please sign in to rate the app.');
+      } else {
+        alert('Please sign in to rate the app.');
+      }
+      return;
+    }
+    if (existingRating) {
+      setSelectedRating(existingRating.rating);
+      setRatingFeedback(existingRating.feedback || '');
+    } else {
+      setSelectedRating(0);
+      setRatingFeedback('');
+    }
+    setShowRatingModal(true);
+  };
+
+  const handleShareApp = () => {
+    const link = APP_DOWNLOAD_LINK || APP_STORE_URL;
+    const shareMessage = link
+      ? `Check out this awesome fitness app! Download it here: ${String(link)}`
+      : 'Check out this awesome fitness app! Download link coming soon.';
+    if (Platform.OS === 'web') {
+      if (navigator.clipboard) {
+        void navigator.clipboard.writeText(shareMessage);
+        alert('Link copied to clipboard!');
+      } else {
+        alert(shareMessage);
+      }
+    } else {
+      void Share.share({ message: shareMessage });
+    }
+  };
+
+  const getRatingLabel = (rating: number): string => {
+    switch (rating) {
+      case 1: return 'Poor';
+      case 2: return 'Fair';
+      case 3: return 'Good';
+      case 4: return 'Great';
+      case 5: return 'Excellent';
+      default: return 'Tap a star';
     }
   };
 
@@ -162,8 +270,8 @@ export default function SettingsScreen() {
       return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["pendingActivities"] });
-      queryClient.invalidateQueries({ queryKey: ["activities"] });
+      void queryClient.invalidateQueries({ queryKey: ["pendingActivities"] });
+      void queryClient.invalidateQueries({ queryKey: ["activities"] });
       setSelectedActivity(null);
       Alert.alert("Success", "Activity approved and added to records");
     },
@@ -183,7 +291,7 @@ export default function SettingsScreen() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["pendingActivities"] });
+      void queryClient.invalidateQueries({ queryKey: ["pendingActivities"] });
       setSelectedActivity(null);
       Alert.alert("Success", "Activity rejected");
     },
@@ -367,14 +475,7 @@ export default function SettingsScreen() {
 
         <TouchableOpacity
           style={styles.settingItem}
-          onPress={() => {
-            const PLAY_STORE_URL = '';
-            if (PLAY_STORE_URL) {
-              void Linking.openURL(PLAY_STORE_URL);
-            } else {
-              showComingSoon('Rate Us');
-            }
-          }}
+          onPress={handleRateUs}
         >
           <View style={styles.settingLeft}>
             <View style={[styles.iconContainer, { backgroundColor: '#FFF7ED' }]}>
@@ -382,7 +483,9 @@ export default function SettingsScreen() {
             </View>
             <View style={styles.settingTextContainer}>
               <Text style={styles.settingTitle}>Rate Us</Text>
-              <Text style={styles.settingSubtitle}>Love the app? Leave us a rating</Text>
+              <Text style={styles.settingSubtitle}>
+                {existingRating ? `You rated ${existingRating.rating}/5 — tap to update` : 'Love the app? Leave us a rating'}
+              </Text>
             </View>
           </View>
           <ChevronRight size={20} color="#999" />
@@ -390,22 +493,7 @@ export default function SettingsScreen() {
 
         <TouchableOpacity
           style={styles.settingItem}
-          onPress={() => {
-            const APP_LINK = '';
-            const shareMessage = APP_LINK
-              ? `Check out this app! ${APP_LINK}`
-              : 'Check out this app! Download link coming soon.';
-            if (Platform.OS === 'web') {
-              if (navigator.clipboard) {
-                void navigator.clipboard.writeText(shareMessage);
-                alert('Link copied to clipboard!');
-              } else {
-                alert(shareMessage);
-              }
-            } else {
-              void Share.share({ message: shareMessage });
-            }
-          }}
+          onPress={handleShareApp}
         >
           <View style={styles.settingLeft}>
             <View style={[styles.iconContainer, { backgroundColor: '#EFF6FF' }]}>
@@ -820,10 +908,10 @@ export default function SettingsScreen() {
                         if (valid) {
                           const result = await deleteAccount();
                           if (result.error) {
-                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
                             setDeletePinError(result.error.message);
                           } else {
-                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                             setShowDeleteModal(false);
                             if (Platform.OS !== 'web') {
                               Alert.alert('Account Deleted', 'Your account has been permanently deleted.');
@@ -833,7 +921,7 @@ export default function SettingsScreen() {
                             router.replace('/(tabs)' as any);
                           }
                         } else {
-                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
                           setDeletePinError('Incorrect PIN. Please try again.');
                           setDeletePin('');
                         }
@@ -855,6 +943,106 @@ export default function SettingsScreen() {
                 </View>
               </>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showRatingModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowRatingModal(false)}
+      >
+        <View style={styles.detailModalOverlay}>
+          <View style={styles.ratingModalContent}>
+            <View style={styles.detailHeader}>
+              <Text style={styles.detailTitle}>Rate Our App</Text>
+              <TouchableOpacity onPress={() => {
+                setShowRatingModal(false);
+                setSelectedRating(0);
+                setRatingFeedback('');
+              }}>
+                <XIcon size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.ratingBody}>
+              <View style={styles.ratingStarsContainer}>
+                <Text style={styles.ratingPrompt}>How would you rate your experience?</Text>
+                <View style={styles.starsRow}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <TouchableOpacity
+                      key={star}
+                      onPress={() => {
+                        setSelectedRating(star);
+                        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      }}
+                      style={styles.starButton}
+                    >
+                      <Star
+                        size={40}
+                        color={star <= selectedRating ? '#f59e0b' : '#d1d5db'}
+                        fill={star <= selectedRating ? '#f59e0b' : 'transparent'}
+                      />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={[
+                  styles.ratingLabel,
+                  selectedRating > 0 && styles.ratingLabelActive,
+                ]}>
+                  {getRatingLabel(selectedRating)}
+                </Text>
+              </View>
+
+              <View style={styles.ratingFeedbackSection}>
+                <Text style={styles.feedbackLabel}>Additional Feedback (Optional)</Text>
+                <TextInput
+                  style={styles.ratingFeedbackInput}
+                  placeholder="Tell us what you think..."
+                  placeholderTextColor="#999"
+                  multiline
+                  maxLength={200}
+                  value={ratingFeedback}
+                  onChangeText={setRatingFeedback}
+                  textAlignVertical="top"
+                />
+                <Text style={styles.characterCount}>{ratingFeedback.length}/200</Text>
+              </View>
+            </View>
+
+            <View style={styles.feedbackActions}>
+              <TouchableOpacity
+                style={styles.cancelFeedbackButton}
+                onPress={() => {
+                  setShowRatingModal(false);
+                  setSelectedRating(0);
+                  setRatingFeedback('');
+                }}
+              >
+                <Text style={styles.cancelFeedbackText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.submitRatingButton,
+                  (selectedRating === 0 || ratingMutation.isPending) && styles.submitFeedbackButtonDisabled
+                ]}
+                onPress={() => {
+                  if (selectedRating > 0) {
+                    ratingMutation.mutate({ rating: selectedRating, feedback: ratingFeedback });
+                  }
+                }}
+                disabled={selectedRating === 0 || ratingMutation.isPending}
+              >
+                {ratingMutation.isPending ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.submitFeedbackText}>
+                    {existingRating ? 'Update Rating' : 'Submit Rating'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1418,5 +1606,64 @@ const styles = StyleSheet.create({
   deletePinDotFilled: {
     backgroundColor: "#dc2626",
     borderColor: "#dc2626",
+  },
+  ratingModalContent: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingBottom: 20,
+  },
+  ratingBody: {
+    padding: 24,
+    gap: 24,
+  },
+  ratingStarsContainer: {
+    alignItems: "center" as const,
+    gap: 12,
+  },
+  ratingPrompt: {
+    fontSize: 16,
+    fontWeight: "600" as const,
+    color: "#333",
+    textAlign: "center" as const,
+  },
+  starsRow: {
+    flexDirection: "row" as const,
+    gap: 8,
+    marginTop: 8,
+  },
+  starButton: {
+    padding: 4,
+  },
+  ratingLabel: {
+    fontSize: 15,
+    fontWeight: "500" as const,
+    color: "#999",
+    marginTop: 4,
+  },
+  ratingLabelActive: {
+    color: "#f59e0b",
+    fontWeight: "600" as const,
+  },
+  ratingFeedbackSection: {
+    gap: 8,
+  },
+  ratingFeedbackInput: {
+    backgroundColor: "#f5f5f5",
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    color: "#000",
+    minHeight: 80,
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+  },
+  submitRatingButton: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: "#f59e0b",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
   },
 });
