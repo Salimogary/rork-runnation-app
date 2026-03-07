@@ -30,7 +30,7 @@ const SECTIONS: PolicySection[] = [
     icon: <Eye size={20} color="#3b82f6" />,
     accentColor: '#3b82f6',
     content: [
-      'Maun Runner App ("the App") is a fitness and community platform that enables users to track walking, running, and treadmill activities, participate in events, engage with a social feed, and purchase merchandise.',
+      'RunNation ("the App") is a fitness and community platform that enables users to track walking, running, and treadmill activities, participate in events, engage with a social feed, and purchase merchandise.',
       'This document outlines how we collect, use, store, and protect your personal data in compliance with applicable data protection laws. By using the App, you agree to the practices described herein.',
     ],
   },
@@ -125,7 +125,7 @@ const SECTIONS: PolicySection[] = [
       'Acceptable Use: The App is intended for personal fitness tracking and community engagement. You agree not to misuse the platform, harass other users, or upload inappropriate content to the social feed.',
       'Admin Decisions: Administrators reserve the right to approve or reject treadmill activity submissions, event enrollments, and external activity submissions at their discretion.',
       'Shop Purchases: All merchandise purchases are subject to availability. Order statuses are managed by administrators. Refund and return policies are handled on a case-by-case basis.',
-      'Intellectual Property: All content, design, and functionality of the Maun Runner App are the property of the App operators. User-generated content (posts, photos) remains the property of the user but is licensed to the App for display purposes.',
+      'Intellectual Property: All content, design, and functionality of the RunNation app are the property of the App operators. User-generated content (posts, photos) remains the property of the user but is licensed to the App for display purposes.',
       'Modifications: We reserve the right to update this policy and these terms at any time. Continued use of the App after changes constitutes acceptance of the updated terms.',
       'Limitation of Liability: The App is provided "as is" for fitness tracking purposes. We are not liable for inaccuracies in distance tracking, GPS data, or any health-related decisions made based on App data. Always consult a medical professional before starting any exercise programme.',
     ],
@@ -235,7 +235,7 @@ export default function PolicyScreen() {
 
         <View style={styles.infoCard}>
           <Text style={styles.infoText}>
-            Your privacy matters to us. Tap each section below to learn how we handle your data and the terms governing your use of Maun Runner App.
+            Your privacy matters to us. Tap each section below to learn how we handle your data and the terms governing your use of RunNation.
           </Text>
         </View>
 
@@ -251,7 +251,7 @@ export default function PolicyScreen() {
         </View>
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Maun Runner App v1.0.0</Text>
+          <Text style={styles.footerText}>RunNation v1.0.0</Text>
           <Text style={styles.footerSub}>This policy is effective as of {LAST_UPDATED}</Text>
         </View>
       </ScrollView>

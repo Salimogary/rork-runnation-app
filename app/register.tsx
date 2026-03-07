@@ -1195,7 +1195,7 @@ export default function RegisterScreen() {
           <View style={styles.content}>
             <View style={styles.header}>
               <Text style={styles.logo}>🏃</Text>
-              <Text style={styles.title}>Maun Runner</Text>
+              <Text style={styles.title}>RunNation</Text>
               <Text style={styles.subtitle}>
                 {screenMode === 'login' && 'Welcome back!'}
                 {screenMode === 'fullRegistration' && registrationStep === 1 && 'Join the community'}

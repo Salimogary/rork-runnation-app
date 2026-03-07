@@ -28,8 +28,8 @@ const slides: Slide[] = [
   {
     id: 1,
     image: require('../assets/images/adaptive-icon.png'),
-    title: 'Maun Run',
-    description: 'Everyday Counts',
+    title: 'RunNation',
+    description: 'Where runners belong',
     gradient: ['#FF6B35', '#F7931E'] as const,
   },
   {
