@@ -9,6 +9,7 @@ import { supabase } from "@/lib/supabase";
 import { useState, useEffect } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
+import { getNotificationsEnabled, setNotificationsEnabled as saveNotificationsEnabled } from "@/utils/notifications";
 
 interface PendingActivity {
   PendingActivityID: string;
@@ -32,6 +33,10 @@ export default function SettingsScreen() {
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<PendingActivity | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+
+  useEffect(() => {
+    void getNotificationsEnabled().then(setNotificationsEnabled);
+  }, []);
   const [locationEnabled, setLocationEnabled] = useState(true);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
@@ -401,7 +406,12 @@ export default function SettingsScreen() {
         
         <TouchableOpacity 
           style={styles.settingItem} 
-          onPress={() => setNotificationsEnabled(!notificationsEnabled)}
+          onPress={() => {
+            const next = !notificationsEnabled;
+            setNotificationsEnabled(next);
+            void saveNotificationsEnabled(next);
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          }}
         >
           <View style={styles.settingLeft}>
             <View style={styles.iconContainer}>

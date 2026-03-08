@@ -3,6 +3,7 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { SubscriptionProvider, useSubscription } from "@/contexts/SubscriptionContext";
+import { NotificationProvider } from "@/contexts/NotificationContext";
 import { TRPCProvider } from "@/lib/trpc";
 import * as SplashScreen from "expo-splash-screen";
 import * as Linking from "expo-linking";
@@ -193,7 +194,9 @@ export default function RootLayout() {
       <TRPCProvider>
         <AuthProvider>
           <SubscriptionProvider>
-            <RootLayoutNav />
+            <NotificationProvider>
+              <RootLayoutNav />
+            </NotificationProvider>
           </SubscriptionProvider>
         </AuthProvider>
       </TRPCProvider>
