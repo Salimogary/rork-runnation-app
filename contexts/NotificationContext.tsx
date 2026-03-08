@@ -13,6 +13,7 @@ import {
   checkAndNotifyBadges,
   checkAndNotifyProfileCompletion,
   checkAndNotifyGoalProgress,
+  checkAndNotifyTrialExpiry,
 } from '@/utils/notifications';
 
 const convertKmhToMinPerKm = (kmh: number): number => {
@@ -22,7 +23,7 @@ const convertKmhToMinPerKm = (kmh: number): number => {
 
 export const [NotificationProvider, useNotifications] = createContextHook(() => {
   const { user } = useAuth();
-  const _sub = useSubscription();
+  const { trialDaysRemaining, subscriptionStatus } = useSubscription();
   const setupDone = useRef(false);
 
   useEffect(() => {
@@ -222,6 +223,11 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
       );
     }
   }, [user?.id, goalProgressData]);
+
+  useEffect(() => {
+    if (!user?.id || Platform.OS === 'web') return;
+    void checkAndNotifyTrialExpiry(user.id, trialDaysRemaining, subscriptionStatus);
+  }, [user?.id, trialDaysRemaining, subscriptionStatus]);
 
   const refreshNotificationData = useCallback(() => {
     console.log('[NotifContext] Manual refresh triggered');

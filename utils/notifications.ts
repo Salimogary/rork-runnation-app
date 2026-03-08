@@ -8,6 +8,7 @@ const STORAGE_KEYS = {
   LAST_FITNESS_PROGRESS: 'notif_last_fitness_progress',
   LAST_WEIGHT_PROGRESS: 'notif_last_weight_progress',
   NOTIFICATIONS_ENABLED: 'notif_enabled',
+  TRIAL_NOTIFIED_MILESTONES: 'notif_trial_milestones',
 };
 
 export async function setupNotifications(): Promise<boolean> {
@@ -194,6 +195,73 @@ export async function checkAndNotifyGoalProgress(
     await AsyncStorage.setItem(key, currentProgress.toString());
   } catch (error) {
     console.error('[Notifications] Goal progress check error:', error);
+  }
+}
+
+const TRIAL_DURATION_DAYS = 90;
+const TRIAL_NOTIFICATION_DAYS = [30, 60, 80, 85, 90];
+
+export async function checkAndNotifyTrialExpiry(
+  userId: string,
+  trialDaysRemaining: number,
+  subscriptionStatus: string
+): Promise<void> {
+  try {
+    if (subscriptionStatus !== 'trial') {
+      console.log('[Notifications] Not on trial, skipping trial notifications');
+      return;
+    }
+
+    const key = `${STORAGE_KEYS.TRIAL_NOTIFIED_MILESTONES}_${userId}`;
+    const stored = await AsyncStorage.getItem(key);
+    const notifiedMilestones: number[] = stored ? JSON.parse(stored) : [];
+
+    const daysUsed = TRIAL_DURATION_DAYS - trialDaysRemaining;
+
+    for (const milestone of TRIAL_NOTIFICATION_DAYS) {
+      if (daysUsed >= milestone && !notifiedMilestones.includes(milestone)) {
+        const daysLeft = TRIAL_DURATION_DAYS - milestone;
+
+        if (milestone === 90) {
+          await sendLocalNotification(
+            '⏰ Free Plan Expired',
+            'Your 90-day Free Plan has ended. Subscribe now to continue enjoying RunNation!',
+            { type: 'trial_expiry', milestone, daysLeft: 0 }
+          );
+        } else if (milestone === 85) {
+          await sendLocalNotification(
+            '⚠️ Only 5 Days Left!',
+            `Your Free Plan expires in ${daysLeft} days. Subscribe now to keep your progress!`,
+            { type: 'trial_expiry', milestone, daysLeft }
+          );
+        } else if (milestone === 80) {
+          await sendLocalNotification(
+            '🔔 Free Plan Ending Soon',
+            `You have ${daysLeft} days left on your Free Plan. Don't lose access — subscribe today!`,
+            { type: 'trial_expiry', milestone, daysLeft }
+          );
+        } else if (milestone === 60) {
+          await sendLocalNotification(
+            '📅 60 Days on RunNation!',
+            `You've been with us for 60 days! ${daysLeft} days left on your Free Plan. Consider upgrading.`,
+            { type: 'trial_expiry', milestone, daysLeft }
+          );
+        } else if (milestone === 30) {
+          await sendLocalNotification(
+            '🏃 30 Days In!',
+            `You've been running with us for 30 days! ${daysLeft} days remain on your Free Plan.`,
+            { type: 'trial_expiry', milestone, daysLeft }
+          );
+        }
+
+        notifiedMilestones.push(milestone);
+        console.log(`[Notifications] Trial milestone ${milestone} notified, ${daysLeft} days left`);
+      }
+    }
+
+    await AsyncStorage.setItem(key, JSON.stringify(notifiedMilestones));
+  } catch (error) {
+    console.error('[Notifications] Trial expiry check error:', error);
   }
 }
 
