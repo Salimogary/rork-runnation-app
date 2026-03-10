@@ -518,9 +518,7 @@ export default function RegisterScreen() {
   };
 
   const handleSkipStep = async () => {
-    if (registrationStep === 2) {
-      setRegistrationStep(3);
-    } else if (registrationStep === 3) {
+    if (registrationStep === 3) {
       await AsyncStorage.setItem('hasSeenOnboarding', 'true');
       router.replace('/(tabs)');
     }
@@ -860,7 +858,7 @@ export default function RegisterScreen() {
       <View style={styles.stepHeader}>
         <Target size={32} color="#fff" />
         <Text style={styles.formTitle}>Set Your Goals</Text>
-        <Text style={styles.stepSubtitle}>What do you want to achieve? Select all that apply.</Text>
+        <Text style={styles.stepSubtitle}>What do you want to achieve? Select at least one (you can choose all).</Text>
       </View>
 
       {goalsLoading ? (
@@ -914,7 +912,7 @@ export default function RegisterScreen() {
 
       <View style={styles.buttonContainer}>
         <TouchableOpacity
-          style={[styles.button, styles.primaryButton, isLoading && styles.buttonDisabled]}
+          style={[styles.button, styles.primaryButton, (isLoading || selectedGoalIds.length === 0) && styles.buttonDisabled]}
           onPress={handleStep2Complete}
           disabled={isLoading || selectedGoalIds.length === 0}
           activeOpacity={0.8}
@@ -927,14 +925,6 @@ export default function RegisterScreen() {
               <ChevronRight size={20} color="#fff" />
             </View>
           )}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.textButton}
-          onPress={handleSkipStep}
-          disabled={isLoading}
-        >
-          <Text style={styles.textButtonText}>Skip for now</Text>
         </TouchableOpacity>
       </View>
     </>
