@@ -2,7 +2,7 @@ import { StyleSheet, View, Text, ScrollView, RefreshControl, Animated, Touchable
 import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
-import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints, Users, ArrowUp, ArrowDown, Minus, Trophy, Flame } from "lucide-react-native";
+import { Target, TrendingDown, TrendingUp, Award, Calendar, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints, Users, ArrowUp, ArrowDown, Minus, Trophy, Flame } from "lucide-react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -1422,6 +1422,20 @@ export default function GoalsScreen() {
 
   const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading && !habitDeclaration && !habitDeclarationLoading && !communityRanking && !communityRankLoading && !medalGoalData && !medalGoalLoading;
 
+  const allGoalTypes = useMemo(() => {
+    return [
+      { key: "fitness", label: "Improve Fitness", isTracked: !!fitnessGoal, icon: "zap" as const },
+      { key: "weight", label: "Weight Loss", isTracked: !!weightTargetGoal, icon: "scale" as const },
+      { key: "health", label: "General Health", isTracked: healthEntries.length > 0, icon: "heart" as const },
+      { key: "habit", label: "Build My Habit", isTracked: !!habitDeclaration, icon: "flame" as const },
+      { key: "medals", label: "Earn Medals", isTracked: !!medalGoalData && medalGoalData.enrolledEvents > 0, icon: "trophy" as const },
+      { key: "community", label: "Compete in Community", isTracked: !!communityRanking, icon: "users" as const },
+    ];
+  }, [fitnessGoal, weightTargetGoal, healthEntries, habitDeclaration, medalGoalData, communityRanking]);
+
+  const trackedGoalsCount = useMemo(() => allGoalTypes.filter(g => g.isTracked).length, [allGoalTypes]);
+  const untrackedGoals = useMemo(() => allGoalTypes.filter(g => !g.isTracked), [allGoalTypes]);
+
   return (
     <Animated.View style={[styles.container, { opacity: fadeAnim, backgroundColor: themeColors.background }]}>
       <ScrollView
@@ -1430,13 +1444,13 @@ export default function GoalsScreen() {
           <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor={colors.primary} colors={[colors.primary]} />
         }
       >
-        {activitySummary && (
-          <View style={styles.streakSection}>
-            <LinearGradient colors={["#FF6B35", "#FF8C42"]} style={styles.streakCard}>
-              <View style={styles.streakTop}>
-                <Text style={styles.streakNumber}>{activitySummary.streakDays}</Text>
-                <Text style={styles.streakLabel}>Day Streak</Text>
-              </View>
+        <View style={styles.streakSection}>
+          <LinearGradient colors={["#FF6B35", "#FF8C42"]} style={styles.streakCard}>
+            <View style={styles.streakTop}>
+              <Text style={styles.streakNumber}>{trackedGoalsCount}</Text>
+              <Text style={styles.streakLabel}>{trackedGoalsCount === 1 ? "Goal Being Tracked" : "Goals Being Tracked"}</Text>
+            </View>
+            {activitySummary ? (
               <View style={styles.streakStats}>
                 <View style={styles.streakStatItem}>
                   <Text style={styles.streakStatValue}>{activitySummary.activeDays}</Text>
@@ -1453,9 +1467,9 @@ export default function GoalsScreen() {
                   <Text style={styles.streakStatLabel}>Total Time</Text>
                 </View>
               </View>
-            </LinearGradient>
-          </View>
-        )}
+            ) : null}
+          </LinearGradient>
+        </View>
 
         {fitnessGoal && fitnessProgress ? (
           <View style={styles.section}>
@@ -2120,22 +2134,7 @@ export default function GoalsScreen() {
           </View>
         ) : null}
 
-        {userGoals.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Target size={18} color={colors.text} />
-              <Text style={styles.sectionTitle}>My Fitness Goals</Text>
-            </View>
-            <View style={styles.goalsContainer}>
-              {userGoals.map((goal) => (
-                <View key={goal.user_goals_id} style={styles.goalChip}>
-                  <CheckCircle size={14} color={colors.success} />
-                  <Text style={styles.goalChipText}>{goal.goal}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
+
 
         {ongoingEvents.length > 0 && (
           <View style={styles.section}>
@@ -2185,26 +2184,7 @@ export default function GoalsScreen() {
           </View>
         )}
 
-        {activitySummary && activitySummary.activeDays > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <TrendingUp size={18} color={colors.text} />
-              <Text style={styles.sectionTitle}>Daily Averages</Text>
-            </View>
-            <View style={styles.avgRow}>
-              <LinearGradient colors={colors.gradient.teal} style={styles.avgCard}>
-                <Text style={styles.avgValue}>{activitySummary.avgDistance.toFixed(1)}</Text>
-                <Text style={styles.avgLabel}>km/day</Text>
-              </LinearGradient>
-              <LinearGradient colors={colors.gradient.blue} style={styles.avgCard}>
-                <Text style={styles.avgValue}>
-                  {activitySummary.avgPace > 0 ? (60 / activitySummary.avgPace).toFixed(1) : "--"}
-                </Text>
-                <Text style={styles.avgLabel}>min/km avg</Text>
-              </LinearGradient>
-            </View>
-          </View>
-        )}
+
 
         {hasNoGoals && (
           <View style={styles.emptyContainer}>
@@ -2213,6 +2193,28 @@ export default function GoalsScreen() {
             <Text style={styles.emptySubtext}>
               Visit your Profile to set fitness goals, weight targets, and join events to track your progress here.
             </Text>
+          </View>
+        )}
+
+        {untrackedGoals.length > 0 && !hasNoGoals && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Target size={18} color={colors.textLight} />
+              <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Goals Not Being Tracked</Text>
+            </View>
+            <View style={styles.untrackedContainer}>
+              {untrackedGoals.map((goal) => (
+                <View key={goal.key} style={styles.untrackedChip}>
+                  {goal.icon === "zap" && <Zap size={14} color={colors.textLight} />}
+                  {goal.icon === "scale" && <Scale size={14} color={colors.textLight} />}
+                  {goal.icon === "heart" && <Heart size={14} color={colors.textLight} />}
+                  {goal.icon === "flame" && <Flame size={14} color={colors.textLight} />}
+                  {goal.icon === "trophy" && <Trophy size={14} color={colors.textLight} />}
+                  {goal.icon === "users" && <Users size={14} color={colors.textLight} />}
+                  <Text style={styles.untrackedChipText}>{goal.label}</Text>
+                </View>
+              ))}
+            </View>
           </View>
         )}
       </ScrollView>
@@ -3844,5 +3846,27 @@ const styles = StyleSheet.create({
   habitPreviewHighlight: {
     fontWeight: "800" as const,
     color: "#0D9488",
+  },
+  untrackedContainer: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 8,
+  },
+  untrackedChip: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+    backgroundColor: colors.extraLightGray,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    borderStyle: "dashed" as const,
+  },
+  untrackedChipText: {
+    fontSize: 13,
+    fontWeight: "600" as const,
+    color: colors.textLight,
   },
 });
