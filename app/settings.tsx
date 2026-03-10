@@ -72,15 +72,48 @@ export default function SettingsScreen() {
   const { data: supportContacts = [], isLoading: isLoadingContacts } = useQuery<SupportContact[]>({
     queryKey: ['supportContacts'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const regId = await AsyncStorage.getItem('registrationId');
+      let userCountry: string | null = null;
+
+      if (regId) {
+        const { data: regData } = await supabase
+          .from('Registrations')
+          .select('Country')
+          .eq('RegistrationID', regId)
+          .maybeSingle();
+        if (regData?.Country) {
+          userCountry = regData.Country;
+          console.log('User country for support contacts:', userCountry);
+        }
+      }
+
+      const { data: allContacts, error } = await supabase
         .from('support_contacts')
         .select('*')
-        .order('country', { ascending: true });
+        .order('support_contacy_id', { ascending: true });
+
       if (error) {
         console.error('Error fetching support contacts:', error);
         throw new Error(error.message);
       }
-      return data || [];
+
+      if (!allContacts || allContacts.length === 0) {
+        console.log('No support contacts found in table');
+        return [];
+      }
+
+      if (userCountry) {
+        const countryMatch = allContacts.filter(
+          (c) => c.country?.toLowerCase() === userCountry!.toLowerCase()
+        );
+        if (countryMatch.length > 0) {
+          console.log('Found country-matched support contacts:', countryMatch.length);
+          return countryMatch;
+        }
+      }
+
+      console.log('Using default (first) support contact');
+      return [allContacts[0]];
     },
     enabled: showHelpModal,
   });
