@@ -924,7 +924,7 @@ export default function GoalsScreen() {
     return "years";
   };
 
-  const { data: activitySummary, refetch: refetchActivity } = useQuery<ActivitySummary>({
+  const { refetch: refetchActivity } = useQuery<ActivitySummary>({
     queryKey: ["goalActivitySummary", user?.id],
     queryFn: async () => {
       if (!user?.id) return { totalDistance: 0, totalTime: 0, activeDays: 0, avgDistance: 0, avgPace: 0, streakDays: 0 };
@@ -1387,13 +1387,6 @@ export default function GoalsScreen() {
     setShowWeightTargetForm(true);
   }, [weightTargetGoal]);
 
-  const formatTime = (minutes: number): string => {
-    const hours = Math.floor(minutes / 60);
-    const mins = Math.round(minutes % 60);
-    if (hours > 0) return `${hours}h ${mins}m`;
-    return `${mins}m`;
-  };
-
   const formatGoalDate = (dateString: string): string => {
     const date = new Date(dateString + "T00:00:00");
     const day = date.getDate();
@@ -1450,24 +1443,6 @@ export default function GoalsScreen() {
               <Text style={styles.streakNumber}>{trackedGoalsCount}</Text>
               <Text style={styles.streakLabel}>{trackedGoalsCount === 1 ? "Goal Being Tracked" : "Goals Being Tracked"}</Text>
             </View>
-            {activitySummary ? (
-              <View style={styles.streakStats}>
-                <View style={styles.streakStatItem}>
-                  <Text style={styles.streakStatValue}>{activitySummary.activeDays}</Text>
-                  <Text style={styles.streakStatLabel}>Active Days</Text>
-                </View>
-                <View style={styles.streakDivider} />
-                <View style={styles.streakStatItem}>
-                  <Text style={styles.streakStatValue}>{activitySummary.totalDistance.toFixed(1)}</Text>
-                  <Text style={styles.streakStatLabel}>Total km</Text>
-                </View>
-                <View style={styles.streakDivider} />
-                <View style={styles.streakStatItem}>
-                  <Text style={styles.streakStatValue}>{formatTime(activitySummary.totalTime)}</Text>
-                  <Text style={styles.streakStatLabel}>Total Time</Text>
-                </View>
-              </View>
-            ) : null}
           </LinearGradient>
         </View>
 
@@ -2651,30 +2626,30 @@ const styles = StyleSheet.create({
     paddingTop: 16,
   },
   streakCard: {
-    borderRadius: 20,
-    padding: 20,
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
     shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
   streakTop: {
+    flexDirection: "row" as const,
     alignItems: "center" as const,
-    marginBottom: 16,
+    gap: 10,
   },
   streakNumber: {
-    fontSize: 48,
+    fontSize: 28,
     fontWeight: "900" as const,
     color: colors.white,
-    lineHeight: 54,
   },
   streakLabel: {
     fontSize: 16,
     fontWeight: "600" as const,
     color: colors.white,
     opacity: 0.9,
-    marginTop: 2,
   },
   streakStats: {
     flexDirection: "row" as const,
