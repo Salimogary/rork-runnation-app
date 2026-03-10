@@ -615,9 +615,64 @@ export default function ActivityScreen() {
       return;
     }
 
+    const durationParts = formData.duration.split(':');
+    const durationMinutes = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]) + parseInt(durationParts[2]) / 60;
+
+    if (formData.exerciseType === "Walk") {
+      if (distanceNum < 0.25) {
+        Alert.alert("Activity Not Saved", "A Walk must be at least 0.25 km to be saved.");
+        return;
+      }
+      if (durationMinutes < 10) {
+        Alert.alert("Activity Not Saved", "A Walk must be at least 10 minutes to be saved.");
+        return;
+      }
+    } else if (formData.exerciseType === "Run") {
+      if (distanceNum < 0.45) {
+        Alert.alert("Activity Not Saved", "A Run must be at least 0.45 km to be saved.");
+        return;
+      }
+      if (durationMinutes < 10) {
+        Alert.alert("Activity Not Saved", "A Run must be at least 10 minutes to be saved.");
+        return;
+      }
+    }
+
     setIsSubmitting(true);
 
     try {
+      const { count, error: countError } = await supabase
+        .from("External Activity Submissions")
+        .select("*", { count: "exact", head: true })
+        .eq("RegistrationID", user.id)
+        .eq("Activity_Date", formData.activityDate);
+
+      const { count: existingCount, error: existingError } = await supabase
+        .from("activities")
+        .select("*", { count: "exact", head: true })
+        .eq("RegistrationID", user.id)
+        .eq("Activity_Date", formData.activityDate);
+
+      if (countError) console.error("[ActivityLimit] Submissions count error:", countError);
+      if (existingError) console.error("[ActivityLimit] Activities count error:", existingError);
+
+      const totalToday = (count || 0) + (existingCount || 0);
+      console.log("[ActivityLimit] Total activities for", formData.activityDate, ":", totalToday);
+
+      if (totalToday >= 5) {
+        Alert.alert(
+          "Daily Limit Reached",
+          "You can only save a maximum of 5 activities per day. This activity was not saved."
+        );
+        setIsSubmitting(false);
+        return;
+      }
+    } catch (err: any) {
+      console.error("[ActivityLimit] Error checking daily limit:", err);
+    }
+
+    try {
+      console.log("[Submit External Activity] Passed all validations");
       console.log("[Submit External Activity] Submitting data:", {
         RegistrationID: user.id,
         Activity_Date: formData.activityDate,
