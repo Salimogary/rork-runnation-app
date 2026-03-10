@@ -13,6 +13,11 @@ const STORAGE_KEYS = {
 
 export async function setupNotifications(): Promise<boolean> {
   try {
+    if (Platform.OS === 'web') {
+      console.log('[Notifications] Web platform — skipping notification setup');
+      return false;
+    }
+
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
         shouldShowAlert: true,
@@ -22,11 +27,6 @@ export async function setupNotifications(): Promise<boolean> {
         shouldShowList: true,
       }),
     });
-
-    if (Platform.OS === 'web') {
-      console.log('[Notifications] Web platform — skipping permission request');
-      return false;
-    }
 
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
@@ -82,7 +82,7 @@ export async function sendLocalNotification(
         data: data ?? {},
         sound: 'default',
       },
-      trigger: null,
+      trigger: null as any,
     });
     console.log('[Notifications] Sent:', title);
   } catch (error) {
