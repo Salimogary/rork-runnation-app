@@ -402,10 +402,6 @@ export default function RegisterScreen() {
   };
 
   const handleStep2Complete = async () => {
-    if (selectedGoalIds.length === 0) {
-      Alert.alert('Select Goals', 'Please select at least one goal to continue.');
-      return;
-    }
 
     if (!registrationId) {
       console.error('[Register] No registrationId for step 2');
@@ -517,8 +513,15 @@ export default function RegisterScreen() {
     }
   };
 
+  const handleSkipGoals = async () => {
+    console.log('[Register] Skipping goals step');
+    setRegistrationStep(3);
+  };
+
   const handleSkipStep = async () => {
-    if (registrationStep === 3) {
+    if (registrationStep === 2) {
+      setRegistrationStep(3);
+    } else if (registrationStep === 3) {
       await AsyncStorage.setItem('hasSeenOnboarding', 'true');
       router.replace('/(tabs)');
     }
@@ -858,7 +861,7 @@ export default function RegisterScreen() {
       <View style={styles.stepHeader}>
         <Target size={32} color="#fff" />
         <Text style={styles.formTitle}>Set Your Goals</Text>
-        <Text style={styles.stepSubtitle}>What do you want to achieve? Select at least one (you can choose all).</Text>
+        <Text style={styles.stepSubtitle}>What do you want to achieve? Select any that apply, or skip this step.</Text>
       </View>
 
       {goalsLoading ? (
@@ -912,16 +915,16 @@ export default function RegisterScreen() {
 
       <View style={styles.buttonContainer}>
         <TouchableOpacity
-          style={[styles.button, styles.primaryButton, (isLoading || selectedGoalIds.length === 0) && styles.buttonDisabled]}
-          onPress={handleStep2Complete}
-          disabled={isLoading || selectedGoalIds.length === 0}
+          style={[styles.button, styles.primaryButton, isLoading && styles.buttonDisabled]}
+          onPress={selectedGoalIds.length > 0 ? handleStep2Complete : handleSkipGoals}
+          disabled={isLoading}
           activeOpacity={0.8}
         >
           {isLoading ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
             <View style={styles.buttonInner}>
-              <Text style={styles.buttonText}>Next: Club Membership</Text>
+              <Text style={styles.buttonText}>{selectedGoalIds.length > 0 ? 'Next: Club Membership' : 'Skip & Continue'}</Text>
               <ChevronRight size={20} color="#fff" />
             </View>
           )}
