@@ -63,6 +63,11 @@ interface HabitDeclaration {
   is_active: boolean;
 }
 
+interface GoalItem {
+  goal_id: number;
+  Goal: string;
+}
+
 interface RecentActivity {
   Pace_km_h: number;
   Activity_Date: string;
@@ -168,6 +173,52 @@ export default function GoalsScreen() {
       useNativeDriver: true,
     }).start();
   }, [fadeAnim]);
+
+  const { data: goalOrder = [] } = useQuery<GoalItem[]>({
+    queryKey: ["goalOrder"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("goals")
+        .select("goal_id, Goal")
+        .order("goal_id", { ascending: true });
+      if (error) {
+        console.error("[Goals] Error fetching goal order:", error);
+        return [];
+      }
+      console.log("[Goals] Goal order:", data);
+      return (data as GoalItem[]) || [];
+    },
+    staleTime: 60000,
+  });
+
+  const goalNameToKey = useCallback((goalName: string): string | null => {
+    const name = goalName.toLowerCase().trim();
+    if (name.includes("fitness") || name.includes("pace")) return "fitness";
+    if (name.includes("weight")) return "weight";
+    if (name.includes("health")) return "health";
+    if (name.includes("habit") || name.includes("discipline")) return "habit";
+    if (name.includes("medal")) return "medals";
+    if (name.includes("community") || name.includes("compete")) return "community";
+    if (name.includes("event")) return "events";
+    return null;
+  }, []);
+
+  const orderedGoalKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const g of goalOrder) {
+      const key = goalNameToKey(g.Goal);
+      if (key && !keys.includes(key)) {
+        keys.push(key);
+      }
+    }
+    const allKeys = ["fitness", "weight", "health", "habit", "medals", "community", "events"];
+    for (const k of allKeys) {
+      if (!keys.includes(k)) {
+        keys.push(k);
+      }
+    }
+    return keys;
+  }, [goalOrder, goalNameToKey]);
 
   const { data: fitnessGoal, isLoading: fitnessGoalLoading, refetch: refetchFitnessGoal } = useQuery<FitnessGoal | null>({
     queryKey: ["fitnessGoal", user?.id],
@@ -1415,16 +1466,22 @@ export default function GoalsScreen() {
 
   const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading && !habitDeclaration && !habitDeclarationLoading && !communityRanking && !communityRankLoading && !medalGoalData && !medalGoalLoading;
 
-  const allGoalTypes = useMemo(() => {
-    return [
-      { key: "fitness", label: "Improve Fitness", isTracked: !!fitnessGoal, icon: "zap" as const },
-      { key: "weight", label: "Weight Loss", isTracked: !!weightTargetGoal, icon: "scale" as const },
-      { key: "health", label: "General Health", isTracked: healthEntries.length > 0, icon: "heart" as const },
-      { key: "habit", label: "Build My Habit", isTracked: !!habitDeclaration, icon: "flame" as const },
-      { key: "medals", label: "Earn Medals", isTracked: !!medalGoalData && medalGoalData.enrolledEvents > 0, icon: "trophy" as const },
-      { key: "community", label: "Compete in Community", isTracked: !!communityRanking, icon: "users" as const },
-    ];
+  const allGoalTypesMap = useMemo(() => {
+    const map: Record<string, { key: string; label: string; isTracked: boolean; icon: "zap" | "scale" | "heart" | "flame" | "trophy" | "users" }> = {
+      fitness: { key: "fitness", label: "Improve Fitness", isTracked: !!fitnessGoal, icon: "zap" },
+      weight: { key: "weight", label: "Weight Loss", isTracked: !!weightTargetGoal, icon: "scale" },
+      health: { key: "health", label: "General Health", isTracked: healthEntries.length > 0, icon: "heart" },
+      habit: { key: "habit", label: "Build My Habit", isTracked: !!habitDeclaration, icon: "flame" },
+      medals: { key: "medals", label: "Earn Medals", isTracked: !!medalGoalData && medalGoalData.enrolledEvents > 0, icon: "trophy" },
+      community: { key: "community", label: "Compete in Community", isTracked: !!communityRanking, icon: "users" },
+    };
+    return map;
   }, [fitnessGoal, weightTargetGoal, healthEntries, habitDeclaration, medalGoalData, communityRanking]);
+
+  const allGoalTypes = useMemo(() => {
+    const goalKeys = orderedGoalKeys.filter(k => k !== "events");
+    return goalKeys.map(k => allGoalTypesMap[k]).filter(Boolean);
+  }, [orderedGoalKeys, allGoalTypesMap]);
 
   const trackedGoalsCount = useMemo(() => allGoalTypes.filter(g => g.isTracked).length, [allGoalTypes]);
   const untrackedGoals = useMemo(() => allGoalTypes.filter(g => !g.isTracked), [allGoalTypes]);
@@ -1446,718 +1503,734 @@ export default function GoalsScreen() {
           </LinearGradient>
         </View>
 
-        {fitnessGoal && fitnessProgress ? (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Zap size={18} color={colors.primary} />
-              <Text style={styles.sectionTitle}>Improve Fitness</Text>
-              <TouchableOpacity onPress={openEditGoalForm} style={styles.editButton} activeOpacity={0.7}>
-                <Text style={styles.editButtonText}>Edit</Text>
-                <ChevronRight size={14} color={colors.primary} />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.fitnessCard}>
-              <View style={styles.paceComparisonRow}>
-                <View style={styles.paceBlock}>
-                  <Text style={styles.paceBlockLabel}>Current Avg</Text>
-                  <Text style={[styles.paceBlockValue, fitnessProgress.isAhead ? styles.paceGood : styles.paceBehind]}>
-                    {formatPaceMinPerKm(fitnessProgress.avgPaceKmh)}
-                  </Text>
-                  <Text style={styles.paceBlockUnit}>min/km</Text>
+        {orderedGoalKeys.map((goalKey) => {
+          if (goalKey === "fitness") {
+            return fitnessGoal && fitnessProgress ? (
+              <View key="fitness" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Zap size={18} color={colors.primary} />
+                  <Text style={styles.sectionTitle}>Improve Fitness</Text>
+                  <TouchableOpacity onPress={openEditGoalForm} style={styles.editButton} activeOpacity={0.7}>
+                    <Text style={styles.editButtonText}>Edit</Text>
+                    <ChevronRight size={14} color={colors.primary} />
+                  </TouchableOpacity>
                 </View>
-                <View style={styles.paceArrowContainer}>
-                  {fitnessProgress.isAhead ? (
-                    <View style={styles.statusPillGood}>
-                      <TrendingUp size={14} color="#10B981" />
-                      <Text style={styles.statusPillTextGood}>On Track</Text>
-                    </View>
-                  ) : (
-                    <View style={styles.statusPillBehind}>
-                      <TrendingDown size={14} color="#EF4444" />
-                      <Text style={styles.statusPillTextBehind}>Behind</Text>
-                    </View>
-                  )}
-                </View>
-                <View style={styles.paceBlock}>
-                  <Text style={styles.paceBlockLabel}>Target</Text>
-                  <Text style={styles.paceBlockValueTarget}>
-                    {formatPaceMinPerKm(fitnessProgress.targetPaceKmh)}
-                  </Text>
-                  <Text style={styles.paceBlockUnit}>min/km</Text>
-                </View>
-              </View>
-
-              <View style={styles.fitnessProgressSection}>
-                <View style={styles.fitnessProgressInfo}>
-                  <Text style={styles.fitnessProgressLabel}>Progress</Text>
-                  <Text style={styles.fitnessProgressPercent}>{Math.round(fitnessProgress.progressPercent)}%</Text>
-                </View>
-                <View style={styles.fitnessProgressTrack}>
-                  <LinearGradient
-                    colors={fitnessProgress.isAhead ? ["#10B981", "#34D399"] : ["#F59E0B", "#FBBF24"]}
-                    style={[styles.fitnessProgressFill, { width: `${fitnessProgress.progressPercent}%` }]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.fitnessMetaRow}>
-                <View style={styles.fitnessMetaItem}>
-                  <Clock size={12} color={colors.textSecondary} />
-                  <Text style={styles.fitnessMetaText}>
-                    {fitnessProgress.daysLeft > 0 ? `${fitnessProgress.daysLeft} days left` : "Target date passed"}
-                  </Text>
-                </View>
-                <View style={styles.fitnessMetaItem}>
-                  <Calendar size={12} color={colors.textSecondary} />
-                  <Text style={styles.fitnessMetaText}>
-                    By {formatGoalDate(fitnessGoal.target_date)}
-                  </Text>
-                </View>
-              </View>
-
-              <Text style={styles.fitnessFootnote}>
-                Based on last {fitnessProgress.activitiesUsed} {fitnessProgress.activitiesUsed === 1 ? "activity" : "activities"}
-              </Text>
-            </View>
-          </View>
-        ) : fitnessGoal && recentActivities.length === 0 ? (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Zap size={18} color={colors.primary} />
-              <Text style={styles.sectionTitle}>Improve Fitness</Text>
-              <TouchableOpacity onPress={openEditGoalForm} style={styles.editButton} activeOpacity={0.7}>
-                <Text style={styles.editButtonText}>Edit</Text>
-                <ChevronRight size={14} color={colors.primary} />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.fitnessCard}>
-              <View style={styles.noActivitiesInfo}>
-                <Zap size={28} color={colors.textLight} />
-                <Text style={styles.noActivitiesTitle}>No Activities Yet</Text>
-                <Text style={styles.noActivitiesText}>
-                  Complete your first activity to start tracking your pace against your target of {formatPaceMinPerKm(fitnessGoal.target_pace)} min/km
-                </Text>
-              </View>
-            </View>
-          </View>
-        ) : !fitnessGoal && !fitnessGoalLoading ? (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Zap size={18} color={colors.primary} />
-              <Text style={styles.sectionTitle}>Improve Fitness</Text>
-            </View>
-            <TouchableOpacity style={styles.setupGoalCard} onPress={openEditGoalForm} activeOpacity={0.8}>
-              <LinearGradient colors={["#FF6B35", "#FF8C42"]} style={styles.setupGoalGradient}>
-                <Zap size={32} color={colors.white} />
-                <Text style={styles.setupGoalTitle}>Set Your Pace Goal</Text>
-                <Text style={styles.setupGoalSubtext}>
-                  Track your average pace against a target to improve your fitness over time
-                </Text>
-                <View style={styles.setupGoalButton}>
-                  <Text style={styles.setupGoalButtonText}>Get Started</Text>
-                  <ChevronRight size={16} color={colors.primary} />
-                </View>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
-        {weightTargetGoal && weightProgress ? (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Scale size={18} color={colors.primary} />
-              <Text style={styles.sectionTitle}>Weight Loss</Text>
-              <TouchableOpacity onPress={openEditWeightTarget} style={styles.editButton} activeOpacity={0.7}>
-                <Text style={styles.editButtonText}>Edit</Text>
-                <ChevronRight size={14} color={colors.primary} />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.weightCard}>
-              <View style={styles.weightRow}>
-                <View style={styles.weightItem}>
-                  <Text style={[styles.weightValue, weightProgress.current !== null && weightProgress.current <= weightProgress.target ? styles.paceGood : styles.paceBehind]}>
-                    {weightProgress.current !== null ? weightProgress.current.toFixed(1) : "--"}
-                  </Text>
-                  <Text style={styles.weightLabel}>Current (kg)</Text>
-                </View>
-                <View style={styles.weightArrow}>
-                  {weightProgress.current !== null && weightProgress.progressPercent >= 50 ? (
-                    <View style={styles.statusPillGood}>
-                      <TrendingDown size={14} color="#10B981" />
-                      <Text style={styles.statusPillTextGood}>On Track</Text>
-                    </View>
-                  ) : weightProgress.current !== null ? (
-                    <View style={styles.statusPillBehind}>
-                      <TrendingUp size={14} color="#EF4444" />
-                      <Text style={styles.statusPillTextBehind}>Behind</Text>
-                    </View>
-                  ) : (
-                    <Scale size={24} color={colors.textLight} />
-                  )}
-                </View>
-                <View style={styles.weightItem}>
-                  <Text style={styles.weightValueTarget}>{weightProgress.target.toFixed(1)}</Text>
-                  <Text style={styles.weightLabel}>Target (kg)</Text>
-                </View>
-              </View>
-
-              {weightProgress.current !== null && (
-                <View style={styles.fitnessProgressSection}>
-                  <View style={styles.fitnessProgressInfo}>
-                    <Text style={styles.fitnessProgressLabel}>Progress</Text>
-                    <Text style={styles.fitnessProgressPercent}>{Math.round(weightProgress.progressPercent)}%</Text>
-                  </View>
-                  <View style={styles.fitnessProgressTrack}>
-                    <LinearGradient
-                      colors={weightProgress.progressPercent >= 50 ? ["#10B981", "#34D399"] : ["#F59E0B", "#FBBF24"]}
-                      style={[styles.fitnessProgressFill, { width: `${weightProgress.progressPercent}%` }]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                    />
-                  </View>
-                </View>
-              )}
-
-              <View style={styles.fitnessMetaRow}>
-                <View style={styles.fitnessMetaItem}>
-                  <Clock size={12} color={colors.textSecondary} />
-                  <Text style={styles.fitnessMetaText}>
-                    {weightProgress.daysLeft > 0 ? `${weightProgress.daysLeft} days left` : "Target date passed"}
-                  </Text>
-                </View>
-                <View style={styles.fitnessMetaItem}>
-                  <Calendar size={12} color={colors.textSecondary} />
-                  <Text style={styles.fitnessMetaText}>
-                    By {formatGoalDate(weightProgress.targetDate)}
-                  </Text>
-                </View>
-              </View>
-
-              {weightProgress.current !== null && (
-                <Text style={styles.weightDiff}>
-                  {weightProgress.diff.toFixed(1)} kg {weightProgress.isLosing ? "to lose" : "reached target!"}
-                </Text>
-              )}
-
-              {weightProgress.entries.length > 1 && (
-                <View style={styles.weightHistorySection}>
-                  <Text style={styles.weightHistoryTitle}>Recent Entries</Text>
-                  {weightProgress.entries.slice(-5).reverse().map((entry) => (
-                    <View key={entry.id} style={styles.weightHistoryRow}>
-                      <Text style={styles.weightHistoryDate}>{formatGoalDate(entry.date)}</Text>
-                      <Text style={styles.weightHistoryValue}>{entry.weight.toFixed(1)} kg</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-
-              {weightProgress.current === null && (
-                <View style={styles.noActivitiesInfo}>
-                  <Scale size={28} color={colors.textLight} />
-                  <Text style={styles.noActivitiesTitle}>No Weight Logged Yet</Text>
-                  <Text style={styles.noActivitiesText}>
-                    Log your first weight entry to start tracking your progress toward {weightProgress.target.toFixed(1)} kg
-                  </Text>
-                </View>
-              )}
-
-              <TouchableOpacity
-                style={styles.logWeightButton}
-                onPress={() => setShowWeightLogForm(true)}
-                activeOpacity={0.8}
-              >
-                <Plus size={16} color={colors.white} />
-                <Text style={styles.logWeightButtonText}>Log Weight</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : !weightTargetGoal && !weightTargetLoading ? (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Scale size={18} color={colors.primary} />
-              <Text style={styles.sectionTitle}>Weight Loss</Text>
-            </View>
-            <TouchableOpacity style={styles.setupGoalCard} onPress={openEditWeightTarget} activeOpacity={0.8}>
-              <LinearGradient colors={["#10B981", "#34D399"]} style={styles.setupGoalGradient}>
-                <Scale size={32} color={colors.white} />
-                <Text style={styles.setupGoalTitle}>Set Your Weight Goal</Text>
-                <Text style={styles.setupGoalSubtext}>
-                  Track your weight loss by logging your weight weekly and measuring progress toward your target
-                </Text>
-                <View style={styles.setupGoalButton}>
-                  <Text style={[styles.setupGoalButtonText, { color: "#10B981" }]}>Get Started</Text>
-                  <ChevronRight size={16} color="#10B981" />
-                </View>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
-        {healthScore ? (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Heart size={18} color="#E11D48" />
-              <Text style={styles.sectionTitle}>General Health</Text>
-              <TouchableOpacity onPress={() => setShowHealthForm(true)} style={styles.editButton} activeOpacity={0.7}>
-                <Text style={styles.editButtonText}>Log</Text>
-                <Plus size={14} color={colors.primary} />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.healthCard}>
-              <View style={styles.healthScoreCircleContainer}>
-                <View style={[styles.healthScoreCircle, { borderColor: getHealthScoreColor(healthScore.overall) }]}>
-                  <Text style={[styles.healthScoreNumber, { color: getHealthScoreColor(healthScore.overall) }]}>
-                    {healthScore.overall}
-                  </Text>
-                  <Text style={styles.healthScoreOutOf}>/100</Text>
-                </View>
-                <View style={[styles.healthScorePill, { backgroundColor: getHealthScoreColor(healthScore.overall) + "18" }]}>
-                  <Text style={[styles.healthScorePillText, { color: getHealthScoreColor(healthScore.overall) }]}>
-                    {getHealthScoreLabel(healthScore.overall)}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.healthBreakdown}>
-                <View style={styles.healthMetricRow}>
-                  <View style={styles.healthMetricIcon}>
-                    <Footprints size={16} color="#4A90E2" />
-                  </View>
-                  <View style={styles.healthMetricInfo}>
-                    <Text style={styles.healthMetricLabel}>Steps</Text>
-                    <Text style={styles.healthMetricValue}>{healthScore.steps.avg.toLocaleString()}/day</Text>
-                  </View>
-                  <View style={styles.healthMetricBarContainer}>
-                    <View style={styles.healthMetricBarTrack}>
-                      <View style={[styles.healthMetricBarFill, { width: `${healthScore.steps.score}%`, backgroundColor: "#4A90E2" }]} />
-                    </View>
-                    <Text style={styles.healthMetricScore}>{healthScore.steps.score}</Text>
-                  </View>
-                </View>
-
-                {healthScore.heartRate && (
-                  <View style={styles.healthMetricRow}>
-                    <View style={styles.healthMetricIcon}>
-                      <Heart size={16} color="#E11D48" />
-                    </View>
-                    <View style={styles.healthMetricInfo}>
-                      <Text style={styles.healthMetricLabel}>Heart Rate</Text>
-                      <Text style={styles.healthMetricValue}>{healthScore.heartRate.avg} bpm</Text>
-                    </View>
-                    <View style={styles.healthMetricBarContainer}>
-                      <View style={styles.healthMetricBarTrack}>
-                        <View style={[styles.healthMetricBarFill, { width: `${healthScore.heartRate.score}%`, backgroundColor: "#E11D48" }]} />
-                      </View>
-                      <Text style={styles.healthMetricScore}>{healthScore.heartRate.score}</Text>
-                    </View>
-                  </View>
-                )}
-
-                {healthScore.sleep && (
-                  <View style={styles.healthMetricRow}>
-                    <View style={styles.healthMetricIcon}>
-                      <Moon size={16} color="#8B5CF6" />
-                    </View>
-                    <View style={styles.healthMetricInfo}>
-                      <Text style={styles.healthMetricLabel}>Sleep</Text>
-                      <Text style={styles.healthMetricValue}>{healthScore.sleep.avg}h/night</Text>
-                    </View>
-                    <View style={styles.healthMetricBarContainer}>
-                      <View style={styles.healthMetricBarTrack}>
-                        <View style={[styles.healthMetricBarFill, { width: `${healthScore.sleep.score}%`, backgroundColor: "#8B5CF6" }]} />
-                      </View>
-                      <Text style={styles.healthMetricScore}>{healthScore.sleep.score}</Text>
-                    </View>
-                  </View>
-                )}
-
-                {healthScore.spo2 && (
-                  <View style={styles.healthMetricRow}>
-                    <View style={styles.healthMetricIcon}>
-                      <Droplets size={16} color="#0EA5E9" />
-                    </View>
-                    <View style={styles.healthMetricInfo}>
-                      <Text style={styles.healthMetricLabel}>Blood Oxygen</Text>
-                      <Text style={styles.healthMetricValue}>{healthScore.spo2.avg}% SpO2</Text>
-                    </View>
-                    <View style={styles.healthMetricBarContainer}>
-                      <View style={styles.healthMetricBarTrack}>
-                        <View style={[styles.healthMetricBarFill, { width: `${healthScore.spo2.score}%`, backgroundColor: "#0EA5E9" }]} />
-                      </View>
-                      <Text style={styles.healthMetricScore}>{healthScore.spo2.score}</Text>
-                    </View>
-                  </View>
-                )}
-              </View>
-
-              <Text style={styles.fitnessFootnote}>
-                Based on last {healthScore.entriesUsed} {healthScore.entriesUsed === 1 ? "day" : "days"}
-              </Text>
-
-              {healthEntries.length > 0 && (
-                <View style={styles.healthHistorySection}>
-                  <Text style={styles.weightHistoryTitle}>Recent Entries</Text>
-                  {healthEntries.slice(0, 5).map((entry) => (
-                    <View key={entry.health_id} style={styles.healthHistoryRow}>
-                      <Text style={styles.weightHistoryDate}>{formatGoalDate(entry.record_date)}</Text>
-                      <View style={styles.healthHistoryStats}>
-                        <Text style={styles.healthHistoryStat}>{entry.steps?.toLocaleString() ?? "-"} steps</Text>
-                        {entry.heart_rate_bpm ? <Text style={styles.healthHistoryStatSub}>{entry.heart_rate_bpm} bpm</Text> : null}
-                        {entry.blood_oxygen_spo2 ? <Text style={styles.healthHistoryStatSub}>{entry.blood_oxygen_spo2}% SpO2</Text> : null}
-                      </View>
-                    </View>
-                  ))}
-                </View>
-              )}
-            </View>
-          </View>
-        ) : !healthLoading ? (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Heart size={18} color="#E11D48" />
-              <Text style={styles.sectionTitle}>General Health</Text>
-            </View>
-            <TouchableOpacity style={styles.setupGoalCard} onPress={() => setShowHealthForm(true)} activeOpacity={0.8}>
-              <LinearGradient colors={["#E11D48", "#F43F5E"]} style={styles.setupGoalGradient}>
-                <Heart size={32} color={colors.white} />
-                <Text style={styles.setupGoalTitle}>Track Your Health</Text>
-                <Text style={styles.setupGoalSubtext}>
-                  Enter daily data from your smartwatch to get an overall health score based on steps, heart rate, sleep, and blood oxygen
-                </Text>
-                <View style={styles.setupGoalButton}>
-                  <Text style={[styles.setupGoalButtonText, { color: "#E11D48" }]}>Log Today</Text>
-                  <ChevronRight size={16} color="#E11D48" />
-                </View>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
-        {habitDeclaration ? (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Flame size={18} color="#0D9488" />
-              <Text style={styles.sectionTitle}>Build My Habit</Text>
-              <TouchableOpacity onPress={openEditHabit} style={styles.editButton} activeOpacity={0.7}>
-                <Text style={styles.editButtonText}>Edit</Text>
-                <ChevronRight size={14} color={colors.primary} />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.habitCard}>
-              <View style={styles.habitDeclarationRow}>
-                <Text style={styles.habitDeclarationText}>
-                  I <Text style={styles.habitHighlight}>{habitDeclaration.activity_type}</Text>{" "}
-                  <Text style={styles.habitHighlight}>{habitDeclaration.target_amount}</Text>{" "}
-                  <Text style={styles.habitHighlight}>{habitDeclaration.unit}</Text>{" "}
-                  <Text style={styles.habitHighlight}>{habitDeclaration.frequency}</Text>
-                </Text>
-              </View>
-
-              <View style={styles.habitDateRow}>
-                <Calendar size={12} color={colors.textSecondary} />
-                <Text style={styles.habitDateText}>
-                  Since {formatGoalDate(habitDeclaration.start_date)}
-                </Text>
-              </View>
-
-              {habitCommitment ? (
-                <>
-                  <View style={styles.habitCommitmentHeader}>
-                    <View style={[styles.habitCommitmentPill, { backgroundColor: getCommitmentColor(habitCommitment.percent) + "18" }]}>
-                      <Text style={[styles.habitCommitmentPillText, { color: getCommitmentColor(habitCommitment.percent) }]}>
-                        {getCommitmentLabel(habitCommitment.percent)}
+                <View style={styles.fitnessCard}>
+                  <View style={styles.paceComparisonRow}>
+                    <View style={styles.paceBlock}>
+                      <Text style={styles.paceBlockLabel}>Current Avg</Text>
+                      <Text style={[styles.paceBlockValue, fitnessProgress.isAhead ? styles.paceGood : styles.paceBehind]}>
+                        {formatPaceMinPerKm(fitnessProgress.avgPaceKmh)}
                       </Text>
+                      <Text style={styles.paceBlockUnit}>min/km</Text>
+                    </View>
+                    <View style={styles.paceArrowContainer}>
+                      {fitnessProgress.isAhead ? (
+                        <View style={styles.statusPillGood}>
+                          <TrendingUp size={14} color="#10B981" />
+                          <Text style={styles.statusPillTextGood}>On Track</Text>
+                        </View>
+                      ) : (
+                        <View style={styles.statusPillBehind}>
+                          <TrendingDown size={14} color="#EF4444" />
+                          <Text style={styles.statusPillTextBehind}>Behind</Text>
+                        </View>
+                      )}
+                    </View>
+                    <View style={styles.paceBlock}>
+                      <Text style={styles.paceBlockLabel}>Target</Text>
+                      <Text style={styles.paceBlockValueTarget}>
+                        {formatPaceMinPerKm(fitnessProgress.targetPaceKmh)}
+                      </Text>
+                      <Text style={styles.paceBlockUnit}>min/km</Text>
                     </View>
                   </View>
+
                   <View style={styles.fitnessProgressSection}>
                     <View style={styles.fitnessProgressInfo}>
-                      <Text style={styles.fitnessProgressLabel}>Commitment</Text>
-                      <Text style={styles.fitnessProgressPercent}>{habitCommitment.percent}%</Text>
+                      <Text style={styles.fitnessProgressLabel}>Progress</Text>
+                      <Text style={styles.fitnessProgressPercent}>{Math.round(fitnessProgress.progressPercent)}%</Text>
                     </View>
                     <View style={styles.fitnessProgressTrack}>
                       <LinearGradient
-                        colors={habitCommitment.percent >= 70 ? ["#0D9488", "#14B8A6"] : habitCommitment.percent >= 40 ? ["#F59E0B", "#FBBF24"] : ["#EF4444", "#F87171"]}
-                        style={[styles.fitnessProgressFill, { width: `${Math.max(2, habitCommitment.percent)}%` }]}
+                        colors={fitnessProgress.isAhead ? ["#10B981", "#34D399"] : ["#F59E0B", "#FBBF24"]}
+                        style={[styles.fitnessProgressFill, { width: `${fitnessProgress.progressPercent}%` }]}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 0 }}
                       />
                     </View>
                   </View>
 
-                  <Text style={styles.habitCommitmentDetail}>
-                    {habitCommitment.periodsMet} of {habitCommitment.periodsElapsed} {getFrequencyPeriodLabel(habitDeclaration.frequency)} met
+                  <View style={styles.fitnessMetaRow}>
+                    <View style={styles.fitnessMetaItem}>
+                      <Clock size={12} color={colors.textSecondary} />
+                      <Text style={styles.fitnessMetaText}>
+                        {fitnessProgress.daysLeft > 0 ? `${fitnessProgress.daysLeft} days left` : "Target date passed"}
+                      </Text>
+                    </View>
+                    <View style={styles.fitnessMetaItem}>
+                      <Calendar size={12} color={colors.textSecondary} />
+                      <Text style={styles.fitnessMetaText}>
+                        By {formatGoalDate(fitnessGoal.target_date)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.fitnessFootnote}>
+                    Based on last {fitnessProgress.activitiesUsed} {fitnessProgress.activitiesUsed === 1 ? "activity" : "activities"}
                   </Text>
-                </>
-              ) : (
-                <View style={styles.noActivitiesInfo}>
-                  <Flame size={24} color={colors.textLight} />
-                  <Text style={styles.noActivitiesText}>
-                    Start logging activities to track your commitment
-                  </Text>
-                </View>
-              )}
-            </View>
-          </View>
-        ) : !habitDeclarationLoading ? (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Flame size={18} color="#0D9488" />
-              <Text style={styles.sectionTitle}>Build My Habit</Text>
-            </View>
-            <TouchableOpacity style={styles.setupGoalCard} onPress={() => { resetHabitForm(); setShowHabitModal(true); }} activeOpacity={0.8}>
-              <LinearGradient colors={["#0D9488", "#14B8A6"]} style={styles.setupGoalGradient}>
-                <Flame size={32} color={colors.white} />
-                <Text style={styles.setupGoalTitle}>Build My Habit</Text>
-                <Text style={styles.setupGoalSubtext}>
-                  Make your declaration and track your commitment
-                </Text>
-                <View style={styles.setupGoalButton}>
-                  <Text style={[styles.setupGoalButtonText, { color: "#0D9488" }]}>Make Declaration</Text>
-                  <ChevronRight size={16} color="#0D9488" />
-                </View>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
-        {medalGoalData ? (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Trophy size={18} color="#D97706" />
-              <Text style={styles.sectionTitle}>Earn Medals</Text>
-            </View>
-            <View style={styles.medalGoalCard}>
-              <View style={styles.medalRatiosRow}>
-                <View style={styles.medalRatioBlock}>
-                  <View style={styles.medalRatioCircle}>
-                    <Text style={styles.medalRatioNumber}>{medalGoalData.enrolledEvents}</Text>
-                    <Text style={styles.medalRatioOf}>/ {medalGoalData.totalEvents}</Text>
-                  </View>
-                  <Text style={styles.medalRatioLabel}>Races Enrolled</Text>
-                  <View style={styles.medalRatioBarTrack}>
-                    <View style={[styles.medalRatioBarFill, { width: `${medalGoalData.enrollmentRatio}%`, backgroundColor: "#D97706" }]} />
-                  </View>
-                  <Text style={styles.medalRatioPercent}>{Math.round(medalGoalData.enrollmentRatio)}%</Text>
-                </View>
-
-                <View style={styles.medalRatioDivider} />
-
-                <View style={styles.medalRatioBlock}>
-                  <View style={styles.medalRatioCircle}>
-                    <Text style={[styles.medalRatioNumber, { color: "#059669" }]}>{medalGoalData.medalsEarned}</Text>
-                    <Text style={styles.medalRatioOf}>/ {medalGoalData.enrolledEvents}</Text>
-                  </View>
-                  <Text style={styles.medalRatioLabel}>Medals Earned</Text>
-                  <View style={styles.medalRatioBarTrack}>
-                    <View style={[styles.medalRatioBarFill, { width: `${medalGoalData.medalRatio}%`, backgroundColor: "#059669" }]} />
-                  </View>
-                  <Text style={styles.medalRatioPercent}>{Math.round(medalGoalData.medalRatio)}%</Text>
                 </View>
               </View>
+            ) : fitnessGoal && recentActivities.length === 0 ? (
+              <View key="fitness" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Zap size={18} color={colors.primary} />
+                  <Text style={styles.sectionTitle}>Improve Fitness</Text>
+                  <TouchableOpacity onPress={openEditGoalForm} style={styles.editButton} activeOpacity={0.7}>
+                    <Text style={styles.editButtonText}>Edit</Text>
+                    <ChevronRight size={14} color={colors.primary} />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.fitnessCard}>
+                  <View style={styles.noActivitiesInfo}>
+                    <Zap size={28} color={colors.textLight} />
+                    <Text style={styles.noActivitiesTitle}>No Activities Yet</Text>
+                    <Text style={styles.noActivitiesText}>
+                      Complete your first activity to start tracking your pace against your target of {formatPaceMinPerKm(fitnessGoal.target_pace)} min/km
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ) : !fitnessGoal && !fitnessGoalLoading ? (
+              <View key="fitness" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Zap size={18} color={colors.primary} />
+                  <Text style={styles.sectionTitle}>Improve Fitness</Text>
+                </View>
+                <TouchableOpacity style={styles.setupGoalCard} onPress={openEditGoalForm} activeOpacity={0.8}>
+                  <LinearGradient colors={["#FF6B35", "#FF8C42"]} style={styles.setupGoalGradient}>
+                    <Zap size={32} color={colors.white} />
+                    <Text style={styles.setupGoalTitle}>Set Your Pace Goal</Text>
+                    <Text style={styles.setupGoalSubtext}>
+                      Track your average pace against a target to improve your fitness over time
+                    </Text>
+                    <View style={styles.setupGoalButton}>
+                      <Text style={styles.setupGoalButtonText}>Get Started</Text>
+                      <ChevronRight size={16} color={colors.primary} />
+                    </View>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            ) : null;
+          }
 
-              {medalGoalData.events.filter(e => e.isEnrolled).length > 0 && (
-                <View style={styles.medalEventsList}>
-                  <Text style={styles.weightHistoryTitle}>Enrolled Events</Text>
-                  {medalGoalData.events.filter(e => e.isEnrolled).map((event, index) => (
-                    <View key={index} style={styles.medalEventRow}>
-                      <View style={styles.medalEventInfo}>
-                        <Text style={styles.medalEventName} numberOfLines={1}>{event.eventName}</Text>
+          if (goalKey === "weight") {
+            return weightTargetGoal && weightProgress ? (
+              <View key="weight" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Scale size={18} color={colors.primary} />
+                  <Text style={styles.sectionTitle}>Weight Loss</Text>
+                  <TouchableOpacity onPress={openEditWeightTarget} style={styles.editButton} activeOpacity={0.7}>
+                    <Text style={styles.editButtonText}>Edit</Text>
+                    <ChevronRight size={14} color={colors.primary} />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.weightCard}>
+                  <View style={styles.weightRow}>
+                    <View style={styles.weightItem}>
+                      <Text style={[styles.weightValue, weightProgress.current !== null && weightProgress.current <= weightProgress.target ? styles.paceGood : styles.paceBehind]}>
+                        {weightProgress.current !== null ? weightProgress.current.toFixed(1) : "--"}
+                      </Text>
+                      <Text style={styles.weightLabel}>Current (kg)</Text>
+                    </View>
+                    <View style={styles.weightArrow}>
+                      {weightProgress.current !== null && weightProgress.progressPercent >= 50 ? (
+                        <View style={styles.statusPillGood}>
+                          <TrendingDown size={14} color="#10B981" />
+                          <Text style={styles.statusPillTextGood}>On Track</Text>
+                        </View>
+                      ) : weightProgress.current !== null ? (
+                        <View style={styles.statusPillBehind}>
+                          <TrendingUp size={14} color="#EF4444" />
+                          <Text style={styles.statusPillTextBehind}>Behind</Text>
+                        </View>
+                      ) : (
+                        <Scale size={24} color={colors.textLight} />
+                      )}
+                    </View>
+                    <View style={styles.weightItem}>
+                      <Text style={styles.weightValueTarget}>{weightProgress.target.toFixed(1)}</Text>
+                      <Text style={styles.weightLabel}>Target (kg)</Text>
+                    </View>
+                  </View>
+
+                  {weightProgress.current !== null && (
+                    <View style={styles.fitnessProgressSection}>
+                      <View style={styles.fitnessProgressInfo}>
+                        <Text style={styles.fitnessProgressLabel}>Progress</Text>
+                        <Text style={styles.fitnessProgressPercent}>{Math.round(weightProgress.progressPercent)}%</Text>
                       </View>
+                      <View style={styles.fitnessProgressTrack}>
+                        <LinearGradient
+                          colors={weightProgress.progressPercent >= 50 ? ["#10B981", "#34D399"] : ["#F59E0B", "#FBBF24"]}
+                          style={[styles.fitnessProgressFill, { width: `${weightProgress.progressPercent}%` }]}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 0 }}
+                        />
+                      </View>
+                    </View>
+                  )}
+
+                  <View style={styles.fitnessMetaRow}>
+                    <View style={styles.fitnessMetaItem}>
+                      <Clock size={12} color={colors.textSecondary} />
+                      <Text style={styles.fitnessMetaText}>
+                        {weightProgress.daysLeft > 0 ? `${weightProgress.daysLeft} days left` : "Target date passed"}
+                      </Text>
+                    </View>
+                    <View style={styles.fitnessMetaItem}>
+                      <Calendar size={12} color={colors.textSecondary} />
+                      <Text style={styles.fitnessMetaText}>
+                        By {formatGoalDate(weightProgress.targetDate)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {weightProgress.current !== null && (
+                    <Text style={styles.weightDiff}>
+                      {weightProgress.diff.toFixed(1)} kg {weightProgress.isLosing ? "to lose" : "reached target!"}
+                    </Text>
+                  )}
+
+                  {weightProgress.entries.length > 1 && (
+                    <View style={styles.weightHistorySection}>
+                      <Text style={styles.weightHistoryTitle}>Recent Entries</Text>
+                      {weightProgress.entries.slice(-5).reverse().map((entry) => (
+                        <View key={entry.id} style={styles.weightHistoryRow}>
+                          <Text style={styles.weightHistoryDate}>{formatGoalDate(entry.date)}</Text>
+                          <Text style={styles.weightHistoryValue}>{entry.weight.toFixed(1)} kg</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {weightProgress.current === null && (
+                    <View style={styles.noActivitiesInfo}>
+                      <Scale size={28} color={colors.textLight} />
+                      <Text style={styles.noActivitiesTitle}>No Weight Logged Yet</Text>
+                      <Text style={styles.noActivitiesText}>
+                        Log your first weight entry to start tracking your progress toward {weightProgress.target.toFixed(1)} kg
+                      </Text>
+                    </View>
+                  )}
+
+                  <TouchableOpacity
+                    style={styles.logWeightButton}
+                    onPress={() => setShowWeightLogForm(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Plus size={16} color={colors.white} />
+                    <Text style={styles.logWeightButtonText}>Log Weight</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : !weightTargetGoal && !weightTargetLoading ? (
+              <View key="weight" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Scale size={18} color={colors.primary} />
+                  <Text style={styles.sectionTitle}>Weight Loss</Text>
+                </View>
+                <TouchableOpacity style={styles.setupGoalCard} onPress={openEditWeightTarget} activeOpacity={0.8}>
+                  <LinearGradient colors={["#10B981", "#34D399"]} style={styles.setupGoalGradient}>
+                    <Scale size={32} color={colors.white} />
+                    <Text style={styles.setupGoalTitle}>Set Your Weight Goal</Text>
+                    <Text style={styles.setupGoalSubtext}>
+                      Track your weight loss by logging your weight weekly and measuring progress toward your target
+                    </Text>
+                    <View style={styles.setupGoalButton}>
+                      <Text style={[styles.setupGoalButtonText, { color: "#10B981" }]}>Get Started</Text>
+                      <ChevronRight size={16} color="#10B981" />
+                    </View>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            ) : null;
+          }
+
+          if (goalKey === "health") {
+            return healthScore ? (
+              <View key="health" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Heart size={18} color="#E11D48" />
+                  <Text style={styles.sectionTitle}>General Health</Text>
+                  <TouchableOpacity onPress={() => setShowHealthForm(true)} style={styles.editButton} activeOpacity={0.7}>
+                    <Text style={styles.editButtonText}>Log</Text>
+                    <Plus size={14} color={colors.primary} />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.healthCard}>
+                  <View style={styles.healthScoreCircleContainer}>
+                    <View style={[styles.healthScoreCircle, { borderColor: getHealthScoreColor(healthScore.overall) }]}>
+                      <Text style={[styles.healthScoreNumber, { color: getHealthScoreColor(healthScore.overall) }]}>
+                        {healthScore.overall}
+                      </Text>
+                      <Text style={styles.healthScoreOutOf}>/100</Text>
+                    </View>
+                    <View style={[styles.healthScorePill, { backgroundColor: getHealthScoreColor(healthScore.overall) + "18" }]}>
+                      <Text style={[styles.healthScorePillText, { color: getHealthScoreColor(healthScore.overall) }]}>
+                        {getHealthScoreLabel(healthScore.overall)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.healthBreakdown}>
+                    <View style={styles.healthMetricRow}>
+                      <View style={styles.healthMetricIcon}>
+                        <Footprints size={16} color="#4A90E2" />
+                      </View>
+                      <View style={styles.healthMetricInfo}>
+                        <Text style={styles.healthMetricLabel}>Steps</Text>
+                        <Text style={styles.healthMetricValue}>{healthScore.steps.avg.toLocaleString()}/day</Text>
+                      </View>
+                      <View style={styles.healthMetricBarContainer}>
+                        <View style={styles.healthMetricBarTrack}>
+                          <View style={[styles.healthMetricBarFill, { width: `${healthScore.steps.score}%`, backgroundColor: "#4A90E2" }]} />
+                        </View>
+                        <Text style={styles.healthMetricScore}>{healthScore.steps.score}</Text>
+                      </View>
+                    </View>
+
+                    {healthScore.heartRate && (
+                      <View style={styles.healthMetricRow}>
+                        <View style={styles.healthMetricIcon}>
+                          <Heart size={16} color="#E11D48" />
+                        </View>
+                        <View style={styles.healthMetricInfo}>
+                          <Text style={styles.healthMetricLabel}>Heart Rate</Text>
+                          <Text style={styles.healthMetricValue}>{healthScore.heartRate.avg} bpm</Text>
+                        </View>
+                        <View style={styles.healthMetricBarContainer}>
+                          <View style={styles.healthMetricBarTrack}>
+                            <View style={[styles.healthMetricBarFill, { width: `${healthScore.heartRate.score}%`, backgroundColor: "#E11D48" }]} />
+                          </View>
+                          <Text style={styles.healthMetricScore}>{healthScore.heartRate.score}</Text>
+                        </View>
+                      </View>
+                    )}
+
+                    {healthScore.sleep && (
+                      <View style={styles.healthMetricRow}>
+                        <View style={styles.healthMetricIcon}>
+                          <Moon size={16} color="#8B5CF6" />
+                        </View>
+                        <View style={styles.healthMetricInfo}>
+                          <Text style={styles.healthMetricLabel}>Sleep</Text>
+                          <Text style={styles.healthMetricValue}>{healthScore.sleep.avg}h/night</Text>
+                        </View>
+                        <View style={styles.healthMetricBarContainer}>
+                          <View style={styles.healthMetricBarTrack}>
+                            <View style={[styles.healthMetricBarFill, { width: `${healthScore.sleep.score}%`, backgroundColor: "#8B5CF6" }]} />
+                          </View>
+                          <Text style={styles.healthMetricScore}>{healthScore.sleep.score}</Text>
+                        </View>
+                      </View>
+                    )}
+
+                    {healthScore.spo2 && (
+                      <View style={styles.healthMetricRow}>
+                        <View style={styles.healthMetricIcon}>
+                          <Droplets size={16} color="#0EA5E9" />
+                        </View>
+                        <View style={styles.healthMetricInfo}>
+                          <Text style={styles.healthMetricLabel}>Blood Oxygen</Text>
+                          <Text style={styles.healthMetricValue}>{healthScore.spo2.avg}% SpO2</Text>
+                        </View>
+                        <View style={styles.healthMetricBarContainer}>
+                          <View style={styles.healthMetricBarTrack}>
+                            <View style={[styles.healthMetricBarFill, { width: `${healthScore.spo2.score}%`, backgroundColor: "#0EA5E9" }]} />
+                          </View>
+                          <Text style={styles.healthMetricScore}>{healthScore.spo2.score}</Text>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+
+                  <Text style={styles.fitnessFootnote}>
+                    Based on last {healthScore.entriesUsed} {healthScore.entriesUsed === 1 ? "day" : "days"}
+                  </Text>
+
+                  {healthEntries.length > 0 && (
+                    <View style={styles.healthHistorySection}>
+                      <Text style={styles.weightHistoryTitle}>Recent Entries</Text>
+                      {healthEntries.slice(0, 5).map((entry) => (
+                        <View key={entry.health_id} style={styles.healthHistoryRow}>
+                          <Text style={styles.weightHistoryDate}>{formatGoalDate(entry.record_date)}</Text>
+                          <View style={styles.healthHistoryStats}>
+                            <Text style={styles.healthHistoryStat}>{entry.steps?.toLocaleString() ?? "-"} steps</Text>
+                            {entry.heart_rate_bpm ? <Text style={styles.healthHistoryStatSub}>{entry.heart_rate_bpm} bpm</Text> : null}
+                            {entry.blood_oxygen_spo2 ? <Text style={styles.healthHistoryStatSub}>{entry.blood_oxygen_spo2}% SpO2</Text> : null}
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </View>
+            ) : !healthLoading ? (
+              <View key="health" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Heart size={18} color="#E11D48" />
+                  <Text style={styles.sectionTitle}>General Health</Text>
+                </View>
+                <TouchableOpacity style={styles.setupGoalCard} onPress={() => setShowHealthForm(true)} activeOpacity={0.8}>
+                  <LinearGradient colors={["#E11D48", "#F43F5E"]} style={styles.setupGoalGradient}>
+                    <Heart size={32} color={colors.white} />
+                    <Text style={styles.setupGoalTitle}>Track Your Health</Text>
+                    <Text style={styles.setupGoalSubtext}>
+                      Enter daily data from your smartwatch to get an overall health score based on steps, heart rate, sleep, and blood oxygen
+                    </Text>
+                    <View style={styles.setupGoalButton}>
+                      <Text style={[styles.setupGoalButtonText, { color: "#E11D48" }]}>Log Today</Text>
+                      <ChevronRight size={16} color="#E11D48" />
+                    </View>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            ) : null;
+          }
+
+          if (goalKey === "habit") {
+            return habitDeclaration ? (
+              <View key="habit" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Flame size={18} color="#0D9488" />
+                  <Text style={styles.sectionTitle}>Build My Habit</Text>
+                  <TouchableOpacity onPress={openEditHabit} style={styles.editButton} activeOpacity={0.7}>
+                    <Text style={styles.editButtonText}>Edit</Text>
+                    <ChevronRight size={14} color={colors.primary} />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.habitCard}>
+                  <View style={styles.habitDeclarationRow}>
+                    <Text style={styles.habitDeclarationText}>
+                      I <Text style={styles.habitHighlight}>{habitDeclaration.activity_type}</Text>{" "}
+                      <Text style={styles.habitHighlight}>{habitDeclaration.target_amount}</Text>{" "}
+                      <Text style={styles.habitHighlight}>{habitDeclaration.unit}</Text>{" "}
+                      <Text style={styles.habitHighlight}>{habitDeclaration.frequency}</Text>
+                    </Text>
+                  </View>
+
+                  <View style={styles.habitDateRow}>
+                    <Calendar size={12} color={colors.textSecondary} />
+                    <Text style={styles.habitDateText}>
+                      Since {formatGoalDate(habitDeclaration.start_date)}
+                    </Text>
+                  </View>
+
+                  {habitCommitment ? (
+                    <>
+                      <View style={styles.habitCommitmentHeader}>
+                        <View style={[styles.habitCommitmentPill, { backgroundColor: getCommitmentColor(habitCommitment.percent) + "18" }]}>
+                          <Text style={[styles.habitCommitmentPillText, { color: getCommitmentColor(habitCommitment.percent) }]}>
+                            {getCommitmentLabel(habitCommitment.percent)}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.fitnessProgressSection}>
+                        <View style={styles.fitnessProgressInfo}>
+                          <Text style={styles.fitnessProgressLabel}>Commitment</Text>
+                          <Text style={styles.fitnessProgressPercent}>{habitCommitment.percent}%</Text>
+                        </View>
+                        <View style={styles.fitnessProgressTrack}>
+                          <LinearGradient
+                            colors={habitCommitment.percent >= 70 ? ["#0D9488", "#14B8A6"] : habitCommitment.percent >= 40 ? ["#F59E0B", "#FBBF24"] : ["#EF4444", "#F87171"]}
+                            style={[styles.fitnessProgressFill, { width: `${Math.max(2, habitCommitment.percent)}%` }]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                          />
+                        </View>
+                      </View>
+
+                      <Text style={styles.habitCommitmentDetail}>
+                        {habitCommitment.periodsMet} of {habitCommitment.periodsElapsed} {getFrequencyPeriodLabel(habitDeclaration.frequency)} met
+                      </Text>
+                    </>
+                  ) : (
+                    <View style={styles.noActivitiesInfo}>
+                      <Flame size={24} color={colors.textLight} />
+                      <Text style={styles.noActivitiesText}>
+                        Start logging activities to track your commitment
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            ) : !habitDeclarationLoading ? (
+              <View key="habit" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Flame size={18} color="#0D9488" />
+                  <Text style={styles.sectionTitle}>Build My Habit</Text>
+                </View>
+                <TouchableOpacity style={styles.setupGoalCard} onPress={() => { resetHabitForm(); setShowHabitModal(true); }} activeOpacity={0.8}>
+                  <LinearGradient colors={["#0D9488", "#14B8A6"]} style={styles.setupGoalGradient}>
+                    <Flame size={32} color={colors.white} />
+                    <Text style={styles.setupGoalTitle}>Build My Habit</Text>
+                    <Text style={styles.setupGoalSubtext}>
+                      Make your declaration and track your commitment
+                    </Text>
+                    <View style={styles.setupGoalButton}>
+                      <Text style={[styles.setupGoalButtonText, { color: "#0D9488" }]}>Make Declaration</Text>
+                      <ChevronRight size={16} color="#0D9488" />
+                    </View>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            ) : null;
+          }
+
+          if (goalKey === "medals") {
+            return medalGoalData ? (
+              <View key="medals" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Trophy size={18} color="#D97706" />
+                  <Text style={styles.sectionTitle}>Earn Medals</Text>
+                </View>
+                <View style={styles.medalGoalCard}>
+                  <View style={styles.medalRatiosRow}>
+                    <View style={styles.medalRatioBlock}>
+                      <View style={styles.medalRatioCircle}>
+                        <Text style={styles.medalRatioNumber}>{medalGoalData.enrolledEvents}</Text>
+                        <Text style={styles.medalRatioOf}>/ {medalGoalData.totalEvents}</Text>
+                      </View>
+                      <Text style={styles.medalRatioLabel}>Races Enrolled</Text>
+                      <View style={styles.medalRatioBarTrack}>
+                        <View style={[styles.medalRatioBarFill, { width: `${medalGoalData.enrollmentRatio}%`, backgroundColor: "#D97706" }]} />
+                      </View>
+                      <Text style={styles.medalRatioPercent}>{Math.round(medalGoalData.enrollmentRatio)}%</Text>
+                    </View>
+
+                    <View style={styles.medalRatioDivider} />
+
+                    <View style={styles.medalRatioBlock}>
+                      <View style={styles.medalRatioCircle}>
+                        <Text style={[styles.medalRatioNumber, { color: "#059669" }]}>{medalGoalData.medalsEarned}</Text>
+                        <Text style={styles.medalRatioOf}>/ {medalGoalData.enrolledEvents}</Text>
+                      </View>
+                      <Text style={styles.medalRatioLabel}>Medals Earned</Text>
+                      <View style={styles.medalRatioBarTrack}>
+                        <View style={[styles.medalRatioBarFill, { width: `${medalGoalData.medalRatio}%`, backgroundColor: "#059669" }]} />
+                      </View>
+                      <Text style={styles.medalRatioPercent}>{Math.round(medalGoalData.medalRatio)}%</Text>
+                    </View>
+                  </View>
+
+                  {medalGoalData.events.filter(e => e.isEnrolled).length > 0 && (
+                    <View style={styles.medalEventsList}>
+                      <Text style={styles.weightHistoryTitle}>Enrolled Events</Text>
+                      {medalGoalData.events.filter(e => e.isEnrolled).map((event, index) => (
+                        <View key={index} style={styles.medalEventRow}>
+                          <View style={styles.medalEventInfo}>
+                            <Text style={styles.medalEventName} numberOfLines={1}>{event.eventName}</Text>
+                          </View>
+                          <View style={[
+                            styles.medalEventBadge,
+                            event.isOnMedalList ? styles.medalEventBadgeEarned : styles.medalEventBadgePending,
+                          ]}>
+                            <Award size={12} color={event.isOnMedalList ? "#D97706" : colors.textLight} />
+                            <Text style={[
+                              styles.medalEventBadgeText,
+                              event.isOnMedalList ? styles.medalEventBadgeTextEarned : styles.medalEventBadgeTextPending,
+                            ]}>
+                              {event.isOnMedalList ? "Earned" : "Pending"}
+                            </Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {medalGoalData.enrolledEvents === 0 && (
+                    <View style={styles.noActivitiesInfo}>
+                      <Trophy size={24} color={colors.textLight} />
+                      <Text style={styles.noActivitiesText}>
+                        Enroll in races from the Events tab to start earning medals
+                      </Text>
+                    </View>
+                  )}
+
+                  <Text style={styles.fitnessFootnote}>
+                    {medalGoalData.totalEvents} {medalGoalData.totalEvents === 1 ? "race" : "races"} available
+                  </Text>
+                </View>
+              </View>
+            ) : !medalGoalLoading ? (
+              <View key="medals" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Trophy size={18} color="#D97706" />
+                  <Text style={styles.sectionTitle}>Earn Medals</Text>
+                </View>
+                <View style={styles.medalGoalCard}>
+                  <View style={styles.noActivitiesInfo}>
+                    <Trophy size={28} color={colors.textLight} />
+                    <Text style={styles.noActivitiesTitle}>No Races Available</Text>
+                    <Text style={styles.noActivitiesText}>
+                      When races are added, you can track your enrollment and medal progress here
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ) : null;
+          }
+
+          if (goalKey === "community") {
+            return communityRanking ? (
+              <View key="community" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Users size={18} color="#0EA5E9" />
+                  <Text style={styles.sectionTitle}>Compete in Community</Text>
+                </View>
+                <View style={styles.communityCard}>
+                  <View style={styles.communityRankCenter}>
+                    <View style={styles.communityRankCircle}>
+                      <Text style={styles.communityRankNumber}>#{communityRanking.currentRank}</Text>
+                      <Text style={styles.communityRankOf}>of {communityRanking.totalParticipants}</Text>
+                    </View>
+                    {rankChange ? (
                       <View style={[
-                        styles.medalEventBadge,
-                        event.isOnMedalList ? styles.medalEventBadgeEarned : styles.medalEventBadgePending,
+                        styles.rankChangePill,
+                        rankChange.isImproving && styles.rankChangePillUp,
+                        rankChange.isDeclining && styles.rankChangePillDown,
+                        rankChange.isSame && styles.rankChangePillSame,
                       ]}>
-                        <Award size={12} color={event.isOnMedalList ? "#D97706" : colors.textLight} />
+                        {rankChange.isImproving ? (
+                          <ArrowUp size={13} color="#10B981" />
+                        ) : rankChange.isDeclining ? (
+                          <ArrowDown size={13} color="#EF4444" />
+                        ) : (
+                          <Minus size={13} color="#F59E0B" />
+                        )}
                         <Text style={[
-                          styles.medalEventBadgeText,
-                          event.isOnMedalList ? styles.medalEventBadgeTextEarned : styles.medalEventBadgeTextPending,
+                          styles.rankChangeText,
+                          rankChange.isImproving && styles.rankChangeTextUp,
+                          rankChange.isDeclining && styles.rankChangeTextDown,
+                          rankChange.isSame && styles.rankChangeTextSame,
                         ]}>
-                          {event.isOnMedalList ? "Earned" : "Pending"}
+                          {rankChange.isImproving
+                            ? `Up ${Math.abs(rankChange.diff)} ${Math.abs(rankChange.diff) === 1 ? "place" : "places"}`
+                            : rankChange.isDeclining
+                            ? `Down ${Math.abs(rankChange.diff)} ${Math.abs(rankChange.diff) === 1 ? "place" : "places"}`
+                            : "No change"}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={[styles.rankChangePill, styles.rankChangePillSame]}>
+                        <Text style={[styles.rankChangeText, styles.rankChangeTextSame]}>First check-in</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.communityStatsRow}>
+                    <View style={styles.communityStatItem}>
+                      <Text style={styles.communityStatValue}>{communityRanking.avgDistance.toFixed(1)}</Text>
+                      <Text style={styles.communityStatLabel}>Avg km/day</Text>
+                    </View>
+                    <View style={styles.communityStatDivider} />
+                    <View style={styles.communityStatItem}>
+                      <Text style={styles.communityStatValue}>{communityRanking.activeDays}</Text>
+                      <Text style={styles.communityStatLabel}>Active Days</Text>
+                    </View>
+                    <View style={styles.communityStatDivider} />
+                    <View style={styles.communityStatItem}>
+                      <Text style={styles.communityStatValue}>
+                        {communityRanking.avgPace > 0 ? formatPaceMinPerKm(communityRanking.avgPace) : "--"}
+                      </Text>
+                      <Text style={styles.communityStatLabel}>Avg Pace</Text>
+                    </View>
+                  </View>
+
+                  {rankChange && rankChange.previousRank > 0 && (
+                    <View style={styles.communityHistoryRow}>
+                      <Text style={styles.communityHistoryLabel}>Previous rank</Text>
+                      <Text style={styles.communityHistoryValue}>#{rankChange.previousRank}</Text>
+                    </View>
+                  )}
+
+                  <Text style={styles.fitnessFootnote}>
+                    Ranked by average daily distance
+                  </Text>
+                </View>
+              </View>
+            ) : !communityRankLoading ? (
+              <View key="community" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Users size={18} color="#0EA5E9" />
+                  <Text style={styles.sectionTitle}>Compete in Community</Text>
+                </View>
+                <View style={styles.communityCard}>
+                  <View style={styles.noActivitiesInfo}>
+                    <Users size={28} color={colors.textLight} />
+                    <Text style={styles.noActivitiesTitle}>Not Ranked Yet</Text>
+                    <Text style={styles.noActivitiesText}>
+                      Complete your first activity to appear on the community leaderboard and start tracking your rank
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ) : null;
+          }
+
+          if (goalKey === "events") {
+            return ongoingEvents.length > 0 ? (
+              <View key="events" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Award size={18} color={colors.text} />
+                  <Text style={styles.sectionTitle}>Event Goals</Text>
+                </View>
+                {ongoingEvents.map((event) => (
+                  <View key={event.eventId} style={styles.eventGoalCard}>
+                    <View style={styles.eventGoalHeader}>
+                      <Calendar size={14} color={colors.primary} />
+                      <Text style={styles.eventGoalName} numberOfLines={1}>{event.eventName}</Text>
+                      <View style={[styles.medalBadge, event.isOnMedalList ? styles.medalBadgeOn : styles.medalBadgeOff]}>
+                        <Award size={12} color={event.isOnMedalList ? "#FFD700" : colors.lightGray} />
+                        <Text style={[styles.medalBadgeText, event.isOnMedalList ? styles.medalTextOn : styles.medalTextOff]}>
+                          {event.isOnMedalList ? "On Track" : "Behind"}
                         </Text>
                       </View>
                     </View>
-                  ))}
-                </View>
-              )}
-
-              {medalGoalData.enrolledEvents === 0 && (
-                <View style={styles.noActivitiesInfo}>
-                  <Trophy size={24} color={colors.textLight} />
-                  <Text style={styles.noActivitiesText}>
-                    Enroll in races from the Events tab to start earning medals
-                  </Text>
-                </View>
-              )}
-
-              <Text style={styles.fitnessFootnote}>
-                {medalGoalData.totalEvents} {medalGoalData.totalEvents === 1 ? "race" : "races"} available
-              </Text>
-            </View>
-          </View>
-        ) : !medalGoalLoading ? (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Trophy size={18} color="#D97706" />
-              <Text style={styles.sectionTitle}>Earn Medals</Text>
-            </View>
-            <View style={styles.medalGoalCard}>
-              <View style={styles.noActivitiesInfo}>
-                <Trophy size={28} color={colors.textLight} />
-                <Text style={styles.noActivitiesTitle}>No Races Available</Text>
-                <Text style={styles.noActivitiesText}>
-                  When races are added, you can track your enrollment and medal progress here
-                </Text>
-              </View>
-            </View>
-          </View>
-        ) : null}
-
-        {communityRanking ? (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Users size={18} color="#0EA5E9" />
-              <Text style={styles.sectionTitle}>Compete in Community</Text>
-            </View>
-            <View style={styles.communityCard}>
-              <View style={styles.communityRankCenter}>
-                <View style={styles.communityRankCircle}>
-                  <Text style={styles.communityRankNumber}>#{communityRanking.currentRank}</Text>
-                  <Text style={styles.communityRankOf}>of {communityRanking.totalParticipants}</Text>
-                </View>
-                {rankChange ? (
-                  <View style={[
-                    styles.rankChangePill,
-                    rankChange.isImproving && styles.rankChangePillUp,
-                    rankChange.isDeclining && styles.rankChangePillDown,
-                    rankChange.isSame && styles.rankChangePillSame,
-                  ]}>
-                    {rankChange.isImproving ? (
-                      <ArrowUp size={13} color="#10B981" />
-                    ) : rankChange.isDeclining ? (
-                      <ArrowDown size={13} color="#EF4444" />
-                    ) : (
-                      <Minus size={13} color="#F59E0B" />
+                    {event.medal_min_cumulative_distance && event.medal_min_cumulative_distance > 0 && (
+                      <View style={styles.eventProgress}>
+                        <View style={styles.eventProgressInfo}>
+                          <Text style={styles.eventProgressText}>
+                            {event.currentDistance.toFixed(1)} / {event.medal_min_cumulative_distance} km
+                          </Text>
+                        </View>
+                        <View style={styles.eventProgressTrack}>
+                          <LinearGradient
+                            colors={event.isOnMedalList ? ["#FFD700", "#FFA500"] : ["#EF4444", "#F87171"]}
+                            style={[
+                              styles.eventProgressFill,
+                              { width: `${Math.min(100, (event.currentDistance / event.medal_min_cumulative_distance) * 100)}%` },
+                            ]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                          />
+                        </View>
+                      </View>
                     )}
-                    <Text style={[
-                      styles.rankChangeText,
-                      rankChange.isImproving && styles.rankChangeTextUp,
-                      rankChange.isDeclining && styles.rankChangeTextDown,
-                      rankChange.isSame && styles.rankChangeTextSame,
-                    ]}>
-                      {rankChange.isImproving
-                        ? `Up ${Math.abs(rankChange.diff)} ${Math.abs(rankChange.diff) === 1 ? "place" : "places"}`
-                        : rankChange.isDeclining
-                        ? `Down ${Math.abs(rankChange.diff)} ${Math.abs(rankChange.diff) === 1 ? "place" : "places"}`
-                        : "No change"}
-                    </Text>
-                  </View>
-                ) : (
-                  <View style={[styles.rankChangePill, styles.rankChangePillSame]}>
-                    <Text style={[styles.rankChangeText, styles.rankChangeTextSame]}>First check-in</Text>
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.communityStatsRow}>
-                <View style={styles.communityStatItem}>
-                  <Text style={styles.communityStatValue}>{communityRanking.avgDistance.toFixed(1)}</Text>
-                  <Text style={styles.communityStatLabel}>Avg km/day</Text>
-                </View>
-                <View style={styles.communityStatDivider} />
-                <View style={styles.communityStatItem}>
-                  <Text style={styles.communityStatValue}>{communityRanking.activeDays}</Text>
-                  <Text style={styles.communityStatLabel}>Active Days</Text>
-                </View>
-                <View style={styles.communityStatDivider} />
-                <View style={styles.communityStatItem}>
-                  <Text style={styles.communityStatValue}>
-                    {communityRanking.avgPace > 0 ? formatPaceMinPerKm(communityRanking.avgPace) : "--"}
-                  </Text>
-                  <Text style={styles.communityStatLabel}>Avg Pace</Text>
-                </View>
-              </View>
-
-              {rankChange && rankChange.previousRank > 0 && (
-                <View style={styles.communityHistoryRow}>
-                  <Text style={styles.communityHistoryLabel}>Previous rank</Text>
-                  <Text style={styles.communityHistoryValue}>#{rankChange.previousRank}</Text>
-                </View>
-              )}
-
-              <Text style={styles.fitnessFootnote}>
-                Ranked by average daily distance
-              </Text>
-            </View>
-          </View>
-        ) : !communityRankLoading ? (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Users size={18} color="#0EA5E9" />
-              <Text style={styles.sectionTitle}>Compete in Community</Text>
-            </View>
-            <View style={styles.communityCard}>
-              <View style={styles.noActivitiesInfo}>
-                <Users size={28} color={colors.textLight} />
-                <Text style={styles.noActivitiesTitle}>Not Ranked Yet</Text>
-                <Text style={styles.noActivitiesText}>
-                  Complete your first activity to appear on the community leaderboard and start tracking your rank
-                </Text>
-              </View>
-            </View>
-          </View>
-        ) : null}
-
-
-
-        {ongoingEvents.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Award size={18} color={colors.text} />
-              <Text style={styles.sectionTitle}>Event Goals</Text>
-            </View>
-            {ongoingEvents.map((event) => (
-              <View key={event.eventId} style={styles.eventGoalCard}>
-                <View style={styles.eventGoalHeader}>
-                  <Calendar size={14} color={colors.primary} />
-                  <Text style={styles.eventGoalName} numberOfLines={1}>{event.eventName}</Text>
-                  <View style={[styles.medalBadge, event.isOnMedalList ? styles.medalBadgeOn : styles.medalBadgeOff]}>
-                    <Award size={12} color={event.isOnMedalList ? "#FFD700" : colors.lightGray} />
-                    <Text style={[styles.medalBadgeText, event.isOnMedalList ? styles.medalTextOn : styles.medalTextOff]}>
-                      {event.isOnMedalList ? "On Track" : "Behind"}
-                    </Text>
-                  </View>
-                </View>
-                {event.medal_min_cumulative_distance && event.medal_min_cumulative_distance > 0 && (
-                  <View style={styles.eventProgress}>
-                    <View style={styles.eventProgressInfo}>
-                      <Text style={styles.eventProgressText}>
-                        {event.currentDistance.toFixed(1)} / {event.medal_min_cumulative_distance} km
+                    {event.medal_min_daily_distance && event.medal_min_daily_distance > 0 && (
+                      <Text style={styles.eventDailyTarget}>
+                        Daily target: {event.medal_min_daily_distance} km/day
                       </Text>
-                    </View>
-                    <View style={styles.eventProgressTrack}>
-                      <LinearGradient
-                        colors={event.isOnMedalList ? ["#FFD700", "#FFA500"] : ["#EF4444", "#F87171"]}
-                        style={[
-                          styles.eventProgressFill,
-                          { width: `${Math.min(100, (event.currentDistance / event.medal_min_cumulative_distance) * 100)}%` },
-                        ]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                      />
-                    </View>
+                    )}
                   </View>
-                )}
-                {event.medal_min_daily_distance && event.medal_min_daily_distance > 0 && (
-                  <Text style={styles.eventDailyTarget}>
-                    Daily target: {event.medal_min_daily_distance} km/day
-                  </Text>
-                )}
+                ))}
               </View>
-            ))}
-          </View>
-        )}
+            ) : null;
+          }
+
+          return null;
+        })}
 
 
 
