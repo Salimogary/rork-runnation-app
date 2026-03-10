@@ -590,8 +590,8 @@ export default function SettingsScreen() {
               <MessageSquare size={22} color="#3b82f6" />
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Send Feedback</Text>
-              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Share your thoughts and suggestions</Text>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Suggestions</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Share thoughts and ideas to help improve the app</Text>
             </View>
           </View>
           <ChevronRight size={20} color={themeColors.iconMuted} />
@@ -741,7 +741,7 @@ export default function SettingsScreen() {
         <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
           <View style={[styles.detailModalContent, { backgroundColor: themeColors.modalBackground }]}>
             <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
-              <Text style={[styles.detailTitle, { color: themeColors.text }]}>Send Feedback</Text>
+              <Text style={[styles.detailTitle, { color: themeColors.text }]}>Suggestions</Text>
               <TouchableOpacity onPress={() => {
                 setShowFeedbackModal(false);
                 setFeedbackText("");
