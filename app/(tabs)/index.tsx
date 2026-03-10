@@ -21,6 +21,21 @@ interface Coordinates {
   longitude: number;
 }
 
+interface LocationPoint {
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  timestamp: number;
+}
+
+const GPS_ACCURACY_THRESHOLD = 25;
+const MAX_SPEED_KMH_RUN = 45;
+const MAX_SPEED_KMH_WALK = 15;
+const MIN_DISTANCE_BETWEEN_POINTS = 0.002;
+const MIN_DISTANCE_WALK = 0.25;
+const MIN_DISTANCE_RUN = 0.45;
+const MAX_DAILY_ACTIVITIES = 5;
+
 export default function ExerciseScreen() {
   const { user } = useAuth();
   const { colors: themeColors } = useTheme();
@@ -36,12 +51,18 @@ export default function ExerciseScreen() {
   const [treadmillDistance, setTreadmillDistance] = useState("");
   const [treadmillTime, setTreadmillTime] = useState("");
   const [treadmillImage, setTreadmillImage] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
   const timerInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedBeforePause = useRef<number>(0);
   const runningStartTimestamp = useRef<number | null>(null);
   const appState = useRef<AppStateStatus>(AppState.currentState);
+  const lastValidPoint = useRef<LocationPoint | null>(null);
+  const isResuming = useRef<boolean>(false);
+  const totalPauseDuration = useRef<number>(0);
+  const pauseStartTimestamp = useRef<number | null>(null);
+  const filteredPointCount = useRef<number>(0);
 
   const updateDuration = useCallback(() => {
     if (runningStartTimestamp.current !== null) {
@@ -79,13 +100,110 @@ export default function ExerciseScreen() {
     }
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status === "granted") {
-      const location = await Location.getCurrentPositionAsync({});
-      setCurrentLocation({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      });
+      try {
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+        setCurrentLocation({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        });
+        console.log('[Location] Initial position obtained, accuracy:', location.coords.accuracy, 'm');
+      } catch (err) {
+        console.error('[Location] Error getting initial position:', err);
+      }
     }
   };
+
+  const isValidGpsPoint = useCallback((point: LocationPoint, exerciseT: ExerciseType): boolean => {
+    if (point.accuracy !== null && point.accuracy > GPS_ACCURACY_THRESHOLD) {
+      console.log('[GPS Filter] Rejected: accuracy too low:', point.accuracy, 'm');
+      filteredPointCount.current++;
+      return false;
+    }
+
+    if (!lastValidPoint.current) {
+      return true;
+    }
+
+    const dist = calculateDistance(
+      { latitude: lastValidPoint.current.latitude, longitude: lastValidPoint.current.longitude },
+      { latitude: point.latitude, longitude: point.longitude }
+    );
+
+    if (dist < MIN_DISTANCE_BETWEEN_POINTS) {
+      console.log('[GPS Filter] Rejected: too close:', (dist * 1000).toFixed(1), 'm');
+      filteredPointCount.current++;
+      return false;
+    }
+
+    const timeDiffHours = (point.timestamp - lastValidPoint.current.timestamp) / (1000 * 3600);
+    if (timeDiffHours > 0) {
+      const speedKmh = dist / timeDiffHours;
+      const maxSpeed = exerciseT === "Walk" ? MAX_SPEED_KMH_WALK : MAX_SPEED_KMH_RUN;
+
+      if (speedKmh > maxSpeed) {
+        console.log('[GPS Filter] Rejected: unrealistic speed:', speedKmh.toFixed(1), 'km/h (max:', maxSpeed, ')');
+        filteredPointCount.current++;
+        return false;
+      }
+    }
+
+    return true;
+  }, []);
+
+  const handleLocationUpdate = useCallback((location: Location.LocationObject, exerciseT: ExerciseType) => {
+    const newPoint: LocationPoint = {
+      latitude: location.coords.latitude,
+      longitude: location.coords.longitude,
+      accuracy: location.coords.accuracy,
+      timestamp: location.timestamp,
+    };
+
+    const newCoord: Coordinates = {
+      latitude: newPoint.latitude,
+      longitude: newPoint.longitude,
+    };
+
+    setCurrentLocation(newCoord);
+
+    if (isResuming.current) {
+      console.log('[GPS] First point after resume — skipping distance, updating anchor');
+      lastValidPoint.current = newPoint;
+      isResuming.current = false;
+      setCoords((prev) => [...prev, newCoord]);
+      return;
+    }
+
+    if (!isValidGpsPoint(newPoint, exerciseT)) {
+      return;
+    }
+
+    if (lastValidPoint.current) {
+      const dist = calculateDistance(
+        { latitude: lastValidPoint.current.latitude, longitude: lastValidPoint.current.longitude },
+        newCoord
+      );
+      console.log('[GPS] Valid point, distance delta:', (dist * 1000).toFixed(1), 'm, accuracy:', newPoint.accuracy?.toFixed(1), 'm');
+      setDistance((prevDist) => prevDist + dist);
+    }
+
+    lastValidPoint.current = newPoint;
+    setCoords((prev) => [...prev, newCoord]);
+  }, [isValidGpsPoint]);
+
+  const startLocationWatch = useCallback(async (exerciseT: ExerciseType) => {
+    locationSubscription.current = await Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.BestForNavigation,
+        distanceInterval: 5,
+        timeInterval: 3000,
+      },
+      (location) => {
+        handleLocationUpdate(location, exerciseT);
+      }
+    );
+  }, [handleLocationUpdate]);
 
   const startTracking = async (type: ExerciseType) => {
     if (!type) return;
@@ -105,8 +223,15 @@ export default function ExerciseScreen() {
     setCoords([]);
     setDistance(0);
     setDuration(0);
+    lastValidPoint.current = null;
+    isResuming.current = false;
+    totalPauseDuration.current = 0;
+    pauseStartTimestamp.current = null;
+    filteredPointCount.current = 0;
     elapsedBeforePause.current = 0;
     runningStartTimestamp.current = Date.now();
+
+    console.log('[Tracking] Started', type, 'at', new Date().toISOString());
 
     timerInterval.current = setInterval(() => {
       if (runningStartTimestamp.current !== null) {
@@ -116,28 +241,7 @@ export default function ExerciseScreen() {
       }
     }, 1000) as any;
 
-    locationSubscription.current = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.High,
-        distanceInterval: 10,
-      },
-      (location) => {
-        const newCoord = {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-        };
-        setCurrentLocation(newCoord);
-        setCoords((prev) => {
-          const updated = [...prev, newCoord];
-          if (prev.length > 0) {
-            const lastCoord = prev[prev.length - 1];
-            const dist = calculateDistance(lastCoord, newCoord);
-            setDistance((prevDist) => prevDist + dist);
-          }
-          return updated;
-        });
-      }
-    );
+    await startLocationWatch(type);
   };
 
   const pauseTracking = () => {
@@ -146,6 +250,7 @@ export default function ExerciseScreen() {
       elapsedBeforePause.current += Math.floor((now - runningStartTimestamp.current) / 1000);
       runningStartTimestamp.current = null;
     }
+    pauseStartTimestamp.current = Date.now();
     setRunState("paused");
     if (timerInterval.current) {
       clearInterval(timerInterval.current);
@@ -153,6 +258,7 @@ export default function ExerciseScreen() {
     if (locationSubscription.current) {
       locationSubscription.current.remove();
     }
+    console.log('[Tracking] Paused. Elapsed so far:', elapsedBeforePause.current, 's');
   };
 
   const resumeTracking = async () => {
@@ -160,6 +266,14 @@ export default function ExerciseScreen() {
       return;
     }
 
+    if (pauseStartTimestamp.current !== null) {
+      const pauseMs = Date.now() - pauseStartTimestamp.current;
+      totalPauseDuration.current += pauseMs;
+      pauseStartTimestamp.current = null;
+      console.log('[Tracking] Pause duration:', Math.floor(pauseMs / 1000), 's. Total pause:', Math.floor(totalPauseDuration.current / 1000), 's');
+    }
+
+    isResuming.current = true;
     setRunState("running");
     runningStartTimestamp.current = Date.now();
 
@@ -171,28 +285,7 @@ export default function ExerciseScreen() {
       }
     }, 1000) as any;
 
-    locationSubscription.current = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.High,
-        distanceInterval: 10,
-      },
-      (location) => {
-        const newCoord = {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-        };
-        setCurrentLocation(newCoord);
-        setCoords((prev) => {
-          const updated = [...prev, newCoord];
-          if (prev.length > 0) {
-            const lastCoord = prev[prev.length - 1];
-            const dist = calculateDistance(lastCoord, newCoord);
-            setDistance((prevDist) => prevDist + dist);
-          }
-          return updated;
-        });
-      }
-    );
+    await startLocationWatch(exerciseType);
   };
 
   const stopTracking = async () => {
@@ -201,7 +294,8 @@ export default function ExerciseScreen() {
       elapsedBeforePause.current += Math.floor((now - runningStartTimestamp.current) / 1000);
       runningStartTimestamp.current = null;
     }
-    setDuration(elapsedBeforePause.current);
+    const finalDuration = elapsedBeforePause.current;
+    setDuration(finalDuration);
     setRunState("finished");
     if (timerInterval.current) {
       clearInterval(timerInterval.current);
@@ -210,32 +304,92 @@ export default function ExerciseScreen() {
       locationSubscription.current.remove();
     }
 
-    if (user && startTime) {
-      const endTime = new Date();
-      const calculatedPace = duration > 0 ? (distance / (duration / 3600)) : 0;
+    console.log('[Tracking] Stopped. Final distance:', distance.toFixed(3), 'km, duration:', finalDuration, 's, filtered points:', filteredPointCount.current);
+
+    if (!user || !startTime) {
+      console.log('[Tracking] No user or startTime, skipping save');
+      return;
+    }
+
+    const durationMinutes = finalDuration / 60;
+    if (exerciseType === "Walk" && distance < MIN_DISTANCE_WALK) {
+      Alert.alert("Activity Not Saved", `A Walk must be at least ${MIN_DISTANCE_WALK} km to be saved. You covered ${distance.toFixed(2)} km.`);
+      return;
+    }
+    if (exerciseType === "Run" && distance < MIN_DISTANCE_RUN) {
+      Alert.alert("Activity Not Saved", `A Run must be at least ${MIN_DISTANCE_RUN} km to be saved. You covered ${distance.toFixed(2)} km.`);
+      return;
+    }
+    if ((exerciseType === "Walk" || exerciseType === "Run") && durationMinutes < 10) {
+      Alert.alert("Activity Not Saved", `A ${exerciseType} must be at least 10 minutes. Your activity was ${Math.floor(durationMinutes)} minutes.`);
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      const today = startTime.toISOString().split('T')[0];
+      const { count, error: countError } = await supabase
+        .from("activities")
+        .select("*", { count: "exact", head: true })
+        .eq("RegistrationID", user.id)
+        .eq("Activity_Date", today);
+
+      if (countError) {
+        console.error('[ActivityLimit] Count error:', countError);
+      }
+
+      if ((count || 0) >= MAX_DAILY_ACTIVITIES) {
+        Alert.alert(
+          "Daily Limit Reached",
+          `You can only save a maximum of ${MAX_DAILY_ACTIVITIES} activities per day. This activity was not saved.`
+        );
+        setIsSaving(false);
+        return;
+      }
+
+      const calculatedPace = finalDuration > 0 ? (distance / (finalDuration / 3600)) : 0;
+
+      const actualEndTime = new Date(startTime.getTime() + (finalDuration * 1000));
+
+      const startTimeStr = startTime.toISOString().split('T')[1].split('.')[0];
+      const endTimeStr = actualEndTime.toISOString().split('T')[1].split('.')[0];
 
       const nextActivityId = uuidv4();
 
-      console.log("Saving activity with ID:", nextActivityId);
+      console.log('[Tracking] Saving activity:', {
+        id: nextActivityId,
+        type: exerciseType,
+        distance: distance.toFixed(3),
+        duration: finalDuration,
+        pace: calculatedPace.toFixed(2),
+        startTime: startTimeStr,
+        endTime: endTimeStr,
+      });
 
       const { error } = await supabase.from("activities").insert({
         ActivityID: nextActivityId,
         RegistrationID: user.id,
-        Activity_Date: startTime.toISOString().split('T')[0],
+        Activity_Date: today,
         Exercise_Type: exerciseType || "Run",
-        Distance_km: distance,
-        Start_Time: startTime.toISOString().split('T')[1].split('.')[0],
-        End_Time: endTime.toISOString().split('T')[1].split('.')[0],
-        Pace_km_h: calculatedPace,
+        Distance_km: parseFloat(distance.toFixed(2)),
+        Start_Time: startTimeStr,
+        End_Time: endTimeStr,
+        Pace_km_h: parseFloat(calculatedPace.toFixed(2)),
       });
 
       if (error) {
-        console.error("Error saving activity:", error);
+        console.error("[Tracking] Error saving activity:", error);
         Alert.alert("Error", "Failed to save activity");
       } else {
-        console.log("Activity saved successfully with ID:", nextActivityId);
+        console.log("[Tracking] Activity saved successfully with ID:", nextActivityId);
         Alert.alert("Success", "Activity saved successfully!");
       }
+    } catch (err) {
+      console.error("[Tracking] Unexpected error saving:", err);
+      Alert.alert("Error", "Something went wrong while saving your activity.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -249,6 +403,11 @@ export default function ExerciseScreen() {
     setExerciseType(null);
     elapsedBeforePause.current = 0;
     runningStartTimestamp.current = null;
+    lastValidPoint.current = null;
+    isResuming.current = false;
+    totalPauseDuration.current = 0;
+    pauseStartTimestamp.current = null;
+    filteredPointCount.current = 0;
   };
 
   const pickImage = async () => {
@@ -461,10 +620,10 @@ export default function ExerciseScreen() {
                 </LinearGradient>
               </TouchableOpacity>
               
-              <TouchableOpacity style={styles.actionButton} onPress={stopTracking} activeOpacity={0.8}>
+              <TouchableOpacity style={styles.actionButton} onPress={stopTracking} disabled={isSaving} activeOpacity={0.8}>
                 <LinearGradient colors={['#EF4444', '#F87171']} style={styles.actionButtonGradient}>
                   <Square size={28} color={colors.white} />
-                  <Text style={styles.actionButtonText}>Finish</Text>
+                  <Text style={styles.actionButtonText}>{isSaving ? "Saving..." : "Finish"}</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -479,10 +638,10 @@ export default function ExerciseScreen() {
                 </LinearGradient>
               </TouchableOpacity>
               
-              <TouchableOpacity style={styles.actionButton} onPress={stopTracking} activeOpacity={0.8}>
+              <TouchableOpacity style={styles.actionButton} onPress={stopTracking} disabled={isSaving} activeOpacity={0.8}>
                 <LinearGradient colors={['#EF4444', '#F87171']} style={styles.actionButtonGradient}>
                   <Square size={28} color={colors.white} />
-                  <Text style={styles.actionButtonText}>Finish</Text>
+                  <Text style={styles.actionButtonText}>{isSaving ? "Saving..." : "Finish"}</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -609,7 +768,6 @@ const styles = StyleSheet.create({
   map: {
     flex: 1,
   },
-
   statsContainer: {
     flexDirection: "row",
     paddingHorizontal: 16,
