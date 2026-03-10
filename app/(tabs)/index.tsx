@@ -10,6 +10,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Stack } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTheme } from "@/contexts/ThemeContext";
 import colors from "@/constants/colors";
 
 type RunState = "idle" | "running" | "paused" | "finished";
@@ -22,6 +23,7 @@ interface Coordinates {
 
 export default function ExerciseScreen() {
   const { user } = useAuth();
+  const { colors: themeColors } = useTheme();
   const [runState, setRunState] = useState<RunState>("idle");
   const [distance, setDistance] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -338,7 +340,7 @@ export default function ExerciseScreen() {
   }, [distance, duration]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <Stack.Screen options={{ title: "Exercise" }} />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {Platform.OS !== 'web' && currentLocation && runState !== 'idle' && (
@@ -389,7 +391,7 @@ export default function ExerciseScreen() {
         <View style={styles.controlsContainer}>
           {runState === "idle" && (
             <View style={styles.typeSelectionContainer}>
-              <Text style={styles.typeSelectionTitle}>Choose Your Activity</Text>
+              <Text style={[styles.typeSelectionTitle, { color: themeColors.text }]}>Choose Your Activity</Text>
 
               <TouchableOpacity
                 style={styles.typeButton}
@@ -525,8 +527,8 @@ export default function ExerciseScreen() {
         transparent={true}
         onRequestClose={() => setShowTreadmillModal(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+        <View style={[styles.modalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.surface }]}>
             <LinearGradient colors={colors.gradient.teal} style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Treadmill Activity</Text>
               <TouchableOpacity onPress={() => setShowTreadmillModal(false)}>
@@ -536,26 +538,26 @@ export default function ExerciseScreen() {
 
             <ScrollView style={styles.modalBody}>
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Distance (km)</Text>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Distance (km)</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
                   value={treadmillDistance}
                   onChangeText={setTreadmillDistance}
                   keyboardType="decimal-pad"
                   placeholder="e.g., 5.2"
-                  placeholderTextColor={colors.textLight}
+                  placeholderTextColor={themeColors.textLight}
                 />
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Time (minutes)</Text>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Time (minutes)</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
                   value={treadmillTime}
                   onChangeText={setTreadmillTime}
                   keyboardType="decimal-pad"
                   placeholder="e.g., 30"
-                  placeholderTextColor={colors.textLight}
+                  placeholderTextColor={themeColors.textLight}
                 />
               </View>
 
@@ -573,12 +575,12 @@ export default function ExerciseScreen() {
                 </TouchableOpacity>
               </View>
 
-              <Text style={styles.infoText}>
+              <Text style={[styles.infoText, { color: themeColors.textSecondary }]}>
                 📸 Your submission will be reviewed by an admin
               </Text>
             </ScrollView>
 
-            <View style={styles.modalFooter}>
+            <View style={[styles.modalFooter, { borderTopColor: themeColors.border }]}>
               <TouchableOpacity style={styles.submitButton} onPress={submitTreadmill} activeOpacity={0.8}>
                 <LinearGradient colors={colors.gradient.teal} style={styles.submitButtonGradient}>
                   <Text style={styles.submitButtonText}>Submit for Approval</Text>

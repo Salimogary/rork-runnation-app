@@ -7,6 +7,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import colors from "@/constants/colors";
+import { useTheme } from "@/contexts/ThemeContext";
 
 interface UserGoal {
   user_goals_id: number;
@@ -138,6 +139,7 @@ const convertMinPerKmToKmh = (minPerKm: number): number => {
 
 export default function GoalsScreen() {
   const { user } = useAuth();
+  const { colors: themeColors } = useTheme();
   const queryClient = useQueryClient();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [showGoalForm, setShowGoalForm] = useState(false);
@@ -1290,7 +1292,7 @@ export default function GoalsScreen() {
   const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading && userDisciplineGoals.length === 0 && !userDisciplineLoading && !communityRanking && !communityRankLoading && !medalGoalData && !medalGoalLoading;
 
   return (
-    <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
+    <Animated.View style={[styles.container, { opacity: fadeAnim, backgroundColor: themeColors.background }]}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={

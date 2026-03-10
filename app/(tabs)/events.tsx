@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Calendar as CalendarIcon, Users, Clock, Award } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import colors from "@/constants/colors";
+import { useTheme } from "@/contexts/ThemeContext";
 
 interface Event {
   eventId: string;
@@ -17,6 +18,7 @@ type EventsQueryResult = Event[] | undefined;
 
 export default function EventsScreen() {
   const { registrationId } = useAuth();
+  const { colors: themeColors } = useTheme();
   const router = useRouter();
 
   const { data: events, isLoading: eventsLoading, refetch: refetchEvents } = trpc.admin.getEvents.useQuery(undefined, {
@@ -54,7 +56,7 @@ export default function EventsScreen() {
     : [];
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <TouchableOpacity
         style={styles.participantsButton}
         onPress={() => router.push("/participants" as any)}
@@ -100,25 +102,25 @@ export default function EventsScreen() {
         ) : (
           <View style={styles.eventsContainer}>
             {sortedEvents.map((event) => (
-              <LinearGradient key={event.eventId} colors={[colors.white, colors.extraLightGray]} style={styles.eventCard}>
+              <LinearGradient key={event.eventId} colors={[themeColors.cardBackground, themeColors.elevated]} style={styles.eventCard}>
                 <View style={styles.eventHeader}>
                   <CalendarIcon size={24} color={colors.primary} />
-                  <Text style={styles.eventName} numberOfLines={2}>{event.eventName}</Text>
+                  <Text style={[styles.eventName, { color: themeColors.text }]} numberOfLines={2}>{event.eventName}</Text>
                 </View>
                 
                 <View style={styles.eventDates}>
                   <View style={styles.dateRow}>
                     <Clock size={16} color={colors.textSecondary} />
                     <View style={styles.dateContent}>
-                      <Text style={styles.dateLabel}>Starts</Text>
-                      <Text style={styles.dateValue}>{formatDate(event.startsAt)}</Text>
+                      <Text style={[styles.dateLabel, { color: themeColors.textSecondary }]}>Starts</Text>
+                      <Text style={[styles.dateValue, { color: themeColors.text }]}>{formatDate(event.startsAt)}</Text>
                     </View>
                   </View>
                   <View style={styles.dateRow}>
                     <Clock size={16} color={colors.textSecondary} />
                     <View style={styles.dateContent}>
-                      <Text style={styles.dateLabel}>Ends</Text>
-                      <Text style={styles.dateValue}>{formatDate(event.endsAt)}</Text>
+                      <Text style={[styles.dateLabel, { color: themeColors.textSecondary }]}>Ends</Text>
+                      <Text style={[styles.dateValue, { color: themeColors.text }]}>{formatDate(event.endsAt)}</Text>
                     </View>
                   </View>
                 </View>

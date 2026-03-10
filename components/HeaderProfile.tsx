@@ -14,6 +14,7 @@ import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { Edit2, LogOut, Check, Circle, X } from "lucide-react-native";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTheme } from "@/contexts/ThemeContext";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { getEarnedBadgeCount } from "@/utils/badges";
@@ -36,6 +37,7 @@ interface HeaderUserProfile {
 export default function HeaderProfile() {
   const { user, signOut } = useAuth();
   const router = useRouter();
+  const { colors: themeColors, isDark } = useTheme();
   const [menuVisible, setMenuVisible] = useState(false);
   const [checklistVisible, setChecklistVisible] = useState(false);
 
@@ -276,7 +278,7 @@ export default function HeaderProfile() {
   return (
     <View style={styles.container}>
       <TouchableOpacity
-        style={styles.profileButton}
+        style={[styles.profileButton, { backgroundColor: isDark ? '#2A2A2A' : '#f0f0f0' }]}
         onPress={() => setMenuVisible(true)}
         activeOpacity={0.7}
       >
@@ -321,7 +323,7 @@ export default function HeaderProfile() {
           </Text>
         </TouchableOpacity>
 
-        <Text style={styles.nameText} numberOfLines={1}>
+        <Text style={[styles.nameText, { color: isDark ? '#F0F0F0' : '#000' }]} numberOfLines={1}>
           {firstName}
         </Text>
       </TouchableOpacity>
@@ -335,16 +337,16 @@ export default function HeaderProfile() {
         <TouchableWithoutFeedback onPress={() => setMenuVisible(false)}>
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback>
-              <View style={styles.menuContainer}>
+              <View style={[styles.menuContainer, { backgroundColor: themeColors.modalBackground }]}>
                 <TouchableOpacity
                   style={styles.menuItem}
                   onPress={handleEdit}
                   activeOpacity={0.7}
                 >
-                  <Edit2 size={20} color="#000" />
-                  <Text style={styles.menuItemText}>Edit</Text>
+                  <Edit2 size={20} color={themeColors.text} />
+                  <Text style={[styles.menuItemText, { color: themeColors.text }]}>Edit</Text>
                 </TouchableOpacity>
-                <View style={styles.menuDivider} />
+                <View style={[styles.menuDivider, { backgroundColor: themeColors.border }]} />
                 <TouchableOpacity
                   style={styles.menuItem}
                   onPress={handleSignOut}
@@ -370,19 +372,19 @@ export default function HeaderProfile() {
         <TouchableWithoutFeedback onPress={() => setChecklistVisible(false)}>
           <View style={styles.checklistOverlay}>
             <TouchableWithoutFeedback>
-              <View style={styles.checklistContainer}>
-                <View style={styles.checklistHeader}>
+              <View style={[styles.checklistContainer, { backgroundColor: themeColors.modalBackground }]}>
+                <View style={[styles.checklistHeader, { borderBottomColor: themeColors.border }]}>
                   <View style={styles.checklistTitleRow}>
-                    <Text style={styles.checklistTitle}>Profile Completion</Text>
+                    <Text style={[styles.checklistTitle, { color: themeColors.text }]}>Profile Completion</Text>
                     <TouchableOpacity
                       onPress={() => setChecklistVisible(false)}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
-                      <X size={22} color="#666" />
+                      <X size={22} color={themeColors.iconDefault} />
                     </TouchableOpacity>
                   </View>
 
-                  <View style={styles.progressBarOuter}>
+                  <View style={[styles.progressBarOuter, { backgroundColor: themeColors.skeleton }]}>
                     <View
                       style={[
                         styles.progressBarInner,
@@ -409,7 +411,7 @@ export default function HeaderProfile() {
                   showsVerticalScrollIndicator={false}
                 >
                   {completion?.items.map((item, index) => (
-                    <View key={item.id} style={styles.checklistItem}>
+                    <View key={item.id} style={[styles.checklistItem, { borderBottomColor: themeColors.divider }]}>
                       <View style={styles.checklistNumberWrap}>
                         <Text style={styles.checklistNumber}>{index + 1}</Text>
                       </View>
@@ -425,7 +427,8 @@ export default function HeaderProfile() {
                       <Text
                         style={[
                           styles.checklistLabel,
-                          item.completed && styles.checklistLabelDone,
+                          { color: themeColors.textSecondary },
+                          item.completed && [styles.checklistLabelDone, { color: themeColors.text }],
                         ]}
                       >
                         {item.label}

@@ -16,6 +16,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { Camera, Heart, MessageCircle, User as UserIcon, Trash2, Activity, Smile } from "lucide-react-native";
+import { useTheme } from "@/contexts/ThemeContext";
 
 interface Post {
   social_post_id: string;
@@ -48,6 +49,7 @@ interface ActivityStats {
 
 export default function ChatScreen() {
   const { user, registrationId } = useAuth();
+  const { colors: themeColors } = useTheme();
   const queryClient = useQueryClient();
   const [caption, setCaption] = useState("");
   const [showActivity, setShowActivity] = useState(false);
@@ -302,8 +304,8 @@ export default function ChatScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.uploadSection}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
+      <View style={[styles.uploadSection, { backgroundColor: themeColors.cardBackground }]}>
         {selectedImage && (
           <View style={styles.selectedImageContainer}>
             <Image
@@ -322,8 +324,9 @@ export default function ChatScreen() {
         
         <View style={styles.uploadHeader}>
           <TextInput
-            style={styles.captionInput}
+            style={[styles.captionInput, { color: themeColors.text, borderBottomColor: themeColors.border }]}
             placeholder="What's on your mind?"
+            placeholderTextColor={themeColors.textLight}
             value={caption}
             onChangeText={setCaption}
             multiline
@@ -456,14 +459,14 @@ export default function ChatScreen() {
         ) : (
           <View style={styles.photoList}>
             {posts.map((post) => (
-              <View key={post.social_post_id} style={styles.photoCard}>
+              <View key={post.social_post_id} style={[styles.photoCard, { backgroundColor: themeColors.cardBackground }]}>
                 <View style={styles.photoHeader}>
                   <View style={styles.userInfo}>
                     <View style={styles.avatarPlaceholder}>
                       <UserIcon size={18} color="#fff" />
                     </View>
                     <View>
-                      <Text style={styles.userName}>
+                      <Text style={[styles.userName, { color: themeColors.text }]}>
                         {post.user?.first_name || "Unknown User"}
                       </Text>
                       <Text style={styles.userUsername}>
@@ -485,7 +488,7 @@ export default function ChatScreen() {
 
                 {post.caption && (
                   <View style={styles.captionContainer}>
-                    <Text style={styles.captionText}>{post.caption}</Text>
+                    <Text style={[styles.captionText, { color: themeColors.text }]}>{post.caption}</Text>
                   </View>
                 )}
 
@@ -498,7 +501,7 @@ export default function ChatScreen() {
                 )}
 
                 {post.activity_data && (
-                  <View style={styles.postActivityCard}>
+                  <View style={[styles.postActivityCard, { backgroundColor: themeColors.inputBackground }]}>
                     <View style={styles.compactActivityStats}>
                       <View style={styles.compactActivityStat}>
                         <Text style={styles.compactActivityLabel}>TYPE</Text>

@@ -4,6 +4,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { SubscriptionProvider, useSubscription } from "@/contexts/SubscriptionContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
+import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
 import { TRPCProvider } from "@/lib/trpc";
 import * as SplashScreen from "expo-splash-screen";
 import * as Linking from "expo-linking";
@@ -123,10 +124,17 @@ function NavigationGuard() {
 }
 
 function RootLayoutNav() {
+  const { colors } = useTheme();
+
   return (
     <>
       <NavigationGuard />
-      <Stack screenOptions={{ headerBackTitle: "Back" }}>
+      <Stack screenOptions={{
+        headerBackTitle: "Back",
+        headerStyle: { backgroundColor: colors.headerBackground },
+        headerTintColor: colors.headerText,
+        contentStyle: { backgroundColor: colors.background },
+      }}>
         <Stack.Screen name="onboarding" options={{ headerShown: false }} />
         <Stack.Screen name="register" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
@@ -192,13 +200,15 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <TRPCProvider>
-        <AuthProvider>
-          <SubscriptionProvider>
-            <NotificationProvider>
-              <RootLayoutNav />
-            </NotificationProvider>
-          </SubscriptionProvider>
-        </AuthProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <SubscriptionProvider>
+              <NotificationProvider>
+                <RootLayoutNav />
+              </NotificationProvider>
+            </SubscriptionProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </TRPCProvider>
     </ErrorBoundary>
   );

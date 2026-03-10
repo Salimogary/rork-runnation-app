@@ -40,6 +40,7 @@ import {
 import { getAllBadges, getEarnedBadgeCount } from "@/utils/badges";
 import type { Badge } from "@/utils/badges";
 import { useSubscription } from "@/contexts/SubscriptionContext";
+import { useTheme } from "@/contexts/ThemeContext";
 import { Clock, CreditCard, Zap, Circle } from "lucide-react-native";
 import { calculateProfileCompletion } from "@/utils/profileCompletion";
 import type { ProfileCompletionInputs } from "@/utils/profileCompletion";
@@ -97,6 +98,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { subscriptionStatus, trialDaysRemaining, subscription, isLoading: subLoading } = useSubscription();
+  const { colors: themeColors } = useTheme();
   const [editSection, setEditSection] = useState<EditSection>(null);
   const [showEditMenu, setShowEditMenu] = useState(false);
   const [formData, setFormData] = useState<Partial<UserProfile>>({});
@@ -1330,7 +1332,7 @@ export default function ProfileScreen() {
   );
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+    <ScrollView style={[styles.container, { backgroundColor: themeColors.background }]} contentContainerStyle={styles.scrollContent}>
       <View style={styles.header}>
         <View style={styles.photoContainer}>
           {profilePhoto ? (

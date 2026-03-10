@@ -5,10 +5,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { ShoppingCart, Trash2, Plus, Minus } from "lucide-react-native";
 import { Image } from "expo-image";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTheme } from "@/contexts/ThemeContext";
 
 export default function CartScreen() {
   const router = useRouter();
   const { registrationId } = useAuth();
+  const { colors: themeColors } = useTheme();
   const queryClient = useQueryClient();
 
   const { data: cartItems, isLoading } = trpc.shop.getCart.useQuery({ userId: registrationId });
@@ -57,7 +59,7 @@ export default function CartScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <Stack.Screen options={{ title: "Shopping Cart", headerBackTitle: "Shop" }} />
 
       {isLoading ? (

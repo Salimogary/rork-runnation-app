@@ -3,33 +3,33 @@ import { Activity, Users, MessageCircle, ShoppingBag, Settings, Calendar, Target
 import React from "react";
 import { TouchableOpacity } from "react-native";
 import HeaderProfile from "@/components/HeaderProfile";
-import colors from "@/constants/colors";
+import { useTheme } from "@/contexts/ThemeContext";
 
 export default function TabLayout() {
   const router = useRouter();
+  const { colors } = useTheme();
 
   return (
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.mediumGray,
+        tabBarInactiveTintColor: colors.iconMuted,
         tabBarStyle: {
-          backgroundColor: colors.white,
+          backgroundColor: colors.tabBar,
           borderTopWidth: 0,
           elevation: 8,
-          shadowColor: colors.black,
+          shadowColor: '#000',
           shadowOffset: { width: 0, height: -4 },
           shadowOpacity: 0.1,
           shadowRadius: 8,
-
         },
         headerShown: true,
         headerStyle: {
-          backgroundColor: colors.primary,
+          backgroundColor: colors.headerBackground,
           elevation: 0,
           shadowOpacity: 0,
         },
-        headerTintColor: colors.white,
+        headerTintColor: colors.headerText,
         headerTitleAlign: "center" as const,
         headerTitleStyle: {
           fontWeight: "700" as const,
@@ -37,7 +37,7 @@ export default function TabLayout() {
         },
         headerLeft: () => (
           <TouchableOpacity onPress={() => router.push("/settings" as any)} style={{ marginLeft: 16 }}>
-            <Settings size={24} color={colors.white} />
+            <Settings size={24} color={colors.headerText} />
           </TouchableOpacity>
         ),
         headerRight: () => <HeaderProfile />,

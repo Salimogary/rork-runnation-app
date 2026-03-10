@@ -30,6 +30,7 @@ import {
   X,
 } from 'lucide-react-native';
 import colors from '@/constants/colors';
+import { useTheme } from '@/contexts/ThemeContext';
 
 const PAYMENT_ICONS: Record<PaymentMethod, { icon: typeof Smartphone; color: string; bg: string }> = {
   mtn_mobile_money: { icon: Smartphone, color: '#FFCC00', bg: '#FFF8DC' },
@@ -47,6 +48,7 @@ const FEATURES = [
 export default function SubscriptionScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const { colors: themeColors } = useTheme();
   const {
     subscriptionStatus,
     trialDaysRemaining,
@@ -191,7 +193,7 @@ export default function SubscriptionScreen() {
 
   if (subscriptionStatus === 'pending') {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: themeColors.background }]}>
         <View style={styles.pendingContainer}>
           <View style={styles.pendingIconWrap}>
             <ActivityIndicator size="large" color={colors.primary} />
@@ -219,7 +221,7 @@ export default function SubscriptionScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}

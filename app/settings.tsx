@@ -1,8 +1,9 @@
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, Image, TextInput, ActivityIndicator, Share } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, Bell, MapPin, Moon, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff, Lock, Trash2, AlertTriangle, Star, Share2, Crown } from "lucide-react-native";
+import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff, Lock, Trash2, AlertTriangle, Star, Share2, Crown } from "lucide-react-native";
 import { useSubscription } from '@/contexts/SubscriptionContext';
+import { useTheme } from '@/contexts/ThemeContext';
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
@@ -38,7 +39,7 @@ export default function SettingsScreen() {
     void getNotificationsEnabled().then(setNotificationsEnabled);
   }, []);
   const [locationEnabled, setLocationEnabled] = useState(true);
-  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
+  const { isDark, setDarkMode, colors: themeColors } = useTheme();
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackAttachment, setFeedbackAttachment] = useState<string | null>(null);
@@ -328,35 +329,35 @@ export default function SettingsScreen() {
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={[styles.container, { backgroundColor: themeColors.background }]}>
       {isAdmin && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Admin</Text>
+          <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>Admin</Text>
           
           <TouchableOpacity
-            style={styles.settingItem}
+            style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
             onPress={() => setShowApprovalModal(true)}
           >
             <View style={styles.settingLeft}>
-              <View style={styles.iconContainer}>
+              <View style={[styles.iconContainer, { backgroundColor: isDark ? '#312E81' : '#f5f5f5' }]}>
                 <ClipboardList size={22} color="#8b5cf6" />
               </View>
               <View style={styles.settingTextContainer}>
-                <Text style={styles.settingTitle}>Pending Approvals</Text>
-                <Text style={styles.settingSubtitle}>
+                <Text style={[styles.settingTitle, { color: themeColors.text }]}>Pending Approvals</Text>
+                <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>
                   {pendingActivities.length} treadmill activities pending
                 </Text>
               </View>
             </View>
-            <ChevronRight size={20} color="#999" />
+            <ChevronRight size={20} color={themeColors.iconMuted} />
           </TouchableOpacity>
         </View>
       )}
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Subscription</Text>
+        <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>Subscription</Text>
         <TouchableOpacity
-          style={styles.settingItem}
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
           onPress={() => router.push('/subscription' as any)}
         >
           <View style={styles.settingLeft}>
@@ -364,7 +365,7 @@ export default function SettingsScreen() {
               <Crown size={22} color="#FFD700" />
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={styles.settingTitle}>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>
                 {subscriptionStatus === 'active'
                   ? 'Premium Active'
                   : subscriptionStatus === 'trial'
@@ -373,7 +374,7 @@ export default function SettingsScreen() {
                       ? 'Payment Pending'
                       : 'Subscribe'}
               </Text>
-              <Text style={styles.settingSubtitle}>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>
                 {subscriptionStatus === 'active' && subscription?.expires_at
                   ? `Expires ${new Date(subscription.expires_at).toLocaleDateString()}`
                   : subscriptionStatus === 'trial'
@@ -402,10 +403,10 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Preferences</Text>
+        <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>Preferences</Text>
         
         <TouchableOpacity 
-          style={styles.settingItem} 
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]} 
           onPress={() => {
             const next = !notificationsEnabled;
             setNotificationsEnabled(next);
@@ -418,8 +419,8 @@ export default function SettingsScreen() {
               <Bell size={22} color="#10b981" />
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={styles.settingTitle}>Notifications</Text>
-              <Text style={styles.settingSubtitle}>Enable push notifications</Text>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Notifications</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Enable push notifications</Text>
             </View>
           </View>
           <View style={[styles.radioButton, notificationsEnabled && styles.radioButtonActive]}>
@@ -428,16 +429,16 @@ export default function SettingsScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity 
-          style={styles.settingItem} 
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]} 
           onPress={() => setLocationEnabled(!locationEnabled)}
         >
           <View style={styles.settingLeft}>
-            <View style={styles.iconContainer}>
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#1E3A5F' : '#f5f5f5' }]}>
               <MapPin size={22} color="#3b82f6" />
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={styles.settingTitle}>Location</Text>
-              <Text style={styles.settingSubtitle}>Enable location services</Text>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Location</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Enable location services</Text>
             </View>
           </View>
           <View style={[styles.radioButton, locationEnabled && styles.radioButtonActive]}>
@@ -446,34 +447,37 @@ export default function SettingsScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity 
-          style={styles.settingItem} 
-          onPress={() => setDarkModeEnabled(!darkModeEnabled)}
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]} 
+          onPress={() => {
+            setDarkMode(!isDark);
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          }}
         >
           <View style={styles.settingLeft}>
-            <View style={styles.iconContainer}>
-              <Moon size={22} color="#8b5cf6" />
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#312E81' : '#F3F0FF' }]}>
+              {isDark ? <Sun size={22} color="#A78BFA" /> : <Moon size={22} color="#8b5cf6" />}
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={styles.settingTitle}>Dark Mode</Text>
-              <Text style={styles.settingSubtitle}>Enable dark theme</Text>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Dark Mode</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>{isDark ? 'Dark theme active' : 'Enable dark theme'}</Text>
             </View>
           </View>
-          <View style={[styles.radioButton, darkModeEnabled && styles.radioButtonActive]}>
-            {darkModeEnabled && <View style={styles.radioButtonInner} />}
+          <View style={[styles.radioButton, isDark && styles.radioButtonActive]}>
+            {isDark && <View style={styles.radioButtonInner} />}
           </View>
         </TouchableOpacity>
 
         <TouchableOpacity 
-          style={styles.settingItem} 
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]} 
           onPress={() => setPrivateMode(!privateMode)}
         >
           <View style={styles.settingLeft}>
-            <View style={[styles.iconContainer, privateMode && styles.iconContainerActive]}>
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#3B2000' : '#f5f5f5' }, privateMode && styles.iconContainerActive]}>
               <EyeOff size={22} color={privateMode ? "#fff" : "#f97316"} />
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={styles.settingTitle}>Private Mode</Text>
-              <Text style={styles.settingSubtitle}>Hide your data from public views</Text>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Private Mode</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Hide your data from public views</Text>
             </View>
           </View>
           <View style={[styles.radioButton, privateMode && styles.radioButtonActive]}>
@@ -483,108 +487,108 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Support</Text>
+        <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>Support</Text>
         
         <TouchableOpacity
-          style={styles.settingItem}
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
           onPress={() => showComingSoon("Contact Admin")}
         >
           <View style={styles.settingLeft}>
-            <View style={styles.iconContainer}>
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#3B2800' : '#f5f5f5' }]}>
               <Mail size={22} color="#f59e0b" />
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={styles.settingTitle}>Contact Admin</Text>
-              <Text style={styles.settingSubtitle}>Get in touch with administrators</Text>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Contact Admin</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Get in touch with administrators</Text>
             </View>
           </View>
-          <ChevronRight size={20} color="#999" />
+          <ChevronRight size={20} color={themeColors.iconMuted} />
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.settingItem}
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
           onPress={() => router.push("/policy" as any)}
         >
           <View style={styles.settingLeft}>
-            <View style={styles.iconContainer}>
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#312E81' : '#f5f5f5' }]}>
               <FileText size={22} color="#8b5cf6" />
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={styles.settingTitle}>Policy, Terms and Conditions</Text>
-              <Text style={styles.settingSubtitle}>View our policies and terms</Text>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Policy, Terms and Conditions</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>View our policies and terms</Text>
             </View>
           </View>
-          <ChevronRight size={20} color="#999" />
+          <ChevronRight size={20} color={themeColors.iconMuted} />
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.settingItem}
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
           onPress={() => setShowFeedbackModal(true)}
         >
           <View style={styles.settingLeft}>
-            <View style={styles.iconContainer}>
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#1E3A5F' : '#f5f5f5' }]}>
               <MessageSquare size={22} color="#3b82f6" />
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={styles.settingTitle}>Send Feedback</Text>
-              <Text style={styles.settingSubtitle}>Share your thoughts and suggestions</Text>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Send Feedback</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Share your thoughts and suggestions</Text>
             </View>
           </View>
-          <ChevronRight size={20} color="#999" />
+          <ChevronRight size={20} color={themeColors.iconMuted} />
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.settingItem}
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
           onPress={handleRateUs}
         >
           <View style={styles.settingLeft}>
-            <View style={[styles.iconContainer, { backgroundColor: '#FFF7ED' }]}>
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#3B2800' : '#FFF7ED' }]}>
               <Star size={22} color="#f59e0b" />
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={styles.settingTitle}>Rate Us</Text>
-              <Text style={styles.settingSubtitle}>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Rate Us</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>
                 {existingRating ? `You rated ${existingRating.rating}/5 — tap to update` : 'Love the app? Leave us a rating'}
               </Text>
             </View>
           </View>
-          <ChevronRight size={20} color="#999" />
+          <ChevronRight size={20} color={themeColors.iconMuted} />
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.settingItem}
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
           onPress={handleShareApp}
         >
           <View style={styles.settingLeft}>
-            <View style={[styles.iconContainer, { backgroundColor: '#EFF6FF' }]}>
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#1E3A5F' : '#EFF6FF' }]}>
               <Share2 size={22} color="#3b82f6" />
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={styles.settingTitle}>Share App</Text>
-              <Text style={styles.settingSubtitle}>Invite friends to join</Text>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Share App</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Invite friends to join</Text>
             </View>
           </View>
-          <ChevronRight size={20} color="#999" />
+          <ChevronRight size={20} color={themeColors.iconMuted} />
         </TouchableOpacity>
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Access</Text>
+        <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>Access</Text>
         
         <TouchableOpacity
-          style={styles.settingItem}
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
           onPress={() => router.push("/admin-login" as any)}
         >
           <View style={styles.settingLeft}>
-            <View style={styles.iconContainer}>
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#3B1515' : '#f5f5f5' }]}>
               <Shield size={22} color="#ef4444" />
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={styles.settingTitle}>Admin Login</Text>
-              <Text style={styles.settingSubtitle}>Access admin dashboard</Text>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Admin Login</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Access admin dashboard</Text>
             </View>
           </View>
-          <ChevronRight size={20} color="#999" />
+          <ChevronRight size={20} color={themeColors.iconMuted} />
         </TouchableOpacity>
       </View>
 
@@ -599,9 +603,9 @@ export default function SettingsScreen() {
 
       {user && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Danger Zone</Text>
+          <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>Danger Zone</Text>
           <TouchableOpacity
-            style={styles.deleteAccountButton}
+            style={[styles.deleteAccountButton, { backgroundColor: themeColors.cardBackground }]}
             onPress={() => {
               setShowDeleteModal(true);
               setDeleteStep('confirm');
@@ -616,9 +620,9 @@ export default function SettingsScreen() {
       )}
 
       <View style={styles.footer}>
-        <Text style={styles.footerText}>Version 1.0.0</Text>
+        <Text style={[styles.footerText, { color: themeColors.textLight }]}>Version 1.0.0</Text>
         {user && 'username' in user && user.username && (
-          <Text style={styles.footerSubtext}>Signed in as: {user.username}</Text>
+          <Text style={[styles.footerSubtext, { color: themeColors.textLight }]}>Signed in as: {user.username}</Text>
         )}
       </View>
 
@@ -628,29 +632,29 @@ export default function SettingsScreen() {
         transparent={false}
         onRequestClose={() => setShowApprovalModal(false)}
       >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader2}>
-            <Text style={styles.modalTitle2}>Pending Approvals</Text>
+        <View style={[styles.modalContainer, { backgroundColor: themeColors.background }]}>
+          <View style={[styles.modalHeader2, { backgroundColor: themeColors.cardBackground, borderBottomColor: themeColors.border }]}>
+            <Text style={[styles.modalTitle2, { color: themeColors.text }]}>Pending Approvals</Text>
             <TouchableOpacity onPress={() => setShowApprovalModal(false)}>
-              <XIcon size={24} color="#666" />
+              <XIcon size={24} color={themeColors.iconDefault} />
             </TouchableOpacity>
           </View>
 
           <ScrollView style={styles.pendingList}>
             {pendingActivities.length === 0 ? (
               <View style={styles.emptyState}>
-                <Text style={styles.emptyStateText}>No pending activities</Text>
+                <Text style={[styles.emptyStateText, { color: themeColors.textLight }]}>No pending activities</Text>
               </View>
             ) : (
               pendingActivities.map((activity) => (
                 <TouchableOpacity
                   key={activity.PendingActivityID}
-                  style={styles.pendingItem}
+                  style={[styles.pendingItem, { backgroundColor: themeColors.cardBackground }]}
                   onPress={() => setSelectedActivity(activity)}
                 >
                   <View style={styles.pendingInfo}>
-                    <Text style={styles.pendingType}>{activity.Exercise_Type}</Text>
-                    <Text style={styles.pendingDate}>{formatDate(activity.Created_At)}</Text>
+                    <Text style={[styles.pendingType, { color: themeColors.text }]}>{activity.Exercise_Type}</Text>
+                    <Text style={[styles.pendingDate, { color: themeColors.textSecondary }]}>{formatDate(activity.Created_At)}</Text>
                     <View style={styles.pendingStats}>
                       <Text style={styles.pendingStat}>
                         {activity.Distance_Entered.toFixed(2)} {activity.Distance_Unit}
@@ -660,7 +664,7 @@ export default function SettingsScreen() {
                       </Text>
                     </View>
                   </View>
-                  <ChevronRight size={20} color="#999" />
+                  <ChevronRight size={20} color={themeColors.iconMuted} />
                 </TouchableOpacity>
               ))
             )}
@@ -674,35 +678,35 @@ export default function SettingsScreen() {
         transparent={true}
         onRequestClose={() => setShowFeedbackModal(false)}
       >
-        <View style={styles.detailModalOverlay}>
-          <View style={styles.detailModalContent}>
-            <View style={styles.detailHeader}>
-              <Text style={styles.detailTitle}>Send Feedback</Text>
+        <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.detailModalContent, { backgroundColor: themeColors.modalBackground }]}>
+            <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.detailTitle, { color: themeColors.text }]}>Send Feedback</Text>
               <TouchableOpacity onPress={() => {
                 setShowFeedbackModal(false);
                 setFeedbackText("");
                 setFeedbackAttachment(null);
               }}>
-                <XIcon size={24} color="#666" />
+                <XIcon size={24} color={themeColors.iconDefault} />
               </TouchableOpacity>
             </View>
 
             <View style={styles.feedbackBody}>
-              <Text style={styles.feedbackLabel}>Your Feedback</Text>
+              <Text style={[styles.feedbackLabel, { color: themeColors.text }]}>Your Feedback</Text>
               <TextInput
-                style={styles.feedbackInput}
+                style={[styles.feedbackInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
                 placeholder="Share your thoughts, suggestions, or report issues..."
-                placeholderTextColor="#999"
+                placeholderTextColor={themeColors.textLight}
                 multiline
                 maxLength={300}
                 value={feedbackText}
                 onChangeText={setFeedbackText}
                 textAlignVertical="top"
               />
-              <Text style={styles.characterCount}>{feedbackText.length}/300</Text>
+              <Text style={[styles.characterCount, { color: themeColors.textLight }]}>{feedbackText.length}/300</Text>
 
               <TouchableOpacity
-                style={styles.attachButton}
+                style={[styles.attachButton, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder }]}
                 onPress={() => showComingSoon("Attachment")}
               >
                 <Paperclip size={20} color="#3b82f6" />
@@ -721,16 +725,16 @@ export default function SettingsScreen() {
               )}
             </View>
 
-            <View style={styles.feedbackActions}>
+            <View style={[styles.feedbackActions, { borderTopColor: themeColors.border }]}>
               <TouchableOpacity
-                style={styles.cancelFeedbackButton}
+                style={[styles.cancelFeedbackButton, { backgroundColor: themeColors.inputBackground }]}
                 onPress={() => {
                   setShowFeedbackModal(false);
                   setFeedbackText("");
                   setFeedbackAttachment(null);
                 }}
               >
-                <Text style={styles.cancelFeedbackText}>Cancel</Text>
+                <Text style={[styles.cancelFeedbackText, { color: themeColors.textSecondary }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -764,24 +768,24 @@ export default function SettingsScreen() {
         transparent={true}
         onRequestClose={() => setShowPinModal(false)}
       >
-        <View style={styles.detailModalOverlay}>
-          <View style={styles.pinModalContent}>
-            <View style={styles.detailHeader}>
-              <Text style={styles.detailTitle}>Verify PIN</Text>
+        <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.pinModalContent, { backgroundColor: themeColors.modalBackground }]}>
+            <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.detailTitle, { color: themeColors.text }]}>Verify PIN</Text>
               <TouchableOpacity onPress={() => {
                 setShowPinModal(false);
                 setSignOutPin('');
                 setSignOutPinError('');
               }}>
-                <XIcon size={24} color="#666" />
+                <XIcon size={24} color={themeColors.iconDefault} />
               </TouchableOpacity>
             </View>
 
             <View style={styles.pinModalBody}>
-              <View style={styles.pinLockIcon}>
+              <View style={[styles.pinLockIcon, { backgroundColor: isDark ? '#3B1515' : '#fef2f2' }]}>
                 <Lock size={28} color="#ef4444" />
               </View>
-              <Text style={styles.pinModalSubtitle}>Enter your PIN to sign out</Text>
+              <Text style={[styles.pinModalSubtitle, { color: themeColors.textSecondary }]}>Enter your PIN to sign out</Text>
 
               <View style={styles.pinDotsRow}>
                 {[0, 1, 2, 3].map((i) => (
@@ -816,16 +820,16 @@ export default function SettingsScreen() {
               )}
             </View>
 
-            <View style={styles.feedbackActions}>
+            <View style={[styles.feedbackActions, { borderTopColor: themeColors.border }]}>
               <TouchableOpacity
-                style={styles.cancelFeedbackButton}
+                style={[styles.cancelFeedbackButton, { backgroundColor: themeColors.inputBackground }]}
                 onPress={() => {
                   setShowPinModal(false);
                   setSignOutPin('');
                   setSignOutPinError('');
                 }}
               >
-                <Text style={styles.cancelFeedbackText}>Cancel</Text>
+                <Text style={[styles.cancelFeedbackText, { color: themeColors.textSecondary }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -852,33 +856,33 @@ export default function SettingsScreen() {
         transparent={true}
         onRequestClose={() => setShowDeleteModal(false)}
       >
-        <View style={styles.detailModalOverlay}>
-          <View style={styles.pinModalContent}>
+        <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.pinModalContent, { backgroundColor: themeColors.modalBackground }]}>
             {deleteStep === 'confirm' ? (
               <>
-                <View style={styles.detailHeader}>
-                  <Text style={styles.detailTitle}>Delete Account</Text>
+                <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
+                  <Text style={[styles.detailTitle, { color: themeColors.text }]}>Delete Account</Text>
                   <TouchableOpacity onPress={() => setShowDeleteModal(false)}>
-                    <XIcon size={24} color="#666" />
+                    <XIcon size={24} color={themeColors.iconDefault} />
                   </TouchableOpacity>
                 </View>
 
                 <View style={styles.deleteWarningBody}>
-                  <View style={styles.deleteWarningIcon}>
+                  <View style={[styles.deleteWarningIcon, { backgroundColor: isDark ? '#3B1515' : '#fef2f2' }]}>
                     <AlertTriangle size={32} color="#dc2626" />
                   </View>
                   <Text style={styles.deleteWarningTitle}>Are you sure?</Text>
-                  <Text style={styles.deleteWarningText}>
+                  <Text style={[styles.deleteWarningText, { color: themeColors.textSecondary }]}>
                     This action is permanent and cannot be undone. All your data including activities, goals, club memberships, and event participation will be permanently deleted.
                   </Text>
                 </View>
 
-                <View style={styles.feedbackActions}>
+                <View style={[styles.feedbackActions, { borderTopColor: themeColors.border }]}>
                   <TouchableOpacity
-                    style={styles.cancelFeedbackButton}
+                    style={[styles.cancelFeedbackButton, { backgroundColor: themeColors.inputBackground }]}
                     onPress={() => setShowDeleteModal(false)}
                   >
-                    <Text style={styles.cancelFeedbackText}>Cancel</Text>
+                    <Text style={[styles.cancelFeedbackText, { color: themeColors.textSecondary }]}>Cancel</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.deleteConfirmStepButton}
@@ -890,22 +894,22 @@ export default function SettingsScreen() {
               </>
             ) : (
               <>
-                <View style={styles.detailHeader}>
-                  <Text style={styles.detailTitle}>Verify PIN</Text>
+                <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
+                  <Text style={[styles.detailTitle, { color: themeColors.text }]}>Verify PIN</Text>
                   <TouchableOpacity onPress={() => {
                     setShowDeleteModal(false);
                     setDeletePin('');
                     setDeletePinError('');
                   }}>
-                    <XIcon size={24} color="#666" />
+                    <XIcon size={24} color={themeColors.iconDefault} />
                   </TouchableOpacity>
                 </View>
 
                 <View style={styles.pinModalBody}>
-                  <View style={styles.deleteLockIcon}>
+                  <View style={[styles.deleteLockIcon, { backgroundColor: isDark ? '#3B1515' : '#fef2f2' }]}>
                     <Lock size={28} color="#dc2626" />
                   </View>
-                  <Text style={styles.pinModalSubtitle}>Enter your PIN to confirm account deletion</Text>
+                  <Text style={[styles.pinModalSubtitle, { color: themeColors.textSecondary }]}>Enter your PIN to confirm account deletion</Text>
 
                   <View style={styles.pinDotsRow}>
                     {[0, 1, 2, 3].map((i) => (
@@ -940,16 +944,16 @@ export default function SettingsScreen() {
                   )}
                 </View>
 
-                <View style={styles.feedbackActions}>
+                <View style={[styles.feedbackActions, { borderTopColor: themeColors.border }]}>
                   <TouchableOpacity
-                    style={styles.cancelFeedbackButton}
+                    style={[styles.cancelFeedbackButton, { backgroundColor: themeColors.inputBackground }]}
                     onPress={() => {
                       setDeleteStep('confirm');
                       setDeletePin('');
                       setDeletePinError('');
                     }}
                   >
-                    <Text style={styles.cancelFeedbackText}>Back</Text>
+                    <Text style={[styles.cancelFeedbackText, { color: themeColors.textSecondary }]}>Back</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[
@@ -1014,21 +1018,21 @@ export default function SettingsScreen() {
         onRequestClose={() => setShowRatingModal(false)}
       >
         <View style={styles.detailModalOverlay}>
-          <View style={styles.ratingModalContent}>
-            <View style={styles.detailHeader}>
-              <Text style={styles.detailTitle}>Rate Our App</Text>
+          <View style={[styles.ratingModalContent, { backgroundColor: themeColors.modalBackground }]}>
+            <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.detailTitle, { color: themeColors.text }]}>Rate Our App</Text>
               <TouchableOpacity onPress={() => {
                 setShowRatingModal(false);
                 setSelectedRating(0);
                 setRatingFeedback('');
               }}>
-                <XIcon size={24} color="#666" />
+                <XIcon size={24} color={themeColors.iconDefault} />
               </TouchableOpacity>
             </View>
 
             <View style={styles.ratingBody}>
               <View style={styles.ratingStarsContainer}>
-                <Text style={styles.ratingPrompt}>How would you rate your experience?</Text>
+                <Text style={[styles.ratingPrompt, { color: themeColors.text }]}>How would you rate your experience?</Text>
                 <View style={styles.starsRow}>
                   {[1, 2, 3, 4, 5].map((star) => (
                     <TouchableOpacity
@@ -1056,31 +1060,31 @@ export default function SettingsScreen() {
               </View>
 
               <View style={styles.ratingFeedbackSection}>
-                <Text style={styles.feedbackLabel}>Additional Feedback (Optional)</Text>
+                <Text style={[styles.feedbackLabel, { color: themeColors.text }]}>Additional Feedback (Optional)</Text>
                 <TextInput
-                  style={styles.ratingFeedbackInput}
+                  style={[styles.ratingFeedbackInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
                   placeholder="Tell us what you think..."
-                  placeholderTextColor="#999"
+                  placeholderTextColor={themeColors.textLight}
                   multiline
                   maxLength={200}
                   value={ratingFeedback}
                   onChangeText={setRatingFeedback}
                   textAlignVertical="top"
                 />
-                <Text style={styles.characterCount}>{ratingFeedback.length}/200</Text>
+                <Text style={[styles.characterCount, { color: themeColors.textLight }]}>{ratingFeedback.length}/200</Text>
               </View>
             </View>
 
-            <View style={styles.feedbackActions}>
+            <View style={[styles.feedbackActions, { borderTopColor: themeColors.border }]}>
               <TouchableOpacity
-                style={styles.cancelFeedbackButton}
+                style={[styles.cancelFeedbackButton, { backgroundColor: themeColors.inputBackground }]}
                 onPress={() => {
                   setShowRatingModal(false);
                   setSelectedRating(0);
                   setRatingFeedback('');
                 }}
               >
-                <Text style={styles.cancelFeedbackText}>Cancel</Text>
+                <Text style={[styles.cancelFeedbackText, { color: themeColors.textSecondary }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -1113,43 +1117,43 @@ export default function SettingsScreen() {
         transparent={true}
         onRequestClose={() => setSelectedActivity(null)}
       >
-        <View style={styles.detailModalOverlay}>
-          <View style={styles.detailModalContent}>
+        <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.detailModalContent, { backgroundColor: themeColors.modalBackground }]}>
             {selectedActivity && (
               <>
-                <View style={styles.detailHeader}>
-                  <Text style={styles.detailTitle}>Review Activity</Text>
+                <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
+                  <Text style={[styles.detailTitle, { color: themeColors.text }]}>Review Activity</Text>
                   <TouchableOpacity onPress={() => setSelectedActivity(null)}>
-                    <XIcon size={24} color="#666" />
+                    <XIcon size={24} color={themeColors.iconDefault} />
                   </TouchableOpacity>
                 </View>
 
                 <ScrollView style={styles.detailBody}>
                   <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Type</Text>
-                    <Text style={styles.detailValue}>{selectedActivity.Exercise_Type}</Text>
+                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Type</Text>
+                    <Text style={[styles.detailValue, { color: themeColors.text }]}>{selectedActivity.Exercise_Type}</Text>
                   </View>
 
                   <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Submitted At</Text>
-                    <Text style={styles.detailValue}>{formatDate(selectedActivity.Created_At)}</Text>
+                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Submitted At</Text>
+                    <Text style={[styles.detailValue, { color: themeColors.text }]}>{formatDate(selectedActivity.Created_At)}</Text>
                   </View>
 
                   <View style={styles.detailRow}>
                     <View style={styles.detailSection}>
-                      <Text style={styles.detailLabel}>Distance</Text>
-                      <Text style={styles.detailValue}>{selectedActivity.Distance_Entered.toFixed(2)} {selectedActivity.Distance_Unit}</Text>
+                      <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Distance</Text>
+                      <Text style={[styles.detailValue, { color: themeColors.text }]}>{selectedActivity.Distance_Entered.toFixed(2)} {selectedActivity.Distance_Unit}</Text>
                     </View>
                     <View style={styles.detailSection}>
-                      <Text style={styles.detailLabel}>Time</Text>
-                      <Text style={styles.detailValue}>
+                      <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Time</Text>
+                      <Text style={[styles.detailValue, { color: themeColors.text }]}>
                         {formatTimeInterval(selectedActivity.Time_Entered)}
                       </Text>
                     </View>
                   </View>
 
                   <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Treadmill Photo</Text>
+                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Treadmill Photo</Text>
                     <Image
                       source={{ uri: selectedActivity.Photo_Path }}
                       style={styles.activityImage}
@@ -1158,7 +1162,7 @@ export default function SettingsScreen() {
                   </View>
                 </ScrollView>
 
-                <View style={styles.actionButtons}>
+                <View style={[styles.actionButtons, { borderTopColor: themeColors.border }]}>
                   <TouchableOpacity
                     style={styles.rejectButton}
                     onPress={() => rejectMutation.mutate(selectedActivity.PendingActivityID)}

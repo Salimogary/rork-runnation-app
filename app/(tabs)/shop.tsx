@@ -8,6 +8,7 @@ import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter, Stack } from "expo-router";
 import colors from "@/constants/colors";
+import { useTheme } from "@/contexts/ThemeContext";
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import * as Haptics from "expo-haptics";
 
@@ -25,6 +26,7 @@ interface CatalogueItem {
 
 export default function ShopScreen() {
   const { registrationId, verifyPin } = useAuth();
+  const { colors: themeColors } = useTheme();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [pinUnlocked, setPinUnlocked] = useState(false);
@@ -139,15 +141,15 @@ export default function ShopScreen() {
 
   if (!pinUnlocked) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: themeColors.background }]}>
         <Stack.Screen options={{ title: "Shop" }} />
         <Animated.View style={[styles.pinGateContainer, { opacity: fadeAnim }]}>
-          <View style={styles.pinGateContent}>
+          <View style={[styles.pinGateContent, { backgroundColor: themeColors.cardBackground }]}>
             <View style={styles.lockIconWrap}>
-              <Lock size={36} color={colors.primary} />
+              <Lock size={36} color={themeColors.primary} />
             </View>
-            <Text style={styles.pinGateTitle}>Shop Access</Text>
-            <Text style={styles.pinGateSubtitle}>Enter your 4-digit PIN to access the shop</Text>
+            <Text style={[styles.pinGateTitle, { color: themeColors.text }]}>Shop Access</Text>
+            <Text style={[styles.pinGateSubtitle, { color: themeColors.textSecondary }]}>Enter your 4-digit PIN to access the shop</Text>
 
             <Animated.View style={{ transform: [{ translateX: shakeAnim }] }}>
               <View style={styles.pinDotsRow}>
@@ -209,7 +211,7 @@ export default function ShopScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <Stack.Screen
         options={{
           title: "Shop",
@@ -246,7 +248,7 @@ export default function ShopScreen() {
         ) : (
           <View style={styles.productGrid}>
             {products.map((item) => (
-              <View key={item.CatalogueID} style={styles.productCard}>
+              <View key={item.CatalogueID} style={[styles.productCard, { backgroundColor: themeColors.cardBackground }]}>
                 {item.Photo_URL ? (
                   <Image
                     source={{ uri: item.Photo_URL }}
@@ -261,7 +263,7 @@ export default function ShopScreen() {
                 )}
                 
                 <View style={styles.productInfo}>
-                  <Text style={styles.productName} numberOfLines={2}>
+                  <Text style={[styles.productName, { color: themeColors.text }]} numberOfLines={2}>
                     {item.Catalogue_Item || 'Unnamed Item'}
                   </Text>
                   
@@ -285,7 +287,7 @@ export default function ShopScreen() {
                   
                   <View style={styles.priceRow}>
                     <Text style={styles.priceLabel}>ugx.</Text>
-                    <Text style={styles.priceValue}>
+                    <Text style={[styles.priceValue, { color: themeColors.text }]}>
                       {(item.Price || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
                     </Text>
                   </View>

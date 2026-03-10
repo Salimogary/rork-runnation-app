@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { Plus, X, Calendar, MapPin, TrendingUp, Clock, Award, ChevronRight, Users } from "lucide-react-native";
 import colors from "@/constants/colors";
+import { useTheme } from "@/contexts/ThemeContext";
 
 
 interface ActivityData {
@@ -50,6 +51,7 @@ type ActiveTab = "runs" | "club" | "community";
 
 export default function ActivityScreen() {
   const { user, privateMode } = useAuth();
+  const { colors: themeColors } = useTheme();
 
   const [communitySortBy, setCommunitySortBy] = useState<CommunitySortOption>("distance");
   const [clubSortBy, setClubSortBy] = useState<CommunitySortOption>("distance");
@@ -668,8 +670,8 @@ export default function ActivityScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.header}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
+      <LinearGradient colors={[themeColors.primary, themeColors.primaryDark]} style={styles.header}>
         <View style={styles.toggleContainer}>
           <TouchableOpacity
             style={[styles.toggleButton, activeTab === "runs" && styles.toggleButtonActive]}
@@ -778,10 +780,10 @@ export default function ActivityScreen() {
 
         {activeTab === "runs" && (
           <View style={styles.eventsSection}>
-            <Text style={styles.eventsSectionTitle}>Registered Events</Text>
+            <Text style={[styles.eventsSectionTitle, { color: themeColors.text }]}>Registered Events</Text>
             {registeredEvents && registeredEvents.length > 0 ? (
               registeredEvents.map((event) => (
-                <View key={event.eventId} style={styles.eventCard}>
+                <View key={event.eventId} style={[styles.eventCard, { backgroundColor: themeColors.cardBackground }]}>
                   <View style={styles.eventCardRow}>
                     <Calendar size={14} color={colors.primary} />
                     <Text style={styles.eventName} numberOfLines={1}>{event.eventName}</Text>
@@ -812,7 +814,7 @@ export default function ActivityScreen() {
                 </View>
               ))
             ) : (
-              <View style={styles.noEventsCard}>
+              <View style={[styles.noEventsCard, { backgroundColor: themeColors.cardBackground }]}>
                 <Calendar size={20} color={colors.textLight} />
                 <Text style={styles.noEventsText}>No registered events</Text>
               </View>
@@ -849,7 +851,7 @@ export default function ActivityScreen() {
           ) : (
             <View style={styles.leaderboardContainer}>
               {sortedClubData.map((item, index) => (
-                <View key={item.RegistrationID} style={styles.leaderboardCard}>
+                <View key={item.RegistrationID} style={[styles.leaderboardCard, { backgroundColor: themeColors.cardBackground }]}>
                   <View style={styles.leaderboardHeader}>
                     <View style={styles.nameBadge}>
                       <Text style={styles.runnerName} numberOfLines={1}>{item.Name}</Text>
@@ -920,7 +922,7 @@ export default function ActivityScreen() {
           ) : (
             <View style={styles.leaderboardContainer}>
               {sortedCommunityData.map((item, index) => (
-                <View key={item.RegistrationID} style={styles.leaderboardCard}>
+                <View key={item.RegistrationID} style={[styles.leaderboardCard, { backgroundColor: themeColors.cardBackground }]}>
                   <View style={styles.leaderboardHeader}>
                     <View style={styles.nameBadge}>
                       <Text style={styles.runnerName} numberOfLines={1}>{item.Name}</Text>
@@ -991,7 +993,7 @@ export default function ActivityScreen() {
           ) : (
             <View style={styles.activitiesContainer}>
               {sortedActivities.map((activity) => (
-                <View key={activity.ActivityID} style={styles.activityCard}>
+                <View key={activity.ActivityID} style={[styles.activityCard, { backgroundColor: themeColors.cardBackground }]}>
                   <View style={styles.activityRow}>
                     <View style={styles.activityMainInfo}>
                       <Text style={styles.activityType}>{activity.Exercise_Type}</Text>
@@ -1029,33 +1031,33 @@ export default function ActivityScreen() {
         transparent={true}
         onRequestClose={() => setShowExternalForm(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <LinearGradient colors={colors.gradient.orange} style={styles.modalHeader}>
+        <View style={[styles.modalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.surface }]}>
+            <LinearGradient colors={themeColors.gradient.orange} style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Add External Activity</Text>
               <TouchableOpacity onPress={() => setShowExternalForm(false)}>
-                <X size={24} color={colors.white} />
+                <X size={24} color="#fff" />
               </TouchableOpacity>
             </LinearGradient>
 
             <ScrollView style={styles.modalBody}>
-              <Text style={styles.modalSubtitle}>
+              <Text style={[styles.modalSubtitle, { color: themeColors.textSecondary }]}>
                 📱 Import from other running apps
               </Text>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Date *</Text>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Date *</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
                   placeholder="YYYY-MM-DD (e.g., 2024-12-25)"
                   value={formData.activityDate}
                   onChangeText={(text) => setFormData({ ...formData, activityDate: text })}
-                  placeholderTextColor={colors.textLight}
+                  placeholderTextColor={themeColors.textLight}
                 />
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Activity Type *</Text>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Activity Type *</Text>
                 <View style={styles.typeChipsContainer}>
                   {["Run", "Walk", "Treadmill"].map((type) => (
                     <TouchableOpacity
@@ -1081,41 +1083,41 @@ export default function ActivityScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Start Time *</Text>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Start Time *</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
                   placeholder="HH:MM (e.g., 08:30)"
                   value={formData.startTime}
                   onChangeText={(text) => setFormData({ ...formData, startTime: text })}
-                  placeholderTextColor={colors.textLight}
+                  placeholderTextColor={themeColors.textLight}
                 />
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Duration (HH:MM:SS) *</Text>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Duration (HH:MM:SS) *</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
                   placeholder="e.g., 00:45:30"
                   value={formData.duration}
                   onChangeText={(text) => setFormData({ ...formData, duration: text })}
-                  placeholderTextColor={colors.textLight}
+                  placeholderTextColor={themeColors.textLight}
                 />
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Distance (km) *</Text>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Distance (km) *</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
                   placeholder="e.g., 5.5"
                   keyboardType="numeric"
                   value={formData.distanceKm}
                   onChangeText={(text) => setFormData({ ...formData, distanceKm: text })}
-                  placeholderTextColor={colors.textLight}
+                  placeholderTextColor={themeColors.textLight}
                 />
               </View>
             </ScrollView>
 
-            <View style={styles.modalFooter}>
+            <View style={[styles.modalFooter, { borderTopColor: themeColors.border }]}>
               <TouchableOpacity
                 style={styles.modalCancelButton}
                 onPress={() => setShowExternalForm(false)}
