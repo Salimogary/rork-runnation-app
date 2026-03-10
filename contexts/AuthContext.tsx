@@ -425,10 +425,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+const defaultAuthValue: AuthContextValue = {
+  user: null,
+  isLoading: true,
+  registrationId: '',
+  privateMode: false,
+  setPrivateMode: async () => {},
+  signIn: async () => ({ error: { message: 'Auth not initialized' } }),
+  signUp: async () => ({ error: { message: 'Auth not initialized' } }),
+  signOut: async () => ({ error: { message: 'Auth not initialized' } }),
+  deleteAccount: async () => ({ error: { message: 'Auth not initialized' } }),
+  verifyPin: async () => false,
+  getBiometricStatus: async () => false,
+  disableBiometric: async () => {},
+};
+
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    console.warn('[AuthContext] useAuth called outside AuthProvider, returning defaults');
+    return defaultAuthValue;
   }
   return context;
 }
