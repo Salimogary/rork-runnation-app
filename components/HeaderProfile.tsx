@@ -16,7 +16,6 @@ import { Edit2, LogOut, Check, Circle, X } from "lucide-react-native";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { getEarnedBadgeCount } from "@/utils/badges";
 import { calculateProfileCompletion } from "@/utils/profileCompletion";
