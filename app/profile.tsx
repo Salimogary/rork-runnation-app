@@ -37,7 +37,7 @@ import {
   BadgeCheck,
   Mail,
 } from "lucide-react-native";
-import { getAllBadges, getEarnedBadgeCount } from "@/utils/badges";
+import { getAllBadges, getEarnedBadgeCount, getProfileCompleteBadge } from "@/utils/badges";
 import type { Badge } from "@/utils/badges";
 import { useSubscription } from "@/contexts/SubscriptionContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -170,18 +170,14 @@ export default function ProfileScreen() {
     staleTime: 60000,
   });
 
-  const badges = useMemo(() => {
+  const distanceBadges = useMemo(() => {
     if (!activityStats) return [];
-    return getAllBadges(activityStats.totalDistance, activityStats.totalActivities);
+    return getAllBadges(activityStats.totalDistance, activityStats.totalActivities, 0).filter((b) => b.type === "distance");
   }, [activityStats]);
-
-  const earnedBadgeCount = useMemo(() => {
-    if (!activityStats) return 0;
-    return getEarnedBadgeCount(activityStats.totalDistance, activityStats.totalActivities);
+  const activityBadges = useMemo(() => {
+    if (!activityStats) return [];
+    return getAllBadges(activityStats.totalDistance, activityStats.totalActivities, 0).filter((b) => b.type === "activity_count");
   }, [activityStats]);
-
-  const distanceBadges = useMemo(() => badges.filter((b) => b.type === "distance"), [badges]);
-  const activityBadges = useMemo(() => badges.filter((b) => b.type === "activity_count"), [badges]);
 
   const { data: goals = [] } = useQuery<GoalItem[]>({
     queryKey: ["allGoals", user?.id, user],
@@ -315,6 +311,17 @@ export default function ProfileScreen() {
     if (!completionInputs) return null;
     return calculateProfileCompletion(completionInputs);
   }, [completionInputs]);
+
+  const completionPct = completion?.percentage ?? 0;
+
+  const earnedBadgeCount = useMemo(() => {
+    if (!activityStats) return 0;
+    return getEarnedBadgeCount(activityStats.totalDistance, activityStats.totalActivities, completionPct);
+  }, [activityStats, completionPct]);
+
+  const profileBadge = useMemo(() => {
+    return getProfileCompleteBadge(completionPct);
+  }, [completionPct]);
 
   const sendVerificationMutation = useMutation({
     mutationFn: async () => {
@@ -1237,6 +1244,11 @@ export default function ProfileScreen() {
           </Text>
           <Text style={styles.badgesStatLabel}>Total Activities</Text>
         </View>
+      </View>
+
+      <Text style={styles.badgeCategoryTitle}>🎓 Profile Completion</Text>
+      <View style={styles.badgesGrid}>
+        {profileBadge ? renderBadgeItem(profileBadge) : null}
       </View>
 
       <Text style={styles.badgeCategoryTitle}>🏅 Distance Milestones</Text>

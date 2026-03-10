@@ -49,8 +49,7 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
       const filtered = (data || []).filter((a: any) => validTypes.includes(a.Exercise_Type || ''));
       const totalDistance = filtered.reduce((sum: number, a: any) => sum + (a.Distance_km || 0), 0);
       const totalActivities = filtered.length;
-      const earnedCount = getEarnedBadgeCount(totalDistance, totalActivities);
-      return { earnedCount, totalDistance, totalActivities };
+      return { totalDistance, totalActivities };
     },
     enabled: !!user?.id,
     staleTime: 60000,
@@ -200,8 +199,10 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
 
   useEffect(() => {
     if (!user?.id || !badgeData || Platform.OS === 'web') return;
-    void checkAndNotifyBadges(user.id, badgeData.earnedCount);
-  }, [user?.id, badgeData]);
+    const completionPct = completionData ? calculateProfileCompletion(completionData).percentage : 0;
+    const earnedCount = getEarnedBadgeCount(badgeData.totalDistance, badgeData.totalActivities, completionPct);
+    void checkAndNotifyBadges(user.id, earnedCount);
+  }, [user?.id, badgeData, completionData]);
 
   useEffect(() => {
     if (!user?.id || !completionData || Platform.OS === 'web') return;

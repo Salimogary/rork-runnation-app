@@ -1,6 +1,6 @@
 export interface Badge {
   id: string;
-  type: "distance" | "activity_count";
+  type: "distance" | "activity_count" | "profile_complete";
   title: string;
   description: string;
   milestone: number;
@@ -41,19 +41,33 @@ export function getActivityCountBadges(totalActivities: number): Badge[] {
   return badges;
 }
 
-export function getAllBadges(totalDistanceKm: number, totalActivities: number): Badge[] {
+export function getProfileCompleteBadge(completionPercentage: number): Badge {
+  return {
+    id: "profile_complete_100",
+    type: "profile_complete",
+    title: "100% Complete",
+    description: "Completed 100% of your registration profile",
+    milestone: 100,
+    icon: "🎓",
+    earned: completionPercentage >= 100,
+  };
+}
+
+export function getAllBadges(totalDistanceKm: number, totalActivities: number, completionPercentage: number = 0): Badge[] {
   return [
+    getProfileCompleteBadge(completionPercentage),
     ...getDistanceBadges(totalDistanceKm),
     ...getActivityCountBadges(totalActivities),
   ];
 }
 
-export function getEarnedBadgeCount(totalDistanceKm: number, totalActivities: number): number {
+export function getEarnedBadgeCount(totalDistanceKm: number, totalActivities: number, completionPercentage: number = 0): number {
+  const profileEarned = completionPercentage >= 100 ? 1 : 0;
   const distanceEarned = DISTANCE_MILESTONES.filter((km) => totalDistanceKm >= km).length;
   let activityEarned = 0;
   for (let i = ACTIVITY_INTERVAL; i <= MAX_ACTIVITY_BADGES; i += ACTIVITY_INTERVAL) {
     if (totalActivities >= i) activityEarned++;
     else break;
   }
-  return distanceEarned + activityEarned;
+  return profileEarned + distanceEarned + activityEarned;
 }

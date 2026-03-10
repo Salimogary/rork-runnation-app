@@ -16,6 +16,7 @@ import { Edit2, LogOut, Check, Circle, X } from "lucide-react-native";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { getEarnedBadgeCount } from "@/utils/badges";
 import { calculateProfileCompletion } from "@/utils/profileCompletion";
@@ -72,23 +73,23 @@ export default function HeaderProfile() {
     enabled: !!user,
   });
 
-  const { data: badgeCount = 0 } = useQuery<number>({
+  const { data: badgeStats } = useQuery<{ totalDistance: number; totalActivities: number }>({
     queryKey: ["headerBadgeCount", user?.id],
     queryFn: async () => {
-      if (!user) return 0;
+      if (!user) return { totalDistance: 0, totalActivities: 0 };
       const { data, error } = await supabase
         .from("activities")
         .select("Distance_km, Exercise_Type")
         .eq("RegistrationID", user.id);
       if (error) {
         console.error("[HeaderBadges] Error:", error);
-        return 0;
+        return { totalDistance: 0, totalActivities: 0 };
       }
       const validTypes = ["Run", "Walk", "Treadmill", "Tredmill"];
       const filtered = (data || []).filter((a) => validTypes.includes(a.Exercise_Type || ""));
       const totalDistance = filtered.reduce((sum, a) => sum + (a.Distance_km || 0), 0);
       const totalActivities = filtered.length;
-      return getEarnedBadgeCount(totalDistance, totalActivities);
+      return { totalDistance, totalActivities };
     },
     enabled: !!user,
     staleTime: 60000,
@@ -235,6 +236,12 @@ export default function HeaderProfile() {
     if (!completionInputs) return null;
     return calculateProfileCompletion(completionInputs);
   }, [completionInputs]);
+
+  const badgeCount = useMemo(() => {
+    if (!badgeStats) return 0;
+    const pct = completion?.percentage ?? 0;
+    return getEarnedBadgeCount(badgeStats.totalDistance, badgeStats.totalActivities, pct);
+  }, [badgeStats, completion]);
 
   const handleEdit = () => {
     setMenuVisible(false);
