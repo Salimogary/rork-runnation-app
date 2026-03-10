@@ -35,10 +35,9 @@ interface WeightGoalEntry {
 interface FitnessGoal {
   id: number;
   registration_id: string;
-  target_pace_kmh: number;
+  target_pace: number;
   target_date: string;
   created_at: string;
-  updated_at: string;
 }
 
 interface HealthGoalEntry {
@@ -175,6 +174,8 @@ export default function GoalsScreen() {
         .from("fitness_goal")
         .select("*")
         .eq("registration_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
       if (error) {
         console.error("[Goals] Error fetching fitness goal:", error);
@@ -212,32 +213,20 @@ export default function GoalsScreen() {
     mutationFn: async ({ paceKmh, date }: { paceKmh: number; date: string }) => {
       if (!user?.id) throw new Error("Not logged in");
 
-      if (fitnessGoal) {
-        const { data, error } = await supabase
-          .from("fitness_goal")
-          .update({
-            target_pace_kmh: paceKmh,
-            target_date: date,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("registration_id", user.id)
-          .select()
-          .single();
-        if (error) throw error;
-        return data;
-      } else {
-        const { data, error } = await supabase
-          .from("fitness_goal")
-          .insert({
-            registration_id: user.id,
-            target_pace_kmh: paceKmh,
-            target_date: date,
-          })
-          .select()
-          .single();
-        if (error) throw error;
-        return data;
+      const { data, error } = await supabase
+        .from("fitness_goal")
+        .insert({
+          registration_id: user.id,
+          target_pace: paceKmh,
+          target_date: date,
+        })
+        .select()
+        .single();
+      if (error) {
+        console.error("[Goals] Supabase insert error:", JSON.stringify(error));
+        throw new Error(error.message || "Failed to save fitness goal");
       }
+      return data;
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["fitnessGoal", user?.id] });
@@ -248,7 +237,7 @@ export default function GoalsScreen() {
       Alert.alert("Success", "Fitness goal saved!");
     },
     onError: (error: any) => {
-      console.error("[Goals] Save fitness goal error:", error);
+      console.error("[Goals] Save fitness goal error:", JSON.stringify(error));
       Alert.alert("Error", error?.message || "Failed to save fitness goal");
     },
   });
@@ -295,7 +284,7 @@ export default function GoalsScreen() {
     if (validActivities.length === 0) return null;
 
     const avgPaceKmh = validActivities.reduce((sum, a) => sum + a.Pace_km_h, 0) / validActivities.length;
-    const targetPaceKmh = fitnessGoal.target_pace_kmh;
+    const targetPaceKmh = fitnessGoal.target_pace;
 
     const avgMinPerKm = convertKmhToMinPerKm(avgPaceKmh);
     const targetMinPerKm = convertKmhToMinPerKm(targetPaceKmh);
@@ -1275,7 +1264,7 @@ export default function GoalsScreen() {
 
   const openEditGoalForm = useCallback(() => {
     if (fitnessGoal) {
-      const minPerKm = convertKmhToMinPerKm(fitnessGoal.target_pace_kmh);
+      const minPerKm = convertKmhToMinPerKm(fitnessGoal.target_pace);
       const mins = Math.floor(minPerKm);
       const secs = Math.round((minPerKm - mins) * 60);
       setTargetPaceMin(mins.toString());
@@ -1417,7 +1406,7 @@ export default function GoalsScreen() {
                 <Zap size={28} color={colors.textLight} />
                 <Text style={styles.noActivitiesTitle}>No Activities Yet</Text>
                 <Text style={styles.noActivitiesText}>
-                  Complete your first activity to start tracking your pace against your target of {formatPaceMinPerKm(fitnessGoal.target_pace_kmh)} min/km
+                  Complete your first activity to start tracking your pace against your target of {formatPaceMinPerKm(fitnessGoal.target_pace)} min/km
                 </Text>
               </View>
             </View>
