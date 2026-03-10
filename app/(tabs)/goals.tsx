@@ -2,7 +2,7 @@ import { StyleSheet, View, Text, ScrollView, RefreshControl, Animated, Touchable
 import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
-import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints, Shield, Check, Trash2, Users, ArrowUp, ArrowDown, Minus, Trophy } from "lucide-react-native";
+import { Target, TrendingDown, TrendingUp, Award, Calendar, CheckCircle, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints, Users, ArrowUp, ArrowDown, Minus, Trophy, Flame } from "lucide-react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -51,18 +51,16 @@ interface HealthGoalEntry {
   overall_health_score: number | null;
 }
 
-interface SelfDisciplineGoal {
-  self_discipline_goal_id: number;
-  created_at: string;
-  goal: string | null;
-  goal_name: string | null;
-}
-
-interface UserSelfDisciplineGoal {
-  user_self_discipline_id: number;
+interface HabitDeclaration {
+  declaration_id: number;
   registration_id: string;
-  self_discipline_goal_id: number;
-  selected_at: string;
+  activity_type: string;
+  target_amount: number;
+  unit: string;
+  frequency: string;
+  start_date: string;
+  created_at: string;
+  is_active: boolean;
 }
 
 interface RecentActivity {
@@ -155,7 +153,12 @@ export default function GoalsScreen() {
   const [healthHeartRateInput, setHealthHeartRateInput] = useState("");
   const [healthSleepInput, setHealthSleepInput] = useState("");
   const [healthSpo2Input, setHealthSpo2Input] = useState("");
-  const [showDisciplineModal, setShowDisciplineModal] = useState(false);
+  const [showHabitModal, setShowHabitModal] = useState(false);
+  const [habitActivityType, setHabitActivityType] = useState<string>("Walk");
+  const [habitAmount, setHabitAmount] = useState<string>("");
+  const [habitUnit, setHabitUnit] = useState<string>("kilometers");
+  const [habitFrequency, setHabitFrequency] = useState<string>("daily");
+  const [habitStartDate, setHabitStartDate] = useState<string>("");
   const [previousRank, setPreviousRank] = useState<StoredRankSnapshot | null>(null);
 
   useEffect(() => {
@@ -668,51 +671,83 @@ export default function GoalsScreen() {
     return "Needs Work";
   };
 
-  const { data: availableDisciplineGoals = [], isLoading: disciplineGoalsLoading } = useQuery<SelfDisciplineGoal[]>({
-    queryKey: ["availableDisciplineGoals"],
+  const { data: habitDeclaration, isLoading: habitDeclarationLoading, refetch: refetchHabit } = useQuery<HabitDeclaration | null>({
+    queryKey: ["habitDeclaration", user?.id],
     queryFn: async () => {
+      if (!user?.id) return null;
       const { data, error } = await supabase
-        .from("self_discipline_goal")
+        .from("habit_declarations")
         .select("*")
-        .order("self_discipline_goal_id", { ascending: true });
+        .eq("registration_id", user.id)
+        .eq("is_active", true)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
       if (error) {
-        console.error("[Goals] Error fetching discipline goals:", error);
-        return [];
+        console.error("[Goals] Error fetching habit declaration:", error);
+        return null;
       }
-      console.log("[Goals] Available discipline goals:", data?.length);
-      return (data || []) as SelfDisciplineGoal[];
-    },
-    staleTime: 60000,
-  });
-
-  const { data: userDisciplineGoals = [], isLoading: userDisciplineLoading, refetch: refetchDiscipline } = useQuery<UserSelfDisciplineGoal[]>({
-    queryKey: ["userDisciplineGoals", user?.id],
-    queryFn: async () => {
-      if (!user?.id) return [];
-      const { data, error } = await supabase
-        .from("user_self_discipline_goals")
-        .select("*")
-        .eq("registration_id", user.id);
-      if (error) {
-        console.error("[Goals] Error fetching user discipline goals:", error);
-        return [];
-      }
-      console.log("[Goals] User discipline goals:", data?.length);
-      return (data || []) as UserSelfDisciplineGoal[];
+      console.log("[Goals] Habit declaration:", data);
+      return data as HabitDeclaration | null;
     },
     enabled: !!user?.id,
     staleTime: 30000,
   });
 
-  const addDisciplineGoalMutation = useMutation({
-    mutationFn: async (goalId: number) => {
+  const { data: habitActivities = [] } = useQuery<any[]>({
+    queryKey: ["habitActivities", user?.id, habitDeclaration?.declaration_id],
+    queryFn: async () => {
+      if (!user?.id || !habitDeclaration) return [];
+      if (habitDeclaration.unit === "steps") {
+        const { data, error } = await supabase
+          .from("health_goal")
+          .select("record_date, steps")
+          .eq("registration_id", user.id)
+          .gte("record_date", habitDeclaration.start_date);
+        if (error) {
+          console.error("[Goals] Error fetching habit steps:", error);
+          return [];
+        }
+        return data || [];
+      } else {
+        const { data, error } = await supabase
+          .from("activities")
+          .select("Activity_Date, Distance_km, Exercise_Type")
+          .eq("RegistrationID", user.id)
+          .gte("Activity_Date", habitDeclaration.start_date);
+        if (error) {
+          console.error("[Goals] Error fetching habit activities:", error);
+          return [];
+        }
+        return (data || []).filter((a: any) =>
+          a.Exercise_Type?.toLowerCase() === habitDeclaration.activity_type.toLowerCase()
+        );
+      }
+    },
+    enabled: !!user?.id && !!habitDeclaration,
+    staleTime: 30000,
+  });
+
+  const saveHabitMutation = useMutation({
+    mutationFn: async (declaration: {
+      activity_type: string;
+      target_amount: number;
+      unit: string;
+      frequency: string;
+      start_date: string;
+    }) => {
       if (!user?.id) throw new Error("Not logged in");
-      if (userDisciplineGoals.length >= 3) throw new Error("Maximum 3 goals allowed");
+      await supabase
+        .from("habit_declarations")
+        .update({ is_active: false })
+        .eq("registration_id", user.id)
+        .eq("is_active", true);
       const { data, error } = await supabase
-        .from("user_self_discipline_goals")
+        .from("habit_declarations")
         .insert({
           registration_id: user.id,
-          self_discipline_goal_id: goalId,
+          ...declaration,
+          is_active: true,
         })
         .select()
         .single();
@@ -720,59 +755,174 @@ export default function GoalsScreen() {
       return data;
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["userDisciplineGoals", user?.id] });
+      void queryClient.invalidateQueries({ queryKey: ["habitDeclaration", user?.id] });
+      void queryClient.invalidateQueries({ queryKey: ["habitActivities", user?.id] });
+      setShowHabitModal(false);
+      resetHabitForm();
+      Alert.alert("Success", "Your habit declaration has been saved!");
     },
     onError: (error: any) => {
-      console.error("[Goals] Add discipline goal error:", error);
-      Alert.alert("Error", error?.message || "Failed to add goal");
+      console.error("[Goals] Save habit declaration error:", error);
+      Alert.alert("Error", error?.message || "Failed to save declaration");
     },
   });
 
-  const removeDisciplineGoalMutation = useMutation({
-    mutationFn: async (goalId: number) => {
-      if (!user?.id) throw new Error("Not logged in");
-      const { error } = await supabase
-        .from("user_self_discipline_goals")
-        .delete()
-        .eq("registration_id", user.id)
-        .eq("self_discipline_goal_id", goalId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["userDisciplineGoals", user?.id] });
-    },
-    onError: (error: any) => {
-      console.error("[Goals] Remove discipline goal error:", error);
-      Alert.alert("Error", error?.message || "Failed to remove goal");
-    },
-  });
+  const resetHabitForm = useCallback(() => {
+    setHabitActivityType("Walk");
+    setHabitAmount("");
+    setHabitUnit("kilometers");
+    setHabitFrequency("daily");
+    setHabitStartDate("");
+  }, []);
 
-  const selectedDisciplineGoalIds = useMemo(() => {
-    return new Set(userDisciplineGoals.map((g) => g.self_discipline_goal_id));
-  }, [userDisciplineGoals]);
-
-  const selectedDisciplineDetails = useMemo(() => {
-    return userDisciplineGoals.map((ug) => {
-      const detail = availableDisciplineGoals.find((g) => g.self_discipline_goal_id === ug.self_discipline_goal_id);
-      return {
-        ...ug,
-        goal_name: detail?.goal_name || "Unknown Goal",
-        goal: detail?.goal || "",
-      };
-    });
-  }, [userDisciplineGoals, availableDisciplineGoals]);
-
-  const handleToggleDisciplineGoal = useCallback((goalId: number) => {
-    if (selectedDisciplineGoalIds.has(goalId)) {
-      removeDisciplineGoalMutation.mutate(goalId);
-    } else {
-      if (userDisciplineGoals.length >= 3) {
-        Alert.alert("Limit Reached", "You can select a maximum of 3 discipline goals. Remove one first to add a new one.");
-        return;
-      }
-      addDisciplineGoalMutation.mutate(goalId);
+  const handleSaveHabit = useCallback(() => {
+    const amount = parseFloat(habitAmount);
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert("Error", "Please enter a valid target amount");
+      return;
     }
-  }, [selectedDisciplineGoalIds, userDisciplineGoals.length, addDisciplineGoalMutation, removeDisciplineGoalMutation]);
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(habitStartDate)) {
+      Alert.alert("Error", "Please enter date in YYYY-MM-DD format");
+      return;
+    }
+    const dateObj = new Date(habitStartDate + "T00:00:00");
+    if (isNaN(dateObj.getTime())) {
+      Alert.alert("Error", "Please enter a valid date");
+      return;
+    }
+    saveHabitMutation.mutate({
+      activity_type: habitActivityType,
+      target_amount: amount,
+      unit: habitUnit,
+      frequency: habitFrequency,
+      start_date: habitStartDate,
+    });
+  }, [habitActivityType, habitAmount, habitUnit, habitFrequency, habitStartDate, saveHabitMutation]);
+
+  const habitCommitment = useMemo(() => {
+    if (!habitDeclaration) return null;
+
+    const start = new Date(habitDeclaration.start_date + "T00:00:00");
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (today < start) {
+      return { percent: 0, periodsElapsed: 0, periodsMet: 0 };
+    }
+
+    const isSteps = habitDeclaration.unit === "steps";
+    const target = habitDeclaration.target_amount;
+
+    const valueByDate = new Map<string, number>();
+    habitActivities.forEach((entry: any) => {
+      if (isSteps) {
+        const date = entry.record_date;
+        valueByDate.set(date, (valueByDate.get(date) || 0) + (entry.steps || 0));
+      } else {
+        const date = entry.Activity_Date?.split?.("T")?.[0] || entry.Activity_Date;
+        valueByDate.set(date, (valueByDate.get(date) || 0) + (entry.Distance_km || 0));
+      }
+    });
+
+    const diffDays = Math.floor((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    let periodsElapsed = 0;
+    let periodsMet = 0;
+
+    if (habitDeclaration.frequency === "daily") {
+      periodsElapsed = diffDays;
+      for (let i = 0; i < diffDays; i++) {
+        const d = new Date(start);
+        d.setDate(d.getDate() + i);
+        const dateStr = d.toISOString().split("T")[0];
+        if ((valueByDate.get(dateStr) || 0) >= target) periodsMet++;
+      }
+    } else if (habitDeclaration.frequency === "weekly") {
+      const totalWeeks = Math.ceil(diffDays / 7);
+      periodsElapsed = totalWeeks;
+      for (let w = 0; w < totalWeeks; w++) {
+        let weekTotal = 0;
+        for (let d = 0; d < 7; d++) {
+          const dayIndex = w * 7 + d;
+          if (dayIndex >= diffDays) break;
+          const date = new Date(start);
+          date.setDate(date.getDate() + dayIndex);
+          const dateStr = date.toISOString().split("T")[0];
+          weekTotal += valueByDate.get(dateStr) || 0;
+        }
+        if (weekTotal >= target) periodsMet++;
+      }
+    } else if (habitDeclaration.frequency === "monthly") {
+      let current = new Date(start.getFullYear(), start.getMonth(), 1);
+      while (current <= today) {
+        periodsElapsed++;
+        const monthStart = new Date(Math.max(current.getTime(), start.getTime()));
+        const nextMonth = new Date(current.getFullYear(), current.getMonth() + 1, 1);
+        const monthEnd = new Date(Math.min(nextMonth.getTime() - 86400000, today.getTime()));
+        let monthTotal = 0;
+        const iter = new Date(monthStart);
+        while (iter <= monthEnd) {
+          const dateStr = iter.toISOString().split("T")[0];
+          monthTotal += valueByDate.get(dateStr) || 0;
+          iter.setDate(iter.getDate() + 1);
+        }
+        if (monthTotal >= target) periodsMet++;
+        current = nextMonth;
+      }
+    } else if (habitDeclaration.frequency === "yearly") {
+      let currentYear = start.getFullYear();
+      while (currentYear <= today.getFullYear()) {
+        periodsElapsed++;
+        const yearStart = new Date(Math.max(new Date(currentYear, 0, 1).getTime(), start.getTime()));
+        const yearEnd = new Date(Math.min(new Date(currentYear, 11, 31).getTime(), today.getTime()));
+        let yearTotal = 0;
+        const iter = new Date(yearStart);
+        while (iter <= yearEnd) {
+          const dateStr = iter.toISOString().split("T")[0];
+          yearTotal += valueByDate.get(dateStr) || 0;
+          iter.setDate(iter.getDate() + 1);
+        }
+        if (yearTotal >= target) periodsMet++;
+        currentYear++;
+      }
+    }
+
+    const percent = periodsElapsed > 0 ? Math.round((periodsMet / periodsElapsed) * 100) : 0;
+    return { percent, periodsElapsed, periodsMet };
+  }, [habitDeclaration, habitActivities]);
+
+  const openEditHabit = useCallback(() => {
+    if (habitDeclaration) {
+      setHabitActivityType(habitDeclaration.activity_type);
+      setHabitAmount(habitDeclaration.target_amount.toString());
+      setHabitUnit(habitDeclaration.unit);
+      setHabitFrequency(habitDeclaration.frequency);
+      setHabitStartDate(habitDeclaration.start_date);
+    } else {
+      resetHabitForm();
+    }
+    setShowHabitModal(true);
+  }, [habitDeclaration, resetHabitForm]);
+
+  const getCommitmentColor = (percent: number): string => {
+    if (percent >= 70) return "#0D9488";
+    if (percent >= 40) return "#F59E0B";
+    return "#EF4444";
+  };
+
+  const getCommitmentLabel = (percent: number): string => {
+    if (percent >= 80) return "Excellent";
+    if (percent >= 60) return "Good";
+    if (percent >= 40) return "Fair";
+    return "Needs Work";
+  };
+
+  const getFrequencyPeriodLabel = (frequency: string): string => {
+    if (frequency === "daily") return "days";
+    if (frequency === "weekly") return "weeks";
+    if (frequency === "monthly") return "months";
+    return "years";
+  };
 
   const { data: activitySummary, refetch: refetchActivity } = useQuery<ActivitySummary>({
     queryKey: ["goalActivitySummary", user?.id],
@@ -844,15 +994,7 @@ export default function GoalsScreen() {
     staleTime: 30000,
   });
 
-  const disciplineActivityProgress = useMemo(() => {
-    if (!activitySummary || userDisciplineGoals.length === 0) return null;
-    return {
-      activeDays: activitySummary?.activeDays ?? 0,
-      streakDays: activitySummary?.streakDays ?? 0,
-      totalDistance: activitySummary?.totalDistance ?? 0,
-      goalsSelected: userDisciplineGoals.length,
-    };
-  }, [activitySummary, userDisciplineGoals]);
+
 
   const { data: communityRankData, isLoading: communityRankLoading, refetch: refetchCommunityRank } = useQuery<CommunityRankData[]>({
     queryKey: ["goalCommunityRank"],
@@ -1163,7 +1305,7 @@ export default function GoalsScreen() {
     void refetchFitnessGoal();
     void refetchRecent();
     void refetchHealth();
-    void refetchDiscipline();
+    void refetchHabit();
     void refetchCommunityRank();
     void refetchMedalGoal();
   };
@@ -1278,7 +1420,7 @@ export default function GoalsScreen() {
     setShowGoalForm(true);
   }, [fitnessGoal]);
 
-  const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading && userDisciplineGoals.length === 0 && !userDisciplineLoading && !communityRanking && !communityRankLoading && !medalGoalData && !medalGoalLoading;
+  const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !fitnessGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading && !habitDeclaration && !habitDeclarationLoading && !communityRanking && !communityRankLoading && !medalGoalData && !medalGoalLoading;
 
   return (
     <Animated.View style={[styles.container, { opacity: fadeAnim, backgroundColor: themeColors.background }]}>
@@ -1704,69 +1846,87 @@ export default function GoalsScreen() {
           </View>
         ) : null}
 
-        {selectedDisciplineDetails.length > 0 ? (
+        {habitDeclaration ? (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Shield size={18} color="#6366F1" />
-              <Text style={styles.sectionTitle}>Self Discipline</Text>
-              <TouchableOpacity onPress={() => setShowDisciplineModal(true)} style={styles.editButton} activeOpacity={0.7}>
+              <Flame size={18} color="#0D9488" />
+              <Text style={styles.sectionTitle}>Build My Habit</Text>
+              <TouchableOpacity onPress={openEditHabit} style={styles.editButton} activeOpacity={0.7}>
                 <Text style={styles.editButtonText}>Edit</Text>
                 <ChevronRight size={14} color={colors.primary} />
               </TouchableOpacity>
             </View>
-            <View style={styles.disciplineCard}>
-              {selectedDisciplineDetails.map((goal, index) => (
-                <View key={goal.user_self_discipline_id} style={[styles.disciplineGoalRow, index < selectedDisciplineDetails.length - 1 && styles.disciplineGoalBorder]}>
-                  <View style={styles.disciplineGoalIcon}>
-                    <Shield size={16} color="#6366F1" />
-                  </View>
-                  <View style={styles.disciplineGoalInfo}>
-                    <Text style={styles.disciplineGoalName}>{goal.goal_name}</Text>
-                    {goal.goal ? <Text style={styles.disciplineGoalDesc} numberOfLines={2}>{goal.goal}</Text> : null}
-                  </View>
-                </View>
-              ))}
+            <View style={styles.habitCard}>
+              <View style={styles.habitDeclarationRow}>
+                <Text style={styles.habitDeclarationText}>
+                  I <Text style={styles.habitHighlight}>{habitDeclaration.activity_type}</Text>{" "}
+                  <Text style={styles.habitHighlight}>{habitDeclaration.target_amount}</Text>{" "}
+                  <Text style={styles.habitHighlight}>{habitDeclaration.unit}</Text>{" "}
+                  <Text style={styles.habitHighlight}>{habitDeclaration.frequency}</Text>
+                </Text>
+              </View>
 
-              {disciplineActivityProgress && (
-                <View style={styles.disciplineStatsRow}>
-                  <View style={styles.disciplineStat}>
-                    <Text style={styles.disciplineStatValue}>{disciplineActivityProgress.streakDays}</Text>
-                    <Text style={styles.disciplineStatLabel}>Streak</Text>
+              <View style={styles.habitDateRow}>
+                <Calendar size={12} color={colors.textSecondary} />
+                <Text style={styles.habitDateText}>
+                  Since {formatGoalDate(habitDeclaration.start_date)}
+                </Text>
+              </View>
+
+              {habitCommitment ? (
+                <>
+                  <View style={styles.habitCommitmentHeader}>
+                    <View style={[styles.habitCommitmentPill, { backgroundColor: getCommitmentColor(habitCommitment.percent) + "18" }]}>
+                      <Text style={[styles.habitCommitmentPillText, { color: getCommitmentColor(habitCommitment.percent) }]}>
+                        {getCommitmentLabel(habitCommitment.percent)}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={styles.disciplineStatDivider} />
-                  <View style={styles.disciplineStat}>
-                    <Text style={styles.disciplineStatValue}>{disciplineActivityProgress.activeDays}</Text>
-                    <Text style={styles.disciplineStatLabel}>Active Days</Text>
+                  <View style={styles.fitnessProgressSection}>
+                    <View style={styles.fitnessProgressInfo}>
+                      <Text style={styles.fitnessProgressLabel}>Commitment</Text>
+                      <Text style={styles.fitnessProgressPercent}>{habitCommitment.percent}%</Text>
+                    </View>
+                    <View style={styles.fitnessProgressTrack}>
+                      <LinearGradient
+                        colors={habitCommitment.percent >= 70 ? ["#0D9488", "#14B8A6"] : habitCommitment.percent >= 40 ? ["#F59E0B", "#FBBF24"] : ["#EF4444", "#F87171"]}
+                        style={[styles.fitnessProgressFill, { width: `${Math.max(2, habitCommitment.percent)}%` }]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                      />
+                    </View>
                   </View>
-                  <View style={styles.disciplineStatDivider} />
-                  <View style={styles.disciplineStat}>
-                    <Text style={styles.disciplineStatValue}>{disciplineActivityProgress.totalDistance.toFixed(1)}</Text>
-                    <Text style={styles.disciplineStatLabel}>Total km</Text>
-                  </View>
+
+                  <Text style={styles.habitCommitmentDetail}>
+                    {habitCommitment.periodsMet} of {habitCommitment.periodsElapsed} {getFrequencyPeriodLabel(habitDeclaration.frequency)} met
+                  </Text>
+                </>
+              ) : (
+                <View style={styles.noActivitiesInfo}>
+                  <Flame size={24} color={colors.textLight} />
+                  <Text style={styles.noActivitiesText}>
+                    Start logging activities to track your commitment
+                  </Text>
                 </View>
               )}
-
-              <Text style={styles.fitnessFootnote}>
-                {selectedDisciplineDetails.length} of 3 goals selected
-              </Text>
             </View>
           </View>
-        ) : !userDisciplineLoading && !disciplineGoalsLoading ? (
+        ) : !habitDeclarationLoading ? (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Shield size={18} color="#6366F1" />
-              <Text style={styles.sectionTitle}>Self Discipline</Text>
+              <Flame size={18} color="#0D9488" />
+              <Text style={styles.sectionTitle}>Build My Habit</Text>
             </View>
-            <TouchableOpacity style={styles.setupGoalCard} onPress={() => setShowDisciplineModal(true)} activeOpacity={0.8}>
-              <LinearGradient colors={["#6366F1", "#818CF8"]} style={styles.setupGoalGradient}>
-                <Shield size={32} color={colors.white} />
-                <Text style={styles.setupGoalTitle}>Build Self Discipline</Text>
+            <TouchableOpacity style={styles.setupGoalCard} onPress={() => { resetHabitForm(); setShowHabitModal(true); }} activeOpacity={0.8}>
+              <LinearGradient colors={["#0D9488", "#14B8A6"]} style={styles.setupGoalGradient}>
+                <Flame size={32} color={colors.white} />
+                <Text style={styles.setupGoalTitle}>Build My Habit</Text>
                 <Text style={styles.setupGoalSubtext}>
-                  Choose up to 3 discipline goals and track your consistency through daily activity
+                  Make your declaration and track your commitment
                 </Text>
                 <View style={styles.setupGoalButton}>
-                  <Text style={[styles.setupGoalButtonText, { color: "#6366F1" }]}>Choose Goals</Text>
-                  <ChevronRight size={16} color="#6366F1" />
+                  <Text style={[styles.setupGoalButtonText, { color: "#0D9488" }]}>Make Declaration</Text>
+                  <ChevronRight size={16} color="#0D9488" />
                 </View>
               </LinearGradient>
             </TouchableOpacity>
@@ -2252,84 +2412,124 @@ export default function GoalsScreen() {
       </Modal>
 
       <Modal
-        visible={showDisciplineModal}
+        visible={showHabitModal}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setShowDisciplineModal(false)}
+        onRequestClose={() => setShowHabitModal(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <LinearGradient colors={["#6366F1", "#818CF8"]} style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Self Discipline Goals</Text>
-              <TouchableOpacity onPress={() => setShowDisciplineModal(false)}>
+            <LinearGradient colors={["#0D9488", "#14B8A6"]} style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>My Declaration</Text>
+              <TouchableOpacity onPress={() => setShowHabitModal(false)}>
                 <X size={24} color={colors.white} />
               </TouchableOpacity>
             </LinearGradient>
 
             <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
               <Text style={styles.modalSubtitle}>
-                Select 1 to 3 discipline goals to track. Your progress is measured against your daily exercise activity.
+                Define what you do as a runner. Make your declaration.
               </Text>
 
-              <View style={styles.disciplineSelectionCount}>
-                <Text style={styles.disciplineSelectionCountText}>
-                  {userDisciplineGoals.length} / 3 selected
+              <View style={styles.habitPreview}>
+                <Text style={styles.habitPreviewText}>
+                  I{" "}
+                  <Text style={styles.habitPreviewHighlight}>{habitActivityType}</Text>{" "}
+                  <Text style={styles.habitPreviewHighlight}>{habitAmount || "___"}</Text>{" "}
+                  <Text style={styles.habitPreviewHighlight}>{habitUnit}</Text>{" "}
+                  <Text style={styles.habitPreviewHighlight}>{habitFrequency}</Text>
                 </Text>
               </View>
 
-              {availableDisciplineGoals.map((goal) => {
-                const isSelected = selectedDisciplineGoalIds.has(goal.self_discipline_goal_id);
-                const isDisabled = !isSelected && userDisciplineGoals.length >= 3;
-                return (
-                  <TouchableOpacity
-                    key={goal.self_discipline_goal_id}
-                    style={[
-                      styles.disciplineOptionCard,
-                      isSelected && styles.disciplineOptionSelected,
-                      isDisabled && styles.disciplineOptionDisabled,
-                    ]}
-                    onPress={() => handleToggleDisciplineGoal(goal.self_discipline_goal_id)}
-                    activeOpacity={0.7}
-                    disabled={addDisciplineGoalMutation.isPending || removeDisciplineGoalMutation.isPending}
-                  >
-                    <View style={[
-                      styles.disciplineOptionCheck,
-                      isSelected && styles.disciplineOptionCheckActive,
-                    ]}>
-                      {isSelected ? <Check size={14} color={colors.white} /> : null}
-                    </View>
-                    <View style={styles.disciplineOptionInfo}>
-                      <Text style={[styles.disciplineOptionName, isSelected && styles.disciplineOptionNameActive]}>
-                        {goal.goal_name || "Unnamed Goal"}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Activity Type *</Text>
+                <View style={styles.habitChipRow}>
+                  {["Walk", "Run", "Treadmill"].map((type) => (
+                    <TouchableOpacity
+                      key={type}
+                      style={[styles.habitChip, habitActivityType === type && styles.habitChipActive]}
+                      onPress={() => setHabitActivityType(type)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.habitChipText, habitActivityType === type && styles.habitChipTextActive]}>
+                        {type}
                       </Text>
-                      {goal.goal ? (
-                        <Text style={styles.disciplineOptionDesc} numberOfLines={3}>
-                          {goal.goal}
-                        </Text>
-                      ) : null}
-                    </View>
-                    {isSelected && (
-                      <TouchableOpacity
-                        style={styles.disciplineRemoveBtn}
-                        onPress={() => removeDisciplineGoalMutation.mutate(goal.self_discipline_goal_id)}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      >
-                        <Trash2 size={16} color="#EF4444" />
-                      </TouchableOpacity>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-
-              {availableDisciplineGoals.length === 0 && (
-                <View style={styles.noActivitiesInfo}>
-                  <Shield size={28} color={colors.textLight} />
-                  <Text style={styles.noActivitiesTitle}>No Goals Available</Text>
-                  <Text style={styles.noActivitiesText}>
-                    Discipline goals haven't been set up yet. Please check back later.
-                  </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-              )}
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Target Amount *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 3"
+                  value={habitAmount}
+                  onChangeText={setHabitAmount}
+                  keyboardType="decimal-pad"
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Unit *</Text>
+                <View style={styles.habitChipRow}>
+                  {["steps", "kilometers"].map((u) => (
+                    <TouchableOpacity
+                      key={u}
+                      style={[styles.habitChip, habitUnit === u && styles.habitChipActive]}
+                      onPress={() => setHabitUnit(u)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.habitChipText, habitUnit === u && styles.habitChipTextActive]}>
+                        {u.charAt(0).toUpperCase() + u.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Frequency *</Text>
+                <View style={styles.habitChipRow}>
+                  {["daily", "weekly", "monthly", "yearly"].map((f) => (
+                    <TouchableOpacity
+                      key={f}
+                      style={[styles.habitChip, habitFrequency === f && styles.habitChipActive]}
+                      onPress={() => setHabitFrequency(f)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.habitChipText, habitFrequency === f && styles.habitChipTextActive]}>
+                        {f.charAt(0).toUpperCase() + f.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Starting Date *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="YYYY-MM-DD (e.g. 2026-03-10)"
+                  value={habitStartDate}
+                  onChangeText={setHabitStartDate}
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.saveButton, saveHabitMutation.isPending && styles.saveButtonDisabled]}
+                onPress={handleSaveHabit}
+                disabled={saveHabitMutation.isPending}
+                activeOpacity={0.8}
+              >
+                <LinearGradient colors={["#0D9488", "#14B8A6"]} style={styles.saveButtonGradient}>
+                  <Text style={styles.saveButtonText}>
+                    {saveHabitMutation.isPending ? "Saving..." : "Save Declaration"}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
             </ScrollView>
           </View>
         </View>
@@ -3543,5 +3743,106 @@ const styles = StyleSheet.create({
   },
   medalEventBadgeTextPending: {
     color: colors.textLight,
+  },
+  habitCard: {
+    backgroundColor: colors.cardBackground,
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  habitDeclarationRow: {
+    backgroundColor: "#F0FDFA",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: "#0D9488",
+  },
+  habitDeclarationText: {
+    fontSize: 18,
+    fontWeight: "600" as const,
+    color: colors.text,
+    lineHeight: 26,
+  },
+  habitHighlight: {
+    fontWeight: "800" as const,
+    color: "#0D9488",
+  },
+  habitDateRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+    marginBottom: 16,
+  },
+  habitDateText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  habitCommitmentHeader: {
+    alignItems: "center" as const,
+    marginBottom: 12,
+  },
+  habitCommitmentPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 16,
+  },
+  habitCommitmentPillText: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+  },
+  habitCommitmentDetail: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    textAlign: "center" as const,
+    marginTop: 4,
+  },
+  habitChipRow: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 8,
+  },
+  habitChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: colors.extraLightGray,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  habitChipActive: {
+    backgroundColor: "#F0FDFA",
+    borderColor: "#0D9488",
+  },
+  habitChipText: {
+    fontSize: 14,
+    fontWeight: "600" as const,
+    color: colors.textSecondary,
+  },
+  habitChipTextActive: {
+    color: "#0D9488",
+    fontWeight: "700" as const,
+  },
+  habitPreview: {
+    backgroundColor: "#F0FDFA",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: "#0D9488",
+  },
+  habitPreviewText: {
+    fontSize: 17,
+    fontWeight: "600" as const,
+    color: colors.text,
+    lineHeight: 24,
+  },
+  habitPreviewHighlight: {
+    fontWeight: "800" as const,
+    color: "#0D9488",
   },
 });
