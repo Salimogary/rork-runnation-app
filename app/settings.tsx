@@ -1,7 +1,8 @@
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, Image, TextInput, ActivityIndicator, Share } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff, Lock, Trash2, AlertTriangle, Star, Share2, Crown } from "lucide-react-native";
+import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff, Lock, Trash2, AlertTriangle, Star, Share2, Crown, HelpCircle, Phone, Globe } from "lucide-react-native";
+import { Linking } from "react-native";
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 
@@ -57,6 +58,32 @@ export default function SettingsScreen() {
   const [selectedRating, setSelectedRating] = useState<number>(0);
   const [ratingFeedback, setRatingFeedback] = useState('');
   const { subscriptionStatus, trialDaysRemaining, subscription } = useSubscription();
+  const [showHelpModal, setShowHelpModal] = useState(false);
+
+  interface SupportContact {
+    support_contacy_id: number;
+    created_at: string;
+    country: string | null;
+    name: string | null;
+    phone: string | null;
+    email: string | null;
+  }
+
+  const { data: supportContacts = [], isLoading: isLoadingContacts } = useQuery<SupportContact[]>({
+    queryKey: ['supportContacts'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('support_contacts')
+        .select('*')
+        .order('country', { ascending: true });
+      if (error) {
+        console.error('Error fetching support contacts:', error);
+        throw new Error(error.message);
+      }
+      return data || [];
+    },
+    enabled: showHelpModal,
+  });
 
   useEffect(() => {
     const checkAdmin = async () => {
@@ -491,15 +518,15 @@ export default function SettingsScreen() {
         
         <TouchableOpacity
           style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
-          onPress={() => showComingSoon("Contact Admin")}
+          onPress={() => setShowHelpModal(true)}
         >
           <View style={styles.settingLeft}>
-            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#3B2800' : '#f5f5f5' }]}>
-              <Mail size={22} color="#f59e0b" />
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#1E3A5F' : '#EFF6FF' }]}>
+              <HelpCircle size={22} color="#3b82f6" />
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Contact Admin</Text>
-              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Get in touch with administrators</Text>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Help</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Support desk contacts</Text>
             </View>
           </View>
           <ChevronRight size={20} color={themeColors.iconMuted} />
@@ -1185,6 +1212,91 @@ export default function SettingsScreen() {
           </View>
         </View>
       </Modal>
+      <Modal
+        visible={showHelpModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowHelpModal(false)}
+      >
+        <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.helpModalContent, { backgroundColor: themeColors.modalBackground }]}>
+            <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.detailTitle, { color: themeColors.text }]}>Help</Text>
+              <TouchableOpacity onPress={() => setShowHelpModal(false)}>
+                <XIcon size={24} color={themeColors.iconDefault} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.helpBody}>
+              <Text style={[styles.helpSectionLabel, { color: themeColors.textSecondary }]}>SUPPORT DESK CONTACTS</Text>
+
+              {isLoadingContacts ? (
+                <View style={styles.helpLoadingContainer}>
+                  <ActivityIndicator size="small" color="#3b82f6" />
+                  <Text style={[styles.helpLoadingText, { color: themeColors.textSecondary }]}>Loading contacts...</Text>
+                </View>
+              ) : supportContacts.length === 0 ? (
+                <View style={styles.helpEmptyContainer}>
+                  <Text style={[styles.helpEmptyText, { color: themeColors.textLight }]}>No support contacts available</Text>
+                </View>
+              ) : (
+                supportContacts.map((contact) => (
+                  <View
+                    key={contact.support_contacy_id}
+                    style={[styles.helpContactCard, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}
+                  >
+                    <View style={styles.helpContactHeader}>
+                      {contact.country && (
+                        <View style={styles.helpCountryRow}>
+                          <Globe size={14} color={themeColors.textSecondary} />
+                          <Text style={[styles.helpCountryText, { color: themeColors.textSecondary }]}>{contact.country}</Text>
+                        </View>
+                      )}
+                      {contact.name && (
+                        <Text style={[styles.helpContactName, { color: themeColors.text }]}>{contact.name}</Text>
+                      )}
+                    </View>
+
+                    <View style={styles.helpContactActions}>
+                      {contact.phone && (
+                        <TouchableOpacity
+                          style={[styles.helpActionButton, { backgroundColor: isDark ? '#0D3320' : '#ECFDF5' }]}
+                          onPress={() => {
+                            if (Platform.OS === 'web') {
+                              window.open(`tel:${contact.phone}`, '_self');
+                            } else {
+                              void Linking.openURL(`tel:${contact.phone}`);
+                            }
+                          }}
+                        >
+                          <Phone size={16} color="#10b981" />
+                          <Text style={[styles.helpActionText, { color: '#10b981' }]}>{contact.phone}</Text>
+                        </TouchableOpacity>
+                      )}
+                      {contact.email && (
+                        <TouchableOpacity
+                          style={[styles.helpActionButton, { backgroundColor: isDark ? '#1E3A5F' : '#EFF6FF' }]}
+                          onPress={() => {
+                            if (Platform.OS === 'web') {
+                              window.open(`mailto:${contact.email}`, '_self');
+                            } else {
+                              void Linking.openURL(`mailto:${contact.email}`);
+                            }
+                          }}
+                        >
+                          <Mail size={16} color="#3b82f6" />
+                          <Text style={[styles.helpActionText, { color: '#3b82f6' }]}>{contact.email}</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
     </ScrollView>
   );
 }
@@ -1753,5 +1865,82 @@ const styles = StyleSheet.create({
     fontWeight: "700" as const,
     color: "#333",
     letterSpacing: 0.5,
+  },
+  helpModalContent: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: "85%",
+  },
+  helpBody: {
+    padding: 20,
+  },
+  helpSectionLabel: {
+    fontSize: 12,
+    fontWeight: "700" as const,
+    color: "#666",
+    letterSpacing: 0.8,
+    marginBottom: 16,
+  },
+  helpLoadingContainer: {
+    alignItems: "center" as const,
+    paddingVertical: 40,
+    gap: 12,
+  },
+  helpLoadingText: {
+    fontSize: 14,
+    color: "#999",
+  },
+  helpEmptyContainer: {
+    alignItems: "center" as const,
+    paddingVertical: 40,
+  },
+  helpEmptyText: {
+    fontSize: 15,
+    color: "#999",
+  },
+  helpContactCard: {
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+  },
+  helpContactHeader: {
+    marginBottom: 12,
+    gap: 4,
+  },
+  helpCountryRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+  },
+  helpCountryText: {
+    fontSize: 12,
+    fontWeight: "600" as const,
+    color: "#666",
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+  },
+  helpContactName: {
+    fontSize: 17,
+    fontWeight: "700" as const,
+    color: "#000",
+    marginTop: 2,
+  },
+  helpContactActions: {
+    gap: 8,
+  },
+  helpActionButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
+  helpActionText: {
+    fontSize: 14,
+    fontWeight: "500" as const,
   },
 });
