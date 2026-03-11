@@ -15,10 +15,20 @@ import * as Haptics from "expo-haptics";
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
 
+interface CatalogueItemRaw {
+  CatalogueID: string;
+  Catalogue_Item: string | null;
+  Quanity?: number | null;
+  Quantity?: number | null;
+  Size: string | null;
+  Price: number | null;
+  Photo_URL?: string | null;
+}
+
 interface CatalogueItem {
   CatalogueID: string;
   Catalogue_Item: string | null;
-  Quanity: number | null;
+  stock: number;
   Size: string | null;
   Price: number | null;
   Photo_URL?: string | null;
@@ -109,7 +119,18 @@ export default function ShopScreen() {
       }
 
       console.log("Catalogue items fetched:", data?.length || 0);
-      return data || [];
+      if (data && data.length > 0) {
+        console.log("First item keys:", Object.keys(data[0]));
+        console.log("First item sample:", JSON.stringify(data[0]));
+      }
+      return (data || []).map((item: CatalogueItemRaw) => ({
+        CatalogueID: item.CatalogueID,
+        Catalogue_Item: item.Catalogue_Item,
+        stock: item.Quanity ?? item.Quantity ?? 0,
+        Size: item.Size,
+        Price: item.Price,
+        Photo_URL: item.Photo_URL,
+      }));
     },
   });
   
@@ -128,7 +149,7 @@ export default function ShopScreen() {
   });
   
   const handleAddToCart = (item: CatalogueItem) => {
-    if ((item.Quanity || 0) <= 0) {
+    if ((item.stock) <= 0) {
       Alert.alert("Out of Stock", "This item is currently unavailable");
       return;
     }
@@ -277,10 +298,10 @@ export default function ShopScreen() {
                     <View style={styles.stockBadge}>
                       <View style={[
                         styles.stockDot,
-                        (item.Quanity || 0) > 0 ? styles.inStock : styles.outOfStockDot
+                        item.stock > 0 ? styles.inStock : styles.outOfStockDot
                       ]} />
                       <Text style={styles.stockText}>
-                        {(item.Quanity || 0) > 0 ? `${item.Quanity} left` : 'Out of stock'}
+                        {item.stock > 0 ? `${item.stock} left` : 'Out of stock'}
                       </Text>
                     </View>
                   </View>
@@ -295,16 +316,16 @@ export default function ShopScreen() {
                   <TouchableOpacity
                     style={styles.addToCartBtn}
                     onPress={() => handleAddToCart(item)}
-                    disabled={(item.Quanity || 0) <= 0 || addToCartMutation.isPending}
+                    disabled={item.stock <= 0 || addToCartMutation.isPending}
                     activeOpacity={0.8}
                   >
                     <LinearGradient
-                      colors={(item.Quanity || 0) <= 0 ? [colors.mediumGray, colors.mediumGray] : colors.gradient.orange}
+                      colors={item.stock <= 0 ? [colors.mediumGray, colors.mediumGray] : colors.gradient.orange}
                       style={styles.addToCartGradient}
                     >
                       <ShoppingCart size={16} color={colors.white} />
                       <Text style={styles.addToCartText}>
-                        {(item.Quanity || 0) <= 0 ? "Out of Stock" : "Add to Cart"}
+                        {item.stock <= 0 ? "Out of Stock" : "Add to Cart"}
                       </Text>
                     </LinearGradient>
                   </TouchableOpacity>
