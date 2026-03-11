@@ -1,7 +1,7 @@
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, Image, TextInput, ActivityIndicator, Share } from "react-native";
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, TextInput, ActivityIndicator, Share } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, CheckCircle, XCircle, ClipboardList, X as XIcon, MessageSquare, Paperclip, Shield, EyeOff, Lock, Trash2, AlertTriangle, Star, Share2, Crown, HelpCircle, Phone, Globe } from "lucide-react-native";
+import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIcon, MessageSquare, Paperclip, EyeOff, Lock, Trash2, AlertTriangle, Star, Share2, Crown, HelpCircle, Phone, Globe } from "lucide-react-native";
 import { Linking } from "react-native";
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -13,27 +13,10 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 import { getNotificationsEnabled, setNotificationsEnabled as saveNotificationsEnabled } from "@/utils/notifications";
 
-interface PendingActivity {
-  PendingActivityID: string;
-  RegistrationID: string;
-  Exercise_Type: string;
-  Distance_Entered: number;
-  Distance_Unit: string;
-  Time_Entered: string;
-  Photo_Path: string;
-  Status: string;
-  Admin_Notes: string | null;
-  Created_At: string;
-  Reviewed_At: string | null;
-  Reviewed_By: string | null;
-}
-
 export default function SettingsScreen() {
   const { signOut, user, privateMode, setPrivateMode, verifyPin, deleteAccount } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [showApprovalModal, setShowApprovalModal] = useState(false);
-  const [selectedActivity, setSelectedActivity] = useState<PendingActivity | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 
   useEffect(() => {
@@ -53,7 +36,6 @@ export default function SettingsScreen() {
   const [deletePinError, setDeletePinError] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteStep, setDeleteStep] = useState<'confirm' | 'pin'>('confirm');
-  const [isAdmin, setIsAdmin] = useState(false);
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [selectedRating, setSelectedRating] = useState<number>(0);
   const [ratingFeedback, setRatingFeedback] = useState('');
@@ -118,18 +100,6 @@ export default function SettingsScreen() {
     enabled: showHelpModal,
   });
 
-  useEffect(() => {
-    const checkAdmin = async () => {
-      try {
-        const adminStatus = await AsyncStorage.getItem('admin_logged_in');
-        setIsAdmin(adminStatus === 'true');
-      } catch (error) {
-        console.error('Error checking admin status:', error);
-        setIsAdmin(false);
-      }
-    };
-    void checkAdmin();
-  }, []);
 
   const handleSignOut = () => {
     setShowPinModal(true);
@@ -278,142 +248,8 @@ export default function SettingsScreen() {
     }
   };
 
-  const { data: pendingActivities = [] } = useQuery<PendingActivity[]>({
-    queryKey: ["pendingActivities"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("pending_activities")
-        .select("*")
-        .eq("Status", "pending")
-        .order("Created_At", { ascending: false });
-
-      if (error) {
-        console.error("Error fetching pending activities:", error);
-        throw new Error(error.message);
-      }
-
-      return data || [];
-    },
-    enabled: isAdmin,
-  });
-
-  const approveMutation = useMutation({
-    mutationFn: async (activity: PendingActivity) => {
-      const timeParts = activity.Time_Entered.split(':');
-      const hours = parseInt(timeParts[0] || '0', 10);
-      const minutes = parseInt(timeParts[1] || '0', 10);
-      const totalMinutes = hours * 60 + minutes;
-      
-      let distanceKm = activity.Distance_Entered;
-      if (activity.Distance_Unit === 'mi') {
-        distanceKm = activity.Distance_Entered * 1.60934;
-      }
-
-      const endTime = new Date();
-      const startTime = new Date(endTime.getTime() - totalMinutes * 60 * 1000);
-      const calculatedPace = totalMinutes > 0 ? (distanceKm / (totalMinutes / 60)) : 0;
-
-      const { data, error } = await supabase
-        .from("activities")
-        .insert({
-          RegistrationID: activity.RegistrationID,
-          Activity_Date: new Date().toISOString().split('T')[0],
-          Exercise_Type: activity.Exercise_Type,
-          Distance_km: distanceKm,
-          Start_Time: startTime.toISOString().split('T')[1].split('.')[0],
-          End_Time: endTime.toISOString().split('T')[1].split('.')[0],
-          Pace_km_h: calculatedPace,
-        })
-        .select();
-
-      if (error) throw error;
-
-      const { error: deleteError } = await supabase
-        .from("pending_activities")
-        .delete()
-        .eq("PendingActivityID", activity.PendingActivityID);
-
-      if (deleteError) throw deleteError;
-
-      return data;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["pendingActivities"] });
-      void queryClient.invalidateQueries({ queryKey: ["activities"] });
-      setSelectedActivity(null);
-      Alert.alert("Success", "Activity approved and added to records");
-    },
-    onError: (error) => {
-      console.error("Error approving activity:", error);
-      Alert.alert("Error", "Failed to approve activity");
-    },
-  });
-
-  const rejectMutation = useMutation({
-    mutationFn: async (activityId: string) => {
-      const { error } = await supabase
-        .from("pending_activities")
-        .delete()
-        .eq("PendingActivityID", activityId);
-
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["pendingActivities"] });
-      setSelectedActivity(null);
-      Alert.alert("Success", "Activity rejected");
-    },
-    onError: (error) => {
-      console.error("Error rejecting activity:", error);
-      Alert.alert("Error", "Failed to reject activity");
-    },
-  });
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = date.toLocaleDateString("en-US", { month: "short" });
-    const year = date.getFullYear();
-    return `${day} ${month} ${year}`;
-  };
-
-  const formatTimeInterval = (interval: string): string => {
-    const parts = interval.split(':');
-    const hours = parseInt(parts[0] || '0', 10);
-    const minutes = parseInt(parts[1] || '0', 10);
-    
-    if (hours > 0) {
-      return `${hours}h ${minutes}m`;
-    }
-    return `${minutes}m`;
-  };
-
   return (
     <ScrollView style={[styles.container, { backgroundColor: themeColors.background }]}>
-      {isAdmin && (
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>Admin</Text>
-          
-          <TouchableOpacity
-            style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
-            onPress={() => setShowApprovalModal(true)}
-          >
-            <View style={styles.settingLeft}>
-              <View style={[styles.iconContainer, { backgroundColor: isDark ? '#312E81' : '#f5f5f5' }]}>
-                <ClipboardList size={22} color="#8b5cf6" />
-              </View>
-              <View style={styles.settingTextContainer}>
-                <Text style={[styles.settingTitle, { color: themeColors.text }]}>Pending Approvals</Text>
-                <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>
-                  {pendingActivities.length} treadmill activities pending
-                </Text>
-              </View>
-            </View>
-            <ChevronRight size={20} color={themeColors.iconMuted} />
-          </TouchableOpacity>
-        </View>
-      )}
-
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>Subscription</Text>
         <TouchableOpacity
@@ -632,26 +468,6 @@ export default function SettingsScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>Access</Text>
-        
-        <TouchableOpacity
-          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
-          onPress={() => router.push("/admin-login" as any)}
-        >
-          <View style={styles.settingLeft}>
-            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#3B1515' : '#f5f5f5' }]}>
-              <Shield size={22} color="#ef4444" />
-            </View>
-            <View style={styles.settingTextContainer}>
-              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Admin Login</Text>
-              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Access admin dashboard</Text>
-            </View>
-          </View>
-          <ChevronRight size={20} color={themeColors.iconMuted} />
-        </TouchableOpacity>
-      </View>
-
       {user && (
         <View style={styles.section}>
           <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
@@ -685,52 +501,6 @@ export default function SettingsScreen() {
           <Text style={[styles.footerSubtext, { color: themeColors.textLight }]}>Signed in as: {user.username}</Text>
         )}
       </View>
-
-      <Modal
-        visible={showApprovalModal}
-        animationType="slide"
-        transparent={false}
-        onRequestClose={() => setShowApprovalModal(false)}
-      >
-        <View style={[styles.modalContainer, { backgroundColor: themeColors.background }]}>
-          <View style={[styles.modalHeader2, { backgroundColor: themeColors.cardBackground, borderBottomColor: themeColors.border }]}>
-            <Text style={[styles.modalTitle2, { color: themeColors.text }]}>Pending Approvals</Text>
-            <TouchableOpacity onPress={() => setShowApprovalModal(false)}>
-              <XIcon size={24} color={themeColors.iconDefault} />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.pendingList}>
-            {pendingActivities.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={[styles.emptyStateText, { color: themeColors.textLight }]}>No pending activities</Text>
-              </View>
-            ) : (
-              pendingActivities.map((activity) => (
-                <TouchableOpacity
-                  key={activity.PendingActivityID}
-                  style={[styles.pendingItem, { backgroundColor: themeColors.cardBackground }]}
-                  onPress={() => setSelectedActivity(activity)}
-                >
-                  <View style={styles.pendingInfo}>
-                    <Text style={[styles.pendingType, { color: themeColors.text }]}>{activity.Exercise_Type}</Text>
-                    <Text style={[styles.pendingDate, { color: themeColors.textSecondary }]}>{formatDate(activity.Created_At)}</Text>
-                    <View style={styles.pendingStats}>
-                      <Text style={styles.pendingStat}>
-                        {activity.Distance_Entered.toFixed(2)} {activity.Distance_Unit}
-                      </Text>
-                      <Text style={styles.pendingStat}>
-                        {formatTimeInterval(activity.Time_Entered)}
-                      </Text>
-                    </View>
-                  </View>
-                  <ChevronRight size={20} color={themeColors.iconMuted} />
-                </TouchableOpacity>
-              ))
-            )}
-          </ScrollView>
-        </View>
-      </Modal>
 
       <Modal
         visible={showFeedbackModal}
@@ -1171,80 +941,6 @@ export default function SettingsScreen() {
         </View>
       </Modal>
 
-      <Modal
-        visible={selectedActivity !== null}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setSelectedActivity(null)}
-      >
-        <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
-          <View style={[styles.detailModalContent, { backgroundColor: themeColors.modalBackground }]}>
-            {selectedActivity && (
-              <>
-                <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
-                  <Text style={[styles.detailTitle, { color: themeColors.text }]}>Review Activity</Text>
-                  <TouchableOpacity onPress={() => setSelectedActivity(null)}>
-                    <XIcon size={24} color={themeColors.iconDefault} />
-                  </TouchableOpacity>
-                </View>
-
-                <ScrollView style={styles.detailBody}>
-                  <View style={styles.detailSection}>
-                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Type</Text>
-                    <Text style={[styles.detailValue, { color: themeColors.text }]}>{selectedActivity.Exercise_Type}</Text>
-                  </View>
-
-                  <View style={styles.detailSection}>
-                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Submitted At</Text>
-                    <Text style={[styles.detailValue, { color: themeColors.text }]}>{formatDate(selectedActivity.Created_At)}</Text>
-                  </View>
-
-                  <View style={styles.detailRow}>
-                    <View style={styles.detailSection}>
-                      <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Distance</Text>
-                      <Text style={[styles.detailValue, { color: themeColors.text }]}>{selectedActivity.Distance_Entered.toFixed(2)} {selectedActivity.Distance_Unit}</Text>
-                    </View>
-                    <View style={styles.detailSection}>
-                      <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Time</Text>
-                      <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                        {formatTimeInterval(selectedActivity.Time_Entered)}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.detailSection}>
-                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Treadmill Photo</Text>
-                    <Image
-                      source={{ uri: selectedActivity.Photo_Path }}
-                      style={styles.activityImage}
-                      resizeMode="contain"
-                    />
-                  </View>
-                </ScrollView>
-
-                <View style={[styles.actionButtons, { borderTopColor: themeColors.border }]}>
-                  <TouchableOpacity
-                    style={styles.rejectButton}
-                    onPress={() => rejectMutation.mutate(selectedActivity.PendingActivityID)}
-                    disabled={rejectMutation.isPending}
-                  >
-                    <XCircle size={22} color="#fff" />
-                    <Text style={styles.actionButtonText}>Reject</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.approveButton}
-                    onPress={() => approveMutation.mutate(selectedActivity)}
-                    disabled={approveMutation.isPending}
-                  >
-                    <CheckCircle size={22} color="#fff" />
-                    <Text style={styles.actionButtonText}>Approve</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
       <Modal
         visible={showHelpModal}
         animationType="slide"
