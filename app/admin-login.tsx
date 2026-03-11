@@ -153,7 +153,7 @@ export default function AdminLoginScreen() {
 
           <TouchableOpacity 
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={() => router.canGoBack() ? router.back() : router.replace('/')}
           >
             <Text style={styles.backButtonText}>Back to App</Text>
           </TouchableOpacity>
