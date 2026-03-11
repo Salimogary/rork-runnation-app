@@ -186,7 +186,7 @@ export default function SettingsScreen() {
 
   const suggestionMutation = useMutation({
     mutationFn: async (suggestion: string) => {
-      const regId = await AsyncStorage.getItem('registrationId');
+      const regId = user?.id;
       if (!regId) throw new Error('Not registered');
       const { error } = await supabase
         .from('suggestions')
