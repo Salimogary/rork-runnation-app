@@ -16,7 +16,7 @@ export default publicProcedure
     const { data: cartItems, error: cartError } = await ctx.supabase
       .from("shopping_cart")
       .select("*")
-      .eq("user_id", userId);
+      .eq("registration_id", userId);
 
     if (cartError) throw cartError;
     if (!cartItems || cartItems.length === 0) {
@@ -100,7 +100,7 @@ export default publicProcedure
     const { error: clearCartError } = await ctx.supabase
       .from("shopping_cart")
       .delete()
-      .eq("user_id", userId);
+      .eq("registration_id", userId);
 
     if (clearCartError) {
       console.error("Error clearing cart:", clearCartError);
