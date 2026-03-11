@@ -14,12 +14,14 @@ export default publicProcedure
 
     const { data: product, error: productError } = await ctx.supabase
       .from("catalogue")
-      .select("Quanity")
+      .select("*")
       .eq("CatalogueID", catalogueId)
       .single();
 
+    console.log("[addToCart] catalogueId:", catalogueId, "product:", product, "error:", productError);
+
     if (productError || !product) {
-      throw new Error("Product not found");
+      throw new Error("Product not found: " + (productError?.message || "unknown"));
     }
 
     const { data: existingCart } = await ctx.supabase
@@ -33,7 +35,8 @@ export default publicProcedure
       ? existingCart.quantity + quantity
       : quantity;
 
-    if (newQuantity > (product.Quanity || 0)) {
+    const stock = (product as any).Quanity ?? (product as any).Quantity ?? 0;
+    if (newQuantity > stock) {
       throw new Error("Not enough stock available");
     }
 
