@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { trpc } from "@/lib/trpc";
-import { Package, ChevronRight, Edit, X, ClipboardCheck, LogOut, CheckCircle, XCircle, Calendar, Plus, Users, Download, ShoppingBag, Dumbbell, UserPlus, Upload, Activity, Star } from "lucide-react-native";
+import { Package, ChevronRight, Edit, X, ClipboardCheck, LogOut, CheckCircle, XCircle, Calendar, Plus, Users, Download, ShoppingBag, Dumbbell, UserPlus, Upload, Activity, Star, Printer, Truck } from "lucide-react-native";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
@@ -102,9 +102,9 @@ export default function AdminScreen() {
     }
   };
 
-  const { data: orders, isLoading: ordersLoading, error: ordersError } = trpc.admin.getAllOrders.useQuery(
+  const { data: deliveryOrders, isLoading: deliveryOrdersLoading, error: deliveryOrdersError, refetch: refetchDeliveryOrders } = trpc.admin.getDeliveryOrders.useQuery(
     undefined,
-    { enabled: isAuthenticated, retry: 1 }
+    { enabled: isAuthenticated && activeTab === "orders", retry: 1, refetchOnMount: true }
   );
 
   const { data: events, isLoading: eventsLoading, error: eventsError, refetch: refetchEvents } = trpc.admin.getEvents.useQuery(
@@ -306,9 +306,9 @@ const { data: pendingActivities = [], error: pendingActivitiesError, isLoading: 
     },
   });
 
-  const updateStatusMutation = trpc.admin.updateOrderStatus.useMutation({
+  const updateDeliveryStatusMutation = trpc.admin.updateDeliveryOrderStatus.useMutation({
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [["admin", "getAllOrders"]] });
+      void queryClient.invalidateQueries({ queryKey: [["admin", "getDeliveryOrders"]] });
       setShowStatusModal(false);
       Alert.alert("Success", "Order status updated");
     },
@@ -351,10 +351,82 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
   const confirmStatusUpdate = () => {
     if (!selectedOrderId || !selectedStatus) return;
 
-    updateStatusMutation.mutate({
+    updateDeliveryStatusMutation.mutate({
       orderId: selectedOrderId,
       status: selectedStatus as any,
     });
+  };
+
+  const handlePrintSticker = (order: any) => {
+    const items = order.items || [];
+    const itemLines = items.map((item: any) => `${item.name}${item.size ? ` (${item.size})` : ''} x${item.qty}`).join('\n');
+    const stickerContent = [
+      '================================',
+      '       DELIVERY STICKER',
+      '================================',
+      '',
+      `Order #: ${(order.order_id || '').substring(0, 8)}`,
+      `Date: ${new Date(order.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`,
+      '',
+      '--- DELIVER TO ---',
+      `Phone: ${order.phone_number || 'N/A'}`,
+      `Address: ${order.delivery_address || 'N/A'}`,
+      '',
+      '--- DELIVERY TIME ---',
+      order.delivery_time_slots || 'N/A',
+      '',
+      '--- ITEMS ---',
+      itemLines || 'No items',
+      '',
+      `TOTAL: ugx.${(order.total_amount || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}`,
+      '',
+      '================================',
+    ].join('\n');
+
+    if (Platform.OS === 'web') {
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        const itemsHtml = items.map((item: any) =>
+          `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee;">${item.name}${item.size ? ` (${item.size})` : ''}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:center;">x${item.qty}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right;">ugx.${(item.subtotal || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}</td></tr>`
+        ).join('');
+        printWindow.document.write(`
+          <html><head><title>Delivery Sticker</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; max-width: 400px; margin: 0 auto; }
+            .sticker { border: 2px dashed #333; padding: 20px; border-radius: 8px; }
+            .header { text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 16px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+            .section-title { font-weight: bold; font-size: 13px; color: #666; margin: 14px 0 6px; text-transform: uppercase; letter-spacing: 1px; }
+            .field { margin: 4px 0; font-size: 15px; }
+            .field-label { color: #666; font-size: 12px; }
+            table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+            .total { font-size: 20px; font-weight: bold; text-align: right; margin-top: 12px; padding-top: 10px; border-top: 2px solid #333; }
+            .order-id { font-size: 12px; color: #888; text-align: center; margin-bottom: 8px; }
+            @media print { body { padding: 0; } }
+          </style></head><body>
+          <div class="sticker">
+            <div class="header">DELIVERY STICKER</div>
+            <div class="order-id">Order #${(order.order_id || '').substring(0, 8)} &bull; ${new Date(order.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+            <div class="section-title">Deliver To</div>
+            <div class="field"><span class="field-label">Phone:</span> ${order.phone_number || 'N/A'}</div>
+            <div class="field"><span class="field-label">Address:</span> ${order.delivery_address || 'N/A'}</div>
+            <div class="section-title">Delivery Time</div>
+            <div class="field">${order.delivery_time_slots || 'N/A'}</div>
+            <div class="section-title">Items</div>
+            <table>${itemsHtml}</table>
+            <div class="total">TOTAL: ugx.${(order.total_amount || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}</div>
+          </div>
+          <script>window.onload = function() { window.print(); }</script>
+          </body></html>
+        `);
+        printWindow.document.close();
+      }
+    } else {
+      Alert.alert(
+        'Delivery Sticker',
+        stickerContent,
+        [{ text: 'OK' }]
+      );
+    }
   };
 
   const handleUpdateStock = (product: any) => {
@@ -592,78 +664,111 @@ const getStatusColor = (status: string) => {
 
       {activeTab === "orders" ? (
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-          {ordersLoading ? (
+          {deliveryOrdersLoading ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>Loading orders...</Text>
+              <Text style={styles.emptyText}>Loading delivery orders...</Text>
             </View>
-          ) : ordersError ? (
+          ) : deliveryOrdersError ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.errorText}>Error loading orders</Text>
-              <Text style={styles.errorSubtext}>{ordersError.message || "Failed to fetch orders"}</Text>
+              <Text style={styles.errorSubtext}>{deliveryOrdersError.message || "Failed to fetch orders"}</Text>
+              <Text style={styles.errorHint}>Please ensure the &quot;orders_to_deliver&quot; table exists in Supabase.</Text>
               <TouchableOpacity
                 style={styles.retryButton}
-                onPress={() => void queryClient.invalidateQueries({ queryKey: [["admin", "getAllOrders"]] })}
+                onPress={() => refetchDeliveryOrders()}
               >
                 <Text style={styles.retryButtonText}>Retry</Text>
               </TouchableOpacity>
             </View>
-          ) : !orders || orders.length === 0 ? (
+          ) : !deliveryOrders || deliveryOrders.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Package size={64} color="#d1d5db" />
-              <Text style={styles.emptyText}>No orders yet</Text>
+              <Truck size={64} color="#d1d5db" />
+              <Text style={styles.emptyText}>No delivery orders yet</Text>
+              <Text style={styles.emptySubtext}>Orders placed by users will appear here</Text>
             </View>
           ) : (
-            orders.map((order: any) => (
-              <View key={order.order_id} style={styles.orderCard}>
-                <View style={styles.orderHeader}>
-                  <Text style={styles.orderId}>#{order.order_id.substring(0, 8)}</Text>
-                  <TouchableOpacity
-                    style={[styles.statusBadge, { backgroundColor: `${getStatusColor(order.status)}20` }]}
-                    onPress={() => handleUpdateOrderStatus(order.order_id, order.status)}
-                  >
-                    <Text style={[styles.statusText, { color: getStatusColor(order.status) }]}>
-                      {getStatusLabel(order.status)}
+            deliveryOrders.map((order: any) => {
+              const items = order.items || [];
+              return (
+                <View key={order.order_id} style={styles.orderCard}>
+                  <View style={styles.orderHeader}>
+                    <Text style={styles.orderId}>#{(order.order_id || '').substring(0, 8)}</Text>
+                    <TouchableOpacity
+                      style={[styles.statusBadge, { backgroundColor: `${getStatusColor(order.status)}20` }]}
+                      onPress={() => handleUpdateOrderStatus(order.order_id, order.status)}
+                    >
+                      <Text style={[styles.statusText, { color: getStatusColor(order.status) }]}>
+                        {getStatusLabel(order.status)}
+                      </Text>
+                      <ChevronRight size={14} color={getStatusColor(order.status)} />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.orderDetails}>
+                    <Text style={styles.orderLabel}>Phone:</Text>
+                    <Text style={styles.orderValue}>{order.phone_number}</Text>
+                  </View>
+
+                  <View style={styles.orderDetails}>
+                    <Text style={styles.orderLabel}>Address:</Text>
+                    <Text style={styles.orderValue} numberOfLines={2}>
+                      {order.delivery_address}
                     </Text>
-                    <ChevronRight size={14} color={getStatusColor(order.status)} />
+                  </View>
+
+                  <View style={styles.orderDetails}>
+                    <Text style={styles.orderLabel}>Time Slots:</Text>
+                    <Text style={styles.orderValue} numberOfLines={2}>
+                      {order.delivery_time_slots || 'N/A'}
+                    </Text>
+                  </View>
+
+                  {items.length > 0 && (
+                    <View style={styles.orderItemsList}>
+                      <Text style={styles.orderItemsTitle}>Items:</Text>
+                      {items.map((item: any, idx: number) => (
+                        <View key={idx} style={styles.orderItemRow}>
+                          <Text style={styles.orderItemName} numberOfLines={1}>
+                            {item.name}{item.size ? ` (${item.size})` : ''}
+                          </Text>
+                          <Text style={styles.orderItemQty}>x{item.qty}</Text>
+                          <Text style={styles.orderItemPrice}>
+                            ugx.{(item.subtotal || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  <View style={styles.orderDetails}>
+                    <Text style={styles.orderLabel}>Total:</Text>
+                    <Text style={styles.orderTotal}>
+                      ugx.{(order.total_amount || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                    </Text>
+                  </View>
+
+                  <View style={styles.orderDetails}>
+                    <Text style={styles.orderLabel}>Date:</Text>
+                    <Text style={styles.orderValue}>
+                      {new Date(order.created_at).toLocaleDateString("en-GB", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.printStickerBtn}
+                    onPress={() => handlePrintSticker(order)}
+                    activeOpacity={0.8}
+                  >
+                    <Printer size={18} color="#fff" />
+                    <Text style={styles.printStickerText}>Print Delivery Sticker</Text>
                   </TouchableOpacity>
                 </View>
-
-                <View style={styles.orderDetails}>
-                  <Text style={styles.orderLabel}>Customer:</Text>
-                  <Text style={styles.orderValue}>{order.delivery_name}</Text>
-                </View>
-
-                <View style={styles.orderDetails}>
-                  <Text style={styles.orderLabel}>Phone:</Text>
-                  <Text style={styles.orderValue}>{order.delivery_phone}</Text>
-                </View>
-
-                <View style={styles.orderDetails}>
-                  <Text style={styles.orderLabel}>Address:</Text>
-                  <Text style={styles.orderValue} numberOfLines={2}>
-                    {order.delivery_address}
-                  </Text>
-                </View>
-
-                <View style={styles.orderDetails}>
-                  <Text style={styles.orderLabel}>Total:</Text>
-                  <Text style={styles.orderTotal}>
-                    ugx.{(order.total_amount || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}
-                  </Text>
-                </View>
-
-                <View style={styles.orderDetails}>
-                  <Text style={styles.orderLabel}>Date:</Text>
-                  <Text style={styles.orderValue}>
-                    {new Date(order.created_at).toLocaleDateString("en-GB", {
-                      day: "2-digit",
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  </Text>
-                </View>
-              </View>
-            ))
+              );
+            })
           )}
         </ScrollView>
       ) : activeTab === "stock" ? (
@@ -1165,10 +1270,10 @@ const getStatusColor = (status: string) => {
             <TouchableOpacity
               style={styles.confirmButton}
               onPress={confirmStatusUpdate}
-              disabled={updateStatusMutation.isPending}
+              disabled={updateDeliveryStatusMutation.isPending}
             >
               <Text style={styles.confirmButtonText}>
-                {updateStatusMutation.isPending ? "Updating..." : "Update Status"}
+                {updateDeliveryStatusMutation.isPending ? "Updating..." : "Update Status"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -2434,5 +2539,62 @@ const styles = StyleSheet.create({
     color: "#111827",
     lineHeight: 22,
     marginTop: 2,
+  },
+  orderItemsList: {
+    backgroundColor: "#f9fafb",
+    borderRadius: 10,
+    padding: 12,
+    gap: 6,
+    marginTop: 4,
+  },
+  orderItemsTitle: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+    color: "#6b7280",
+    marginBottom: 4,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+  },
+  orderItemRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+    paddingVertical: 4,
+  },
+  orderItemName: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600" as const,
+    color: "#111827",
+  },
+  orderItemQty: {
+    fontSize: 14,
+    fontWeight: "600" as const,
+    color: "#6b7280",
+    minWidth: 30,
+    textAlign: "center" as const,
+  },
+  orderItemPrice: {
+    fontSize: 14,
+    fontWeight: "700" as const,
+    color: "#10b981",
+    minWidth: 80,
+    textAlign: "right" as const,
+  },
+  printStickerBtn: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 8,
+    backgroundColor: "#3b82f6",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  printStickerText: {
+    fontSize: 14,
+    fontWeight: "700" as const,
+    color: "#fff",
   },
 });

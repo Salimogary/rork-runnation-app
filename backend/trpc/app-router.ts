@@ -8,6 +8,7 @@ import clearCartRoute from "./routes/shop/clear-cart/route";
 import checkoutRoute from "./routes/shop/checkout/route";
 import getOrdersRoute from "./routes/shop/get-orders/route";
 import getOrderDetailsRoute from "./routes/shop/get-order-details/route";
+import buyNowRoute from "./routes/shop/buy-now/route";
 import getAllOrdersRoute from "./routes/admin/get-all-orders/route";
 import updateOrderStatusRoute from "./routes/admin/update-order-status/route";
 import updateStockRoute from "./routes/admin/update-stock/route";
@@ -25,6 +26,8 @@ import submitExternalActivityRoute from "./routes/activities/submit-external-act
 import getExternalSubmissionsRoute from "./routes/activities/get-external-submissions/route";
 import approveExternalSubmissionRoute from "./routes/activities/approve-external-submission/route";
 import rejectExternalSubmissionRoute from "./routes/activities/reject-external-submission/route";
+import getDeliveryOrdersRoute from "./routes/admin/get-delivery-orders/route";
+import updateDeliveryOrderStatusRoute from "./routes/admin/update-delivery-order-status/route";
 
 export const appRouter = createTRPCRouter({
   example: createTRPCRouter({
@@ -39,6 +42,7 @@ export const appRouter = createTRPCRouter({
     checkout: checkoutRoute,
     getOrders: getOrdersRoute,
     getOrderDetails: getOrderDetailsRoute,
+    buyNow: buyNowRoute,
   }),
   admin: createTRPCRouter({
     getAllOrders: getAllOrdersRoute,
@@ -54,6 +58,8 @@ export const appRouter = createTRPCRouter({
     uploadActivityFile: uploadActivityFileRoute,
     emailActivityFile: emailActivityFileRoute,
     getMedalList: getMedalListRoute,
+    getDeliveryOrders: getDeliveryOrdersRoute,
+    updateDeliveryOrderStatus: updateDeliveryOrderStatusRoute,
   }),
   activities: createTRPCRouter({
     submitExternalActivity: submitExternalActivityRoute,

@@ -558,6 +558,38 @@ create index if not exists idx_habit_declarations_active on public.habit_declara
 - Formula: `commitment_percent = (periods_met / periods_elapsed) * 100`
 - Displayed with color coding: >= 70% green (Excellent/Good), 40-69% amber (Fair), < 40% red (Needs Work)
 
+### 18. Orders to Deliver (NEW - Required)
+Create this table for the Buy Now checkout flow:
+
+```sql
+create table public.orders_to_deliver (
+  order_id text not null default gen_random_uuid()::text,
+  user_id text not null,
+  phone_number text not null,
+  delivery_address text not null,
+  delivery_time_slots text not null,
+  items jsonb not null default '[]'::jsonb,
+  total_amount double precision not null default 0,
+  status text not null default 'pending',
+  created_at timestamp with time zone not null default now(),
+  constraint orders_to_deliver_pkey primary key (order_id),
+  constraint orders_to_deliver_user_fkey foreign key (user_id) references registrations ("RegistrationID") on delete cascade
+) tablespace pg_default;
+
+create index if not exists idx_orders_to_deliver_user on public.orders_to_deliver using btree (user_id) tablespace pg_default;
+create index if not exists idx_orders_to_deliver_status on public.orders_to_deliver using btree (status) tablespace pg_default;
+create index if not exists idx_orders_to_deliver_created on public.orders_to_deliver using btree (created_at desc) tablespace pg_default;
+```
+
+**Orders to Deliver Logic:**
+- `items` is stored as JSONB array with each item having: name, size, qty, price, subtotal
+- `delivery_time_slots` stores the selected time slots as a comma-separated string
+- Available delivery time slots: Morning (9-11AM), Noon (11AM-1PM), Afternoon (1-5PM), Evening (5-8PM)
+- Status flow: pending → processing → shipped → delivered (or cancelled)
+- Admin can view all orders and print/save delivery stickers for each order
+- Stock is decremented when order is placed
+- Cart is cleared after successful order placement
+
 ## Notes
 
 - FriendID is hidden from users (system-generated)
