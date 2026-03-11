@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   StyleSheet,
   View,
@@ -58,26 +58,31 @@ export default function AdminScreen() {
   const [medalDateEnd, setMedalDateEnd] = useState<string>("");
 
   const queryClient = useQueryClient();
-
-  const checkAuth = useCallback(async () => {
-    try {
-      const isLoggedIn = await AsyncStorage.getItem("admin_logged_in");
-      if (isLoggedIn === "true") {
-        setIsAuthenticated(true);
-      } else {
-        router.replace("/admin-login" as any);
-      }
-    } catch (error) {
-      console.error("Auth check error:", error);
-      router.replace("/admin-login" as any);
-    } finally {
-      setIsChecking(false);
-    }
-  }, [router]);
+  const hasCheckedAuth = useRef(false);
 
   useEffect(() => {
+    if (hasCheckedAuth.current) return;
+    hasCheckedAuth.current = true;
+
+    const checkAuth = async () => {
+      try {
+        const isLoggedIn = await AsyncStorage.getItem("admin_logged_in");
+        if (isLoggedIn === "true") {
+          setIsAuthenticated(true);
+        } else {
+          router.replace("/admin-login" as any);
+        }
+      } catch (error) {
+        console.error("Auth check error:", error);
+        router.replace("/admin-login" as any);
+      } finally {
+        setIsChecking(false);
+      }
+    };
+
     void checkAuth();
-  }, [checkAuth]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleLogout = () => {
     const confirmLogout = async () => {
