@@ -3,11 +3,8 @@ import { StyleSheet, View, Text, TextInput, TouchableOpacity, Alert, Platform, K
 import { useRouter } from "expo-router";
 import { Shield, Lock, User } from "lucide-react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
-const ADMIN_CREDENTIALS = {
-  username: "admin",
-  password: "admin123",
-};
+import { supabase } from "@/lib/supabase";
+import * as Crypto from "expo-crypto";
 
 export default function AdminLoginScreen() {
   const [username, setUsername] = useState("");
@@ -28,29 +25,66 @@ export default function AdminLoginScreen() {
 
     setIsLoading(true);
 
-    setTimeout(async () => {
-      if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
-        await AsyncStorage.setItem("admin_logged_in", "true");
-        await AsyncStorage.setItem("admin_login_time", new Date().toISOString());
-        
-        if (Platform.OS !== 'web') {
-          Alert.alert("Success", "Welcome, Admin!", [
-            { text: "OK", onPress: () => router.replace("/admin" as any) }
-          ]);
-        } else {
-          alert("Welcome, Admin!");
-          router.replace("/admin" as any);
-        }
-      } else {
+    try {
+      const passwordHash = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        password
+      );
+
+      const { data: adminUser, error } = await supabase
+        .from('admin_users')
+        .select('admin_id, username, display_name, is_active')
+        .eq('username', username.toLowerCase().trim())
+        .eq('password_hash', passwordHash)
+        .single();
+
+      if (error || !adminUser) {
+        console.log('[AdminLogin] Login failed:', error?.message);
         const message = "Invalid username or password";
         if (Platform.OS !== 'web') {
           Alert.alert("Login Failed", message);
         } else {
           alert(message);
         }
+        setIsLoading(false);
+        return;
       }
+
+      if (!adminUser.is_active) {
+        const message = "This admin account has been deactivated";
+        if (Platform.OS !== 'web') {
+          Alert.alert("Access Denied", message);
+        } else {
+          alert(message);
+        }
+        setIsLoading(false);
+        return;
+      }
+
+      await AsyncStorage.setItem("admin_logged_in", "true");
+      await AsyncStorage.setItem("admin_login_time", new Date().toISOString());
+      await AsyncStorage.setItem("admin_display_name", adminUser.display_name || adminUser.username);
+
+      const displayName = adminUser.display_name || adminUser.username;
+      if (Platform.OS !== 'web') {
+        Alert.alert("Success", `Welcome, ${displayName}!`, [
+          { text: "OK", onPress: () => router.replace("/admin" as any) }
+        ]);
+      } else {
+        alert(`Welcome, ${displayName}!`);
+        router.replace("/admin" as any);
+      }
+    } catch (err) {
+      console.error('[AdminLogin] Error:', err);
+      const message = "Login failed. Please try again.";
+      if (Platform.OS !== 'web') {
+        Alert.alert("Error", message);
+      } else {
+        alert(message);
+      }
+    } finally {
       setIsLoading(false);
-    }, 800);
+    }
   };
 
   return (
@@ -116,12 +150,6 @@ export default function AdminLoginScreen() {
               {isLoading ? "Logging in..." : "Login"}
             </Text>
           </TouchableOpacity>
-
-          <View style={styles.infoBox}>
-            <Text style={styles.infoTitle}>Test Credentials</Text>
-            <Text style={styles.infoText}>Username: admin</Text>
-            <Text style={styles.infoText}>Password: admin123</Text>
-          </View>
 
           <TouchableOpacity 
             style={styles.backButton}
