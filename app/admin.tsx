@@ -60,6 +60,19 @@ export default function AdminScreen() {
   const queryClient = useQueryClient();
   const hasCheckedAuth = useRef(false);
 
+  const { data: stockProducts, isLoading: stockLoading, error: stockError } = useQuery<any[]>({
+    queryKey: ["catalogue"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("catalogue")
+        .select("*")
+        .order("Catalogue_Item", { ascending: true });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: isAuthenticated && activeTab === "stock",
+  });
+
   useEffect(() => {
     if (hasCheckedAuth.current) return;
     hasCheckedAuth.current = true;
@@ -583,7 +596,7 @@ const getStatusColor = (status: string) => {
 
         <TouchableOpacity
           style={[styles.menuButton, activeTab === "stock" && styles.menuButtonActive]}
-          onPress={() => setActiveTab("stock")}
+          onPress={() => { console.log('[Admin] Stock tile pressed'); setActiveTab("stock"); }}
         >
           <View style={[styles.iconCircle, activeTab === "stock" && styles.iconCircleActive]}>
             <Package size={24} color={activeTab === "stock" ? "#fff" : "#10b981"} />
@@ -778,7 +791,48 @@ const getStatusColor = (status: string) => {
         </ScrollView>
       ) : activeTab === "stock" ? (
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-          <StockManagementList onUpdateStock={handleUpdateStock} />
+          {stockLoading ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Loading stock...</Text>
+            </View>
+          ) : stockError ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.errorText}>Error loading stock</Text>
+              <Text style={styles.errorSubtext}>{stockError instanceof Error ? stockError.message : "Failed to fetch catalogue"}</Text>
+            </View>
+          ) : !stockProducts || stockProducts.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Package size={64} color="#d1d5db" />
+              <Text style={styles.emptyText}>No products in catalogue</Text>
+            </View>
+          ) : (
+            stockProducts.map((product: any) => (
+              <View key={product.CatalogueID} style={styles.stockCard}>
+                <View style={styles.stockInfo}>
+                  <Text style={styles.stockName}>{product.Catalogue_Item}</Text>
+                  {product.Size && <Text style={styles.stockSize}>Size: {product.Size}</Text>}
+                  <View style={styles.stockRow}>
+                    <Text style={styles.stockLabel}>Stock:</Text>
+                    <Text
+                      style={[
+                        styles.stockValue,
+                        (product.Quantity || 0) <= 5 && styles.stockValueLow,
+                        (product.Quantity || 0) === 0 && styles.stockValueOut,
+                      ]}
+                    >
+                      {product.Quantity || 0} units
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={styles.editButton}
+                  onPress={() => handleUpdateStock(product)}
+                >
+                  <Edit size={20} color="#10b981" />
+                </TouchableOpacity>
+              </View>
+            ))
+          )}
         </ScrollView>
       ) : activeTab === "events" ? (
         <View style={{ flex: 1 }}>
@@ -1508,53 +1562,6 @@ const getStatusColor = (status: string) => {
   );
 }
 
-function StockManagementList({ onUpdateStock }: { onUpdateStock: (product: any) => void }) {
-  const { data: products } = useQuery<any[]>({
-    queryKey: ["catalogue"],
-    queryFn: async () => {
-      const { supabase } = await import("@/lib/supabase");
-      const { data, error } = await supabase
-        .from("catalogue")
-        .select("*")
-        .order("Catalogue_Item", { ascending: true });
-
-      if (error) throw error;
-      return data || [];
-    },
-  });
-
-  return (
-    <>
-      {products?.map((product) => (
-        <View key={product.CatalogueID} style={styles.stockCard}>
-          <View style={styles.stockInfo}>
-            <Text style={styles.stockName}>{product.Catalogue_Item}</Text>
-            {product.Size && <Text style={styles.stockSize}>Size: {product.Size}</Text>}
-            <View style={styles.stockRow}>
-              <Text style={styles.stockLabel}>Stock:</Text>
-              <Text
-                style={[
-                  styles.stockValue,
-                  (product.Quanity || 0) <= 5 && styles.stockValueLow,
-                  (product.Quanity || 0) === 0 && styles.stockValueOut,
-                ]}
-              >
-                {product.Quanity || 0} units
-              </Text>
-            </View>
-          </View>
-
-          <TouchableOpacity
-            style={styles.editButton}
-            onPress={() => onUpdateStock(product)}
-          >
-            <Edit size={20} color="#10b981" />
-          </TouchableOpacity>
-        </View>
-      ))}
-    </>
-  );
-}
 
 const styles = StyleSheet.create({
   container: {
