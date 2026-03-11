@@ -28,7 +28,7 @@ export default publicProcedure
 
     const { data: products, error: productsError } = await ctx.supabase
       .from("catalogue")
-      .select("CatalogueID, Catalogue_Item, Price, Size, Quanity, Photo_URL")
+      .select("CatalogueID, Catalogue_Item, Price, Size, Quantity, Photo_URL")
       .in("CatalogueID", catalogueIds);
 
     if (productsError) throw productsError;
