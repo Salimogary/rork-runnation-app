@@ -50,7 +50,7 @@ export default function SettingsScreen() {
     if (adminTapCount.current >= 5) {
       adminTapCount.current = 0;
       if (Platform.OS !== 'web') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
       router.push('/admin-login' as any);
       return;
@@ -182,6 +182,39 @@ export default function SettingsScreen() {
       return data;
     },
     enabled: !!user,
+  });
+
+  const suggestionMutation = useMutation({
+    mutationFn: async (suggestion: string) => {
+      const regId = await AsyncStorage.getItem('registrationId');
+      if (!regId) throw new Error('Not registered');
+      const { error } = await supabase
+        .from('suggestions')
+        .insert({
+          registration_id: regId,
+          suggestion: suggestion.trim(),
+        });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setShowFeedbackModal(false);
+      setFeedbackText('');
+      setFeedbackAttachment(null);
+      if (Platform.OS !== 'web') {
+        Alert.alert('Thank You!', 'Your suggestion has been submitted. We appreciate your feedback!');
+      } else {
+        alert('Thank you! Your suggestion has been submitted.');
+      }
+    },
+    onError: (error) => {
+      console.error('Error submitting suggestion:', error);
+      if (Platform.OS !== 'web') {
+        Alert.alert('Error', 'Failed to submit suggestion. Please try again.');
+      } else {
+        alert('Failed to submit suggestion. Please try again.');
+      }
+    },
   });
 
   const ratingMutation = useMutation({
@@ -589,23 +622,28 @@ export default function SettingsScreen() {
               <TouchableOpacity
                 style={[
                   styles.submitFeedbackButton,
-                  !feedbackText.trim() && styles.submitFeedbackButtonDisabled
+                  (!feedbackText.trim() || suggestionMutation.isPending) && styles.submitFeedbackButtonDisabled
                 ]}
                 onPress={() => {
-                  if (feedbackText.trim()) {
-                    if (Platform.OS !== 'web') {
-                      Alert.alert("Success", "Your feedback has been sent to the admin!");
-                    } else {
-                      alert("Your feedback has been sent to the admin!");
+                  if (feedbackText.trim() && !suggestionMutation.isPending) {
+                    if (!user) {
+                      if (Platform.OS !== 'web') {
+                        Alert.alert('Sign In Required', 'Please sign in to submit a suggestion.');
+                      } else {
+                        alert('Please sign in to submit a suggestion.');
+                      }
+                      return;
                     }
-                    setShowFeedbackModal(false);
-                    setFeedbackText("");
-                    setFeedbackAttachment(null);
+                    suggestionMutation.mutate(feedbackText);
                   }
                 }}
-                disabled={!feedbackText.trim()}
+                disabled={!feedbackText.trim() || suggestionMutation.isPending}
               >
-                <Text style={styles.submitFeedbackText}>Send Feedback</Text>
+                {suggestionMutation.isPending ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.submitFeedbackText}>Send Feedback</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>

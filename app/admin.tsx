@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { trpc } from "@/lib/trpc";
-import { Package, ChevronRight, Edit, X, ClipboardCheck, LogOut, CheckCircle, XCircle, Calendar, Plus, Users, Download, ShoppingBag, Dumbbell, UserPlus, Upload, Activity, Star, Printer, Truck } from "lucide-react-native";
+import { Package, ChevronRight, Edit, X, ClipboardCheck, LogOut, CheckCircle, XCircle, Calendar, Plus, Users, Download, ShoppingBag, Dumbbell, UserPlus, Upload, Activity, Star, Printer, Truck, MessageSquare } from "lucide-react-native";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
@@ -35,7 +35,7 @@ interface PendingActivity {
 
 export default function AdminScreen() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"orders" | "stock" | "approvals" | "events" | "enrollments" | "activityUploads" | "externalActivities" | "ratings">("orders");
+  const [activeTab, setActiveTab] = useState<"orders" | "stock" | "approvals" | "events" | "enrollments" | "activityUploads" | "externalActivities" | "ratings" | "suggestions">("orders");
   const [eventsSubTab, setEventsSubTab] = useState<"calendar" | "participants">("calendar");
   const [selectedEventId, setSelectedEventId] = useState<string>("");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -180,6 +180,29 @@ export default function AdminScreen() {
       return data || [];
     },
     enabled: isAuthenticated && activeTab === 'ratings',
+  });
+
+  interface Suggestion {
+    suggestion_id: number;
+    registration_id: string;
+    suggestion: string;
+    created_at: string;
+  }
+
+  const { data: suggestions = [], isLoading: suggestionsLoading } = useQuery<Suggestion[]>({
+    queryKey: ['adminSuggestions'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('suggestions')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) {
+        console.error('Error fetching suggestions:', error);
+        throw error;
+      }
+      return data || [];
+    },
+    enabled: isAuthenticated && activeTab === 'suggestions',
   });
 
   const averageRating = appRatings.length > 0
@@ -675,6 +698,21 @@ const getStatusColor = (status: string) => {
           {appRatings.length > 0 && (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{appRatings.length}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.menuButton, activeTab === "suggestions" && styles.menuButtonActive]}
+          onPress={() => setActiveTab("suggestions")}
+        >
+          <View style={[styles.iconCircle, activeTab === "suggestions" && styles.iconCircleActive]}>
+            <MessageSquare size={24} color={activeTab === "suggestions" ? "#fff" : "#10b981"} />
+          </View>
+          <Text style={[styles.menuButtonText, activeTab === "suggestions" && styles.menuButtonTextActive]}>Suggestions</Text>
+          {suggestions.length > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{suggestions.length}</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -1199,6 +1237,30 @@ const getStatusColor = (status: string) => {
                 </View>
               ))}
             </>
+          )}
+        </ScrollView>
+      ) : activeTab === "suggestions" ? (
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          {suggestionsLoading ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Loading suggestions...</Text>
+            </View>
+          ) : suggestions.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <MessageSquare size={64} color="#d1d5db" />
+              <Text style={styles.emptyText}>No suggestions yet</Text>
+              <Text style={styles.emptySubtext}>User suggestions will appear here</Text>
+            </View>
+          ) : (
+            suggestions.map((item) => (
+              <View key={item.suggestion_id} style={styles.suggestionCard}>
+                <View style={styles.suggestionHeader}>
+                  <Text style={styles.suggestionUser} numberOfLines={1}>{item.registration_id}</Text>
+                  <Text style={styles.suggestionDate}>{formatDate(item.created_at)}</Text>
+                </View>
+                <Text style={styles.suggestionText}>{item.suggestion}</Text>
+              </View>
+            ))
           )}
         </ScrollView>
       ) : activeTab === "externalActivities" ? (
@@ -2608,5 +2670,37 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700" as const,
     color: "#fff",
+  },
+  suggestionCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+    gap: 10,
+  },
+  suggestionHeader: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+  },
+  suggestionUser: {
+    fontSize: 13,
+    color: "#6b7280",
+    fontWeight: "500" as const,
+    flex: 1,
+    marginRight: 8,
+  },
+  suggestionDate: {
+    fontSize: 13,
+    color: "#6b7280",
+  },
+  suggestionText: {
+    fontSize: 15,
+    color: "#111827",
+    lineHeight: 22,
   },
 });
