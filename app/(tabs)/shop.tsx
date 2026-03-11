@@ -2,11 +2,11 @@ import { StyleSheet, View, Text, ScrollView, TouchableOpacity, RefreshControl, D
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "@/lib/supabase";
-import { Package, ShoppingCart, Lock, ShieldCheck } from "lucide-react-native";
+import { Package, ShoppingCart, Lock, ShieldCheck, ArrowRight } from "lucide-react-native";
 import { Image } from "expo-image";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/contexts/AuthContext";
-import { useRouter, Stack } from "expo-router";
+import { useRouter, Stack, useFocusEffect } from "expo-router";
 import colors from "@/constants/colors";
 import { useTheme } from "@/contexts/ThemeContext";
 import React, { useState, useRef, useEffect, useCallback } from "react";
@@ -55,7 +55,7 @@ export default function ShopScreen() {
         useNativeDriver: true,
       }).start();
     }
-  }, [pinUnlocked]);
+  }, [pinUnlocked, fadeAnim]);
 
   const triggerShake = useCallback(() => {
     Animated.sequence([
@@ -77,10 +77,10 @@ export default function ShopScreen() {
     try {
       const valid = await verifyPin(pinValue);
       if (valid) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setPinUnlocked(true);
       } else {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         setPinError('Incorrect PIN. Please try again.');
         setPinValue('');
         triggerShake();
@@ -95,9 +95,10 @@ export default function ShopScreen() {
 
   useEffect(() => {
     if (pinValue.length === 4 && !pinUnlocked) {
-      handlePinSubmit();
+      void handlePinSubmit();
     }
   }, [pinValue, pinUnlocked, handlePinSubmit]);
+
   
   const { data: products, isLoading, refetch } = useQuery<CatalogueItem[]>({
     queryKey: ["catalogue"],
@@ -134,13 +135,28 @@ export default function ShopScreen() {
     },
   });
   
-  const { data: cartData } = trpc.shop.getCart.useQuery({ userId: registrationId });
+  const { data: cartData, refetch: refetchCart } = trpc.shop.getCart.useQuery(
+    { userId: registrationId },
+    { enabled: !!registrationId }
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (registrationId) {
+        void refetchCart();
+      }
+    }, [registrationId, refetchCart])
+  );
   
   const cartCount = cartData?.reduce((total: number, item: any) => total + (item.quantity || 0), 0) || 0;
+  const cartTotal = cartData?.reduce((total: number, item: any) => {
+    const product = item.product;
+    return total + (product?.Price || 0) * item.quantity;
+  }, 0) || 0;
   
   const addToCartMutation = trpc.shop.addToCart.useMutation({
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [["shop", "getCart"]] });
+      void queryClient.invalidateQueries({ queryKey: [["shop", "getCart"]] });
       Alert.alert("Success", "Item added to cart");
     },
     onError: (error: any) => {
@@ -236,19 +252,6 @@ export default function ShopScreen() {
       <Stack.Screen
         options={{
           title: "Shop",
-          headerRight: () => (
-            <TouchableOpacity
-              style={styles.cartButton}
-              onPress={() => router.push("/cart" as any)}
-            >
-              <ShoppingCart size={24} color={colors.white} />
-              {cartCount > 0 && (
-                <View style={styles.cartBadge}>
-                  <Text style={styles.cartBadgeText}>{cartCount}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          ),
         }}
       />
       <ScrollView
@@ -335,6 +338,36 @@ export default function ShopScreen() {
           </View>
         )}
       </ScrollView>
+
+      {cartCount > 0 && (
+        <TouchableOpacity
+          style={styles.floatingCartBar}
+          onPress={() => router.push("/cart" as any)}
+          activeOpacity={0.9}
+        >
+          <LinearGradient
+            colors={colors.gradient.orange}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.floatingCartGradient}
+          >
+            <View style={styles.floatingCartLeft}>
+              <View style={styles.floatingCartBadge}>
+                <Text style={styles.floatingCartBadgeText}>{cartCount}</Text>
+              </View>
+              <Text style={styles.floatingCartLabel}>
+                {cartCount === 1 ? '1 item' : `${cartCount} items`} in cart
+              </Text>
+            </View>
+            <View style={styles.floatingCartRight}>
+              <Text style={styles.floatingCartTotal}>
+                ugx.{cartTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+              </Text>
+              <ArrowRight size={18} color="#fff" />
+            </View>
+          </LinearGradient>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -590,5 +623,58 @@ const styles = StyleSheet.create({
   pinGateFooterText: {
     fontSize: 13,
     color: colors.textLight,
+  },
+  floatingCartBar: {
+    position: "absolute" as const,
+    bottom: 16,
+    left: 16,
+    right: 16,
+    borderRadius: 16,
+    overflow: "hidden" as const,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  floatingCartGradient: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+  },
+  floatingCartLeft: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+  },
+  floatingCartBadge: {
+    backgroundColor: "rgba(255,255,255,0.25)",
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  floatingCartBadgeText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700" as const,
+  },
+  floatingCartLabel: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600" as const,
+  },
+  floatingCartRight: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+  },
+  floatingCartTotal: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700" as const,
   },
 });

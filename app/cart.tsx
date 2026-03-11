@@ -1,11 +1,14 @@
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert } from "react-native";
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from "react-native";
 import { useRouter, Stack } from "expo-router";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/contexts/AuthContext";
-import { ShoppingCart, Trash2, Plus, Minus } from "lucide-react-native";
+import { ShoppingCart, Trash2, Plus, Minus, CreditCard, ArrowLeft } from "lucide-react-native";
 import { Image } from "expo-image";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "@/contexts/ThemeContext";
+import { LinearGradient } from "expo-linear-gradient";
+import colors from "@/constants/colors";
+import * as Haptics from "expo-haptics";
 
 export default function CartScreen() {
   const router = useRouter();
@@ -13,11 +16,14 @@ export default function CartScreen() {
   const { colors: themeColors } = useTheme();
   const queryClient = useQueryClient();
 
-  const { data: cartItems, isLoading } = trpc.shop.getCart.useQuery({ userId: registrationId });
+  const { data: cartItems, isLoading } = trpc.shop.getCart.useQuery(
+    { userId: registrationId },
+    { enabled: !!registrationId }
+  );
 
   const updateCartMutation = trpc.shop.updateCartItem.useMutation({
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [["shop", "getCart"]] });
+      void queryClient.invalidateQueries({ queryKey: [["shop", "getCart"]] });
     },
     onError: (error: any) => {
       Alert.alert("Error", error.message || "Failed to update cart");
@@ -26,24 +32,56 @@ export default function CartScreen() {
 
   const removeCartMutation = trpc.shop.removeCartItem.useMutation({
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [["shop", "getCart"]] });
+      void queryClient.invalidateQueries({ queryKey: [["shop", "getCart"]] });
     },
     onError: (error: any) => {
       Alert.alert("Error", error.message || "Failed to remove item");
     },
   });
 
+  const clearCartMutation = trpc.shop.clearCart.useMutation({
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [["shop", "getCart"]] });
+    },
+    onError: (error: any) => {
+      Alert.alert("Error", error.message || "Failed to clear cart");
+    },
+  });
+
   const handleQuantityChange = (cartId: string, newQuantity: number) => {
     if (newQuantity < 1) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     updateCartMutation.mutate({ cartId, quantity: newQuantity });
   };
 
   const handleRemoveItem = (cartId: string) => {
     Alert.alert("Remove Item", "Are you sure you want to remove this item?", [
       { text: "Cancel", style: "cancel" },
-      { text: "Remove", onPress: () => removeCartMutation.mutate({ cartId }), style: "destructive" },
+      {
+        text: "Remove",
+        onPress: () => {
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          removeCartMutation.mutate({ cartId });
+        },
+        style: "destructive",
+      },
     ]);
   };
+
+  const handleClearCart = () => {
+    Alert.alert("Clear Cart", "Remove all items from your cart?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Clear All",
+        onPress: () => {
+          clearCartMutation.mutate({ userId: registrationId });
+        },
+        style: "destructive",
+      },
+    ]);
+  };
+
+  const itemCount = cartItems?.reduce((total: number, item: any) => total + (item.quantity || 0), 0) || 0;
 
   const totalAmount = cartItems?.reduce((total: number, item: any) => {
     const product = item.product;
@@ -55,96 +93,180 @@ export default function CartScreen() {
       Alert.alert("Empty Cart", "Please add items to your cart before checking out");
       return;
     }
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     router.push("/checkout" as any);
   };
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
-      <Stack.Screen options={{ title: "Shopping Cart", headerBackTitle: "Shop" }} />
+      <Stack.Screen
+        options={{
+          title: "My Cart",
+          headerBackTitle: "Shop",
+          headerStyle: { backgroundColor: themeColors.headerBackground },
+          headerTintColor: themeColors.headerText,
+          headerRight: () =>
+            cartItems && cartItems.length > 0 ? (
+              <TouchableOpacity
+                onPress={handleClearCart}
+                style={styles.clearButton}
+              >
+                <Text style={[styles.clearButtonText, { color: themeColors.error }]}>Clear</Text>
+              </TouchableOpacity>
+            ) : null,
+        }}
+      />
 
       {isLoading ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>Loading cart...</Text>
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: themeColors.textSecondary }]}>
+            Loading your cart...
+          </Text>
         </View>
       ) : !cartItems || cartItems.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <ShoppingCart size={80} color="#d1d5db" />
-          <Text style={styles.emptyText}>Your cart is empty</Text>
-          <Text style={styles.emptySubtext}>Add items from the shop to get started</Text>
-          <TouchableOpacity style={styles.shopButton} onPress={() => router.back()}>
-            <Text style={styles.shopButtonText}>Continue Shopping</Text>
+        <View style={styles.centerContainer}>
+          <View style={[styles.emptyIconWrap, { backgroundColor: themeColors.cardBackground }]}>
+            <ShoppingCart size={48} color={themeColors.iconMuted} />
+          </View>
+          <Text style={[styles.emptyTitle, { color: themeColors.text }]}>Your cart is empty</Text>
+          <Text style={[styles.emptySubtext, { color: themeColors.textSecondary }]}>
+            Browse the shop and add items you'd like to purchase
+          </Text>
+          <TouchableOpacity
+            style={styles.continueShopping}
+            onPress={() => router.back()}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={colors.gradient.orange}
+              style={styles.continueShoppingGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              <ArrowLeft size={18} color="#fff" />
+              <Text style={styles.continueShoppingText}>Continue Shopping</Text>
+            </LinearGradient>
           </TouchableOpacity>
         </View>
       ) : (
         <>
-          <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={[styles.sectionLabel, { color: themeColors.textSecondary }]}>
+              {itemCount} {itemCount === 1 ? 'item' : 'items'} in your cart
+            </Text>
+
             {cartItems.map((item: any) => {
               const product = item.product;
+              const lineTotal = (product?.Price || 0) * item.quantity;
               return (
-                <View key={item.cart_id} style={styles.cartItem}>
+                <View
+                  key={item.cart_id}
+                  style={[styles.cartItem, { backgroundColor: themeColors.cardBackground }]}
+                >
                   {product?.Photo_URL ? (
                     <Image
                       source={{ uri: product.Photo_URL }}
                       style={styles.productImage}
                       contentFit="cover"
+                      transition={200}
                     />
                   ) : (
-                    <View style={styles.productImagePlaceholder}>
-                      <ShoppingCart size={24} color="#9ca3af" />
+                    <View style={[styles.productImagePlaceholder, { backgroundColor: themeColors.inputBackground }]}>
+                      <ShoppingCart size={24} color={themeColors.iconMuted} />
                     </View>
                   )}
 
-                  <View style={styles.itemDetails}>
-                    <Text style={styles.itemName} numberOfLines={2}>
-                      {product?.Catalogue_Item || "Unknown Item"}
-                    </Text>
-                    {product?.Size && (
-                      <Text style={styles.itemSize}>Size: {product.Size}</Text>
-                    )}
-                    <Text style={styles.itemPrice}>
-                      ugx.{(product?.Price || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}
-                    </Text>
-                  </View>
-
-                  <View style={styles.itemActions}>
-                    <View style={styles.quantityControl}>
+                  <View style={styles.itemContent}>
+                    <View style={styles.itemHeader}>
+                      <Text style={[styles.itemName, { color: themeColors.text }]} numberOfLines={2}>
+                        {product?.Catalogue_Item || "Unknown Item"}
+                      </Text>
                       <TouchableOpacity
-                        style={styles.quantityButton}
-                        onPress={() => handleQuantityChange(item.cart_id, item.quantity - 1)}
-                        disabled={item.quantity <= 1}
+                        style={styles.removeButton}
+                        onPress={() => handleRemoveItem(item.cart_id)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                       >
-                        <Minus size={16} color={item.quantity <= 1 ? "#d1d5db" : "#374151"} />
-                      </TouchableOpacity>
-                      <Text style={styles.quantityText}>{item.quantity}</Text>
-                      <TouchableOpacity
-                        style={styles.quantityButton}
-                        onPress={() => handleQuantityChange(item.cart_id, item.quantity + 1)}
-                      >
-                        <Plus size={16} color="#374151" />
+                        <Trash2 size={18} color={themeColors.error} />
                       </TouchableOpacity>
                     </View>
 
-                    <TouchableOpacity
-                      style={styles.removeButton}
-                      onPress={() => handleRemoveItem(item.cart_id)}
-                    >
-                      <Trash2 size={20} color="#ef4444" />
-                    </TouchableOpacity>
+                    {product?.Size && (
+                      <View style={[styles.sizeTag, { backgroundColor: themeColors.inputBackground }]}>
+                        <Text style={[styles.sizeText, { color: themeColors.textSecondary }]}>
+                          Size: {product.Size}
+                        </Text>
+                      </View>
+                    )}
+
+                    <View style={styles.itemFooter}>
+                      <View style={[styles.quantityControl, { backgroundColor: themeColors.inputBackground }]}>
+                        <TouchableOpacity
+                          style={[
+                            styles.quantityButton,
+                            item.quantity <= 1 && styles.quantityButtonDisabled,
+                          ]}
+                          onPress={() => handleQuantityChange(item.cart_id, item.quantity - 1)}
+                          disabled={item.quantity <= 1}
+                        >
+                          <Minus size={14} color={item.quantity <= 1 ? themeColors.iconMuted : themeColors.text} />
+                        </TouchableOpacity>
+                        <Text style={[styles.quantityText, { color: themeColors.text }]}>
+                          {item.quantity}
+                        </Text>
+                        <TouchableOpacity
+                          style={styles.quantityButton}
+                          onPress={() => handleQuantityChange(item.cart_id, item.quantity + 1)}
+                        >
+                          <Plus size={14} color={themeColors.text} />
+                        </TouchableOpacity>
+                      </View>
+
+                      <Text style={styles.lineTotal}>
+                        ugx.{lineTotal.toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                      </Text>
+                    </View>
                   </View>
                 </View>
               );
             })}
+
+            <View style={{ height: 120 }} />
           </ScrollView>
 
-          <View style={styles.footer}>
-            <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Total:</Text>
-              <Text style={styles.totalAmount}>
-                ugx.{totalAmount.toLocaleString("en-US", { maximumFractionDigits: 0 })}
-              </Text>
+          <View style={[styles.footer, { backgroundColor: themeColors.cardBackground }]}>
+            <View style={styles.footerTop}>
+              <View style={styles.totalRow}>
+                <Text style={[styles.totalLabel, { color: themeColors.textSecondary }]}>
+                  Subtotal ({itemCount} {itemCount === 1 ? 'item' : 'items'})
+                </Text>
+                <Text style={[styles.totalAmount, { color: themeColors.text }]}>
+                  ugx.{totalAmount.toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                </Text>
+              </View>
             </View>
-            <TouchableOpacity style={styles.checkoutButton} onPress={handleCheckout}>
-              <Text style={styles.checkoutButtonText}>Proceed to Checkout</Text>
+
+            <TouchableOpacity
+              style={styles.buyButton}
+              onPress={handleCheckout}
+              activeOpacity={0.85}
+            >
+              <LinearGradient
+                colors={colors.gradient.orange}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.buyButtonGradient}
+              >
+                <CreditCard size={20} color="#fff" />
+                <Text style={styles.buyButtonText}>Buy Now</Text>
+                <Text style={styles.buyButtonPrice}>
+                  ugx.{totalAmount.toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                </Text>
+              </LinearGradient>
             </TouchableOpacity>
           </View>
         </>
@@ -156,7 +278,65 @@ export default function CartScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f9fafb",
+  },
+  centerContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 40,
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 15,
+    marginTop: 8,
+  },
+  emptyIconWrap: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  emptyTitle: {
+    fontSize: 22,
+    fontWeight: "700" as const,
+  },
+  emptySubtext: {
+    fontSize: 15,
+    textAlign: "center",
+    lineHeight: 22,
+  },
+  continueShopping: {
+    marginTop: 16,
+    borderRadius: 12,
+    overflow: "hidden" as const,
+  },
+  continueShoppingGradient: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+  },
+  continueShoppingText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700" as const,
+  },
+  clearButton: {
+    marginRight: 16,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  clearButtonText: {
+    fontSize: 15,
+    fontWeight: "600" as const,
   },
   scrollView: {
     flex: 1,
@@ -165,38 +345,15 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 12,
   },
-  emptyContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 40,
-    gap: 16,
-  },
-  emptyText: {
-    fontSize: 22,
-    fontWeight: "700" as const,
-    color: "#374151",
-  },
-  emptySubtext: {
-    fontSize: 15,
-    color: "#6b7280",
-    textAlign: "center",
-  },
-  shopButton: {
-    backgroundColor: "#10b981",
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 12,
-    marginTop: 16,
-  },
-  shopButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "700" as const,
+  sectionLabel: {
+    fontSize: 14,
+    fontWeight: "600" as const,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+    marginBottom: 4,
   },
   cartItem: {
-    flexDirection: "row",
-    backgroundColor: "#fff",
+    flexDirection: "row" as const,
     borderRadius: 16,
     padding: 12,
     gap: 12,
@@ -207,95 +364,137 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   productImage: {
-    width: 80,
-    height: 80,
+    width: 90,
+    height: 90,
     borderRadius: 12,
     backgroundColor: "#f3f4f6",
   },
   productImagePlaceholder: {
-    width: 80,
-    height: 80,
+    width: 90,
+    height: 90,
     borderRadius: 12,
-    backgroundColor: "#e5e7eb",
     alignItems: "center",
     justifyContent: "center",
   },
-  itemDetails: {
+  itemContent: {
     flex: 1,
-    gap: 4,
+    gap: 6,
+  },
+  itemHeader: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "flex-start" as const,
+    gap: 8,
   },
   itemName: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "700" as const,
-    color: "#111827",
+    flex: 1,
+    lineHeight: 20,
   },
-  itemSize: {
-    fontSize: 13,
-    color: "#6b7280",
+  removeButton: {
+    padding: 4,
   },
-  itemPrice: {
-    fontSize: 17,
-    fontWeight: "700" as const,
-    color: "#10b981",
+  sizeTag: {
+    alignSelf: "flex-start" as const,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  sizeText: {
+    fontSize: 12,
+    fontWeight: "500" as const,
+  },
+  itemFooter: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
     marginTop: 4,
   },
-  itemActions: {
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-  },
   quantityControl: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#f3f4f6",
-    borderRadius: 8,
-    gap: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    borderRadius: 10,
+    gap: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
   },
   quantityButton: {
-    padding: 4,
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  quantityButtonDisabled: {
+    opacity: 0.4,
   },
   quantityText: {
     fontSize: 16,
-    fontWeight: "600" as const,
-    color: "#111827",
-    minWidth: 24,
-    textAlign: "center",
+    fontWeight: "700" as const,
+    minWidth: 28,
+    textAlign: "center" as const,
   },
-  removeButton: {
-    padding: 8,
+  lineTotal: {
+    fontSize: 17,
+    fontWeight: "700" as const,
+    color: colors.primary,
   },
   footer: {
-    backgroundColor: "#fff",
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 24,
     borderTopWidth: 1,
-    borderTopColor: "#e5e7eb",
-    gap: 16,
+    borderTopColor: "rgba(0,0,0,0.06)",
+    gap: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  footerTop: {
+    gap: 6,
   },
   totalRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
   },
   totalLabel: {
-    fontSize: 20,
-    fontWeight: "700" as const,
-    color: "#374151",
+    fontSize: 15,
+    fontWeight: "500" as const,
   },
   totalAmount: {
-    fontSize: 26,
+    fontSize: 22,
     fontWeight: "800" as const,
-    color: "#10b981",
   },
-  checkoutButton: {
-    backgroundColor: "#10b981",
+  buyButton: {
+    borderRadius: 14,
+    overflow: "hidden" as const,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  buyButtonGradient: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
     paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: "center",
+    paddingHorizontal: 24,
+    gap: 10,
   },
-  checkoutButtonText: {
+  buyButtonText: {
     color: "#fff",
     fontSize: 18,
+    fontWeight: "700" as const,
+    flex: 1,
+  },
+  buyButtonPrice: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 16,
     fontWeight: "700" as const,
   },
 });
