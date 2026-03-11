@@ -4,12 +4,14 @@ import { publicProcedure } from "../../../create-context";
 export default publicProcedure
   .input(z.object({ userId: z.string() }))
   .query(async ({ input, ctx }) => {
+    console.log("[getCart] Fetching cart for user:", input.userId);
     const { data: cartItems, error: cartError } = await ctx.supabase
       .from("shopping_cart")
-      .select("cart_id, catalogue_id, quantity, created_at")
+      .select("*")
       .eq("user_id", input.userId)
       .order("created_at", { ascending: false });
 
+    console.log("[getCart] Cart items raw:", JSON.stringify(cartItems), "Error:", cartError);
     if (cartError) throw cartError;
     if (!cartItems || cartItems.length === 0) return [];
 

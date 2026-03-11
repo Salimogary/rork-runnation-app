@@ -4,7 +4,7 @@ import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/contexts/AuthContext";
 import { ShoppingCart, Trash2, Plus, Minus, CreditCard, ArrowLeft } from "lucide-react-native";
 import { Image } from "expo-image";
-import { useQueryClient } from "@tanstack/react-query";
+
 import { useTheme } from "@/contexts/ThemeContext";
 import { LinearGradient } from "expo-linear-gradient";
 import colors from "@/constants/colors";
@@ -14,7 +14,7 @@ export default function CartScreen() {
   const router = useRouter();
   const { registrationId } = useAuth();
   const { colors: themeColors } = useTheme();
-  const queryClient = useQueryClient();
+  const trpcUtils = trpc.useUtils();
 
   const { data: cartItems, isLoading } = trpc.shop.getCart.useQuery(
     { userId: registrationId },
@@ -23,7 +23,7 @@ export default function CartScreen() {
 
   const updateCartMutation = trpc.shop.updateCartItem.useMutation({
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [["shop", "getCart"]] });
+      void trpcUtils.shop.getCart.invalidate();
     },
     onError: (error: any) => {
       Alert.alert("Error", error.message || "Failed to update cart");
@@ -32,7 +32,7 @@ export default function CartScreen() {
 
   const removeCartMutation = trpc.shop.removeCartItem.useMutation({
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [["shop", "getCart"]] });
+      void trpcUtils.shop.getCart.invalidate();
     },
     onError: (error: any) => {
       Alert.alert("Error", error.message || "Failed to remove item");
@@ -41,7 +41,7 @@ export default function CartScreen() {
 
   const clearCartMutation = trpc.shop.clearCart.useMutation({
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [["shop", "getCart"]] });
+      void trpcUtils.shop.getCart.invalidate();
     },
     onError: (error: any) => {
       Alert.alert("Error", error.message || "Failed to clear cart");

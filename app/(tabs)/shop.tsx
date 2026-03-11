@@ -1,5 +1,5 @@
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, RefreshControl, Dimensions, Alert, TextInput, ActivityIndicator, Animated } from "react-native";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "@/lib/supabase";
 import { Package, ShoppingCart, Lock, ShieldCheck, Trash2, Plus, Minus, ArrowRight } from "lucide-react-native";
@@ -40,7 +40,7 @@ export default function ShopScreen() {
   const { registrationId, verifyPin } = useAuth();
   const { colors: themeColors } = useTheme();
   const router = useRouter();
-  const queryClient = useQueryClient();
+  const trpcUtils = trpc.useUtils();
   const [pinUnlocked, setPinUnlocked] = useState(false);
   const [pinValue, setPinValue] = useState('');
   const [pinError, setPinError] = useState('');
@@ -154,7 +154,8 @@ export default function ShopScreen() {
 
   const addToCartMutation = trpc.shop.addToCart.useMutation({
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [["shop", "getCart"]] });
+      console.log('[Shop] Add to cart success, invalidating getCart');
+      void trpcUtils.shop.getCart.invalidate();
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert("Added", "Item added to cart");
     },
@@ -165,7 +166,7 @@ export default function ShopScreen() {
 
   const updateCartMutation = trpc.shop.updateCartItem.useMutation({
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [["shop", "getCart"]] });
+      void trpcUtils.shop.getCart.invalidate();
     },
     onError: (error: any) => {
       Alert.alert("Error", error.message || "Failed to update cart");
@@ -174,7 +175,7 @@ export default function ShopScreen() {
 
   const removeCartMutation = trpc.shop.removeCartItem.useMutation({
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [["shop", "getCart"]] });
+      void trpcUtils.shop.getCart.invalidate();
     },
     onError: (error: any) => {
       Alert.alert("Error", error.message || "Failed to remove item");
@@ -183,7 +184,7 @@ export default function ShopScreen() {
 
   const clearCartMutation = trpc.shop.clearCart.useMutation({
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [["shop", "getCart"]] });
+      void trpcUtils.shop.getCart.invalidate();
     },
     onError: (error: any) => {
       Alert.alert("Error", error.message || "Failed to clear cart");
