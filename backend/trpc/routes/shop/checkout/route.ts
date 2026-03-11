@@ -37,7 +37,7 @@ export default publicProcedure
         throw new Error("Product not found");
       }
 
-      const stock = (product as any).Quantity ?? (product as any).Quanity ?? (product as any).quantity ?? (product as any).Stock ?? (product as any).stock ?? 0;
+      const stock = product.Quantity ?? 0;
       console.log(`[checkout] Product ${product.Catalogue_Item} stock check:`, JSON.stringify({ rawProduct: product, resolvedStock: stock, requestedQty: item.quantity }));
       if (item.quantity > stock) {
         throw new Error(`Not enough stock for ${product.Catalogue_Item}`);
@@ -87,12 +87,11 @@ export default publicProcedure
       if (fetchError || !currentProduct) {
         console.error("Error fetching product for stock update:", fetchError);
       } else {
-        const currentStock = (currentProduct as any).Quantity ?? (currentProduct as any).Quanity ?? (currentProduct as any).quantity ?? (currentProduct as any).Stock ?? (currentProduct as any).stock ?? 0;
+        const currentStock = currentProduct.Quantity ?? 0;
         const newStock = currentStock - orderItem.quantity;
-        const stockField = 'Quantity' in currentProduct ? 'Quantity' : 'Quanity' in currentProduct ? 'Quanity' : 'quantity' in currentProduct ? 'quantity' : 'Stock' in currentProduct ? 'Stock' : 'stock' in currentProduct ? 'stock' : 'Quantity';
         const { error: stockError } = await ctx.supabase
           .from("catalogue")
-          .update({ [stockField]: Math.max(0, newStock) })
+          .update({ Quantity: Math.max(0, newStock) })
           .eq("CatalogueID", orderItem.catalogue_id);
 
         if (stockError) {

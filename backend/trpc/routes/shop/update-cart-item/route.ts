@@ -23,7 +23,7 @@ export default publicProcedure
 
     const { data: product, error: productError } = await ctx.supabase
       .from("catalogue")
-      .select("Quanity")
+      .select("Quantity")
       .eq("CatalogueID", cartItem.catalogue_id)
       .single();
 
@@ -31,7 +31,7 @@ export default publicProcedure
       throw new Error("Product not found");
     }
 
-    if (quantity > (product.Quanity || 0)) {
+    if (quantity > (product.Quantity || 0)) {
       throw new Error("Not enough stock available");
     }
 

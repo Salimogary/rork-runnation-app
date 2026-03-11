@@ -35,7 +35,7 @@ export default publicProcedure
       ? existingCart.quantity + quantity
       : quantity;
 
-    const stock = (product as any).Quanity ?? (product as any).Quantity ?? 0;
+    const stock = product.Quantity ?? 0;
     if (newQuantity > stock) {
       throw new Error("Not enough stock available");
     }
