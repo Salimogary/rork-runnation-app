@@ -102,9 +102,9 @@ export default function AdminScreen() {
     }
   };
 
-  const { data: orders, isLoading: ordersLoading } = trpc.admin.getAllOrders.useQuery(
+  const { data: orders, isLoading: ordersLoading, error: ordersError } = trpc.admin.getAllOrders.useQuery(
     undefined,
-    { enabled: isAuthenticated }
+    { enabled: isAuthenticated, retry: 1 }
   );
 
   const { data: events, isLoading: eventsLoading, error: eventsError, refetch: refetchEvents } = trpc.admin.getEvents.useQuery(
@@ -595,6 +595,17 @@ const getStatusColor = (status: string) => {
           {ordersLoading ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>Loading orders...</Text>
+            </View>
+          ) : ordersError ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.errorText}>Error loading orders</Text>
+              <Text style={styles.errorSubtext}>{ordersError.message || "Failed to fetch orders"}</Text>
+              <TouchableOpacity
+                style={styles.retryButton}
+                onPress={() => void queryClient.invalidateQueries({ queryKey: [["admin", "getAllOrders"]] })}
+              >
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
             </View>
           ) : !orders || orders.length === 0 ? (
             <View style={styles.emptyContainer}>
