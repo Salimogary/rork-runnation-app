@@ -7,7 +7,7 @@ export default publicProcedure
     const { error } = await ctx.supabase
       .from("shopping_cart")
       .delete()
-      .eq("user_id", input.userId);
+      .eq("registration_id", input.userId);
 
     if (error) throw error;
 

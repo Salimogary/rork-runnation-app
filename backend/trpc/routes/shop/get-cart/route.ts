@@ -8,7 +8,7 @@ export default publicProcedure
     const { data: cartItems, error: cartError } = await ctx.supabase
       .from("shopping_cart")
       .select("*")
-      .eq("user_id", input.userId)
+      .eq("registration_id", input.userId)
       .order("created_at", { ascending: false });
 
     console.log("[getCart] Cart items raw:", JSON.stringify(cartItems), "Error:", cartError);

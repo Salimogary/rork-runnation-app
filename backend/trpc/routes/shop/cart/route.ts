@@ -27,7 +27,7 @@ export default publicProcedure
     const { data: existingCart } = await ctx.supabase
       .from("shopping_cart")
       .select("quantity")
-      .eq("user_id", userId)
+      .eq("registration_id", userId)
       .eq("catalogue_id", catalogueId)
       .single();
 
@@ -44,14 +44,14 @@ export default publicProcedure
       const { error } = await ctx.supabase
         .from("shopping_cart")
         .update({ quantity: newQuantity, updated_at: new Date().toISOString() })
-        .eq("user_id", userId)
+        .eq("registration_id", userId)
         .eq("catalogue_id", catalogueId);
 
       if (error) throw error;
     } else {
       const { error } = await ctx.supabase
         .from("shopping_cart")
-        .insert({ user_id: userId, catalogue_id: catalogueId, quantity });
+        .insert({ registration_id: userId, catalogue_id: catalogueId, quantity });
 
       if (error) throw error;
     }
