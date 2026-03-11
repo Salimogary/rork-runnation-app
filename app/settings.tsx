@@ -8,7 +8,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 import { getNotificationsEnabled, setNotificationsEnabled as saveNotificationsEnabled } from "@/utils/notifications";
@@ -41,6 +41,24 @@ export default function SettingsScreen() {
   const [ratingFeedback, setRatingFeedback] = useState('');
   const { subscriptionStatus, trialDaysRemaining, subscription } = useSubscription();
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const adminTapCount = useRef<number>(0);
+  const adminTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleVersionTap = useCallback(() => {
+    adminTapCount.current += 1;
+    if (adminTapTimer.current) clearTimeout(adminTapTimer.current);
+    if (adminTapCount.current >= 5) {
+      adminTapCount.current = 0;
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+      router.push('/admin-login' as any);
+      return;
+    }
+    adminTapTimer.current = setTimeout(() => {
+      adminTapCount.current = 0;
+    }, 2000);
+  }, [router]);
 
   interface SupportContact {
     support_contacy_id: number;
@@ -496,7 +514,9 @@ export default function SettingsScreen() {
       )}
 
       <View style={styles.footer}>
-        <Text style={[styles.footerText, { color: themeColors.textLight }]}>Version 1.0.0</Text>
+        <TouchableOpacity activeOpacity={1} onPress={handleVersionTap}>
+          <Text style={[styles.footerText, { color: themeColors.textLight }]}>Version 1.0.0</Text>
+        </TouchableOpacity>
         {user && 'username' in user && user.username && (
           <Text style={[styles.footerSubtext, { color: themeColors.textLight }]}>Signed in as: {user.username}</Text>
         )}
