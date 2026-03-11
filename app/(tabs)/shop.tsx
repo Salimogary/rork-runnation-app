@@ -133,10 +133,19 @@ export default function ShopScreen() {
     },
   });
 
-  const { data: cartData, refetch: refetchCart } = trpc.shop.getCart.useQuery(
+  console.log('[Shop] registrationId for cart query:', JSON.stringify(registrationId), 'enabled:', !!registrationId);
+
+  const { data: cartData, refetch: refetchCart, error: cartError } = trpc.shop.getCart.useQuery(
     { userId: registrationId },
     { enabled: !!registrationId }
   );
+
+  useEffect(() => {
+    if (cartError) {
+      console.error('[Shop] Cart query error:', cartError);
+    }
+    console.log('[Shop] Cart data received:', JSON.stringify(cartData));
+  }, [cartData, cartError]);
 
   useFocusEffect(
     useCallback(() => {
