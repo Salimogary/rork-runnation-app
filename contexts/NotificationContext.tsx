@@ -46,7 +46,7 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
         .select('Distance_km, Exercise_Type')
         .eq('RegistrationID', user.id);
       if (error) {
-        console.error('[NotifContext] Badge data error:', error);
+        console.error('[NotifContext] Badge data error:', error.message, error.code, error.details);
         return { earnedCount: 0, totalDistance: 0, totalActivities: 0 };
       }
       const validTypes = ['Run', 'Walk', 'Treadmill', 'Tredmill'];
