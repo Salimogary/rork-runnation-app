@@ -333,7 +333,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         supabase.from('user_goals').delete().eq('registration_id', regId),
         supabase.from('user_photos').delete().eq('registration_id', regId),
         supabase.from('club_membership_request').delete().eq('registration_id', regId),
-        supabase.from('contacts').delete().eq('regstration_id', regId),
+        supabase.from('contacts').delete().eq('registration_id', regId),
         supabase.from('Events Participants').delete().eq('RegistrationID', regId),
         supabase.from('event_enrollments').delete().eq('RegistrationID', regId),
         supabase.from('External Activity Submissions').delete().eq('RegistrationID', regId),

@@ -444,7 +444,7 @@ export default function RegisterScreen() {
       const phoneNumber = parseInt(contactData.phone.replace(/[^0-9]/g, ''), 10);
 
       console.log('[Register] Inserting contact:', {
-        regstration_id: registrationId,
+        registration_id: registrationId,
         country_code: contactData.countryCode,
         phone: phoneNumber,
         email: contactData.email.trim(),
@@ -453,7 +453,7 @@ export default function RegisterScreen() {
       const { error: contactError } = await supabase
         .from('contacts')
         .insert({
-          regstration_id: registrationId,
+          registration_id: registrationId,
           country_code: contactData.countryCode,
           phone: phoneNumber,
           email: contactData.email.trim(),
