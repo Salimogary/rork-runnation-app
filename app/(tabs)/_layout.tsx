@@ -30,10 +30,11 @@ export default function TabLayout() {
           shadowOpacity: 0,
         },
         headerTintColor: colors.headerText,
-        headerTitleAlign: "center" as const,
+        headerTitleAlign: "left" as const,
         headerTitleStyle: {
           fontWeight: "700" as const,
           fontSize: 20,
+          marginLeft: 8,
         },
         headerLeft: () => (
           <TouchableOpacity onPress={() => router.push("/settings" as any)} style={{ marginLeft: 16 }}>
