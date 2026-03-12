@@ -30,7 +30,7 @@ interface HeaderUserProfile {
   Sex?: string;
   Residence?: string;
   Country?: string;
-  "Date of Birth"?: string;
+  dob?: string;
   email_verified?: boolean;
 }
 
@@ -48,10 +48,14 @@ export default function HeaderProfile() {
       if (!user) throw new Error("Not authenticated");
       const { data, error } = await supabase
         .from("registrations")
-        .select('"First Name", "Other Names", "Username", "Email", "Sex", "Residence", "Country", "Date of Birth", "email_verified"')
+        .select('"First Name", "Other Names", "Username", "Email", "Sex", "Residence", "Country", dob, email_verified')
         .eq("RegistrationID", user.id)
         .maybeSingle();
-      if (error) throw error;
+      if (error) {
+        console.error('[HeaderProfile] Error fetching profile:', error);
+        throw error;
+      }
+      console.log('[HeaderProfile] Profile data:', data);
       return data || { "First Name": "User" };
     },
     enabled: !!user,
@@ -125,7 +129,7 @@ export default function HeaderProfile() {
       ] = await Promise.all([
         supabase
           .from("registrations")
-          .select('"First Name", "Other Names", "Username", "Email", "Sex", "Residence", "Country", "Date of Birth", "email_verified"')
+          .select('"First Name", "Other Names", "Username", "Email", "Sex", "Residence", "Country", dob, email_verified')
           .eq("RegistrationID", user.id)
           .maybeSingle(),
         supabase
@@ -180,7 +184,7 @@ export default function HeaderProfile() {
         p.Sex &&
         p.Residence &&
         p.Country &&
-        p["Date of Birth"]
+        p.dob
       );
 
       const hasProfilePhoto = !!photoRes.data?.file_path;
