@@ -15,7 +15,7 @@ interface RegistrationData {
   firstName: string;
   otherNames: string;
   username: string;
-  email: string;
+  email?: string;
   sex: string;
   dob: string;
   residence: string;
@@ -211,7 +211,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         let registrationId: string | null = null;
         try {
           const residenceValue = registrationData.residence;
-          const email = registrationData.email || `${username.toLowerCase()}@runapp.local`;
 
           const { data: newUserData, error: insertError } = await supabase
             .from('registrations')
@@ -219,7 +218,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               'First Name': registrationData.firstName,
               'Other Names': registrationData.otherNames,
               Username: username.toLowerCase(),
-              Email: email,
               Sex: registrationData.sex,
               dob: registrationData.dob ? (() => { const match = registrationData.dob!.match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return match ? `${match[3]}-${match[2]}-${match[1]}` : registrationData.dob; })() : null,
               Residence: residenceValue,
@@ -335,6 +333,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         supabase.from('user_goals').delete().eq('registration_id', regId),
         supabase.from('user_photos').delete().eq('registration_id', regId),
         supabase.from('club_membership_request').delete().eq('registration_id', regId),
+        supabase.from('contacts').delete().eq('regstration_id', regId),
         supabase.from('Events Participants').delete().eq('RegistrationID', regId),
         supabase.from('event_enrollments').delete().eq('RegistrationID', regId),
         supabase.from('External Activity Submissions').delete().eq('RegistrationID', regId),

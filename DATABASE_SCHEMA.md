@@ -613,6 +613,32 @@ create index if not exists idx_suggestions_created_at on public.suggestions usin
 - Admin can view all suggestions in the Admin Dashboard > Suggestions tile
 - Suggestions are displayed in reverse chronological order (newest first)
 
+### 20. Contacts (NEW - Required)
+Create this table for storing sensitive contact information separately from registrations:
+
+```sql
+create table public.contacts (
+  contact_id uuid not null default gen_random_uuid (),
+  regstration_id text null,
+  country_code text null,
+  phone integer null,
+  email text null,
+  ph_verified boolean not null default false,
+  em_verified boolean not null default false,
+  constraint contacts_pkey primary key (contact_id),
+  constraint contacts_regstration_id_fkey foreign KEY (regstration_id) references registrations ("RegistrationID")
+) TABLESPACE pg_default;
+
+create index IF not exists idx_contacts_regstration_id on public.contacts using btree (regstration_id) TABLESPACE pg_default;
+```
+
+**Contacts Logic:**
+- Contact info (phone, email, country code) is stored separately from the registrations table for security
+- Collected during registration step 2 (Contacts) after the account is created
+- `ph_verified` and `em_verified` track whether phone and email have been verified
+- Verification updates these boolean flags when confirmed
+- Each registration can have one contact record linked by `regstration_id`
+
 ## Notes
 
 - FriendID is hidden from users (system-generated)

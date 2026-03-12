@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Fingerprint, Camera, Check, ChevronRight, Target, Users, UserPlus, UserCheck, PlusCircle, X, MapPin, Globe, FileText, Download, ChevronLeft } from 'lucide-react-native';
+import { Fingerprint, Camera, Check, ChevronRight, Target, Users, UserPlus, UserCheck, PlusCircle, X, MapPin, Globe, FileText, Download, ChevronLeft, Phone, Mail } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@/contexts/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -26,13 +26,12 @@ import { supabase } from '@/lib/supabase';
 
 
 type ScreenMode = 'login' | 'create' | 'forgot' | 'fullRegistration';
-type RegistrationStep = 1 | 2 | 3;
+type RegistrationStep = 1 | 2 | 3 | 4;
 
 interface RegistrationData {
   firstName: string;
   otherNames: string;
   username: string;
-  email: string;
   sex: string;
   dob: string;
   residence: string;
@@ -43,6 +42,12 @@ interface RegistrationData {
   pin: string;
   confirmPin: string;
   photoUri?: string;
+}
+
+interface ContactData {
+  countryCode: string;
+  phone: string;
+  email: string;
 }
 
 interface GoalItem {
@@ -75,7 +80,6 @@ export default function RegisterScreen() {
     firstName: '',
     otherNames: '',
     username: '',
-    email: '',
     sex: '',
     dob: '',
     residence: '',
@@ -86,6 +90,11 @@ export default function RegisterScreen() {
     pin: '',
     confirmPin: '',
     photoUri: '',
+  });
+  const [contactData, setContactData] = useState<ContactData>({
+    countryCode: '',
+    phone: '',
+    email: '',
   });
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
@@ -110,15 +119,15 @@ export default function RegisterScreen() {
   const pinRef4 = useRef<TextInput>(null);
 
   useEffect(() => {
-    checkBiometricAvailability();
-    fetchCountries();
+    void checkBiometricAvailability();
+    void fetchCountries();
   }, []);
 
   useEffect(() => {
-    if (registrationStep === 2) {
-      fetchGoals();
-    } else if (registrationStep === 3) {
-      fetchClubs();
+    if (registrationStep === 3) {
+      void fetchGoals();
+    } else if (registrationStep === 4) {
+      void fetchClubs();
     }
   }, [registrationStep]);
 
@@ -334,7 +343,7 @@ export default function RegisterScreen() {
 
   const handleStep1Complete = async () => {
     const requiredFields = [
-      'firstName', 'otherNames', 'username', 'email', 'sex', 'dob',
+      'firstName', 'otherNames', 'username', 'sex', 'dob',
       'residence', 'country', 'pin', 'confirmPin'
     ];
 
@@ -391,7 +400,7 @@ export default function RegisterScreen() {
           setRegistrationId(regId);
         }
 
-        console.log('[Register] Step 1 complete, moving to goals. RegistrationID:', regId);
+        console.log('[Register] Step 1 complete, moving to contacts. RegistrationID:', regId);
         setRegistrationStep(2);
       }
     } catch {
@@ -402,9 +411,72 @@ export default function RegisterScreen() {
   };
 
   const handleStep2Complete = async () => {
-
     if (!registrationId) {
-      console.error('[Register] No registrationId for step 2');
+      console.error('[Register] No registrationId for step 2 (contacts)');
+      Alert.alert('Error', 'Registration ID not found. Please try again.');
+      return;
+    }
+
+    if (!contactData.email.trim()) {
+      Alert.alert('Error', 'Please enter your email address');
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(contactData.email.trim())) {
+      Alert.alert('Error', 'Please enter a valid email address');
+      return;
+    }
+
+    if (!contactData.phone.trim()) {
+      Alert.alert('Error', 'Please enter your phone number');
+      return;
+    }
+
+    if (!contactData.countryCode.trim()) {
+      Alert.alert('Error', 'Please select your country/state code');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const phoneNumber = parseInt(contactData.phone.replace(/[^0-9]/g, ''), 10);
+
+      console.log('[Register] Inserting contact:', {
+        regstration_id: registrationId,
+        country_code: contactData.countryCode,
+        phone: phoneNumber,
+        email: contactData.email.trim(),
+      });
+
+      const { error: contactError } = await supabase
+        .from('contacts')
+        .insert({
+          regstration_id: registrationId,
+          country_code: contactData.countryCode,
+          phone: phoneNumber,
+          email: contactData.email.trim(),
+        });
+
+      if (contactError) {
+        console.error('[Register] Error saving contacts:', JSON.stringify(contactError));
+        Alert.alert('Error', 'Failed to save contact information. Please try again.');
+      } else {
+        console.log('[Register] Contacts saved, moving to goals');
+        setRegistrationStep(3);
+      }
+    } catch (err) {
+      console.error('[Register] Contact save error:', err);
+      Alert.alert('Error', 'Something went wrong saving your contact info.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStep3Complete = async () => {
+    if (!registrationId) {
+      console.error('[Register] No registrationId for step 3');
       Alert.alert('Error', 'Registration ID not found. Please try again.');
       return;
     }
@@ -438,7 +510,7 @@ export default function RegisterScreen() {
         Alert.alert('Error', 'Failed to save goals. Please try again.');
       } else {
         console.log('[Register] Goals saved, moving to clubs');
-        setRegistrationStep(3);
+        setRegistrationStep(4);
       }
     } catch (err) {
       console.error('[Register] Goals save error:', err);
@@ -448,9 +520,9 @@ export default function RegisterScreen() {
     }
   };
 
-  const handleStep3Complete = async () => {
+  const handleStep4Complete = async () => {
     if (!registrationId) {
-      console.error('[Register] No registrationId for step 3');
+      console.error('[Register] No registrationId for step 4');
       await AsyncStorage.setItem('hasSeenOnboarding', 'true');
       router.replace('/(tabs)');
       return;
@@ -515,13 +587,15 @@ export default function RegisterScreen() {
 
   const handleSkipGoals = async () => {
     console.log('[Register] Skipping goals step');
-    setRegistrationStep(3);
+    setRegistrationStep(4);
   };
 
   const handleSkipStep = async () => {
     if (registrationStep === 2) {
       setRegistrationStep(3);
     } else if (registrationStep === 3) {
+      setRegistrationStep(4);
+    } else if (registrationStep === 4) {
       await AsyncStorage.setItem('hasSeenOnboarding', 'true');
       router.replace('/(tabs)');
     }
@@ -537,6 +611,10 @@ export default function RegisterScreen() {
 
   const updateRegistrationField = (field: keyof RegistrationData, value: string) => {
     setRegistrationData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const updateContactField = (field: keyof ContactData, value: string) => {
+    setContactData(prev => ({ ...prev, [field]: value }));
   };
 
   const handleForgotPin = async () => {
@@ -569,9 +647,62 @@ export default function RegisterScreen() {
     return goal?.Goal?.toLowerCase() === 'other';
   });
 
+  const COUNTRY_CODES = [
+    { label: '+1 (US/CA)', value: '+1' },
+    { label: '+44 (UK)', value: '+44' },
+    { label: '+91 (India)', value: '+91' },
+    { label: '+61 (Australia)', value: '+61' },
+    { label: '+86 (China)', value: '+86' },
+    { label: '+81 (Japan)', value: '+81' },
+    { label: '+49 (Germany)', value: '+49' },
+    { label: '+33 (France)', value: '+33' },
+    { label: '+55 (Brazil)', value: '+55' },
+    { label: '+27 (South Africa)', value: '+27' },
+    { label: '+254 (Kenya)', value: '+254' },
+    { label: '+234 (Nigeria)', value: '+234' },
+    { label: '+256 (Uganda)', value: '+256' },
+    { label: '+255 (Tanzania)', value: '+255' },
+    { label: '+251 (Ethiopia)', value: '+251' },
+    { label: '+233 (Ghana)', value: '+233' },
+    { label: '+237 (Cameroon)', value: '+237' },
+    { label: '+250 (Rwanda)', value: '+250' },
+    { label: '+263 (Zimbabwe)', value: '+263' },
+    { label: '+260 (Zambia)', value: '+260' },
+    { label: '+265 (Malawi)', value: '+265' },
+    { label: '+258 (Mozambique)', value: '+258' },
+    { label: '+267 (Botswana)', value: '+267' },
+    { label: '+264 (Namibia)', value: '+264' },
+    { label: '+230 (Mauritius)', value: '+230' },
+    { label: '+248 (Seychelles)', value: '+248' },
+    { label: '+966 (Saudi Arabia)', value: '+966' },
+    { label: '+971 (UAE)', value: '+971' },
+    { label: '+974 (Qatar)', value: '+974' },
+    { label: '+65 (Singapore)', value: '+65' },
+    { label: '+60 (Malaysia)', value: '+60' },
+    { label: '+63 (Philippines)', value: '+63' },
+    { label: '+62 (Indonesia)', value: '+62' },
+    { label: '+66 (Thailand)', value: '+66' },
+    { label: '+82 (South Korea)', value: '+82' },
+    { label: '+64 (New Zealand)', value: '+64' },
+    { label: '+353 (Ireland)', value: '+353' },
+    { label: '+34 (Spain)', value: '+34' },
+    { label: '+39 (Italy)', value: '+39' },
+    { label: '+31 (Netherlands)', value: '+31' },
+    { label: '+46 (Sweden)', value: '+46' },
+    { label: '+47 (Norway)', value: '+47' },
+    { label: '+48 (Poland)', value: '+48' },
+    { label: '+7 (Russia)', value: '+7' },
+    { label: '+52 (Mexico)', value: '+52' },
+    { label: '+54 (Argentina)', value: '+54' },
+    { label: '+56 (Chile)', value: '+56' },
+    { label: '+57 (Colombia)', value: '+57' },
+    { label: '+20 (Egypt)', value: '+20' },
+    { label: '+212 (Morocco)', value: '+212' },
+  ];
+
   const renderStepIndicator = () => (
     <View style={styles.stepIndicatorContainer}>
-      {[1, 2, 3].map((step) => {
+      {[1, 2, 3, 4].map((step) => {
         const isActive = registrationStep >= step;
         const isCurrent = registrationStep === step;
         return (
@@ -583,7 +714,7 @@ export default function RegisterScreen() {
                 <Text style={[styles.stepDotText, isActive && styles.stepDotTextActive]}>{step}</Text>
               )}
             </View>
-            {step < 3 && (
+            {step < 4 && (
               <View style={[styles.stepLine, registrationStep > step && styles.stepLineActive]} />
             )}
           </React.Fragment>
@@ -595,8 +726,9 @@ export default function RegisterScreen() {
   const renderStepLabels = () => (
     <View style={styles.stepLabelsRow}>
       <Text style={[styles.stepLabel, registrationStep >= 1 && styles.stepLabelActive]}>Registration</Text>
-      <Text style={[styles.stepLabel, registrationStep >= 2 && styles.stepLabelActive]}>Your Goals</Text>
-      <Text style={[styles.stepLabel, registrationStep >= 3 && styles.stepLabelActive]}>Club</Text>
+      <Text style={[styles.stepLabel, registrationStep >= 2 && styles.stepLabelActive]}>Contacts</Text>
+      <Text style={[styles.stepLabel, registrationStep >= 3 && styles.stepLabelActive]}>Your Goals</Text>
+      <Text style={[styles.stepLabel, registrationStep >= 4 && styles.stepLabelActive]}>Club</Text>
     </View>
   );
 
@@ -638,21 +770,6 @@ export default function RegisterScreen() {
           onChangeText={(text) => updateRegistrationField('username', text)}
           autoCapitalize="none"
           autoCorrect={false}
-          editable={!isLoading}
-        />
-      </View>
-
-      <View style={styles.inputContainer}>
-        <Text style={styles.label}>Email *</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Enter email address"
-          placeholderTextColor="#999"
-          value={registrationData.email}
-          onChangeText={(text) => updateRegistrationField('email', text)}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="email-address"
           editable={!isLoading}
         />
       </View>
@@ -819,7 +936,7 @@ export default function RegisterScreen() {
             <ActivityIndicator color="#FFFFFF" />
           ) : (
             <View style={styles.buttonInner}>
-              <Text style={styles.buttonText}>Next: Set Your Goals</Text>
+              <Text style={styles.buttonText}>Next: Contact Details</Text>
               <ChevronRight size={20} color="#fff" />
             </View>
           )}
@@ -835,7 +952,6 @@ export default function RegisterScreen() {
               firstName: '',
               otherNames: '',
               username: '',
-              email: '',
               sex: '',
               dob: '',
               residence: '',
@@ -847,6 +963,7 @@ export default function RegisterScreen() {
               confirmPin: '',
               photoUri: '',
             });
+            setContactData({ countryCode: '', phone: '', email: '' });
           }}
           disabled={isLoading}
         >
@@ -857,6 +974,94 @@ export default function RegisterScreen() {
   );
 
   const renderStep2 = () => (
+    <>
+      <View style={styles.stepHeader}>
+        <Phone size={32} color="#fff" />
+        <Text style={styles.formTitle}>Contact Details</Text>
+        <Text style={styles.stepSubtitle}>Your contact information is stored securely and separately from your profile.</Text>
+      </View>
+
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>Country / State Code *</Text>
+        <View style={styles.pickerContainer}>
+          <Picker
+            selectedValue={contactData.countryCode}
+            onValueChange={(value: string) => updateContactField('countryCode', value)}
+            style={styles.picker}
+            enabled={!isLoading}
+          >
+            <Picker.Item label="Select country code" value="" />
+            {COUNTRY_CODES.map((cc) => (
+              <Picker.Item key={cc.value} label={cc.label} value={cc.value} />
+            ))}
+          </Picker>
+        </View>
+      </View>
+
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>Phone Number *</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter phone number"
+          placeholderTextColor="#999"
+          value={contactData.phone}
+          onChangeText={(text) => updateContactField('phone', text.replace(/[^0-9]/g, ''))}
+          keyboardType="phone-pad"
+          editable={!isLoading}
+        />
+      </View>
+
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>Email Address *</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter email address"
+          placeholderTextColor="#999"
+          value={contactData.email}
+          onChangeText={(text) => updateContactField('email', text)}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="email-address"
+          editable={!isLoading}
+        />
+      </View>
+
+      <View style={styles.contactSecurityNote}>
+        <Mail size={16} color="rgba(255,255,255,0.7)" />
+        <Text style={styles.contactSecurityText}>
+          Your phone and email will be verified later. This information is kept separately for your security.
+        </Text>
+      </View>
+
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity
+          style={[styles.button, styles.primaryButton, isLoading && styles.buttonDisabled]}
+          onPress={handleStep2Complete}
+          disabled={isLoading}
+          activeOpacity={0.8}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <View style={styles.buttonInner}>
+              <Text style={styles.buttonText}>Next: Set Your Goals</Text>
+              <ChevronRight size={20} color="#fff" />
+            </View>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.textButton}
+          onPress={() => void handleSkipStep()}
+          disabled={isLoading}
+        >
+          <Text style={styles.textButtonText}>Skip for now</Text>
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+
+  const renderStep3 = () => (
     <>
       <View style={styles.stepHeader}>
         <Target size={32} color="#fff" />
@@ -916,7 +1121,7 @@ export default function RegisterScreen() {
       <View style={styles.buttonContainer}>
         <TouchableOpacity
           style={[styles.button, styles.primaryButton, isLoading && styles.buttonDisabled]}
-          onPress={selectedGoalIds.length > 0 ? handleStep2Complete : handleSkipGoals}
+          onPress={selectedGoalIds.length > 0 ? handleStep3Complete : handleSkipGoals}
           disabled={isLoading}
           activeOpacity={0.8}
         >
@@ -937,7 +1142,7 @@ export default function RegisterScreen() {
     setClubChoice(choice);
     setSelectedClubId(null);
     if (choice === 'join' || choice === 'existing') {
-      fetchClubs();
+      void fetchClubs();
     }
   };
 
@@ -1114,7 +1319,7 @@ export default function RegisterScreen() {
     </View>
   );
 
-  const renderStep3 = () => {
+  const renderStep4 = () => {
     const showCompleteButton = clubChoice === 'none' ||
       clubChoice === 'start' ||
       (clubChoice === 'join' && selectedClubId) ||
@@ -1148,7 +1353,7 @@ export default function RegisterScreen() {
           {showCompleteButton && (
             <TouchableOpacity
               style={[styles.button, styles.primaryButton, isLoading && styles.buttonDisabled]}
-              onPress={handleStep3Complete}
+              onPress={handleStep4Complete}
               disabled={isLoading}
               activeOpacity={0.8}
             >
@@ -1192,8 +1397,9 @@ export default function RegisterScreen() {
               <Text style={styles.subtitle}>
                 {screenMode === 'login' && 'Welcome back!'}
                 {screenMode === 'fullRegistration' && registrationStep === 1 && 'Join the community'}
-                {screenMode === 'fullRegistration' && registrationStep === 2 && 'Almost there!'}
-                {screenMode === 'fullRegistration' && registrationStep === 3 && 'One last step!'}
+                {screenMode === 'fullRegistration' && registrationStep === 2 && 'Secure your contacts'}
+                {screenMode === 'fullRegistration' && registrationStep === 3 && 'Almost there!'}
+                {screenMode === 'fullRegistration' && registrationStep === 4 && 'One last step!'}
                 {screenMode === 'forgot' && 'Recover your PIN'}
               </Text>
             </View>
@@ -1206,6 +1412,7 @@ export default function RegisterScreen() {
                   {registrationStep === 1 && renderStep1()}
                   {registrationStep === 2 && renderStep2()}
                   {registrationStep === 3 && renderStep3()}
+                  {registrationStep === 4 && renderStep4()}
                 </>
               ) : screenMode === 'forgot' ? (
                 <>
@@ -1415,12 +1622,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
-    paddingHorizontal: 20,
+    paddingHorizontal: 10,
   },
   stepDot: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: 'rgba(255,255,255,0.25)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1436,7 +1643,7 @@ const styles = StyleSheet.create({
     borderColor: '#1a1a1a',
   },
   stepDotText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700' as const,
     color: 'rgba(255,255,255,0.6)',
   },
@@ -1447,7 +1654,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 2,
     backgroundColor: 'rgba(255,255,255,0.25)',
-    marginHorizontal: 8,
+    marginHorizontal: 6,
   },
   stepLineActive: {
     backgroundColor: '#fff',
@@ -1459,7 +1666,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
   },
   stepLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600' as const,
     color: 'rgba(255,255,255,0.5)',
     textAlign: 'center',
@@ -1669,6 +1876,23 @@ const styles = StyleSheet.create({
     color: '#fff',
     opacity: 0.9,
     lineHeight: 18,
+  },
+  contactSecurityNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  contactSecurityText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.8)',
+    lineHeight: 18,
+    flex: 1,
   },
   goalsGrid: {
     gap: 10,
