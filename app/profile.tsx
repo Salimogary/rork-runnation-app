@@ -810,7 +810,7 @@ export default function ProfileScreen() {
 
       {([
         { label: "Sex", key: "Sex" as const, keyboard: "default" as const },
-        { label: "Residence", key: "Residence" as const, keyboard: "default" as const },
+        { label: "City/Town/District", key: "Residence" as const, keyboard: "default" as const },
         { label: "Occupation", key: "Occupation" as const, keyboard: "default" as const },
         { label: "Country", key: "Country" as const, keyboard: "default" as const },
         { label: "Academic Year", key: "Academic Year" as const, keyboard: "default" as const },
@@ -1272,7 +1272,7 @@ export default function ProfileScreen() {
           { label: "Other Names", value: profile["Other Names"] },
           { label: "Username", value: profile.Username ? `@${profile.Username}` : undefined },
           { label: "Sex", value: profile.Sex },
-          { label: "Residence", value: profile.Residence },
+          { label: "City/Town/District", value: profile.Residence },
           { label: "Country", value: profile.Country },
           { label: "Date of Birth", value: formatDateOfBirth(profile["Date of Birth"]) },
         ]).map((field) => (
