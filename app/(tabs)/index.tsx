@@ -12,6 +12,8 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import colors from "@/constants/colors";
+import { useSubscription } from "@/contexts/SubscriptionContext";
+import SubscriptionGate from "@/components/SubscriptionGate";
 
 type RunState = "idle" | "running" | "paused" | "finished";
 type ExerciseType = "Walk" | "Run" | "Treadmill" | null;
@@ -39,6 +41,15 @@ const MAX_DAILY_ACTIVITIES = 5;
 export default function ExerciseScreen() {
   const { user } = useAuth();
   const { colors: themeColors } = useTheme();
+  const { isSubscribed } = useSubscription();
+
+  if (!isSubscribed) {
+    return (
+      <SubscriptionGate featureName="Exercise">
+        <></>
+      </SubscriptionGate>
+    );
+  }
   const [runState, setRunState] = useState<RunState>("idle");
   const [distance, setDistance] = useState(0);
   const [duration, setDuration] = useState(0);

@@ -8,6 +8,8 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import colors from "@/constants/colors";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useSubscription } from "@/contexts/SubscriptionContext";
+import SubscriptionGate from "@/components/SubscriptionGate";
 
 interface UserGoal {
   user_goals_id: number;
@@ -142,6 +144,15 @@ const convertMinPerKmToKmh = (minPerKm: number): number => {
 export default function GoalsScreen() {
   const { user } = useAuth();
   const { colors: themeColors } = useTheme();
+  const { isSubscribed } = useSubscription();
+
+  if (!isSubscribed) {
+    return (
+      <SubscriptionGate featureName="Goals">
+        <></>
+      </SubscriptionGate>
+    );
+  }
   const queryClient = useQueryClient();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [showGoalForm, setShowGoalForm] = useState(false);

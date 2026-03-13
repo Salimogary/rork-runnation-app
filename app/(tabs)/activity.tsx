@@ -1,5 +1,5 @@
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, RefreshControl, Alert, Modal, TextInput } from "react-native";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "@/lib/supabase";
@@ -7,6 +7,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Plus, X, Calendar, MapPin, TrendingUp, Clock, Award, ChevronRight, Users } from "lucide-react-native";
 import colors from "@/constants/colors";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useSubscription } from "@/contexts/SubscriptionContext";
+import { Lock } from "lucide-react-native";
 
 
 interface ActivityData {
@@ -52,6 +54,7 @@ type ActiveTab = "runs" | "club" | "community";
 export default function ActivityScreen() {
   const { user, privateMode } = useAuth();
   const { colors: themeColors } = useTheme();
+  const { isSubscribed } = useSubscription();
 
   const [communitySortBy, setCommunitySortBy] = useState<CommunitySortOption>("distance");
   const [clubSortBy, setClubSortBy] = useState<CommunitySortOption>("distance");
@@ -66,6 +69,12 @@ export default function ActivityScreen() {
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!isSubscribed && (activeTab === "club" || activeTab === "community")) {
+      setActiveTab("runs");
+    }
+  }, [isSubscribed, activeTab]);
 
   const { data: registeredEvents, isLoading: eventsLoading, refetch: refetchEvents } = useQuery<RegisteredEvent[]>({
     queryKey: ["registered-events", user?.id],
@@ -738,22 +747,40 @@ export default function ActivityScreen() {
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.toggleButton, activeTab === "club" && styles.toggleButtonActive]}
-            onPress={() => setActiveTab("club")}
+            style={[styles.toggleButton, activeTab === "club" && styles.toggleButtonActive, !isSubscribed && styles.toggleButtonLocked]}
+            onPress={() => {
+              if (!isSubscribed) {
+                Alert.alert('Subscription Expired', 'Renew your subscription to access My Club.', [{ text: 'OK' }]);
+                return;
+              }
+              setActiveTab("club");
+            }}
             activeOpacity={0.7}
           >
-            <Text style={[styles.toggleText, activeTab === "club" && styles.toggleTextActive]}>
-              My Club
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={[styles.toggleText, activeTab === "club" && styles.toggleTextActive, !isSubscribed && styles.toggleTextLocked]}>
+                My Club
+              </Text>
+              {!isSubscribed && <Lock size={12} color="#9CA3AF" />}
+            </View>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.toggleButton, activeTab === "community" && styles.toggleButtonActive]}
-            onPress={() => setActiveTab("community")}
+            style={[styles.toggleButton, activeTab === "community" && styles.toggleButtonActive, !isSubscribed && styles.toggleButtonLocked]}
+            onPress={() => {
+              if (!isSubscribed) {
+                Alert.alert('Subscription Expired', 'Renew your subscription to access Community.', [{ text: 'OK' }]);
+                return;
+              }
+              setActiveTab("community");
+            }}
             activeOpacity={0.7}
           >
-            <Text style={[styles.toggleText, activeTab === "community" && styles.toggleTextActive]}>
-              Community
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={[styles.toggleText, activeTab === "community" && styles.toggleTextActive, !isSubscribed && styles.toggleTextLocked]}>
+                Community
+              </Text>
+              {!isSubscribed && <Lock size={12} color="#9CA3AF" />}
+            </View>
           </TouchableOpacity>
         </View>
 
@@ -1724,5 +1751,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700" as const,
     color: colors.white,
+  },
+  toggleButtonLocked: {
+    opacity: 0.5,
+  },
+  toggleTextLocked: {
+    color: '#9CA3AF',
   },
 });

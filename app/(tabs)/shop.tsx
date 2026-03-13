@@ -9,6 +9,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useRouter, Stack, useFocusEffect } from "expo-router";
 import colors from "@/constants/colors";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useSubscription } from "@/contexts/SubscriptionContext";
+import SubscriptionGate from "@/components/SubscriptionGate";
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import * as Haptics from "expo-haptics";
 
@@ -39,6 +41,15 @@ type ShopTab = "catalogue" | "cart";
 export default function ShopScreen() {
   const { registrationId, verifyPin } = useAuth();
   const { colors: themeColors } = useTheme();
+  const { isSubscribed } = useSubscription();
+
+  if (!isSubscribed) {
+    return (
+      <SubscriptionGate featureName="Shop">
+        <></>
+      </SubscriptionGate>
+    );
+  }
   const router = useRouter();
   const trpcUtils = trpc.useUtils();
   const [pinUnlocked, setPinUnlocked] = useState(false);

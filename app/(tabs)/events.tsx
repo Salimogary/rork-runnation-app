@@ -6,6 +6,8 @@ import { Calendar as CalendarIcon, Users, Clock, Award } from "lucide-react-nati
 import { useRouter } from "expo-router";
 import colors from "@/constants/colors";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useSubscription } from "@/contexts/SubscriptionContext";
+import SubscriptionGate from "@/components/SubscriptionGate";
 
 interface Event {
   eventId: string;
@@ -19,6 +21,15 @@ type EventsQueryResult = Event[] | undefined;
 export default function EventsScreen() {
   const { registrationId } = useAuth();
   const { colors: themeColors } = useTheme();
+  const { isSubscribed } = useSubscription();
+
+  if (!isSubscribed) {
+    return (
+      <SubscriptionGate featureName="Events">
+        <></>
+      </SubscriptionGate>
+    );
+  }
   const router = useRouter();
 
   const { data: events, isLoading: eventsLoading, refetch: refetchEvents } = trpc.admin.getEvents.useQuery(undefined, {
