@@ -18,7 +18,7 @@ export const getParticipants = publicProcedure
         RegistrationID,
         Registration_Date,
         events!events_participants_eventId_fkey(eventName),
-        registrations!events_participants_RegistrationID_fkey(First Name, Other Names, Sex, Residence)
+        registrations!events_participants_RegistrationID_fkey(first_name, other_names, sex, "city / town / district")
       `);
 
     if (input.eventId) {
@@ -44,10 +44,10 @@ export const getParticipants = publicProcedure
       Status: "Active",
       Days_Completed: 0,
       user: {
-        "First Name": item["registrations"]?.["First Name"] || "",
-        "Other Names": item["registrations"]?.["Other Names"] || "",
-        Sex: item["registrations"]?.Sex || "",
-        Residence: item["registrations"]?.Residence || "",
+        "First Name": item["registrations"]?.first_name || "",
+        "Other Names": item["registrations"]?.other_names || "",
+        Sex: item["registrations"]?.sex || "",
+        Residence: item["registrations"]?.["city / town / district"] || "",
       },
     }));
 

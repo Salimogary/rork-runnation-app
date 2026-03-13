@@ -54,8 +54,8 @@ const getMedalList = publicProcedure
 
       const { data: registrations, error: regError } = await ctx.supabase
         .from("registrations")
-        .select('"RegistrationID", "First Name", "Other Names", "Country", "Residence"')
-        .in("RegistrationID", regIds);
+        .select('registration_id, first_name, other_names, country, "city / town / district"')
+        .in("registration_id", regIds);
 
       if (regError) {
         console.error("[getMedalList] Error fetching registrations:", regError);
@@ -64,7 +64,7 @@ const getMedalList = publicProcedure
 
       console.log("[getMedalList] Registrations found:", registrations?.length);
 
-      const regMap = new Map((registrations || []).map((r: any) => [r.RegistrationID, r]));
+      const regMap = new Map((registrations || []).map((r: any) => [r.registration_id, r]));
 
       const qualifiedParticipants = await Promise.all(
         participants.map(async (participant: any) => {
@@ -188,10 +188,10 @@ const getMedalList = publicProcedure
             participantId: participant.ParticipantID || participant.id || participant.participantId || '',
             registrationId: participant.RegistrationID,
             eventId: participant.eventId,
-            firstName: registration?.["First Name"] || "",
-            otherNames: registration?.["Other Names"] || "",
-            country: registration?.Country ?? registration?.country ?? "",
-            residence: registration?.Residence ?? registration?.residence ?? "",
+            firstName: registration?.first_name || "",
+            otherNames: registration?.other_names || "",
+            country: registration?.country ?? "",
+            residence: registration?.["city / town / district"] ?? "",
             eventName: event?.eventName || "",
             medalMinDailyDistance,
             medalMinCumulativeDistance,

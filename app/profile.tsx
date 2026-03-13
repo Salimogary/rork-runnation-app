@@ -46,21 +46,16 @@ import { calculateProfileCompletion } from "@/utils/profileCompletion";
 import type { ProfileCompletionInputs } from "@/utils/profileCompletion";
 
 interface UserProfile {
-  RegistrationID: string;
-  "First Name": string;
-  "Other Names"?: string;
-  Username: string;
-  Email?: string;
-  Sex?: string;
-  Age?: number;
-  Residence?: string;
-  Occupation?: string;
-  "Weight Current"?: number;
-  "Weight Target"?: number;
-  Country?: string;
-  "Academic Year"?: string;
-  FriendID?: string;
-  "Date of Birth"?: string;
+  registration_id: string;
+  first_name: string;
+  other_names?: string;
+  username: string;
+  email?: string;
+  sex?: string;
+  "city / town / district"?: string;
+  country?: string;
+  club?: string;
+  dob?: string;
   email_verified?: boolean;
 }
 
@@ -120,7 +115,7 @@ export default function ProfileScreen() {
       const { data, error } = await supabase
         .from("registrations")
         .select("*")
-        .eq("RegistrationID", user.id)
+        .eq("registration_id", user.id)
         .maybeSingle();
 
       if (error) {
@@ -264,8 +259,8 @@ export default function ProfileScreen() {
         subscriptionRes, fitnessGoalRes, weightTargetRes, enrollmentRes,
       ] = await Promise.all([
         supabase.from("registrations")
-          .select('"First Name", "Other Names", "Username", "Email", "Sex", "Residence", "Country", "Date of Birth", "email_verified"')
-          .eq("RegistrationID", user.id).maybeSingle(),
+          .select('first_name, other_names, username, email, sex, "city / town / district", country, dob, email_verified')
+          .eq("registration_id", user.id).maybeSingle(),
         supabase.from("user_photos").select("file_path")
           .eq("registration_id", user.id).eq("is_profile_photo", true).maybeSingle(),
         supabase.from("user_goals").select("user_goals_id")
@@ -284,7 +279,7 @@ export default function ProfileScreen() {
           .eq("RegistrationID", user.id).limit(1),
       ]);
       const p = profileRes.data as any;
-      const allFieldsFilled = !!(p && p["First Name"] && p["Other Names"] && p.Username && p.Email && p.Sex && p.Residence && p.Country && p["Date of Birth"]);
+      const allFieldsFilled = !!(p && p.first_name && p.other_names && p.username && p.email && p.sex && p["city / town / district"] && p.country && p.dob);
       const hasProfilePhoto = !!photoRes.data?.file_path;
       const hasGoal = (goalsRes.data?.length ?? 0) > 0;
       const hasClub = !!(clubRes.data?.club && clubRes.data.club !== "");
@@ -325,13 +320,13 @@ export default function ProfileScreen() {
 
   const sendVerificationMutation = useMutation({
     mutationFn: async () => {
-      if (!user || !profile?.Email) throw new Error("No email found");
+      if (!user || !profile?.email) throw new Error("No email found");
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       const { error } = await supabase
         .from("email_verification_codes")
         .insert({
           registration_id: user.id,
-          email: profile.Email,
+          email: profile.email,
           code,
         });
       if (error) throw error;
@@ -341,7 +336,7 @@ export default function ProfileScreen() {
       console.log("[EmailVerify] Code generated:", code);
       Alert.alert(
         "Verification Code Sent",
-        `A 6-digit verification code has been generated for ${profile?.Email}.\n\nFor testing, your code is: ${code}`,
+        `A 6-digit verification code has been generated for ${profile?.email}.\n\nFor testing, your code is: ${code}`,
         [{ text: "Enter Code", onPress: () => setShowVerifyModal(true) }]
       );
     },
@@ -373,7 +368,7 @@ export default function ProfileScreen() {
       const { error: updateError } = await supabase
         .from("registrations")
         .update({ email_verified: true })
-        .eq("RegistrationID", user.id);
+        .eq("registration_id", user.id);
       if (updateError) throw updateError;
     },
     onSuccess: () => {
@@ -394,7 +389,7 @@ export default function ProfileScreen() {
       const { error } = await supabase
         .from("registrations")
         .update(updates)
-        .eq("RegistrationID", user.id);
+        .eq("registration_id", user.id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -531,18 +526,13 @@ export default function ProfileScreen() {
     setShowEditMenu(false);
     if (section === "profile" && profile) {
       setFormData({
-        "First Name": profile["First Name"],
-        "Other Names": profile["Other Names"],
-        Username: profile.Username,
-        Email: profile.Email,
-        Sex: profile.Sex,
-        Age: profile.Age,
-        Residence: profile.Residence,
-        Occupation: profile.Occupation,
-        "Weight Current": profile["Weight Current"],
-        "Weight Target": profile["Weight Target"],
-        Country: profile.Country,
-        "Academic Year": profile["Academic Year"],
+        first_name: profile.first_name,
+        other_names: profile.other_names,
+        username: profile.username,
+        email: profile.email,
+        sex: profile.sex,
+        "city / town / district": profile["city / town / district"],
+        country: profile.country,
       });
     } else if (section === "goals") {
       const userGoalTexts = userGoals.map((ug) => ug.goal);
@@ -658,7 +648,7 @@ export default function ProfileScreen() {
 
   const getTrialEndDate = useCallback(() => {
     if (!profile) return "";
-    const createdAt = (profile as any).Created_At || (profile as any).created_at;
+    const createdAt = (profile as any).created_at;
     if (!createdAt) return "";
     const created = new Date(createdAt);
     const trialEnd = new Date(created.getTime() + 90 * 24 * 60 * 60 * 1000);
@@ -759,9 +749,9 @@ export default function ProfileScreen() {
       <Text style={styles.editSectionTitle}>Edit Profile</Text>
 
       {([
-        { label: "First Name", key: "First Name" as const, keyboard: "default" as const },
-        { label: "Other Names", key: "Other Names" as const, keyboard: "default" as const },
-        { label: "Username", key: "Username" as const, keyboard: "default" as const },
+        { label: "First Name", key: "first_name" as const, keyboard: "default" as const },
+        { label: "Other Names", key: "other_names" as const, keyboard: "default" as const },
+        { label: "Username", key: "username" as const, keyboard: "default" as const },
       ] as const).map((field) => (
         <View key={field.key} style={styles.field}>
           <Text style={styles.fieldLabel}>{field.label}</Text>
@@ -771,7 +761,7 @@ export default function ProfileScreen() {
             onChangeText={(text) => setFormData({ ...formData, [field.key]: text })}
             placeholder={`Enter ${field.label.toLowerCase()}`}
             keyboardType={field.keyboard}
-            autoCapitalize={field.key === "Username" ? "none" : "sentences"}
+            autoCapitalize={field.key === "username" ? "none" : "sentences"}
           />
         </View>
       ))}
@@ -781,8 +771,8 @@ export default function ProfileScreen() {
         <View style={styles.emailFieldRow}>
           <TextInput
             style={[styles.input, styles.emailInput]}
-            value={String(formData.Email ?? "")}
-            onChangeText={(text) => setFormData({ ...formData, Email: text })}
+            value={String(formData.email ?? "")}
+            onChangeText={(text) => setFormData({ ...formData, email: text })}
             placeholder="Enter email"
             keyboardType="email-address"
             autoCapitalize="none"
@@ -809,11 +799,9 @@ export default function ProfileScreen() {
       </View>
 
       {([
-        { label: "Sex", key: "Sex" as const, keyboard: "default" as const },
-        { label: "City/Town/District", key: "Residence" as const, keyboard: "default" as const },
-        { label: "Occupation", key: "Occupation" as const, keyboard: "default" as const },
-        { label: "Country", key: "Country" as const, keyboard: "default" as const },
-        { label: "Academic Year", key: "Academic Year" as const, keyboard: "default" as const },
+        { label: "Sex", key: "sex" as const, keyboard: "default" as const },
+        { label: "City/Town/District", key: "city / town / district" as const, keyboard: "default" as const },
+        { label: "Country", key: "country" as const, keyboard: "default" as const },
       ] as const).map((field) => (
         <View key={field.key} style={styles.field}>
           <Text style={styles.fieldLabel}>{field.label}</Text>
@@ -826,45 +814,6 @@ export default function ProfileScreen() {
           />
         </View>
       ))}
-
-      <View style={styles.field}>
-        <Text style={styles.fieldLabel}>Age</Text>
-        <TextInput
-          style={styles.input}
-          value={formData.Age?.toString() || ""}
-          onChangeText={(text) => setFormData({ ...formData, Age: parseInt(text) || undefined })}
-          placeholder="Enter your age"
-          keyboardType="numeric"
-        />
-      </View>
-
-      <View style={styles.weightSection}>
-        <Text style={styles.sectionTitle}>Weight Goals</Text>
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Weight Current (kg)</Text>
-          <TextInput
-            style={styles.input}
-            value={formData["Weight Current"]?.toString() || ""}
-            onChangeText={(text) =>
-              setFormData({ ...formData, "Weight Current": parseFloat(text) || undefined })
-            }
-            placeholder="Enter current weight"
-            keyboardType="decimal-pad"
-          />
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Weight Target (kg)</Text>
-          <TextInput
-            style={styles.input}
-            value={formData["Weight Target"]?.toString() || ""}
-            onChangeText={(text) =>
-              setFormData({ ...formData, "Weight Target": parseFloat(text) || undefined })
-            }
-            placeholder="Enter target weight"
-            keyboardType="decimal-pad"
-          />
-        </View>
-      </View>
 
       <View style={styles.actionButtons}>
         <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
@@ -1268,13 +1217,13 @@ export default function ProfileScreen() {
       <View style={styles.bioSection}>
         <Text style={styles.sectionTitle}>Bio</Text>
         {([
-          { label: "First Name", value: profile["First Name"] },
-          { label: "Other Names", value: profile["Other Names"] },
-          { label: "Username", value: profile.Username ? `@${profile.Username}` : undefined },
-          { label: "Sex", value: profile.Sex },
-          { label: "City/Town/District", value: profile.Residence },
-          { label: "Country", value: profile.Country },
-          { label: "Date of Birth", value: formatDateOfBirth(profile["Date of Birth"]) },
+          { label: "First Name", value: profile.first_name },
+          { label: "Other Names", value: profile.other_names },
+          { label: "Username", value: profile.username ? `@${profile.username}` : undefined },
+          { label: "Sex", value: profile.sex },
+          { label: "City/Town/District", value: profile["city / town / district"] },
+          { label: "Country", value: profile.country },
+          { label: "Date of Birth", value: formatDateOfBirth(profile.dob) },
         ]).map((field) => (
           <View key={field.label} style={styles.field}>
             <Text style={styles.fieldLabel}>{field.label}</Text>
@@ -1286,13 +1235,13 @@ export default function ProfileScreen() {
           <Text style={styles.fieldLabel}>Email</Text>
           <View style={styles.emailViewRow}>
             <Text style={[styles.fieldValue, styles.emailViewValue]}>
-              {profile.Email || "Not set"}
+              {profile.email || "Not set"}
             </Text>
             {isEmailVerified ? (
               <View style={styles.verifiedBadgeView}>
                 <BadgeCheck size={20} color="#1d9bf0" />
               </View>
-            ) : profile.Email ? (
+            ) : profile.email ? (
               <TouchableOpacity
                 style={styles.verifyButtonSmall}
                 onPress={() => sendVerificationMutation.mutate()}
@@ -1352,7 +1301,7 @@ export default function ProfileScreen() {
           ) : (
             <View style={styles.photoPlaceholder}>
               <Text style={styles.photoPlaceholderText}>
-                {profile["First Name"]?.[0]?.toUpperCase() || "?"}
+                {profile.first_name?.[0]?.toUpperCase() || "?"}
               </Text>
             </View>
           )}
@@ -1483,7 +1432,7 @@ export default function ProfileScreen() {
             </View>
             <Text style={styles.verifyModalTitle}>Enter Verification Code</Text>
             <Text style={styles.verifyModalDesc}>
-              Enter the 6-digit code for {profile?.Email}
+              Enter the 6-digit code for {profile?.email}
             </Text>
             <TextInput
               style={styles.verifyCodeInput}

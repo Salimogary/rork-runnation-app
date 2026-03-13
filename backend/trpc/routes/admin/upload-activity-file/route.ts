@@ -20,7 +20,7 @@ export default publicProcedure.query(async ({ ctx }) => {
 
     const { data: registrations, error: regError } = await ctx.supabase
       .from("registrations")
-      .select('RegistrationID, "First Name", "Other Names", Email, Username');
+      .select('registration_id, first_name, other_names, email, username');
 
     if (regError) {
       throw new Error(regError.message || "Failed to fetch user data");
@@ -28,12 +28,12 @@ export default publicProcedure.query(async ({ ctx }) => {
 
     const regMap = new Map(
       registrations?.map((r) => [
-        r.RegistrationID,
+        r.registration_id,
         {
-          firstName: r["First Name"] || "",
-          otherNames: r["Other Names"] || "",
-          email: r.Email || "",
-          username: r.Username || "",
+          firstName: r.first_name || "",
+          otherNames: r.other_names || "",
+          email: r.email || "",
+          username: r.username || "",
         },
       ])
     );

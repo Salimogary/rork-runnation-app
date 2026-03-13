@@ -77,12 +77,12 @@ export default function SettingsScreen() {
 
       if (regId) {
         const { data: regData } = await supabase
-          .from('Registrations')
-          .select('Country')
-          .eq('RegistrationID', regId)
+          .from('registrations')
+          .select('country')
+          .eq('registration_id', regId)
           .maybeSingle();
-        if (regData?.Country) {
-          userCountry = regData.Country;
+        if (regData?.country) {
+          userCountry = regData.country;
           console.log('User country for support contacts:', userCountry);
         }
       }

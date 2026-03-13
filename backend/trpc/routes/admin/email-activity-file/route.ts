@@ -18,8 +18,8 @@ export default publicProcedure
     try {
       const { data: user, error: userError } = await ctx.supabase
         .from("registrations")
-        .select('RegistrationID, "First Name", "Other Names", Email, Username')
-        .eq("RegistrationID", input.registrationId)
+        .select('registration_id, first_name, other_names, email, username')
+        .eq("registration_id", input.registrationId)
         .single();
 
       if (userError) {
@@ -32,10 +32,10 @@ export default publicProcedure
         throw new Error("User not found");
       }
       
-      console.log('[EmailActivity] User found:', user.Username);
+      console.log('[EmailActivity] User found:', user.username);
 
-      const userName = `${user["First Name"] || ""} ${user["Other Names"] || ""}`.trim() || user.Username || "Unknown";
-      const userEmail = user.Email || "N/A";
+      const userName = `${user.first_name || ""} ${user.other_names || ""}`.trim() || user.username || "Unknown";
+      const userEmail = user.email || "N/A";
 
       const emailContent = `
 New Activity File Upload
@@ -44,7 +44,7 @@ User Details:
 - Name: ${userName}
 - Registration ID: ${input.registrationId}
 - Email: ${userEmail}
-- Username: ${user.Username || "N/A"}
+- Username: ${user.username || "N/A"}
 
 File Details:
 - File Name: ${input.fileName}
@@ -87,7 +87,7 @@ This file was submitted by a user for admin review and processing.
                 </tr>
                 <tr>
                   <td style="padding: 8px 0; color: #6b7280;"><strong>Username:</strong></td>
-                  <td style="padding: 8px 0;">${user.Username || "N/A"}</td>
+                  <td style="padding: 8px 0;">${user.username || "N/A"}</td>
                 </tr>
               </table>
             </div>

@@ -23,13 +23,13 @@ import type { ProfileCompletionInputs } from "@/utils/profileCompletion";
 
 
 interface HeaderUserProfile {
-  "First Name": string;
-  "Other Names"?: string;
-  Username?: string;
-  Email?: string;
-  Sex?: string;
-  "City/Town/District"?: string;
-  Country?: string;
+  first_name: string;
+  other_names?: string;
+  username?: string;
+  email?: string;
+  sex?: string;
+  "city / town / district"?: string;
+  country?: string;
   dob?: string;
   email_verified?: boolean;
 }
@@ -48,15 +48,15 @@ export default function HeaderProfile() {
       if (!user) throw new Error("Not authenticated");
       const { data, error } = await supabase
         .from("registrations")
-        .select('"First Name", "Other Names", "Username", "Email", "Sex", "City/Town/District", "Country", dob, email_verified')
-        .eq("RegistrationID", user.id)
+        .select('first_name, other_names, username, email, sex, "city / town / district", country, dob, email_verified')
+        .eq("registration_id", user.id)
         .maybeSingle();
       if (error) {
         console.error('[HeaderProfile] Error fetching profile:', JSON.stringify(error));
         throw error;
       }
       console.log('[HeaderProfile] Profile data:', data);
-      return data || { "First Name": "User" };
+      return data || { first_name: "User" };
     },
     enabled: !!user,
   });
@@ -177,13 +177,13 @@ export default function HeaderProfile() {
       const p = profileRes.data as HeaderUserProfile | null;
       const allFieldsFilled = !!(
         p &&
-        p["First Name"] &&
-        p["Other Names"] &&
-        p.Username &&
-        p.Email &&
-        p.Sex &&
-        p["City/Town/District"] &&
-        p.Country &&
+        p.first_name &&
+        p.other_names &&
+        p.username &&
+        p.email &&
+        p.sex &&
+        p["city / town / district"] &&
+        p.country &&
         p.dob
       );
 
@@ -275,7 +275,7 @@ export default function HeaderProfile() {
     }
   };
 
-  const firstName = profile?.["First Name"] || "User";
+  const firstName = profile?.first_name || "User";
   const firstLetter = firstName[0]?.toUpperCase() || "U";
   const percentage = completion?.percentage ?? 0;
 

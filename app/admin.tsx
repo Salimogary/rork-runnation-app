@@ -192,10 +192,10 @@ export default function AdminScreen() {
   }
 
   interface InactiveUser {
-    RegistrationID: string;
-    "First Name": string | null;
-    "Other Names": string | null;
-    Created_At: string;
+    registration_id: string;
+    first_name: string | null;
+    other_names: string | null;
+    created_at: string;
     subscription: number | null;
     lastActivityDate: string | null;
     activityCount: number;
@@ -211,9 +211,9 @@ export default function AdminScreen() {
 
       const { data: expiredUsers, error: regError } = await supabase
         .from('registrations')
-        .select('RegistrationID, "First Name", "Other Names", Created_At, subscription')
+        .select('registration_id, first_name, other_names, created_at, subscription')
         .eq('subscription', 2)
-        .lt('Created_At', cutoff180Str);
+        .lt('created_at', cutoff180Str);
 
       if (regError) {
         console.error('[Archive] Error fetching expired registrations:', JSON.stringify(regError, null, 2));
@@ -227,7 +227,7 @@ export default function AdminScreen() {
 
       console.log('[Archive] Found', expiredUsers.length, 'expired registrations older than 180 days');
 
-      const regIds = expiredUsers.map((u: any) => u.RegistrationID);
+      const regIds = expiredUsers.map((u: any) => u.registration_id);
 
       const { data: activities, error: actError } = await supabase
         .from('activities')
@@ -255,16 +255,16 @@ export default function AdminScreen() {
 
       const result: InactiveUser[] = [];
       for (const user of expiredUsers) {
-        const actInfo = activityMap.get((user as any).RegistrationID);
+        const actInfo = activityMap.get((user as any).registration_id);
         const lastDate = actInfo?.lastDate || null;
         const hasRecentActivity = lastDate && lastDate > cutoff180Str;
 
         if (!hasRecentActivity) {
           result.push({
-            RegistrationID: (user as any).RegistrationID,
-            "First Name": (user as any)["First Name"],
-            "Other Names": (user as any)["Other Names"],
-            Created_At: (user as any).Created_At,
+            registration_id: (user as any).registration_id,
+            first_name: (user as any).first_name,
+            other_names: (user as any).other_names,
+            created_at: (user as any).created_at,
             subscription: (user as any).subscription,
             lastActivityDate: lastDate,
             activityCount: actInfo?.count || 0,
@@ -343,7 +343,7 @@ export default function AdminScreen() {
     if (selectedArchiveIds.length === inactiveUsers.length) {
       setSelectedArchiveIds([]);
     } else {
-      setSelectedArchiveIds(inactiveUsers.map(u => u.RegistrationID));
+      setSelectedArchiveIds(inactiveUsers.map(u => u.registration_id));
     }
   };
 
@@ -1514,12 +1514,12 @@ const getStatusColor = (status: string) => {
                 </View>
 
                 {inactiveUsers.map((user) => {
-                  const isSelected = selectedArchiveIds.includes(user.RegistrationID);
+                  const isSelected = selectedArchiveIds.includes(user.registration_id);
                   return (
                     <TouchableOpacity
-                      key={user.RegistrationID}
+                      key={user.registration_id}
                       style={[styles.archiveUserCard, isSelected && styles.archiveUserCardSelected]}
-                      onPress={() => toggleArchiveSelection(user.RegistrationID)}
+                      onPress={() => toggleArchiveSelection(user.registration_id)}
                       activeOpacity={0.7}
                     >
                       <View style={[styles.archiveCheckbox, isSelected && styles.archiveCheckboxSelected]}>
@@ -1527,13 +1527,13 @@ const getStatusColor = (status: string) => {
                       </View>
                       <View style={{ flex: 1, gap: 6 }}>
                         <Text style={styles.archiveUserName}>
-                          {`${user["First Name"] || ''} ${user["Other Names"] || ''}`.trim() || 'Unknown'}
+                          {`${user.first_name || ''} ${user.other_names || ''}`.trim() || 'Unknown'}
                         </Text>
-                        <Text style={styles.archiveRegId}>{user.RegistrationID}</Text>
+                        <Text style={styles.archiveRegId}>{user.registration_id}</Text>
                         <View style={styles.archiveMetaRow}>
                           <View style={styles.archiveMetaItem}>
                             <Text style={styles.archiveMetaLabel}>Registered</Text>
-                            <Text style={styles.archiveMetaValue}>{formatDate(user.Created_At)}</Text>
+                            <Text style={styles.archiveMetaValue}>{formatDate(user.created_at)}</Text>
                           </View>
                           <View style={styles.archiveMetaItem}>
                             <Text style={styles.archiveMetaLabel}>Last Activity</Text>

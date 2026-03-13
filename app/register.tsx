@@ -392,10 +392,10 @@ export default function RegisterScreen() {
         if (!regId) {
           const { data: regData } = await supabase
             .from('registrations')
-            .select('RegistrationID')
-            .eq('Username', registrationData.username.toLowerCase())
+            .select('registration_id')
+            .eq('username', registrationData.username.toLowerCase())
             .single();
-          setRegistrationId(regData?.RegistrationID || null);
+          setRegistrationId(regData?.registration_id || null);
         } else {
           setRegistrationId(regId);
         }

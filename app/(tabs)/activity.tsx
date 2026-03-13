@@ -301,15 +301,15 @@ export default function ActivityScreen() {
 
         const { data: registrations, error: regError } = await supabase
           .from("registrations")
-          .select('RegistrationID, "First Name", "Other Names", Country, Residence, Sex')
-          .in("RegistrationID", clubMemberIds);
+          .select('registration_id, first_name, other_names, country, "city / town / district", sex')
+          .in("registration_id", clubMemberIds);
 
         if (regError) {
           console.error("[ClubCommunity] Registration fetch error:", regError);
           throw regError;
         }
 
-        const regMap = new Map(registrations?.map(r => [r.RegistrationID, r]));
+        const regMap = new Map(registrations?.map(r => [r.registration_id, r]));
         const userStats = new Map<string, {
           totalDistance: number;
           totalTime: number;
@@ -343,16 +343,16 @@ export default function ActivityScreen() {
         userStats.forEach((stats, regId) => {
           const registration = regMap.get(regId);
           if (!registration) return;
-          const firstName = registration["First Name"] || "";
-          const otherNames = registration["Other Names"] || "";
+          const firstName = registration.first_name || "";
+          const otherNames = registration.other_names || "";
           const fullName = [firstName, otherNames].filter(n => n).join(" ") || "Unknown";
           const activeDays = stats.activeDays.size;
           result.push({
             RegistrationID: regId,
             Name: fullName,
-            Country: registration.Country || "-",
-            Residence: registration.Residence || "-",
-            Sex: registration.Sex || "-",
+            Country: registration.country || "-",
+            Residence: registration["city / town / district"] || "-",
+            Sex: registration.sex || "-",
             AvgDistance: activeDays > 0 ? stats.totalDistance / activeDays : 0,
             AvgTime: activeDays > 0 ? stats.totalTime / activeDays : 0,
             AveragePace: stats.activityCount > 0 ? stats.paceSum / stats.activityCount : 0,
@@ -395,12 +395,12 @@ export default function ActivityScreen() {
         const { data: registrations, error: regError } = await supabase
           .from("registrations")
           .select(`
-            RegistrationID,
-            "First Name",
-            "Other Names",
-            Country,
-            Residence,
-            Sex
+            registration_id,
+            first_name,
+            other_names,
+            country,
+            "city / town / district",
+            sex
           `);
 
         if (regError) {
@@ -408,7 +408,7 @@ export default function ActivityScreen() {
           throw regError;
         }
 
-      const regMap = new Map(registrations?.map(r => [r.RegistrationID, r]));
+      const regMap = new Map(registrations?.map(r => [r.registration_id, r]));
       const userStats = new Map<string, {
         totalDistance: number;
         totalTime: number;
@@ -450,17 +450,17 @@ export default function ActivityScreen() {
         const registration = regMap.get(regId);
         if (!registration) return;
 
-        const firstName = registration["First Name"] || "";
-        const otherNames = registration["Other Names"] || "";
+        const firstName = registration.first_name || "";
+        const otherNames = registration.other_names || "";
         const fullName = [firstName, otherNames].filter(n => n).join(" ") || "Unknown";
 
         const activeDays = stats.activeDays.size;
         result.push({
           RegistrationID: regId,
           Name: fullName,
-          Country: registration.Country || "-",
-          Residence: registration.Residence || "-",
-          Sex: registration.Sex || "-",
+          Country: registration.country || "-",
+          Residence: registration["city / town / district"] || "-",
+          Sex: registration.sex || "-",
           AvgDistance: activeDays > 0 ? stats.totalDistance / activeDays : 0,
           AvgTime: activeDays > 0 ? stats.totalTime / activeDays : 0,
           AveragePace: stats.activityCount > 0 ? stats.paceSum / stats.activityCount : 0,

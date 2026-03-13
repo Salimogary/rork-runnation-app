@@ -37,8 +37,8 @@ export default publicProcedure
 
     const { data: userProfile } = await ctx.supabase
       .from("registrations")
-      .select('"First Name", "Other Names", Email')
-      .eq("RegistrationID", input.registrationId)
+      .select('first_name, other_names, email')
+      .eq("registration_id", input.registrationId)
       .maybeSingle();
 
     if (!userProfile) {
@@ -51,9 +51,9 @@ export default publicProcedure
       .insert({
         EventID: input.eventId,
         RegistrationID: input.registrationId,
-        First_Name: userProfile["First Name"],
-        Other_Names: userProfile["Other Names"] || '',
-        Email: userProfile.Email || '',
+        First_Name: userProfile.first_name,
+        Other_Names: userProfile.other_names || '',
+        Email: userProfile.email || '',
         Status: 'pending',
       })
       .select()

@@ -148,8 +148,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const { data: userData, error: queryError } = await supabase
         .from('registrations')
-        .select('RegistrationID, Username, Email, "Created_At"')
-        .eq('Username', username.toLowerCase())
+        .select('registration_id, username, email, created_at')
+        .eq('username', username.toLowerCase())
         .eq('pin_hash', pinHash)
         .single();
 
@@ -169,9 +169,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const userObj: UserData = {
-        id: userData.RegistrationID,
-        username: userData.Username,
-        createdAt: userData.Created_At || new Date().toISOString(),
+        id: userData.registration_id,
+        username: userData.username,
+        createdAt: userData.created_at || new Date().toISOString(),
       };
 
       await AsyncStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(userObj));
@@ -194,8 +194,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const { data: existingUser } = await supabase
         .from('registrations')
-        .select('Username')
-        .eq('Username', username.toLowerCase())
+        .select('username')
+        .eq('username', username.toLowerCase())
         .single();
 
       if (existingUser) {
@@ -215,18 +215,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const { data: newUserData, error: insertError } = await supabase
             .from('registrations')
             .insert({
-              'First Name': registrationData.firstName,
-              'Other Names': registrationData.otherNames,
-              Username: username.toLowerCase(),
-              Sex: registrationData.sex,
+              first_name: registrationData.firstName,
+              other_names: registrationData.otherNames,
+              username: username.toLowerCase(),
+              sex: registrationData.sex,
               dob: registrationData.dob ? (() => { const match = registrationData.dob!.match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return match ? `${match[3]}-${match[2]}-${match[1]}` : registrationData.dob; })() : null,
-              Residence: residenceValue,
-              'Weight Current': registrationData.weightCurrent ? parseFloat(registrationData.weightCurrent) : null,
-              'Weight Target': registrationData.weightTarget ? parseFloat(registrationData.weightTarget) : null,
-              Country: registrationData.country,
+              'city / town / district': residenceValue,
+              country: registrationData.country,
               pin_hash: pinHash,
             })
-            .select('RegistrationID, Username, "Created_At"')
+            .select('registration_id, username, created_at')
             .single();
 
           if (insertError || !newUserData) {
@@ -234,7 +232,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             return { error: { message: insertError?.message || 'Failed to create account' } };
           }
 
-          registrationId = newUserData.RegistrationID;
+          registrationId = newUserData.registration_id;
 
           if (registrationData.photoUri) {
             try {
@@ -286,8 +284,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           const newUser: UserData = {
             id: registrationId!,
-            username: newUserData.Username,
-            createdAt: newUserData.Created_At || new Date().toISOString(),
+            username: newUserData.username,
+            createdAt: newUserData.created_at || new Date().toISOString(),
           };
 
           await AsyncStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(newUser));
@@ -296,7 +294,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch (dbError) {
           console.error('Failed to save registration data:', dbError);
           if (registrationId) {
-            await supabase.from('registrations').delete().eq('RegistrationID', registrationId);
+            await supabase.from('registrations').delete().eq('registration_id', registrationId);
           }
           return { error: { message: 'Failed to save registration data. Please try again.' } };
         }
@@ -351,7 +349,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { error: regDeleteError } = await supabase
         .from('registrations')
         .delete()
-        .eq('RegistrationID', regId);
+        .eq('registration_id', regId);
 
       if (regDeleteError) {
         console.error('[AuthContext] Failed to delete registration:', regDeleteError);
@@ -386,8 +384,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       );
       const { data, error } = await supabase
         .from('registrations')
-        .select('RegistrationID')
-        .eq('RegistrationID', user.id)
+        .select('registration_id')
+        .eq('registration_id', user.id)
         .eq('pin_hash', pinHash)
         .single();
 

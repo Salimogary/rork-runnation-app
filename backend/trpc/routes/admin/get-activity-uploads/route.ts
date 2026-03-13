@@ -14,9 +14,9 @@ export default publicProcedure.query(async ({ ctx }) => {
         mime_type,
         uploaded_at,
         registrations!activity_uploads_admin_log_RegistrationID_fkey (
-          "First Name",
-          "Other Names",
-          Email
+          first_name,
+          other_names,
+          email
         )
       `)
       .order("uploaded_at", { ascending: false });
@@ -36,9 +36,9 @@ export default publicProcedure.query(async ({ ctx }) => {
       mimeType: upload.mime_type,
       uploadedAt: upload.uploaded_at,
       userName: upload["registrations"]
-        ? `${upload["registrations"]["First Name"] || ""} ${upload["registrations"]["Other Names"] || ""}`.trim()
+        ? `${upload["registrations"].first_name || ""} ${upload["registrations"].other_names || ""}`.trim()
         : "Unknown",
-      email: upload["registrations"]?.Email || "N/A",
+      email: upload["registrations"]?.email || "N/A",
     })) || [];
 
     return formattedData;
