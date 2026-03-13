@@ -193,8 +193,8 @@ export default function AdminScreen() {
 
   interface InactiveUser {
     RegistrationID: string;
-    First_Name: string | null;
-    Other_Names: string | null;
+    "First Name": string | null;
+    "Other Names": string | null;
     Created_At: string;
     subscription: number | null;
     lastActivityDate: string | null;
@@ -211,7 +211,7 @@ export default function AdminScreen() {
 
       const { data: expiredUsers, error: regError } = await supabase
         .from('registrations')
-        .select('RegistrationID, First_Name, Other_Names, Created_At, subscription')
+        .select('RegistrationID, "First Name", "Other Names", Created_At, subscription')
         .eq('subscription', 2)
         .lt('Created_At', cutoff180Str);
 
@@ -262,8 +262,8 @@ export default function AdminScreen() {
         if (!hasRecentActivity) {
           result.push({
             RegistrationID: (user as any).RegistrationID,
-            First_Name: (user as any).First_Name,
-            Other_Names: (user as any).Other_Names,
+            "First Name": (user as any)["First Name"],
+            "Other Names": (user as any)["Other Names"],
             Created_At: (user as any).Created_At,
             subscription: (user as any).subscription,
             lastActivityDate: lastDate,
@@ -1296,7 +1296,7 @@ const getStatusColor = (status: string) => {
                     <View style={styles.enrollmentRow}>
                       <Text style={styles.enrollmentLabel}>Name:</Text>
                       <Text style={styles.enrollmentValue}>
-                        {enrollment.First_Name} {enrollment.Other_Names}
+                        {enrollment["First_Name"]} {enrollment["Other_Names"]}
                       </Text>
                     </View>
                     <View style={styles.enrollmentRow}>
@@ -1527,7 +1527,7 @@ const getStatusColor = (status: string) => {
                       </View>
                       <View style={{ flex: 1, gap: 6 }}>
                         <Text style={styles.archiveUserName}>
-                          {`${user.First_Name || ''} ${user.Other_Names || ''}`.trim() || 'Unknown'}
+                          {`${user["First Name"] || ''} ${user["Other Names"] || ''}`.trim() || 'Unknown'}
                         </Text>
                         <Text style={styles.archiveRegId}>{user.RegistrationID}</Text>
                         <View style={styles.archiveMetaRow}>
