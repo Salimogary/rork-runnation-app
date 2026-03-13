@@ -32,15 +32,47 @@ export default function AdminLoginScreen() {
         password
       );
 
-      const { data: adminUser, error } = await supabase
+      console.log('[AdminLogin] Attempting login with username:', username.toLowerCase().trim());
+      console.log('[AdminLogin] Generated password hash:', passwordHash);
+
+      const { data: userByName, error: lookupError } = await supabase
         .from('admin_users')
-        .select('admin_id, username, display_name, is_active')
+        .select('admin_id, username, display_name, is_active, password_hash')
         .eq('username', username.toLowerCase().trim())
-        .eq('password_hash', passwordHash)
         .single();
 
-      if (error || !adminUser) {
-        console.log('[AdminLogin] Login failed:', error?.message);
+      if (lookupError || !userByName) {
+        console.log('[AdminLogin] Username not found:', lookupError?.message);
+        const message = "Invalid username or password";
+        if (Platform.OS !== 'web') {
+          Alert.alert("Login Failed", message);
+        } else {
+          alert(message);
+        }
+        setIsLoading(false);
+        return;
+      }
+
+      console.log('[AdminLogin] Stored hash:', userByName.password_hash);
+      console.log('[AdminLogin] Hashes match:', userByName.password_hash === passwordHash);
+
+      if (userByName.password_hash !== passwordHash) {
+        console.log('[AdminLogin] Password mismatch. The stored hash in the DB does not match the SHA-256 of entered password.');
+        console.log('[AdminLogin] To fix: update the password_hash in admin_users to:', passwordHash);
+        const message = "Invalid username or password";
+        if (Platform.OS !== 'web') {
+          Alert.alert("Login Failed", message);
+        } else {
+          alert(message);
+        }
+        setIsLoading(false);
+        return;
+      }
+
+      const adminUser = userByName;
+
+      if (!adminUser) {
+        console.log('[AdminLogin] Login failed: no user found');
         const message = "Invalid username or password";
         if (Platform.OS !== 'web') {
           Alert.alert("Login Failed", message);
