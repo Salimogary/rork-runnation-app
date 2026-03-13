@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { trpc } from "@/lib/trpc";
-import { Package, ChevronRight, Edit, X, ClipboardCheck, LogOut, CheckCircle, XCircle, Calendar, Plus, Users, Download, ShoppingBag, Dumbbell, UserPlus, Upload, Activity, Star, Printer, Truck, MessageSquare } from "lucide-react-native";
+import { Package, ChevronRight, Edit, X, ClipboardCheck, LogOut, CheckCircle, XCircle, Calendar, Plus, Users, Download, ShoppingBag, Dumbbell, UserPlus, Upload, Activity, Star, Printer, Truck, MessageSquare, Archive, Trash2, AlertTriangle } from "lucide-react-native";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
@@ -35,7 +35,7 @@ interface PendingActivity {
 
 export default function AdminScreen() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"orders" | "stock" | "approvals" | "events" | "enrollments" | "activityUploads" | "externalActivities" | "ratings" | "suggestions">("orders");
+  const [activeTab, setActiveTab] = useState<"orders" | "stock" | "approvals" | "events" | "enrollments" | "activityUploads" | "externalActivities" | "ratings" | "suggestions" | "archive">("orders");
   const [eventsSubTab, setEventsSubTab] = useState<"calendar" | "participants">("calendar");
   const [selectedEventId, setSelectedEventId] = useState<string>("");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -56,6 +56,8 @@ export default function AdminScreen() {
   const [medalMinCumulativeDistance, setMedalMinCumulativeDistance] = useState<string>("");
   const [medalDateStart, setMedalDateStart] = useState<string>("");
   const [medalDateEnd, setMedalDateEnd] = useState<string>("");
+  const [archiveConfirmVisible, setArchiveConfirmVisible] = useState<boolean>(false);
+  const [selectedArchiveIds, setSelectedArchiveIds] = useState<string[]>([]);
 
   const queryClient = useQueryClient();
   const hasCheckedAuth = useRef(false);
@@ -188,6 +190,174 @@ export default function AdminScreen() {
     suggestion: string;
     created_at: string;
   }
+
+  interface InactiveUser {
+    RegistrationID: string;
+    First_Name: string | null;
+    Other_Names: string | null;
+    Created_At: string;
+    subscription: number | null;
+    lastActivityDate: string | null;
+    activityCount: number;
+  }
+
+  const { data: inactiveUsers = [], isLoading: archiveLoading, refetch: refetchArchive } = useQuery<InactiveUser[]>({
+    queryKey: ['adminArchiveCandidates'],
+    queryFn: async () => {
+      console.log('[Archive] Fetching inactive expired users...');
+      const cutoffDate180 = new Date();
+      cutoffDate180.setDate(cutoffDate180.getDate() - 180);
+      const cutoff180Str = cutoffDate180.toISOString().split('T')[0];
+
+      const { data: expiredUsers, error: regError } = await supabase
+        .from('registrations')
+        .select('"RegistrationID", "First_Name", "Other_Names", "Created_At", subscription')
+        .eq('subscription', 2)
+        .lt('Created_At', cutoff180Str);
+
+      if (regError) {
+        console.error('[Archive] Error fetching expired registrations:', regError);
+        throw regError;
+      }
+
+      if (!expiredUsers || expiredUsers.length === 0) {
+        console.log('[Archive] No expired users found older than 180 days');
+        return [];
+      }
+
+      console.log('[Archive] Found', expiredUsers.length, 'expired registrations older than 180 days');
+
+      const regIds = expiredUsers.map((u: any) => u.RegistrationID);
+
+      const { data: activities, error: actError } = await supabase
+        .from('activities')
+        .select('"RegistrationID", "Activity_Date"')
+        .in('RegistrationID', regIds)
+        .order('Activity_Date', { ascending: false });
+
+      if (actError) {
+        console.error('[Archive] Error fetching activities:', actError);
+        throw actError;
+      }
+
+      const activityMap = new Map<string, { lastDate: string; count: number }>();
+      (activities || []).forEach((a: any) => {
+        const existing = activityMap.get(a.RegistrationID);
+        if (!existing) {
+          activityMap.set(a.RegistrationID, { lastDate: a.Activity_Date, count: 1 });
+        } else {
+          existing.count++;
+          if (a.Activity_Date > existing.lastDate) {
+            existing.lastDate = a.Activity_Date;
+          }
+        }
+      });
+
+      const result: InactiveUser[] = [];
+      for (const user of expiredUsers) {
+        const actInfo = activityMap.get((user as any).RegistrationID);
+        const lastDate = actInfo?.lastDate || null;
+        const hasRecentActivity = lastDate && lastDate > cutoff180Str;
+
+        if (!hasRecentActivity) {
+          result.push({
+            RegistrationID: (user as any).RegistrationID,
+            First_Name: (user as any).First_Name,
+            Other_Names: (user as any).Other_Names,
+            Created_At: (user as any).Created_At,
+            subscription: (user as any).subscription,
+            lastActivityDate: lastDate,
+            activityCount: actInfo?.count || 0,
+          });
+        }
+      }
+
+      console.log('[Archive] Found', result.length, 'users eligible for archiving');
+      return result;
+    },
+    enabled: isAuthenticated && activeTab === 'archive',
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: async (registrationIds: string[]) => {
+      console.log('[Archive] Archiving activities for', registrationIds.length, 'users');
+
+      for (const regId of registrationIds) {
+        const { data: userActivities, error: fetchErr } = await supabase
+          .from('activities')
+          .select('*')
+          .eq('RegistrationID', regId);
+
+        if (fetchErr) {
+          console.error('[Archive] Error fetching activities for', regId, fetchErr);
+          throw new Error(`Failed to fetch activities for ${regId}: ${fetchErr.message}`);
+        }
+
+        if (userActivities && userActivities.length > 0) {
+          const { error: insertErr } = await supabase
+            .from('activities_archive')
+            .insert(userActivities);
+
+          if (insertErr) {
+            console.error('[Archive] Error inserting into archive for', regId, insertErr);
+            throw new Error(`Failed to archive activities for ${regId}: ${insertErr.message}`);
+          }
+
+          const { error: deleteErr } = await supabase
+            .from('activities')
+            .delete()
+            .eq('RegistrationID', regId);
+
+          if (deleteErr) {
+            console.error('[Archive] Error deleting activities for', regId, deleteErr);
+            throw new Error(`Failed to delete archived activities for ${regId}: ${deleteErr.message}`);
+          }
+
+          console.log('[Archive] Archived', userActivities.length, 'activities for', regId);
+        } else {
+          console.log('[Archive] No activities to archive for', regId);
+        }
+      }
+
+      return registrationIds;
+    },
+    onSuccess: (archivedIds) => {
+      void queryClient.invalidateQueries({ queryKey: ['adminArchiveCandidates'] });
+      setSelectedArchiveIds([]);
+      setArchiveConfirmVisible(false);
+      Alert.alert('Success', `Archived activities for ${archivedIds.length} user(s) successfully.`);
+    },
+    onError: (error: any) => {
+      console.error('[Archive] Archive mutation error:', error);
+      Alert.alert('Error', error.message || 'Failed to archive activities');
+    },
+  });
+
+  const toggleArchiveSelection = (regId: string) => {
+    setSelectedArchiveIds(prev =>
+      prev.includes(regId) ? prev.filter(id => id !== regId) : [...prev, regId]
+    );
+  };
+
+  const selectAllArchive = () => {
+    if (selectedArchiveIds.length === inactiveUsers.length) {
+      setSelectedArchiveIds([]);
+    } else {
+      setSelectedArchiveIds(inactiveUsers.map(u => u.RegistrationID));
+    }
+  };
+
+  const handleArchive = () => {
+    if (selectedArchiveIds.length === 0) {
+      Alert.alert('No Selection', 'Please select at least one user to archive.');
+      return;
+    }
+    setArchiveConfirmVisible(true);
+  };
+
+  const confirmArchive = () => {
+    archiveMutation.mutate(selectedArchiveIds);
+  };
 
   const { data: suggestions = [], isLoading: suggestionsLoading } = useQuery<Suggestion[]>({
     queryKey: ['adminSuggestions'],
@@ -715,6 +885,16 @@ const getStatusColor = (status: string) => {
               <Text style={styles.badgeText}>{suggestions.length}</Text>
             </View>
           )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.menuButton, activeTab === "archive" && styles.menuButtonActive]}
+          onPress={() => setActiveTab("archive")}
+        >
+          <View style={[styles.iconCircle, activeTab === "archive" && styles.iconCircleActive]}>
+            <Archive size={24} color={activeTab === "archive" ? "#fff" : "#10b981"} />
+          </View>
+          <Text style={[styles.menuButtonText, activeTab === "archive" && styles.menuButtonTextActive]}>Archive</Text>
         </TouchableOpacity>
       </View>
 
@@ -1263,6 +1443,111 @@ const getStatusColor = (status: string) => {
             ))
           )}
         </ScrollView>
+      ) : activeTab === "archive" ? (
+        <View style={{ flex: 1 }}>
+          <View style={styles.archiveHeaderBar}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.archiveHeaderTitle}>Inactive Users</Text>
+              <Text style={styles.archiveHeaderSubtitle}>
+                Subscription expired 90+ days &bull; No activity 180+ days
+              </Text>
+            </View>
+            {inactiveUsers.length > 0 && (
+              <TouchableOpacity
+                style={styles.selectAllBtn}
+                onPress={selectAllArchive}
+              >
+                <Text style={styles.selectAllBtnText}>
+                  {selectedArchiveIds.length === inactiveUsers.length ? 'Deselect All' : 'Select All'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+            {archiveLoading ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>Scanning for inactive users...</Text>
+              </View>
+            ) : inactiveUsers.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Archive size={64} color="#d1d5db" />
+                <Text style={styles.emptyText}>No users eligible for archiving</Text>
+                <Text style={styles.emptySubtext}>
+                  No expired users with 180+ days of inactivity found
+                </Text>
+                <TouchableOpacity style={styles.retryButton} onPress={() => refetchArchive()}>
+                  <Text style={styles.retryButtonText}>Refresh</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <View style={styles.archiveSummaryCard}>
+                  <AlertTriangle size={20} color="#f59e0b" />
+                  <Text style={styles.archiveSummaryText}>
+                    {inactiveUsers.length} user{inactiveUsers.length !== 1 ? 's' : ''} found &bull;{' '}
+                    {selectedArchiveIds.length} selected
+                  </Text>
+                </View>
+
+                {inactiveUsers.map((user) => {
+                  const isSelected = selectedArchiveIds.includes(user.RegistrationID);
+                  return (
+                    <TouchableOpacity
+                      key={user.RegistrationID}
+                      style={[styles.archiveUserCard, isSelected && styles.archiveUserCardSelected]}
+                      onPress={() => toggleArchiveSelection(user.RegistrationID)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.archiveCheckbox, isSelected && styles.archiveCheckboxSelected]}>
+                        {isSelected && <CheckCircle size={18} color="#fff" />}
+                      </View>
+                      <View style={{ flex: 1, gap: 6 }}>
+                        <Text style={styles.archiveUserName}>
+                          {`${user.First_Name || ''} ${user.Other_Names || ''}`.trim() || 'Unknown'}
+                        </Text>
+                        <Text style={styles.archiveRegId}>{user.RegistrationID}</Text>
+                        <View style={styles.archiveMetaRow}>
+                          <View style={styles.archiveMetaItem}>
+                            <Text style={styles.archiveMetaLabel}>Registered</Text>
+                            <Text style={styles.archiveMetaValue}>{formatDate(user.Created_At)}</Text>
+                          </View>
+                          <View style={styles.archiveMetaItem}>
+                            <Text style={styles.archiveMetaLabel}>Last Activity</Text>
+                            <Text style={styles.archiveMetaValue}>
+                              {user.lastActivityDate ? formatDate(user.lastActivityDate) : 'Never'}
+                            </Text>
+                          </View>
+                          <View style={styles.archiveMetaItem}>
+                            <Text style={styles.archiveMetaLabel}>Activities</Text>
+                            <Text style={styles.archiveMetaValue}>{user.activityCount}</Text>
+                          </View>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            )}
+          </ScrollView>
+
+          {inactiveUsers.length > 0 && selectedArchiveIds.length > 0 && (
+            <View style={styles.archiveActionBar}>
+              <TouchableOpacity
+                style={styles.archiveActionBtn}
+                onPress={handleArchive}
+                disabled={archiveMutation.isPending}
+              >
+                <Trash2 size={20} color="#fff" />
+                <Text style={styles.archiveActionBtnText}>
+                  {archiveMutation.isPending
+                    ? 'Archiving...'
+                    : `Archive ${selectedArchiveIds.length} User${selectedArchiveIds.length !== 1 ? 's' : ''}`}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
       ) : activeTab === "externalActivities" ? (
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
           {externalSubmissionsLoading ? (
@@ -1511,6 +1796,47 @@ const getStatusColor = (status: string) => {
                 </View>
               </>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={archiveConfirmVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Confirm Archive</Text>
+              <TouchableOpacity onPress={() => setArchiveConfirmVisible(false)}>
+                <X size={24} color="#6b7280" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.archiveConfirmBody}>
+              <AlertTriangle size={40} color="#f59e0b" />
+              <Text style={styles.archiveConfirmText}>
+                This will move all activities for {selectedArchiveIds.length} user{selectedArchiveIds.length !== 1 ? 's' : ''} from the live activities table to activities_archive.
+              </Text>
+              <Text style={styles.archiveConfirmWarning}>
+                This action cannot be easily undone.
+              </Text>
+            </View>
+
+            <View style={styles.archiveConfirmActions}>
+              <TouchableOpacity
+                style={styles.archiveCancelBtn}
+                onPress={() => setArchiveConfirmVisible(false)}
+              >
+                <Text style={styles.archiveCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.archiveConfirmBtn}
+                onPress={confirmArchive}
+                disabled={archiveMutation.isPending}
+              >
+                <Text style={styles.confirmButtonText}>
+                  {archiveMutation.isPending ? 'Archiving...' : 'Confirm Archive'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -2702,5 +3028,175 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#111827",
     lineHeight: 22,
+  },
+  archiveHeaderBar: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    padding: 16,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+    gap: 12,
+  },
+  archiveHeaderTitle: {
+    fontSize: 17,
+    fontWeight: "700" as const,
+    color: "#111827",
+  },
+  archiveHeaderSubtitle: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: 2,
+  },
+  selectAllBtn: {
+    backgroundColor: "#f3f4f6",
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+  },
+  selectAllBtnText: {
+    fontSize: 13,
+    fontWeight: "600" as const,
+    color: "#374151",
+  },
+  archiveSummaryCard: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    backgroundColor: "#fef3c7",
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#fbbf2440",
+  },
+  archiveSummaryText: {
+    fontSize: 14,
+    fontWeight: "600" as const,
+    color: "#92400e",
+    flex: 1,
+  },
+  archiveUserCard: {
+    flexDirection: "row" as const,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 14,
+    gap: 12,
+    alignItems: "flex-start" as const,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  archiveUserCardSelected: {
+    borderColor: "#ef4444",
+    backgroundColor: "#fef2f210",
+  },
+  archiveCheckbox: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: "#d1d5db",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    marginTop: 2,
+  },
+  archiveCheckboxSelected: {
+    backgroundColor: "#ef4444",
+    borderColor: "#ef4444",
+  },
+  archiveUserName: {
+    fontSize: 16,
+    fontWeight: "700" as const,
+    color: "#111827",
+  },
+  archiveRegId: {
+    fontSize: 12,
+    color: "#9ca3af",
+    fontWeight: "500" as const,
+  },
+  archiveMetaRow: {
+    flexDirection: "row" as const,
+    gap: 16,
+    flexWrap: "wrap" as const,
+    marginTop: 4,
+  },
+  archiveMetaItem: {
+    gap: 2,
+  },
+  archiveMetaLabel: {
+    fontSize: 11,
+    color: "#9ca3af",
+    fontWeight: "500" as const,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+  },
+  archiveMetaValue: {
+    fontSize: 13,
+    color: "#374151",
+    fontWeight: "600" as const,
+  },
+  archiveActionBar: {
+    padding: 16,
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: "#e5e7eb",
+  },
+  archiveActionBtn: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 8,
+    backgroundColor: "#ef4444",
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  archiveActionBtnText: {
+    fontSize: 16,
+    fontWeight: "700" as const,
+    color: "#fff",
+  },
+  archiveConfirmBody: {
+    alignItems: "center" as const,
+    gap: 12,
+    paddingVertical: 8,
+  },
+  archiveConfirmText: {
+    fontSize: 15,
+    color: "#374151",
+    textAlign: "center" as const,
+    lineHeight: 22,
+  },
+  archiveConfirmWarning: {
+    fontSize: 13,
+    color: "#ef4444",
+    fontWeight: "600" as const,
+    textAlign: "center" as const,
+  },
+  archiveConfirmActions: {
+    flexDirection: "row" as const,
+    gap: 12,
+  },
+  archiveCancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: "#f3f4f6",
+    alignItems: "center" as const,
+  },
+  archiveCancelBtnText: {
+    fontSize: 16,
+    fontWeight: "600" as const,
+    color: "#374151",
+  },
+  archiveConfirmBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: "#ef4444",
+    alignItems: "center" as const,
   },
 });
