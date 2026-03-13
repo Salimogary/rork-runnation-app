@@ -131,6 +131,15 @@ export default function SubscriptionScreen() {
       );
 
       if (error) throw error;
+
+      const { error: regError } = await supabase
+        .from('registrations')
+        .update({ subscription: 3 })
+        .eq('RegistrationID', user.id);
+
+      if (regError) {
+        console.log('[Subscription] Error updating registration subscription column:', regError);
+      }
     },
     onSuccess: () => {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

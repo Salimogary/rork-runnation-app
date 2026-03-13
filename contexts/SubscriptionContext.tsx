@@ -115,14 +115,15 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       if (!user) return null;
       const { data, error } = await supabase
         .from('registrations')
-        .select('Country, "Created_At"')
+        .select('Country, "Created_At", subscription')
         .eq('RegistrationID', user.id)
         .single();
       if (error) {
         console.log('[Subscription] Error fetching user profile:', error);
         return null;
       }
-      return data as { Country: string | null; Created_At: string } | null;
+      console.log('[Subscription] User profile data:', data);
+      return data as { Country: string | null; Created_At: string; subscription: number | null } | null;
     },
     enabled: !!user,
   });
@@ -162,6 +163,13 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   }, [userProfileQuery.data]);
 
   const subscriptionStatus = useMemo<SubscriptionStatus>(() => {
+    const subColumn = userProfileQuery.data?.subscription;
+    console.log('[Subscription] subscription column value:', subColumn);
+
+    if (subColumn === 3) return 'active';
+    if (subColumn === 2) return 'expired';
+    if (subColumn === 1) return 'trial';
+
     const sub = subscriptionQuery.data;
     if (sub) {
       if (sub.status === 'active') {
@@ -177,7 +185,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
     }
     if (!trialExpired) return 'trial';
     return 'expired';
-  }, [subscriptionQuery.data, trialExpired]);
+  }, [userProfileQuery.data?.subscription, subscriptionQuery.data, trialExpired]);
 
   const isSubscribed = subscriptionStatus === 'active' || subscriptionStatus === 'trial';
 
