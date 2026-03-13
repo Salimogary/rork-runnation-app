@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { trpc } from "@/lib/trpc";
-import { Package, ChevronRight, Edit, X, ClipboardCheck, LogOut, CheckCircle, XCircle, Calendar, Plus, Users, Download, ShoppingBag, Dumbbell, UserPlus, Upload, Activity, Star, Printer, Truck, MessageSquare, Archive, Trash2, AlertTriangle } from "lucide-react-native";
+import { Package, ChevronRight, Edit, X, ClipboardCheck, LogOut, CheckCircle, XCircle, Calendar, Plus, Users, Download, ShoppingBag, Dumbbell, UserPlus, Upload, Activity, Star, Printer, Truck, MessageSquare, Archive, Trash2, AlertTriangle, ArrowLeft } from "lucide-react-native";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
@@ -35,7 +35,7 @@ interface PendingActivity {
 
 export default function AdminScreen() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"orders" | "stock" | "approvals" | "events" | "enrollments" | "activityUploads" | "externalActivities" | "ratings" | "suggestions" | "archive">("orders");
+  const [activeTab, setActiveTab] = useState<"orders" | "stock" | "approvals" | "events" | "enrollments" | "activityUploads" | "externalActivities" | "ratings" | "suggestions" | "archive" | null>(null);
   const [eventsSubTab, setEventsSubTab] = useState<"calendar" | "participants">("calendar");
   const [selectedEventId, setSelectedEventId] = useState<string>("");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -759,6 +759,22 @@ const getStatusColor = (status: string) => {
     );
   }
 
+  const getTabTitle = (tab: typeof activeTab): string => {
+    switch (tab) {
+      case "orders": return "Orders";
+      case "stock": return "Stock";
+      case "approvals": return "Treadmill";
+      case "events": return "Events";
+      case "enrollments": return "Enrollments";
+      case "activityUploads": return "Uploads";
+      case "externalActivities": return "External";
+      case "ratings": return "Ratings";
+      case "suggestions": return "Suggestions";
+      case "archive": return "Archive";
+      default: return "Admin Dashboard";
+    }
+  };
+
   if (!isAuthenticated) {
     return null;
   }
@@ -767,7 +783,12 @@ const getStatusColor = (status: string) => {
     <View style={styles.container}>
       <Stack.Screen 
         options={{ 
-          title: "Admin Dashboard",
+          title: activeTab ? getTabTitle(activeTab) : "Admin Dashboard",
+          headerLeft: activeTab ? () => (
+            <TouchableOpacity onPress={() => setActiveTab(null)} style={{ marginLeft: 8, padding: 4 }}>
+              <ArrowLeft size={24} color="#111827" />
+            </TouchableOpacity>
+          ) : undefined,
           headerRight: () => (
             <TouchableOpacity onPress={handleLogout} style={{ marginRight: 16 }}>
               <LogOut size={22} color="#ef4444" />
@@ -776,35 +797,37 @@ const getStatusColor = (status: string) => {
         }} 
       />
 
+      {activeTab === null ? (
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.menuGridScroll}>
       <View style={styles.menuGrid}>
         <TouchableOpacity
-          style={[styles.menuButton, activeTab === "orders" && styles.menuButtonActive]}
+          style={styles.menuButton}
           onPress={() => setActiveTab("orders")}
         >
-          <View style={[styles.iconCircle, activeTab === "orders" && styles.iconCircleActive]}>
-            <ShoppingBag size={24} color={activeTab === "orders" ? "#fff" : "#10b981"} />
+          <View style={styles.iconCircle}>
+            <ShoppingBag size={24} color="#10b981" />
           </View>
-          <Text style={[styles.menuButtonText, activeTab === "orders" && styles.menuButtonTextActive]}>Orders</Text>
+          <Text style={styles.menuButtonText}>Orders</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.menuButton, activeTab === "stock" && styles.menuButtonActive]}
+          style={styles.menuButton}
           onPress={() => { console.log('[Admin] Stock tile pressed'); setActiveTab("stock"); }}
         >
-          <View style={[styles.iconCircle, activeTab === "stock" && styles.iconCircleActive]}>
-            <Package size={24} color={activeTab === "stock" ? "#fff" : "#10b981"} />
+          <View style={styles.iconCircle}>
+            <Package size={24} color="#10b981" />
           </View>
-          <Text style={[styles.menuButtonText, activeTab === "stock" && styles.menuButtonTextActive]}>Stock</Text>
+          <Text style={styles.menuButtonText}>Stock</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.menuButton, activeTab === "approvals" && styles.menuButtonActive]}
+          style={styles.menuButton}
           onPress={() => setActiveTab("approvals")}
         >
-          <View style={[styles.iconCircle, activeTab === "approvals" && styles.iconCircleActive]}>
-            <Dumbbell size={24} color={activeTab === "approvals" ? "#fff" : "#10b981"} />
+          <View style={styles.iconCircle}>
+            <Dumbbell size={24} color="#10b981" />
           </View>
-          <Text style={[styles.menuButtonText, activeTab === "approvals" && styles.menuButtonTextActive]}>Treadmill</Text>
+          <Text style={styles.menuButtonText}>Treadmill</Text>
           {pendingActivities.length > 0 && (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{pendingActivities.length}</Text>
@@ -813,43 +836,43 @@ const getStatusColor = (status: string) => {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.menuButton, activeTab === "events" && styles.menuButtonActive]}
+          style={styles.menuButton}
           onPress={() => setActiveTab("events")}
         >
-          <View style={[styles.iconCircle, activeTab === "events" && styles.iconCircleActive]}>
-            <Calendar size={24} color={activeTab === "events" ? "#fff" : "#10b981"} />
+          <View style={styles.iconCircle}>
+            <Calendar size={24} color="#10b981" />
           </View>
-          <Text style={[styles.menuButtonText, activeTab === "events" && styles.menuButtonTextActive]}>Events</Text>
+          <Text style={styles.menuButtonText}>Events</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.menuButton, activeTab === "enrollments" && styles.menuButtonActive]}
+          style={styles.menuButton}
           onPress={() => setActiveTab("enrollments")}
         >
-          <View style={[styles.iconCircle, activeTab === "enrollments" && styles.iconCircleActive]}>
-            <UserPlus size={24} color={activeTab === "enrollments" ? "#fff" : "#10b981"} />
+          <View style={styles.iconCircle}>
+            <UserPlus size={24} color="#10b981" />
           </View>
-          <Text style={[styles.menuButtonText, activeTab === "enrollments" && styles.menuButtonTextActive]}>Enrollments</Text>
+          <Text style={styles.menuButtonText}>Enrollments</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.menuButton, activeTab === "activityUploads" && styles.menuButtonActive]}
+          style={styles.menuButton}
           onPress={() => setActiveTab("activityUploads")}
         >
-          <View style={[styles.iconCircle, activeTab === "activityUploads" && styles.iconCircleActive]}>
-            <Upload size={24} color={activeTab === "activityUploads" ? "#fff" : "#10b981"} />
+          <View style={styles.iconCircle}>
+            <Upload size={24} color="#10b981" />
           </View>
-          <Text style={[styles.menuButtonText, activeTab === "activityUploads" && styles.menuButtonTextActive]}>Uploads</Text>
+          <Text style={styles.menuButtonText}>Uploads</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.menuButton, activeTab === "externalActivities" && styles.menuButtonActive]}
+          style={styles.menuButton}
           onPress={() => setActiveTab("externalActivities")}
         >
-          <View style={[styles.iconCircle, activeTab === "externalActivities" && styles.iconCircleActive]}>
-            <Activity size={24} color={activeTab === "externalActivities" ? "#fff" : "#10b981"} />
+          <View style={styles.iconCircle}>
+            <Activity size={24} color="#10b981" />
           </View>
-          <Text style={[styles.menuButtonText, activeTab === "externalActivities" && styles.menuButtonTextActive]}>External</Text>
+          <Text style={styles.menuButtonText}>External</Text>
           {(externalSubmissions?.length || 0) > 0 && (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{externalSubmissions?.length || 0}</Text>
@@ -858,13 +881,13 @@ const getStatusColor = (status: string) => {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.menuButton, activeTab === "ratings" && styles.menuButtonActive]}
+          style={styles.menuButton}
           onPress={() => setActiveTab("ratings")}
         >
-          <View style={[styles.iconCircle, activeTab === "ratings" && styles.iconCircleActive]}>
-            <Star size={24} color={activeTab === "ratings" ? "#fff" : "#10b981"} />
+          <View style={styles.iconCircle}>
+            <Star size={24} color="#10b981" />
           </View>
-          <Text style={[styles.menuButtonText, activeTab === "ratings" && styles.menuButtonTextActive]}>Ratings</Text>
+          <Text style={styles.menuButtonText}>Ratings</Text>
           {appRatings.length > 0 && (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{appRatings.length}</Text>
@@ -873,13 +896,13 @@ const getStatusColor = (status: string) => {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.menuButton, activeTab === "suggestions" && styles.menuButtonActive]}
+          style={styles.menuButton}
           onPress={() => setActiveTab("suggestions")}
         >
-          <View style={[styles.iconCircle, activeTab === "suggestions" && styles.iconCircleActive]}>
-            <MessageSquare size={24} color={activeTab === "suggestions" ? "#fff" : "#10b981"} />
+          <View style={styles.iconCircle}>
+            <MessageSquare size={24} color="#10b981" />
           </View>
-          <Text style={[styles.menuButtonText, activeTab === "suggestions" && styles.menuButtonTextActive]}>Suggestions</Text>
+          <Text style={styles.menuButtonText}>Suggestions</Text>
           {suggestions.length > 0 && (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{suggestions.length}</Text>
@@ -888,17 +911,17 @@ const getStatusColor = (status: string) => {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.menuButton, activeTab === "archive" && styles.menuButtonActive]}
+          style={styles.menuButton}
           onPress={() => setActiveTab("archive")}
         >
-          <View style={[styles.iconCircle, activeTab === "archive" && styles.iconCircleActive]}>
-            <Archive size={24} color={activeTab === "archive" ? "#fff" : "#10b981"} />
+          <View style={styles.iconCircle}>
+            <Archive size={24} color="#10b981" />
           </View>
-          <Text style={[styles.menuButtonText, activeTab === "archive" && styles.menuButtonTextActive]}>Archive</Text>
+          <Text style={styles.menuButtonText}>Archive</Text>
         </TouchableOpacity>
       </View>
-
-      {activeTab === "orders" ? (
+      </ScrollView>
+      ) : activeTab === "orders" ? (
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
           {deliveryOrdersLoading ? (
             <View style={styles.emptyContainer}>
@@ -1966,14 +1989,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#6b7280",
   },
+  menuGridScroll: {
+    padding: 16,
+    paddingBottom: 32,
+  },
   menuGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    padding: 16,
     gap: 12,
     backgroundColor: "#f9fafb",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
   },
   menuButton: {
     backgroundColor: "#fff",
