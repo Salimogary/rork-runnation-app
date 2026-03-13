@@ -216,8 +216,8 @@ export default function AdminScreen() {
         .lt('Created_At', cutoff180Str);
 
       if (regError) {
-        console.error('[Archive] Error fetching expired registrations:', regError);
-        throw regError;
+        console.error('[Archive] Error fetching expired registrations:', JSON.stringify(regError, null, 2));
+        throw new Error(regError.message || JSON.stringify(regError));
       }
 
       if (!expiredUsers || expiredUsers.length === 0) {
@@ -236,8 +236,8 @@ export default function AdminScreen() {
         .order('Activity_Date', { ascending: false });
 
       if (actError) {
-        console.error('[Archive] Error fetching activities:', actError);
-        throw actError;
+        console.error('[Archive] Error fetching activities:', JSON.stringify(actError, null, 2));
+        throw new Error(actError.message || JSON.stringify(actError));
       }
 
       const activityMap = new Map<string, { lastDate: string; count: number }>();
