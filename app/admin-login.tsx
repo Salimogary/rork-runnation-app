@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, Alert, Platform, KeyboardAvoidingView, ScrollView } from "react-native";
 import { useRouter } from "expo-router";
-import { Shield, Lock, User } from "lucide-react-native";
+import { Shield, Lock, User, Eye, EyeOff } from "lucide-react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
 import * as Crypto from "expo-crypto";
@@ -10,6 +10,7 @@ export default function AdminLoginScreen() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
 
   const handleLogin = async () => {
@@ -132,12 +133,19 @@ export default function AdminLoginScreen() {
                 onChangeText={setPassword}
                 placeholder="Enter admin password"
                 placeholderTextColor="#9ca3af"
-                secureTextEntry
+                secureTextEntry={!showPassword}
                 autoCapitalize="none"
                 autoCorrect={false}
                 editable={!isLoading}
                 onSubmitEditing={handleLogin}
               />
+              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} hitSlop={8}>
+                {showPassword ? (
+                  <EyeOff size={20} color="#6b7280" />
+                ) : (
+                  <Eye size={20} color="#6b7280" />
+                )}
+              </TouchableOpacity>
             </View>
           </View>
 
