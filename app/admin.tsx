@@ -211,7 +211,7 @@ export default function AdminScreen() {
 
       const { data: expiredUsers, error: regError } = await supabase
         .from('registrations')
-        .select('"RegistrationID", "First_Name", "Other_Names", "Created_At", subscription')
+        .select('RegistrationID, First_Name, Other_Names, Created_At, subscription')
         .eq('subscription', 2)
         .lt('Created_At', cutoff180Str);
 
@@ -231,7 +231,7 @@ export default function AdminScreen() {
 
       const { data: activities, error: actError } = await supabase
         .from('activities')
-        .select('"RegistrationID", "Activity_Date"')
+        .select('RegistrationID, Activity_Date')
         .in('RegistrationID', regIds)
         .order('Activity_Date', { ascending: false });
 
