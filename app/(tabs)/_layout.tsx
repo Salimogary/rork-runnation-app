@@ -6,7 +6,7 @@ import HeaderProfile from "@/components/HeaderProfile";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useSubscription } from "@/contexts/SubscriptionContext";
 
-const LOCKED_TABS = ["index", "goals", "chat", "shop", "events"];
+const LOCKED_TABS = ["goals", "chat", "shop", "events"];
 
 export default function TabLayout() {
   const router = useRouter();
@@ -75,18 +75,7 @@ export default function TabLayout() {
         name="index"
         options={{
           title: "Exercise",
-          tabBarIcon: ({ color }) => (
-            <View>
-              <Activity color={getTabColor("index", color)} size={24} />
-              {!isSubscribed && <Lock size={10} color={lockedColor} style={{ position: 'absolute', top: -4, right: -6 }} />}
-            </View>
-          ),
-          tabBarLabelStyle: !isSubscribed ? { color: lockedColor } : undefined,
-        }}
-        listeners={{
-          tabPress: (e) => {
-            if (!isSubscribed) handleLockedTabPress(e);
-          },
+          tabBarIcon: ({ color }) => <Activity color={color} size={24} />,
         }}
       />
       <Tabs.Screen
