@@ -825,10 +825,10 @@ export default function RegisterScreen() {
       </View>
 
       <View style={styles.inputContainer}>
-        <Text style={styles.label}>Residence (city/district/state/province) *</Text>
+        <Text style={styles.label}>City/Town/District *</Text>
         <TextInput
           style={styles.input}
-          placeholder="Enter city/district/state/province"
+          placeholder="Enter city/town/district"
           placeholderTextColor="#999"
           value={registrationData.residence}
           onChangeText={(text) => updateRegistrationField('residence', text)}
