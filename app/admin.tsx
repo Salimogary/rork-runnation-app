@@ -1140,14 +1140,14 @@ const getStatusColor = (status: string) => {
                   </View>
                 ) : (
                   events.map((event: any) => (
-                    <View key={event.eventId} style={styles.eventCard}>
+                    <View key={event.event_id || event.eventId} style={styles.eventCard}>
                       <View style={styles.eventInfo}>
-                        <Text style={styles.eventName}>{event.eventName}</Text>
+                        <Text style={styles.eventName}>{event.event_name || event.eventName}</Text>
                         <View style={styles.eventDates}>
                           <View style={styles.eventDateRow}>
                             <Text style={styles.eventDateLabel}>Start:</Text>
                             <Text style={styles.eventDateValue}>
-                              {new Date(event.startsAt).toLocaleDateString("en-GB", {
+                              {new Date(event.starts_at || event.startsAt).toLocaleDateString("en-GB", {
                                 day: "2-digit",
                                 month: "short",
                                 year: "numeric",
@@ -1157,7 +1157,7 @@ const getStatusColor = (status: string) => {
                           <View style={styles.eventDateRow}>
                             <Text style={styles.eventDateLabel}>End:</Text>
                             <Text style={styles.eventDateValue}>
-                              {new Date(event.endsAt).toLocaleDateString("en-GB", {
+                              {new Date(event.ends_at || event.endsAt).toLocaleDateString("en-GB", {
                                 day: "2-digit",
                                 month: "short",
                                 year: "numeric",
@@ -1178,18 +1178,18 @@ const getStatusColor = (status: string) => {
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.eventFilterScroll}>
                   {events && events.map((event: any) => (
                     <TouchableOpacity
-                      key={event.eventId}
+                      key={event.event_id || event.eventId}
                       style={[
                         styles.eventFilterChip,
-                        selectedEventId === event.eventId && styles.eventFilterChipActive
+                        selectedEventId === (event.event_id || event.eventId) && styles.eventFilterChipActive
                       ]}
-                      onPress={() => setSelectedEventId(event.eventId)}
+                      onPress={() => setSelectedEventId(event.event_id || event.eventId)}
                     >
                       <Text style={[
                         styles.eventFilterChipText,
-                        selectedEventId === event.eventId && styles.eventFilterChipTextActive
+                        selectedEventId === (event.event_id || event.eventId) && styles.eventFilterChipTextActive
                       ]}>
-                        {event.eventName}
+                        {event.event_name || event.eventName}
                       </Text>
                     </TouchableOpacity>
                   ))}
@@ -1227,26 +1227,26 @@ const getStatusColor = (status: string) => {
                   </View>
                 ) : (
                   participants.map((participant: any) => (
-                    <View key={participant.id} style={styles.participantCard}>
+                    <View key={participant.ParticipantID || participant.id} style={styles.participantCard}>
                       <View style={styles.participantInfo}>
                         <Text style={styles.participantName}>
-                          {`${participant.firstName} ${participant.otherNames || ""}`.trim() || "Unknown User"}
+                          {`${participant.user?.["First Name"] || participant.firstName || ''} ${participant.user?.["Other Names"] || participant.otherNames || ''}`.trim() || "Unknown User"}
                         </Text>
                         <View style={styles.participantDetails}>
                           <View style={styles.participantDetailRow}>
                             <Text style={styles.participantDetailLabel}>Event:</Text>
                             <Text style={styles.participantDetailValue}>{participant.eventName}</Text>
                           </View>
-                          {participant.sex && (
+                          {(participant.user?.Sex || participant.sex) && (
                             <View style={styles.participantDetailRow}>
                               <Text style={styles.participantDetailLabel}>Sex:</Text>
-                              <Text style={styles.participantDetailValue}>{participant.sex}</Text>
+                              <Text style={styles.participantDetailValue}>{participant.user?.Sex || participant.sex}</Text>
                             </View>
                           )}
-                          {participant.residence && (
+                          {(participant.user?.Residence || participant.residence) && (
                             <View style={styles.participantDetailRow}>
                               <Text style={styles.participantDetailLabel}>Residence:</Text>
-                              <Text style={styles.participantDetailValue}>{participant.residence}</Text>
+                              <Text style={styles.participantDetailValue}>{participant.user?.Residence || participant.residence}</Text>
                             </View>
                           )}
                         </View>
@@ -1285,11 +1285,11 @@ const getStatusColor = (status: string) => {
             </View>
           ) : (
             enrollments.map((enrollment: any) => {
-              const event = events?.find(e => e.eventId === enrollment.event_id);
+              const event = events?.find((e: any) => (e.event_id || e.eventId) === enrollment.event_id);
               return (
                 <View key={enrollment.event_enrollment_id} style={styles.enrollmentCard}>
                   <View style={styles.enrollmentHeader}>
-                    <Text style={styles.enrollmentEvent}>{event?.eventName || enrollment.event_id}</Text>
+                    <Text style={styles.enrollmentEvent}>{event?.event_name || event?.eventName || enrollment.event_id}</Text>
                     <Text style={styles.enrollmentDate}>{formatDate(enrollment.enrolled_at)}</Text>
                   </View>
                   <View style={styles.enrollmentDetails}>
