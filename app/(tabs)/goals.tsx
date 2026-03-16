@@ -188,18 +188,24 @@ export default function GoalsScreen() {
   const { data: goalOrder = [] } = useQuery<GoalItem[]>({
     queryKey: ["goalOrder"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("goals")
-        .select("goal_id, Goal")
-        .order("goal_id", { ascending: true });
-      if (error) {
-        console.error("[Goals] Error fetching goal order:", error);
+      try {
+        const { data, error } = await supabase
+          .from("goals")
+          .select("goal_id, Goal")
+          .order("goal_id", { ascending: true });
+        if (error) {
+          console.log("[Goals] Goal order table not available, using defaults:", error.message);
+          return [];
+        }
+        console.log("[Goals] Goal order:", data);
+        return (data as GoalItem[]) || [];
+      } catch {
+        console.log("[Goals] Goal order fetch failed, using defaults");
         return [];
       }
-      console.log("[Goals] Goal order:", data);
-      return (data as GoalItem[]) || [];
     },
     staleTime: 60000,
+    retry: false,
   });
 
   const goalNameToKey = useCallback((goalName: string): string | null => {
@@ -1212,7 +1218,7 @@ export default function GoalsScreen() {
       try {
         const { data: allEvents, error: eventsError } = await supabase
           .from("events")
-          .select("eventId, eventName, startsAt, endsAt, medal_min_cumulative_distance, medal_date_start, medal_date_end");
+          .select("event_id, event_name, starts_at, ends_at, medal_min_cumulative_distance, medal_date_start, medal_date_end");
         if (eventsError) {
           console.error("[Goals] Medal goal - events fetch error:", eventsError);
           return null;
@@ -1221,14 +1227,14 @@ export default function GoalsScreen() {
 
         const { data: participantData, error: partError } = await supabase
           .from("events_participants")
-          .select("eventId")
-          .eq("RegistrationID", user.id);
+          .select("event_id")
+          .eq("registration_id", user.id);
         if (partError) {
           console.error("[Goals] Medal goal - participants fetch error:", partError);
           return null;
         }
 
-        const enrolledEventIds = new Set((participantData || []).map((p: any) => p.eventId));
+        const enrolledEventIds = new Set((participantData || []).map((p: any) => p.event_id));
         const totalEvents = allEvents.length;
         const enrolledEvents = enrolledEventIds.size;
 
@@ -1236,22 +1242,22 @@ export default function GoalsScreen() {
         const eventsDetail: MedalGoalData["events"] = [];
 
         for (const event of allEvents) {
-          const isEnrolled = enrolledEventIds.has(event.eventId);
+          const isEnrolled = enrolledEventIds.has(event.event_id);
           let isOnMedalList = false;
 
           if (isEnrolled) {
-            const medalStart = event.medal_date_start || event.startsAt;
-            const medalEnd = event.medal_date_end || event.endsAt;
+            const medalStart = event.medal_date_start || event.starts_at;
+            const medalEnd = event.medal_date_end || event.ends_at;
 
             if (medalStart && event.medal_min_cumulative_distance) {
               const { data: acts } = await supabase
                 .from("activities")
-                .select("Distance_km")
-                .eq("RegistrationID", user.id)
-                .gte("Activity_Date", medalStart)
-                .lte("Activity_Date", medalEnd);
+                .select("distance_km")
+                .eq("registration_id", user.id)
+                .gte("activity_date", medalStart)
+                .lte("activity_date", medalEnd);
 
-              const totalDist = (acts || []).reduce((sum: number, a: any) => sum + (a.Distance_km || 0), 0);
+              const totalDist = (acts || []).reduce((sum: number, a: any) => sum + (a.distance_km || 0), 0);
               isOnMedalList = totalDist >= event.medal_min_cumulative_distance;
             } else if (isEnrolled && !event.medal_min_cumulative_distance) {
               isOnMedalList = true;
@@ -1261,7 +1267,7 @@ export default function GoalsScreen() {
           }
 
           eventsDetail.push({
-            eventName: event.eventName || "Unnamed Event",
+            eventName: event.event_name || "Unnamed Event",
             isEnrolled,
             isOnMedalList,
           });
@@ -1288,16 +1294,16 @@ export default function GoalsScreen() {
       try {
         const { data: participantData } = await supabase
           .from("events_participants")
-          .select("eventId")
-          .eq("RegistrationID", user.id);
+          .select("event_id")
+          .eq("registration_id", user.id);
 
         if (!participantData || participantData.length === 0) return [];
 
-        const eventIds = participantData.map((p: any) => p.eventId);
+        const eventIds = participantData.map((p: any) => p.event_id);
         const { data: eventsData } = await supabase
           .from("events")
-          .select("eventId, eventName, startsAt, endsAt, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
-          .in("eventId", eventIds);
+          .select("event_id, event_name, starts_at, ends_at, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
+          .in("event_id", eventIds);
 
         if (!eventsData) return [];
 
@@ -1306,25 +1312,25 @@ export default function GoalsScreen() {
 
         const results: RegisteredEvent[] = await Promise.all(
           eventsData.map(async (event: any) => {
-            const startDate = new Date(event.startsAt);
-            const endDate = new Date(event.endsAt);
+            const startDate = new Date(event.starts_at);
+            const endDate = new Date(event.ends_at);
             let status: RegisteredEvent["status"] = "upcoming";
             if (today >= startDate && today <= endDate) status = "ongoing";
             else if (today > endDate) status = "completed";
 
             let currentDistance = 0;
-            const medalStart = event.medal_date_start || event.startsAt;
-            const medalEnd = event.medal_date_end || event.endsAt;
+            const medalStart = event.medal_date_start || event.starts_at;
+            const medalEnd = event.medal_date_end || event.ends_at;
 
             if (medalStart) {
               const { data: acts } = await supabase
                 .from("activities")
-                .select("Distance_km")
-                .eq("RegistrationID", user.id)
-                .gte("Activity_Date", medalStart)
-                .lte("Activity_Date", medalEnd);
+                .select("distance_km")
+                .eq("registration_id", user.id)
+                .gte("activity_date", medalStart)
+                .lte("activity_date", medalEnd);
 
-              currentDistance = (acts || []).reduce((sum: number, a: any) => sum + (a.Distance_km || 0), 0);
+              currentDistance = (acts || []).reduce((sum: number, a: any) => sum + (a.distance_km || 0), 0);
             }
 
             let isOnMedalList = true;
