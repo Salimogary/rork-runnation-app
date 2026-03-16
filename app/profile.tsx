@@ -52,7 +52,7 @@ interface UserProfile {
   username: string;
   email?: string;
   sex?: string;
-  "city / town / district"?: string;
+  city_town_district?: string;
   country?: string;
   club?: string;
   dob?: string;
@@ -259,7 +259,7 @@ export default function ProfileScreen() {
         subscriptionRes, fitnessGoalRes, weightTargetRes, enrollmentRes,
       ] = await Promise.all([
         supabase.from("registrations")
-          .select('first_name, other_names, username, email, sex, "city / town / district", country, dob, email_verified')
+          .select('first_name, other_names, username, email, sex, city_town_district, country, dob, email_verified')
           .eq("registration_id", user.id).maybeSingle(),
         supabase.from("user_photos").select("file_path")
           .eq("registration_id", user.id).eq("is_profile_photo", true).maybeSingle(),
@@ -279,7 +279,7 @@ export default function ProfileScreen() {
           .eq("registration_id", user.id).limit(1),
       ]);
       const p = profileRes.data as any;
-      const allFieldsFilled = !!(p && p.first_name && p.other_names && p.username && p.email && p.sex && p["city / town / district"] && p.country && p.dob);
+      const allFieldsFilled = !!(p && p.first_name && p.other_names && p.username && p.email && p.sex && p.city_town_district && p.country && p.dob);
       const hasProfilePhoto = !!photoRes.data?.file_path;
       const hasGoal = (goalsRes.data?.length ?? 0) > 0;
       const hasClub = !!(clubRes.data?.club && clubRes.data.club !== "");
@@ -531,7 +531,7 @@ export default function ProfileScreen() {
         username: profile.username,
         email: profile.email,
         sex: profile.sex,
-        "city / town / district": profile["city / town / district"],
+        city_town_district: profile.city_town_district,
         country: profile.country,
       });
     } else if (section === "goals") {
@@ -800,7 +800,7 @@ export default function ProfileScreen() {
 
       {([
         { label: "Sex", key: "sex" as const, keyboard: "default" as const },
-        { label: "City/Town/District", key: "city / town / district" as const, keyboard: "default" as const },
+        { label: "City/Town/District", key: "city_town_district" as const, keyboard: "default" as const },
         { label: "Country", key: "country" as const, keyboard: "default" as const },
       ] as const).map((field) => (
         <View key={field.key} style={styles.field}>
@@ -1221,7 +1221,7 @@ export default function ProfileScreen() {
           { label: "Other Names", value: profile.other_names },
           { label: "Username", value: profile.username ? `@${profile.username}` : undefined },
           { label: "Sex", value: profile.sex },
-          { label: "City/Town/District", value: profile["city / town / district"] },
+          { label: "City/Town/District", value: profile.city_town_district },
           { label: "Country", value: profile.country },
           { label: "Date of Birth", value: formatDateOfBirth(profile.dob) },
         ]).map((field) => (

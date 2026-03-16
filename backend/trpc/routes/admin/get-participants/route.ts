@@ -18,7 +18,7 @@ export default publicProcedure
         registration_id,
         registration_date,
         events!events_participants_event_id_fkey(event_name),
-        registrations!events_participants_registration_id_fkey(first_name, other_names, sex, "city / town / district")
+        registrations!events_participants_registration_id_fkey(first_name, other_names, sex, city_town_district)
       `);
 
     if (input.eventId) {
@@ -48,7 +48,7 @@ export default publicProcedure
         "First Name": item["registrations"]?.first_name || "",
         "Other Names": item["registrations"]?.other_names || "",
         Sex: item["registrations"]?.sex || "",
-        Residence: item["registrations"]?.["city / town / district"] || "",
+        Residence: item["registrations"]?.city_town_district || "",
       },
     }));
 

@@ -28,7 +28,7 @@ interface HeaderUserProfile {
   username?: string;
   email?: string;
   sex?: string;
-  "city / town / district"?: string;
+  city_town_district?: string;
   country?: string;
   dob?: string;
   email_verified?: boolean;
@@ -48,7 +48,7 @@ export default function HeaderProfile() {
       if (!user) throw new Error("Not authenticated");
       const { data, error } = await supabase
         .from("registrations")
-        .select('first_name, other_names, username, email, sex, "city / town / district", country, dob, email_verified')
+        .select('first_name, other_names, username, email, sex, city_town_district, country, dob, email_verified')
         .eq("registration_id", user.id)
         .maybeSingle();
       if (error) {
@@ -129,7 +129,7 @@ export default function HeaderProfile() {
       ] = await Promise.all([
         supabase
           .from("registrations")
-          .select('first_name, other_names, username, email, sex, "city / town / district", country, dob, email_verified')
+          .select('first_name, other_names, username, email, sex, city_town_district, country, dob, email_verified')
           .eq("registration_id", user.id)
           .maybeSingle(),
         supabase
@@ -182,7 +182,7 @@ export default function HeaderProfile() {
         p.username &&
         p.email &&
         p.sex &&
-        p["city / town / district"] &&
+        p.city_town_district &&
         p.country &&
         p.dob
       );

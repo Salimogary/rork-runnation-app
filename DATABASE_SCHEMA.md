@@ -11,7 +11,7 @@ create table public.registrations (
   username text null,
   email text null,
   sex text null,
-  "city / town / district" text null,
+  city_town_district text null,
   country text null,
   club text null,
   pin_hash text null,

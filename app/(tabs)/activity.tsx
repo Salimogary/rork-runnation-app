@@ -301,7 +301,7 @@ export default function ActivityScreen() {
 
         const { data: registrations, error: regError } = await supabase
           .from("registrations")
-          .select('registration_id, first_name, other_names, country, "city / town / district", sex')
+          .select('registration_id, first_name, other_names, country, city_town_district, sex')
           .in("registration_id", clubMemberIds);
 
         if (regError) {
@@ -351,7 +351,7 @@ export default function ActivityScreen() {
             registrationId: regId,
             Name: fullName,
             Country: registration.country || "-",
-            Residence: registration["city / town / district"] || "-",
+            Residence: registration.city_town_district || "-",
             Sex: registration.sex || "-",
             AvgDistance: activeDays > 0 ? stats.totalDistance / activeDays : 0,
             AvgTime: activeDays > 0 ? stats.totalTime / activeDays : 0,
@@ -399,7 +399,7 @@ export default function ActivityScreen() {
             first_name,
             other_names,
             country,
-            "city / town / district",
+            city_town_district,
             sex
           `);
 
@@ -459,7 +459,7 @@ export default function ActivityScreen() {
           registrationId: regId,
           Name: fullName,
           Country: registration.country || "-",
-          Residence: registration["city / town / district"] || "-",
+          Residence: registration.city_town_district || "-",
           Sex: registration.sex || "-",
           AvgDistance: activeDays > 0 ? stats.totalDistance / activeDays : 0,
           AvgTime: activeDays > 0 ? stats.totalTime / activeDays : 0,

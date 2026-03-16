@@ -54,7 +54,7 @@ const getMedalList = publicProcedure
 
       const { data: registrations, error: regError } = await ctx.supabase
         .from("registrations")
-        .select('registration_id, first_name, other_names, country, "city / town / district"')
+        .select('registration_id, first_name, other_names, country, city_town_district')
         .in("registration_id", regIds);
 
       if (regError) {
@@ -191,7 +191,7 @@ const getMedalList = publicProcedure
             firstName: registration?.first_name || "",
             otherNames: registration?.other_names || "",
             country: registration?.country ?? "",
-            residence: registration?.["city / town / district"] ?? "",
+            residence: registration?.city_town_district ?? "",
             eventName: event?.event_name || "",
             medalMinDailyDistance,
             medalMinCumulativeDistance,
