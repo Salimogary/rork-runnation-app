@@ -169,7 +169,7 @@ export default function HeaderProfile() {
           .limit(1),
         supabase
           .from("event_enrollments")
-          .select("enrollment_id")
+          .select("event_enrollment_id")
           .eq("registration_id", user.id)
           .limit(1),
       ]);

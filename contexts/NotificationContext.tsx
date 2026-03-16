@@ -92,7 +92,7 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
           .eq('registration_id', user.id).limit(1),
         supabase.from('weight_target_goal').select('weight_target_goal_id')
           .eq('registration_id', user.id).limit(1),
-        supabase.from('event_enrollments').select('enrollment_id')
+        supabase.from('event_enrollments').select('event_enrollment_id')
           .eq('registration_id', user.id).limit(1),
       ]);
 

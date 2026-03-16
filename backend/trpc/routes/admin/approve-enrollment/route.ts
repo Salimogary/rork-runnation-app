@@ -13,8 +13,8 @@ export default publicProcedure
     const { data: enrollment, error: fetchError } = await ctx.supabase
       .from("event_enrollments")
       .select("*")
-      .eq("enrollment_id", input.enrollmentId)
-      .eq("Status", "pending")
+      .eq("event_enrollment_id", input.enrollmentId)
+      .eq("status", "pending")
       .maybeSingle();
 
     if (fetchError) {
@@ -30,7 +30,7 @@ export default publicProcedure
     const { data: participant, error: insertError } = await ctx.supabase
       .from("events_participants")
       .insert({
-        event_id: enrollment.EventID,
+        event_id: enrollment.event_id,
         registration_id: enrollment.registration_id,
         registration_date: new Date().toISOString().split('T')[0],
       })
@@ -45,7 +45,7 @@ export default publicProcedure
     const { error: deleteError } = await ctx.supabase
       .from("event_enrollments")
       .delete()
-      .eq("enrollment_id", input.enrollmentId);
+      .eq("event_enrollment_id", input.enrollmentId);
 
     if (deleteError) {
       console.error('[approveEnrollment] Error deleting enrollment:', deleteError);

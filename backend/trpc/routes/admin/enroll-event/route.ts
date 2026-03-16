@@ -14,7 +14,7 @@ export default publicProcedure
     const { data: existingPendingEnrollment } = await ctx.supabase
       .from("event_enrollments")
       .select("*")
-      .eq("EventID", input.eventId)
+      .eq("event_id", input.eventId)
       .eq("registration_id", input.registrationId)
       .maybeSingle();
 
@@ -49,12 +49,12 @@ export default publicProcedure
     const { data, error } = await ctx.supabase
       .from("event_enrollments")
       .insert({
-        EventID: input.eventId,
+        event_id: input.eventId,
         registration_id: input.registrationId,
-        First_Name: userProfile.first_name,
-        Other_Names: userProfile.other_names || '',
-        Email: userProfile.email || '',
-        Status: 'pending',
+        first_name: userProfile.first_name,
+        other_names: userProfile.other_names || '',
+        email: userProfile.email || '',
+        status: 'pending',
       })
       .select()
       .single();

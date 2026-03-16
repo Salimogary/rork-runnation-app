@@ -1285,24 +1285,24 @@ const getStatusColor = (status: string) => {
             </View>
           ) : (
             enrollments.map((enrollment: any) => {
-              const event = events?.find(e => e.eventId === enrollment.EventID);
+              const event = events?.find(e => e.eventId === enrollment.event_id);
               return (
-                <View key={enrollment.EnrollmentID} style={styles.enrollmentCard}>
+                <View key={enrollment.event_enrollment_id} style={styles.enrollmentCard}>
                   <View style={styles.enrollmentHeader}>
-                    <Text style={styles.enrollmentEvent}>{event?.eventName || enrollment.EventID}</Text>
-                    <Text style={styles.enrollmentDate}>{formatDate(enrollment.Enrolled_At)}</Text>
+                    <Text style={styles.enrollmentEvent}>{event?.eventName || enrollment.event_id}</Text>
+                    <Text style={styles.enrollmentDate}>{formatDate(enrollment.enrolled_at)}</Text>
                   </View>
                   <View style={styles.enrollmentDetails}>
                     <View style={styles.enrollmentRow}>
                       <Text style={styles.enrollmentLabel}>Name:</Text>
                       <Text style={styles.enrollmentValue}>
-                        {enrollment["First_Name"]} {enrollment["Other_Names"]}
+                        {enrollment.first_name} {enrollment.other_names}
                       </Text>
                     </View>
                     <View style={styles.enrollmentRow}>
                       <Text style={styles.enrollmentLabel}>Email:</Text>
                       <Text style={styles.enrollmentValue} numberOfLines={1}>
-                        {enrollment.Email}
+                        {enrollment.email}
                       </Text>
                     </View>
                   </View>

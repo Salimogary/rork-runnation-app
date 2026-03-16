@@ -13,17 +13,17 @@ export default publicProcedure
     let query = ctx.supabase
       .from("event_enrollments")
       .select(`
-        enrollment_id,
-        EventID,
-        First_Name,
-        Other_Names,
-        Email,
-        Enrolled_At
+        event_enrollment_id,
+        event_id,
+        first_name,
+        other_names,
+        email,
+        enrolled_at
       `)
-      .order('Enrolled_At', { ascending: false });
+      .order('enrolled_at', { ascending: false });
 
     if (input.eventId) {
-      query = query.eq('EventID', input.eventId);
+      query = query.eq('event_id', input.eventId);
     }
 
     const { data, error } = await query;
