@@ -194,7 +194,7 @@ export default function GoalsScreen() {
           .select("goal_id, Goal")
           .order("goal_id", { ascending: true });
         if (error) {
-          console.log("[Goals] Goal order table not available, using defaults:", error.message);
+          console.log("[Goals] Goal order table not available, using defaults:", JSON.stringify(error));
           return [];
         }
         console.log("[Goals] Goal order:", data);
@@ -1072,14 +1072,14 @@ export default function GoalsScreen() {
           .from("activities")
           .select("registration_id, activity_date, distance_km, start_time, end_time, pace_km_h");
         if (activityError) {
-          console.error("[Goals] Community rank activity fetch error:", activityError);
+          console.error("[Goals] Community rank activity fetch error:", JSON.stringify(activityError));
           throw activityError;
         }
         const { data: registrations, error: regError } = await supabase
           .from("registrations")
           .select('registration_id, first_name, other_names');
         if (regError) {
-          console.error("[Goals] Community rank registration fetch error:", regError);
+          console.error("[Goals] Community rank registration fetch error:", JSON.stringify(regError));
           throw regError;
         }
         const regMap = new Map(registrations?.map((r: any) => [r.registration_id, r]));
@@ -1120,7 +1120,7 @@ export default function GoalsScreen() {
         console.log("[Goals] Community rank data processed:", result.length, "users");
         return result;
       } catch (error: any) {
-        console.error("[Goals] Community rank query failed:", error);
+        console.error("[Goals] Community rank query failed:", JSON.stringify(error));
         throw error;
       }
     },
@@ -1220,7 +1220,7 @@ export default function GoalsScreen() {
           .from("events")
           .select("event_id, event_name, starts_at, ends_at, medal_min_cumulative_distance, medal_date_start, medal_date_end");
         if (eventsError) {
-          console.error("[Goals] Medal goal - events fetch error:", eventsError);
+          console.error("[Goals] Medal goal - events fetch error:", JSON.stringify(eventsError));
           return null;
         }
         if (!allEvents || allEvents.length === 0) return null;
@@ -1230,7 +1230,7 @@ export default function GoalsScreen() {
           .select("event_id")
           .eq("registration_id", user.id);
         if (partError) {
-          console.error("[Goals] Medal goal - participants fetch error:", partError);
+          console.error("[Goals] Medal goal - participants fetch error:", JSON.stringify(partError));
           return null;
         }
 
@@ -1279,7 +1279,7 @@ export default function GoalsScreen() {
         console.log("[Goals] Medal goal data:", { totalEvents, enrolledEvents, medalsEarned, enrollmentRatio, medalRatio });
         return { totalEvents, enrolledEvents, medalsEarned, enrollmentRatio, medalRatio, events: eventsDetail };
       } catch (error) {
-        console.error("[Goals] Medal goal query failed:", error);
+        console.error("[Goals] Medal goal query failed:", JSON.stringify(error));
         return null;
       }
     },
@@ -1354,7 +1354,7 @@ export default function GoalsScreen() {
 
         return results;
       } catch (error) {
-        console.error("[Goals] Event goals fetch error:", error);
+        console.error("[Goals] Event goals fetch error:", JSON.stringify(error));
         return [];
       }
     },
