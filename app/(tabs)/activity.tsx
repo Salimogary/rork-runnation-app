@@ -4,7 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, X, Calendar, MapPin, TrendingUp, Clock, Award, ChevronRight, Users } from "lucide-react-native";
+import { Plus, X, Calendar, MapPin, TrendingUp, Clock, Award, ChevronRight, Users, Download } from "lucide-react-native";
+import { File, Paths } from 'expo-file-system/next';
+import { Platform } from 'react-native';
 import colors from "@/constants/colors";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useSubscription } from "@/contexts/SubscriptionContext";
@@ -69,6 +71,66 @@ export default function ActivityScreen() {
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSaveCSV = async () => {
+    if (!isSubscribed) {
+      Alert.alert(
+        'Premium Feature',
+        'Downloading activity data as CSV is available only on a subscribed plan. Please upgrade to access this feature.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    if (!sortedActivities || sortedActivities.length === 0) {
+      Alert.alert('No Data', 'There are no activities to export.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const headers = ['Date', 'Type', 'Distance (km)', 'Start Time', 'End Time', 'Pace (km/h)'];
+      const rows = sortedActivities.map((a) => [
+        a.activity_date,
+        a.exercise_type,
+        a.distance_km.toFixed(2),
+        a.start_time,
+        a.end_time,
+        a.pace_km_h.toFixed(2),
+      ]);
+
+      const csvContent = [headers, ...rows].map((row) => row.join(',')).join('\n');
+
+      if (Platform.OS === 'web') {
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'my_activities.csv';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      } else {
+        const file = new File(Paths.cache, 'my_activities.csv');
+        file.write(csvContent);
+        const sharingModule = await import('expo-sharing');
+        await sharingModule.shareAsync(file.uri, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Save Activity CSV',
+          UTI: 'public.comma-separated-values-text',
+        });
+      }
+
+      console.log('[ActivityCSV] Export successful');
+    } catch (error: any) {
+      console.error('[ActivityCSV] Export failed:', error);
+      Alert.alert('Error', 'Failed to export activities. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (!isSubscribed && (activeTab === "club" || activeTab === "community")) {
@@ -785,15 +847,29 @@ export default function ActivityScreen() {
         </View>
 
         {activeTab === "runs" && (
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => setShowExternalForm(true)}
-            disabled={isSubmitting}
-            activeOpacity={0.8}
-          >
-            <Plus size={20} color={colors.primary} />
-            <Text style={styles.addButtonText}>Add Activity</Text>
-          </TouchableOpacity>
+          <View style={styles.headerButtonsRow}>
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => setShowExternalForm(true)}
+              disabled={isSubmitting}
+              activeOpacity={0.8}
+            >
+              <Plus size={20} color={colors.primary} />
+              <Text style={styles.addButtonText}>Add Activity</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.saveButton, !isSubscribed && styles.saveButtonLocked]}
+              onPress={handleSaveCSV}
+              disabled={isSaving}
+              activeOpacity={0.8}
+              testID="save-csv-button"
+            >
+              {!isSubscribed ? <Lock size={16} color="#9CA3AF" /> : <Download size={16} color={colors.primary} />}
+              <Text style={[styles.saveButtonText, !isSubscribed && styles.saveButtonTextLocked]}>
+                {isSaving ? 'Saving...' : 'Save'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         {activeTab === "club" && userClub?.club_name && (
@@ -1260,10 +1336,15 @@ const styles = StyleSheet.create({
   toggleTextActive: {
     color: colors.primary,
   },
+  headerButtonsRow: {
+    flexDirection: "row" as const,
+    gap: 10,
+  },
   addButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
+    flex: 1,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
     gap: 8,
     backgroundColor: colors.white,
     paddingVertical: 12,
@@ -1279,6 +1360,32 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700" as const,
     color: colors.primary,
+  },
+  saveButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 6,
+    backgroundColor: colors.white,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  saveButtonLocked: {
+    backgroundColor: "rgba(255,255,255,0.7)",
+  },
+  saveButtonText: {
+    fontSize: 15,
+    fontWeight: "700" as const,
+    color: colors.primary,
+  },
+  saveButtonTextLocked: {
+    color: "#9CA3AF",
   },
   sortContainer: {
     flexDirection: "row",
