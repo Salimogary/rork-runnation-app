@@ -1337,8 +1337,8 @@ const getStatusColor = (status: string) => {
               <Text style={styles.emptyText}>No activity uploads yet</Text>
             </View>
           ) : (
-            activityUploads.map((upload: any, index: number) => (
-              <View key={`${upload.registrationId}-${index}`} style={styles.uploadCard}>
+            activityUploads.map((upload: any) => (
+              <View key={upload.id} style={styles.uploadCard}>
                 <View style={styles.uploadInfo}>
                   <Text style={styles.uploadFileName}>{upload.fileName}</Text>
                   <View style={styles.uploadDetails}>

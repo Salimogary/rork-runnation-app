@@ -7,13 +7,11 @@ export default publicProcedure.query(async ({ ctx }) => {
     const { data, error } = await ctx.supabase
       .from("activity_uploads_admin_log")
       .select(`
-        id,
-        RegistrationID,
+        upload_id,
+        registration_id,
         file_name,
-        file_content,
-        mime_type,
         uploaded_at,
-        registrations!activity_uploads_admin_log_RegistrationID_fkey (
+        registrations!activity_uploads_admin_log_registration_id_fkey (
           first_name,
           other_names,
           email
@@ -29,11 +27,9 @@ export default publicProcedure.query(async ({ ctx }) => {
     console.log("[Admin] Activity uploads fetched:", data?.length || 0);
 
     const formattedData = data?.map((upload: any) => ({
-      id: upload.id,
-      registrationId: upload.RegistrationID,
+      id: upload.upload_id,
+      registrationId: upload.registration_id,
       fileName: upload.file_name,
-      fileContent: upload.file_content,
-      mimeType: upload.mime_type,
       uploadedAt: upload.uploaded_at,
       userName: upload["registrations"]
         ? `${upload["registrations"].first_name || ""} ${upload["registrations"].other_names || ""}`.trim()
