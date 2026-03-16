@@ -28,13 +28,13 @@ export default publicProcedure
 
     const { data: products, error: productsError } = await ctx.supabase
       .from("catalogue")
-      .select("CatalogueID, Catalogue_Item, Price, Size, Quantity, Photo_URL")
-      .in("CatalogueID", catalogueIds);
+      .select("catalogue_id, catalogue_item, price, size, quantity, photo_url")
+      .in("catalogue_id", catalogueIds);
 
     if (productsError) throw productsError;
 
     const productMap = new Map(
-      (products || []).map((p: any) => [p.CatalogueID, p])
+      (products || []).map((p: any) => [p.catalogue_id, p])
     );
 
     return cartItems.map((item: any) => ({

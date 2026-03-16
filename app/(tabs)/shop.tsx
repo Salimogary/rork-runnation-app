@@ -18,22 +18,21 @@ const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
 
 interface CatalogueItemRaw {
-  CatalogueID: string;
-  Catalogue_Item: string | null;
-  Quanity?: number | null;
-  Quantity?: number | null;
-  Size: string | null;
-  Price: number | null;
-  Photo_URL?: string | null;
+  catalogue_id: string;
+  catalogue_item: string | null;
+  quantity?: number | null;
+  size: string | null;
+  price: number | null;
+  photo_url?: string | null;
 }
 
 interface CatalogueItem {
-  CatalogueID: string;
-  Catalogue_Item: string | null;
+  catalogue_id: string;
+  catalogue_item: string | null;
   stock: number;
-  Size: string | null;
-  Price: number | null;
-  Photo_URL?: string | null;
+  size: string | null;
+  price: number | null;
+  photo_url?: string | null;
 }
 
 type ShopTab = "catalogue" | "cart";
@@ -120,7 +119,7 @@ export default function ShopScreen() {
       const { data, error } = await supabase
         .from("catalogue")
         .select("*")
-        .order("Catalogue_Item", { ascending: true });
+        .order("catalogue_item", { ascending: true });
 
       if (error) {
         console.error("Error fetching catalogue:", {
@@ -134,12 +133,12 @@ export default function ShopScreen() {
 
       console.log("Catalogue items fetched:", data?.length || 0);
       return (data || []).map((item: CatalogueItemRaw) => ({
-        CatalogueID: item.CatalogueID,
-        Catalogue_Item: item.Catalogue_Item,
-        stock: item.Quanity ?? item.Quantity ?? 0,
-        Size: item.Size,
-        Price: item.Price,
-        Photo_URL: item.Photo_URL,
+        catalogue_id: item.catalogue_id,
+        catalogue_item: item.catalogue_item,
+        stock: item.quantity ?? 0,
+        size: item.size,
+        price: item.price,
+        photo_url: item.photo_url,
       }));
     },
   });
@@ -169,7 +168,7 @@ export default function ShopScreen() {
   const cartCount = cartData?.reduce((total: number, item: any) => total + (item.quantity || 0), 0) || 0;
   const cartTotal = cartData?.reduce((total: number, item: any) => {
     const product = item.product;
-    return total + (product?.Price || 0) * item.quantity;
+    return total + (product?.price || 0) * item.quantity;
   }, 0) || 0;
 
   const addToCartMutation = trpc.shop.addToCart.useMutation({
@@ -218,7 +217,7 @@ export default function ShopScreen() {
     }
     addToCartMutation.mutate({
       userId: registrationId,
-      catalogueId: item.CatalogueID,
+      catalogueId: item.catalogue_id,
       quantity: 1,
     });
   };
@@ -390,10 +389,10 @@ export default function ShopScreen() {
           ) : (
             <View style={styles.productGrid}>
               {products.map((item) => (
-                <View key={item.CatalogueID} style={[styles.productCard, { backgroundColor: themeColors.cardBackground }]}>
-                  {item.Photo_URL ? (
+                <View key={item.catalogue_id} style={[styles.productCard, { backgroundColor: themeColors.cardBackground }]}>
+                  {item.photo_url ? (
                     <Image
-                      source={{ uri: item.Photo_URL }}
+                      source={{ uri: item.photo_url }}
                       style={styles.productImage}
                       contentFit="cover"
                       transition={200}
@@ -406,13 +405,13 @@ export default function ShopScreen() {
 
                   <View style={styles.productInfo}>
                     <Text style={[styles.productName, { color: themeColors.text }]} numberOfLines={2}>
-                      {item.Catalogue_Item || 'Unnamed Item'}
+                      {item.catalogue_item || 'Unnamed Item'}
                     </Text>
 
                     <View style={styles.detailsRow}>
-                      {item.Size && (
+                      {item.size && (
                         <View style={styles.sizeTag}>
-                          <Text style={styles.sizeText}>{item.Size}</Text>
+                          <Text style={styles.sizeText}>{item.size}</Text>
                         </View>
                       )}
                       <View style={styles.stockBadge}>
@@ -429,7 +428,7 @@ export default function ShopScreen() {
                     <View style={styles.priceRow}>
                       <Text style={styles.priceLabel}>ugx.</Text>
                       <Text style={[styles.priceValue, { color: themeColors.text }]}>
-                        {(item.Price || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                        {(item.price || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
                       </Text>
                     </View>
 
@@ -501,15 +500,15 @@ export default function ShopScreen() {
               >
                 {cartData.map((item: any) => {
                   const product = item.product;
-                  const lineTotal = (product?.Price || 0) * item.quantity;
+                  const lineTotal = (product?.price || 0) * item.quantity;
                   return (
                     <View
                       key={item.cart_id}
                       style={[styles.cartItem, { backgroundColor: themeColors.cardBackground }]}
                     >
-                      {product?.Photo_URL ? (
+                      {product?.photo_url ? (
                         <Image
-                          source={{ uri: product.Photo_URL }}
+                          source={{ uri: product.photo_url }}
                           style={styles.cartProductImage}
                           contentFit="cover"
                           transition={200}
@@ -523,7 +522,7 @@ export default function ShopScreen() {
                       <View style={styles.cartItemContent}>
                         <View style={styles.cartItemHeader}>
                           <Text style={[styles.cartItemName, { color: themeColors.text }]} numberOfLines={2}>
-                            {product?.Catalogue_Item || "Unknown Item"}
+                            {product?.catalogue_item || "Unknown Item"}
                           </Text>
                           <TouchableOpacity
                             style={styles.removeButton}
@@ -534,10 +533,10 @@ export default function ShopScreen() {
                           </TouchableOpacity>
                         </View>
 
-                        {product?.Size && (
+                        {product?.size && (
                           <View style={[styles.cartSizeTag, { backgroundColor: themeColors.background }]}>
                             <Text style={[styles.cartSizeText, { color: themeColors.textSecondary }]}>
-                              Size: {product.Size}
+                              Size: {product.size}
                             </Text>
                           </View>
                         )}

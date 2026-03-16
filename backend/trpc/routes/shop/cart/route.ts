@@ -15,7 +15,7 @@ export default publicProcedure
     const { data: product, error: productError } = await ctx.supabase
       .from("catalogue")
       .select("*")
-      .eq("CatalogueID", catalogueId)
+      .eq("catalogue_id", catalogueId)
       .single();
 
     console.log("[addToCart] catalogueId:", catalogueId, "product:", product, "error:", productError);
@@ -35,7 +35,7 @@ export default publicProcedure
       ? existingCart.quantity + quantity
       : quantity;
 
-    const stock = product.Quantity ?? 0;
+    const stock = product.quantity ?? 0;
     if (newQuantity > stock) {
       throw new Error("Not enough stock available");
     }

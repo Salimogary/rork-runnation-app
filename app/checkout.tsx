@@ -52,7 +52,7 @@ export default function CheckoutScreen() {
 
   const totalAmount = cartItems?.reduce((total: number, item: any) => {
     const product = item.product;
-    return total + (product?.Price || 0) * item.quantity;
+    return total + (product?.price || 0) * item.quantity;
   }, 0) || 0;
 
   const toggleSlot = (slotId: string) => {
@@ -194,10 +194,10 @@ export default function CheckoutScreen() {
             return (
               <View key={item.cart_id} style={styles.summaryItem}>
                 <Text style={[styles.summaryItemName, { color: themeColors.text }]} numberOfLines={1}>
-                  {product?.Catalogue_Item} x{item.quantity}
+                  {product?.catalogue_item} x{item.quantity}
                 </Text>
                 <Text style={[styles.summaryItemPrice, { color: themeColors.text }]}>
-                  ugx.{((product?.Price || 0) * item.quantity).toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                  ugx.{((product?.price || 0) * item.quantity).toLocaleString("en-US", { maximumFractionDigits: 0 })}
                 </Text>
               </View>
             );

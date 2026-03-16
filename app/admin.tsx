@@ -68,7 +68,7 @@ export default function AdminScreen() {
       const { data, error } = await supabase
         .from("catalogue")
         .select("*")
-        .order("Catalogue_Item", { ascending: true });
+        .order("catalogue_item", { ascending: true });
       if (error) throw error;
       return data || [];
     },
@@ -656,7 +656,7 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     }
 
     updateStockMutation.mutate({
-      catalogueId: selectedProduct.CatalogueID,
+      catalogueId: selectedProduct.catalogue_id,
       quantity: stockValue,
     });
   };
@@ -1048,20 +1048,20 @@ const getStatusColor = (status: string) => {
             </View>
           ) : (
             stockProducts.map((product: any) => (
-              <View key={product.CatalogueID} style={styles.stockCard}>
+              <View key={product.catalogue_id} style={styles.stockCard}>
                 <View style={styles.stockInfo}>
-                  <Text style={styles.stockName}>{product.Catalogue_Item}</Text>
-                  {product.Size && <Text style={styles.stockSize}>Size: {product.Size}</Text>}
+                  <Text style={styles.stockName}>{product.catalogue_item}</Text>
+                  {product.size && <Text style={styles.stockSize}>Size: {product.size}</Text>}
                   <View style={styles.stockRow}>
                     <Text style={styles.stockLabel}>Stock:</Text>
                     <Text
                       style={[
                         styles.stockValue,
-                        (product.Quantity || 0) <= 5 && styles.stockValueLow,
-                        (product.Quantity || 0) === 0 && styles.stockValueOut,
+                        (product.quantity || 0) <= 5 && styles.stockValueLow,
+                        (product.quantity || 0) === 0 && styles.stockValueOut,
                       ]}
                     >
-                      {product.Quantity || 0} units
+                      {product.quantity || 0} units
                     </Text>
                   </View>
                 </View>
@@ -1721,9 +1721,9 @@ const getStatusColor = (status: string) => {
 
             {selectedProduct && (
               <View style={styles.productInfo}>
-                <Text style={styles.productName}>{selectedProduct.Catalogue_Item}</Text>
+                <Text style={styles.productName}>{selectedProduct.catalogue_item}</Text>
                 <Text style={styles.productCurrentStock}>
-                  Current Stock: {selectedProduct.Quanity || 0}
+                  Current Stock: {selectedProduct.quantity || 0}
                 </Text>
               </View>
             )}

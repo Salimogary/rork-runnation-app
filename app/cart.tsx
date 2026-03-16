@@ -85,7 +85,7 @@ export default function CartScreen() {
 
   const totalAmount = cartItems?.reduce((total: number, item: any) => {
     const product = item.product;
-    return total + (product?.Price || 0) * item.quantity;
+    return total + (product?.price || 0) * item.quantity;
   }, 0) || 0;
 
   const handleCheckout = () => {
@@ -162,15 +162,15 @@ export default function CartScreen() {
 
             {cartItems.map((item: any) => {
               const product = item.product;
-              const lineTotal = (product?.Price || 0) * item.quantity;
+              const lineTotal = (product?.price || 0) * item.quantity;
               return (
                 <View
                   key={item.cart_id}
                   style={[styles.cartItem, { backgroundColor: themeColors.cardBackground }]}
                 >
-                  {product?.Photo_URL ? (
+                  {product?.photo_url ? (
                     <Image
-                      source={{ uri: product.Photo_URL }}
+                      source={{ uri: product.photo_url }}
                       style={styles.productImage}
                       contentFit="cover"
                       transition={200}
@@ -184,7 +184,7 @@ export default function CartScreen() {
                   <View style={styles.itemContent}>
                     <View style={styles.itemHeader}>
                       <Text style={[styles.itemName, { color: themeColors.text }]} numberOfLines={2}>
-                        {product?.Catalogue_Item || "Unknown Item"}
+                        {product?.catalogue_item || "Unknown Item"}
                       </Text>
                       <TouchableOpacity
                         style={styles.removeButton}
@@ -195,10 +195,10 @@ export default function CartScreen() {
                       </TouchableOpacity>
                     </View>
 
-                    {product?.Size && (
+                    {product?.size && (
                       <View style={[styles.sizeTag, { backgroundColor: themeColors.inputBackground }]}>
                         <Text style={[styles.sizeText, { color: themeColors.textSecondary }]}>
-                          Size: {product.Size}
+                          Size: {product.size}
                         </Text>
                       </View>
                     )}
