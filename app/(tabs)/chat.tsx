@@ -26,11 +26,11 @@ interface Post {
   photo_url?: string | null;
   caption?: string | null;
   activity_data?: {
-    Activity_Date: string;
-    Exercise_Type: string;
-    Distance_km: number;
+    activity_date: string;
+    exercise_type: string;
+    distance_km: number;
     Time: string;
-    Pace_km_h: number;
+    pace_km_h: number;
   } | null;
   created_at: string;
   likes_count: number;
@@ -42,11 +42,11 @@ interface Post {
 }
 
 interface ActivityStats {
-  Activity_Date: string;
-  Exercise_Type: string;
-  Distance_km: number;
+  activity_date: string;
+  exercise_type: string;
+  distance_km: number;
   Time: string;
-  Pace_km_h: number;
+  pace_km_h: number;
 }
 
 export default function ChatScreen() {
@@ -97,11 +97,11 @@ export default function ChatScreen() {
       const userIds = [...new Set((data || []).map(p => p.user_id))];
       const { data: userData } = await supabase
         .from("registrations")
-        .select("RegistrationID, \"First Name\", Username")
-        .in("RegistrationID", userIds);
+        .select("registration_id, first_name, username")
+        .in("registration_id", userIds);
 
       const userMap = new Map(
-        (userData || []).map(u => [u.RegistrationID, { first_name: u["First Name"], username: u.Username }])
+        (userData || []).map(u => [u.registration_id, { first_name: u.first_name, username: u.username }])
       );
 
       const postsWithLikes = (data || []).map((post: any) => {
@@ -130,27 +130,27 @@ export default function ChatScreen() {
       const today = new Date().toISOString().split('T')[0];
       const { data, error } = await supabase
         .from("activities")
-        .select("Activity_Date, Exercise_Type, Distance_km, Start_Time, End_Time, Pace_km_h")
-        .eq("RegistrationID", registrationId)
-        .eq("Activity_Date", today)
-        .order("End_Time", { ascending: false })
+        .select("activity_date, exercise_type, distance_km, start_time, end_time, pace_km_h")
+        .eq("registration_id", registrationId)
+        .eq("activity_date", today)
+        .order("end_time", { ascending: false })
         .limit(1);
 
       if (error || !data || data.length === 0) return null;
 
       const activity = data[0];
-      const startTime = new Date(`1970-01-01T${activity.Start_Time}`);
-      const endTime = new Date(`1970-01-01T${activity.End_Time}`);
+      const startTime = new Date(`1970-01-01T${activity.start_time}`);
+      const endTime = new Date(`1970-01-01T${activity.end_time}`);
       const durationMs = endTime.getTime() - startTime.getTime();
       const minutes = Math.floor(durationMs / 60000);
       const seconds = Math.floor((durationMs % 60000) / 1000);
 
       return {
-        Activity_Date: activity.Activity_Date,
-        Exercise_Type: activity.Exercise_Type,
-        Distance_km: activity.Distance_km,
+        activity_date: activity.activity_date,
+        exercise_type: activity.exercise_type,
+        distance_km: activity.distance_km,
         Time: `${minutes}:${seconds.toString().padStart(2, '0')}`,
-        Pace_km_h: activity.Pace_km_h,
+        pace_km_h: activity.pace_km_h,
       };
     },
     enabled: showActivity,
@@ -413,7 +413,7 @@ export default function ChatScreen() {
               <View style={styles.activityStat}>
                 <Text style={styles.activityLabel}>Date</Text>
                 <Text style={styles.activityValue}>
-                  {new Date(currentActivity.Activity_Date).toLocaleDateString('en-US', {
+                  {new Date(currentActivity.activity_date).toLocaleDateString('en-US', {
                     day: '2-digit',
                     month: 'short',
                     year: 'numeric'
@@ -422,12 +422,12 @@ export default function ChatScreen() {
               </View>
               <View style={styles.activityStat}>
                 <Text style={styles.activityLabel}>Type</Text>
-                <Text style={styles.activityValue}>{currentActivity.Exercise_Type}</Text>
+                <Text style={styles.activityValue}>{currentActivity.exercise_type}</Text>
               </View>
               <View style={styles.activityStat}>
                 <Text style={styles.activityLabel}>Distance</Text>
                 <Text style={styles.activityValue}>
-                  {currentActivity.Distance_km != null ? currentActivity.Distance_km.toFixed(2) : '0.00'} km
+                  {currentActivity.distance_km != null ? currentActivity.distance_km.toFixed(2) : '0.00'} km
                 </Text>
               </View>
               <View style={styles.activityStat}>
@@ -437,8 +437,8 @@ export default function ChatScreen() {
               <View style={styles.activityStat}>
                 <Text style={styles.activityLabel}>Pace</Text>
                 <Text style={styles.activityValue}>
-                  {currentActivity.Pace_km_h != null && currentActivity.Pace_km_h > 0 
-                    ? (60 / currentActivity.Pace_km_h).toFixed(2) + ' min/km'
+                  {currentActivity.pace_km_h != null && currentActivity.pace_km_h > 0 
+                    ? (60 / currentActivity.pace_km_h).toFixed(2) + ' min/km'
                     : 'N/A'}
                 </Text>
               </View>
@@ -520,13 +520,13 @@ export default function ChatScreen() {
                         <Text style={styles.compactActivityLabel}>PACE</Text>
                       </View>
                       <View style={styles.compactActivityStat}>
-                        <Text style={styles.compactActivityValue}>{post.activity_data.Exercise_Type}</Text>
+                        <Text style={styles.compactActivityValue}>{post.activity_data.exercise_type}</Text>
                         <Text style={styles.compactActivityValue}>
-                          {post.activity_data.Distance_km != null ? post.activity_data.Distance_km.toFixed(2) : '0.00'} km
+                          {post.activity_data.distance_km != null ? post.activity_data.distance_km.toFixed(2) : '0.00'} km
                         </Text>
                         <Text style={styles.compactActivityValue}>
-                          {post.activity_data.Pace_km_h != null && post.activity_data.Pace_km_h > 0 
-                            ? (60 / post.activity_data.Pace_km_h).toFixed(2)
+                          {post.activity_data.pace_km_h != null && post.activity_data.pace_km_h > 0 
+                            ? (60 / post.activity_data.pace_km_h).toFixed(2)
                             : 'N/A'}
                         </Text>
                       </View>

@@ -16,7 +16,7 @@ const getMedalList = publicProcedure
         .select("*");
 
       if (input.eventId) {
-        participantsQuery = participantsQuery.eq("eventId", input.eventId);
+        participantsQuery = participantsQuery.eq("event_id", input.eventId);
       }
 
       const { data: participants, error: participantsError } = await participantsQuery;
@@ -33,15 +33,15 @@ const getMedalList = publicProcedure
 
       console.log("[getMedalList] Participants found:", participants.length, JSON.stringify(participants));
 
-      const eventIds = [...new Set(participants.map((p: any) => p.eventId))];
-      const regIds = [...new Set(participants.map((p: any) => p.RegistrationID))];
+      const eventIds = [...new Set(participants.map((p: any) => p.event_id))];
+      const regIds = [...new Set(participants.map((p: any) => p.registration_id))];
 
       console.log("[getMedalList] Event IDs:", eventIds, "Registration IDs:", regIds);
 
       const { data: events, error: eventsError } = await ctx.supabase
         .from("events")
-        .select("eventId, eventName, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
-        .in("eventId", eventIds);
+        .select("event_id, event_name, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
+        .in("event_id", eventIds);
 
       if (eventsError) {
         console.error("[getMedalList] Error fetching events:", eventsError);
@@ -50,7 +50,7 @@ const getMedalList = publicProcedure
 
       console.log("[getMedalList] Events found:", JSON.stringify(events));
 
-      const eventsMap = new Map((events || []).map((e: any) => [e.eventId, e]));
+      const eventsMap = new Map((events || []).map((e: any) => [e.event_id, e]));
 
       const { data: registrations, error: regError } = await ctx.supabase
         .from("registrations")
@@ -68,11 +68,11 @@ const getMedalList = publicProcedure
 
       const qualifiedParticipants = await Promise.all(
         participants.map(async (participant: any) => {
-          const event = eventsMap.get(participant.eventId);
-          const registration = regMap.get(participant.RegistrationID);
+          const event = eventsMap.get(participant.event_id);
+          const registration = regMap.get(participant.registration_id);
 
           if (!event) {
-            console.log('[getMedalList] No event found for eventId:', participant.eventId);
+            console.log('[getMedalList] No event found for event_id:', participant.event_id);
             return null;
           }
 
@@ -82,8 +82,8 @@ const getMedalList = publicProcedure
           const medalMinCumulativeDistance = event.medal_min_cumulative_distance;
 
           console.log('[getMedalList] Event medal config:', {
-            eventId: participant.eventId,
-            eventName: event.eventName,
+            eventId: participant.event_id,
+            eventName: event.event_name,
             medalDateStart,
             medalDateEnd,
             medalMinDailyDistance,
@@ -95,7 +95,7 @@ const getMedalList = publicProcedure
             return null;
           }
 
-          const regId = participant.RegistrationID;
+          const regId = participant.registration_id;
 
           const now = new Date();
           const yesterdayDate = new Date(now);
@@ -114,11 +114,11 @@ const getMedalList = publicProcedure
 
           const { data: activities, error: actError } = await ctx.supabase
             .from("activities")
-            .select("Activity_Date, Distance_km")
-            .eq("RegistrationID", regId)
-            .gte("Activity_Date", medalDateStart)
-            .lte("Activity_Date", cutoffStr)
-            .order("Activity_Date", { ascending: true });
+            .select("activity_date, distance_km")
+            .eq("registration_id", regId)
+            .gte("activity_date", medalDateStart)
+            .lte("activity_date", cutoffStr)
+            .order("activity_date", { ascending: true });
 
           if (actError) {
             console.error("[getMedalList] Error fetching activities for", regId, ":", actError);
@@ -131,9 +131,9 @@ const getMedalList = publicProcedure
           const activitiesByDate = new Map<string, number>();
 
           (activities || []).forEach((activity: any) => {
-            const rawDate = activity.Activity_Date;
+            const rawDate = activity.activity_date;
             const dateKey = rawDate ? rawDate.split('T')[0] : rawDate;
-            const dist = activity.Distance_km || 0;
+            const dist = activity.distance_km || 0;
             const currentDistance = activitiesByDate.get(dateKey) || 0;
             activitiesByDate.set(dateKey, currentDistance + dist);
             totalDistance += dist;
@@ -185,14 +185,14 @@ const getMedalList = publicProcedure
           }
 
           return {
-            participantId: participant.ParticipantID || participant.id || participant.participantId || '',
-            registrationId: participant.RegistrationID,
-            eventId: participant.eventId,
+            participantId: participant.event_participant_id || '',
+            registrationId: participant.registration_id,
+            eventId: participant.event_id,
             firstName: registration?.first_name || "",
             otherNames: registration?.other_names || "",
             country: registration?.country ?? "",
             residence: registration?.["city / town / district"] ?? "",
-            eventName: event?.eventName || "",
+            eventName: event?.event_name || "",
             medalMinDailyDistance,
             medalMinCumulativeDistance,
             medalDateStart,

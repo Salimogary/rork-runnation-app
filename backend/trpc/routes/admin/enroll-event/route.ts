@@ -15,7 +15,7 @@ export default publicProcedure
       .from("event_enrollments")
       .select("*")
       .eq("EventID", input.eventId)
-      .eq("RegistrationID", input.registrationId)
+      .eq("registration_id", input.registrationId)
       .maybeSingle();
 
     if (existingPendingEnrollment) {
@@ -26,8 +26,8 @@ export default publicProcedure
     const { data: existingParticipant } = await ctx.supabase
       .from("events_participants")
       .select("*")
-      .eq("eventId", input.eventId)
-      .eq("RegistrationID", input.registrationId)
+      .eq("event_id", input.eventId)
+      .eq("registration_id", input.registrationId)
       .maybeSingle();
 
     if (existingParticipant) {
@@ -50,7 +50,7 @@ export default publicProcedure
       .from("event_enrollments")
       .insert({
         EventID: input.eventId,
-        RegistrationID: input.registrationId,
+        registration_id: input.registrationId,
         First_Name: userProfile.first_name,
         Other_Names: userProfile.other_names || '',
         Email: userProfile.email || '',

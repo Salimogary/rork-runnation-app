@@ -115,15 +115,15 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       if (!user) return null;
       const { data, error } = await supabase
         .from('registrations')
-        .select('Country, "Created_At", subscription')
-        .eq('RegistrationID', user.id)
+        .select('country, created_at, subscription')
+        .eq('registration_id', user.id)
         .single();
       if (error) {
         console.log('[Subscription] Error fetching user profile:', error);
         return null;
       }
       console.log('[Subscription] User profile data:', data);
-      return data as { Country: string | null; Created_At: string; subscription: number | null } | null;
+      return data as { country: string | null; created_at: string; subscription: number | null } | null;
     },
     enabled: !!user,
   });
@@ -147,7 +147,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   });
 
   const createdAt = useMemo(() => {
-    if (userProfileQuery.data?.Created_At) return userProfileQuery.data.Created_At;
+    if (userProfileQuery.data?.created_at) return userProfileQuery.data.created_at;
     if (user?.createdAt) return user.createdAt;
     return new Date().toISOString();
   }, [userProfileQuery.data, user]);
@@ -159,7 +159,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const trialExpired = trialDaysRemaining <= 0;
 
   const userRegion = useMemo(() => {
-    return getRegionFromCountry(userProfileQuery.data?.Country ?? undefined);
+    return getRegionFromCountry(userProfileQuery.data?.country ?? undefined);
   }, [userProfileQuery.data]);
 
   const subscriptionStatus = useMemo<SubscriptionStatus>(() => {

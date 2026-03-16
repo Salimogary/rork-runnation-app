@@ -35,7 +35,7 @@ interface WeightGoalEntry {
 }
 
 interface FitnessGoal {
-  id: number;
+  fitness_goal_id: number;
   registration_id: string;
   target_pace: number;
   target_date: string;
@@ -71,12 +71,12 @@ interface GoalItem {
 }
 
 interface RecentActivity {
-  Pace_km_h: number;
-  Activity_Date: string;
+  pace_km_h: number;
+  activity_date: string;
 }
 
 interface CommunityRankData {
-  RegistrationID: string;
+  registrationId: string;
   Name: string;
   AvgDistance: number;
   ActiveDays: number;
@@ -259,9 +259,9 @@ export default function GoalsScreen() {
       if (!user?.id) return [];
       const { data, error } = await supabase
         .from("activities")
-        .select("Pace_km_h, Activity_Date")
-        .eq("RegistrationID", user.id)
-        .order("Activity_Date", { ascending: false })
+        .select("pace_km_h, activity_date")
+        .eq("registration_id", user.id)
+        .order("activity_date", { ascending: false })
         .limit(5);
       if (error) {
         console.error("[Goals] Error fetching recent activities for pace:", error);
@@ -345,10 +345,10 @@ export default function GoalsScreen() {
   const fitnessProgress = useMemo(() => {
     if (!fitnessGoal || recentActivities.length === 0) return null;
 
-    const validActivities = recentActivities.filter((a) => a.Pace_km_h > 0);
+    const validActivities = recentActivities.filter((a) => a.pace_km_h > 0);
     if (validActivities.length === 0) return null;
 
-    const avgPaceKmh = validActivities.reduce((sum, a) => sum + a.Pace_km_h, 0) / validActivities.length;
+    const avgPaceKmh = validActivities.reduce((sum, a) => sum + a.pace_km_h, 0) / validActivities.length;
     const targetPaceKmh = fitnessGoal.target_pace;
 
     const avgMinPerKm = convertKmhToMinPerKm(avgPaceKmh);
@@ -774,15 +774,15 @@ export default function GoalsScreen() {
       } else {
         const { data, error } = await supabase
           .from("activities")
-          .select("Activity_Date, Distance_km, Exercise_Type")
-          .eq("RegistrationID", user.id)
-          .gte("Activity_Date", habitDeclaration.start_date);
+          .select("activity_date, distance_km, exercise_type")
+          .eq("registration_id", user.id)
+          .gte("activity_date", habitDeclaration.start_date);
         if (error) {
           console.error("[Goals] Error fetching habit activities:", error);
           return [];
         }
         return (data || []).filter((a: any) =>
-          a.Exercise_Type?.toLowerCase() === habitDeclaration.activity_type.toLowerCase()
+          a.exercise_type?.toLowerCase() === habitDeclaration.activity_type.toLowerCase()
         );
       }
     },
@@ -882,8 +882,8 @@ export default function GoalsScreen() {
         const date = entry.record_date;
         valueByDate.set(date, (valueByDate.get(date) || 0) + (entry.steps || 0));
       } else {
-        const date = entry.Activity_Date?.split?.("T")?.[0] || entry.Activity_Date;
-        valueByDate.set(date, (valueByDate.get(date) || 0) + (entry.Distance_km || 0));
+        const date = entry.activity_date?.split?.("T")?.[0] || entry.activity_date;
+        valueByDate.set(date, (valueByDate.get(date) || 0) + (entry.distance_km || 0));
       }
     });
 
@@ -992,8 +992,8 @@ export default function GoalsScreen() {
       if (!user?.id) return { totalDistance: 0, totalTime: 0, activeDays: 0, avgDistance: 0, avgPace: 0, streakDays: 0 };
       const { data, error } = await supabase
         .from("activities")
-        .select("Activity_Date, Distance_km, Start_Time, End_Time, Pace_km_h")
-        .eq("RegistrationID", user.id);
+        .select("activity_date, distance_km, start_time, end_time, pace_km_h")
+        .eq("registration_id", user.id);
 
       if (error) {
         console.error("[Goals] Error fetching activities:", error);
@@ -1007,12 +1007,12 @@ export default function GoalsScreen() {
       const daySet = new Set<string>();
 
       activities.forEach((a: any) => {
-        totalDistance += a.Distance_km || 0;
-        paceSum += a.Pace_km_h || 0;
-        const dateKey = a.Activity_Date?.split?.("T")?.[0] || a.Activity_Date;
+        totalDistance += a.distance_km || 0;
+        paceSum += a.pace_km_h || 0;
+        const dateKey = a.activity_date?.split?.("T")?.[0] || a.activity_date;
         if (dateKey) daySet.add(dateKey);
-        const startParts = (a.Start_Time || "0:0:0").split(":");
-        const endParts = (a.End_Time || "0:0:0").split(":");
+        const startParts = (a.start_time || "0:0:0").split(":");
+        const endParts = (a.end_time || "0:0:0").split(":");
         const startMin = parseInt(startParts[0]) * 60 + parseInt(startParts[1]);
         const endMin = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
         let dur = endMin - startMin;
@@ -1064,19 +1064,19 @@ export default function GoalsScreen() {
       try {
         const { data: activities, error: activityError } = await supabase
           .from("activities")
-          .select("RegistrationID, Activity_Date, Distance_km, Start_Time, End_Time, Pace_km_h");
+          .select("registration_id, activity_date, distance_km, start_time, end_time, pace_km_h");
         if (activityError) {
           console.error("[Goals] Community rank activity fetch error:", activityError);
           throw activityError;
         }
         const { data: registrations, error: regError } = await supabase
           .from("registrations")
-          .select('RegistrationID, "First Name", "Other Names"');
+          .select('registration_id, first_name, other_names');
         if (regError) {
           console.error("[Goals] Community rank registration fetch error:", regError);
           throw regError;
         }
-        const regMap = new Map(registrations?.map((r: any) => [r.RegistrationID, r]));
+        const regMap = new Map(registrations?.map((r: any) => [r.registration_id, r]));
         const userStats = new Map<string, {
           totalDistance: number;
           paceSum: number;
@@ -1084,27 +1084,27 @@ export default function GoalsScreen() {
           activeDays: Set<string>;
         }>();
         activities?.forEach((activity: any) => {
-          const regId = activity.RegistrationID;
+          const regId = activity.registration_id;
           if (!regId) return;
           const existing = userStats.get(regId) || {
             totalDistance: 0, paceSum: 0, activityCount: 0, activeDays: new Set<string>(),
           };
-          existing.totalDistance += activity.Distance_km || 0;
-          existing.paceSum += activity.Pace_km_h || 0;
+          existing.totalDistance += activity.distance_km || 0;
+          existing.paceSum += activity.pace_km_h || 0;
           existing.activityCount += 1;
-          existing.activeDays.add(activity.Activity_Date);
+          existing.activeDays.add(activity.activity_date);
           userStats.set(regId, existing);
         });
         const result: CommunityRankData[] = [];
         userStats.forEach((stats, regId) => {
           const registration = regMap.get(regId) as any;
           if (!registration) return;
-          const firstName = registration["First Name"] || "";
-          const otherNames = registration["Other Names"] || "";
+          const firstName = registration.first_name || "";
+          const otherNames = registration.other_names || "";
           const fullName = [firstName, otherNames].filter((n: string) => n).join(" ") || "Unknown";
           const activeDays = stats.activeDays.size;
           result.push({
-            RegistrationID: regId,
+            registrationId: regId,
             Name: fullName,
             AvgDistance: activeDays > 0 ? stats.totalDistance / activeDays : 0,
             ActiveDays: activeDays,
@@ -1131,7 +1131,7 @@ export default function GoalsScreen() {
       if (daysDiff !== 0) return daysDiff;
       return a.AveragePace - b.AveragePace;
     });
-    const userIndex = sorted.findIndex((item) => item.RegistrationID === user.id);
+    const userIndex = sorted.findIndex((item) => item.registrationId === user.id);
     if (userIndex === -1) return null;
     const currentRank = userIndex + 1;
     const totalParticipants = sorted.length;
@@ -1333,10 +1333,10 @@ export default function GoalsScreen() {
             }
 
             return {
-              eventId: event.eventId,
-              eventName: event.eventName || "Unnamed Event",
-              startsAt: event.startsAt,
-              endsAt: event.endsAt,
+              eventId: event.event_id,
+              eventName: event.event_name || "Unnamed Event",
+              startsAt: event.starts_at,
+              endsAt: event.ends_at,
               isOnMedalList,
               status,
               medal_min_daily_distance: event.medal_min_daily_distance,

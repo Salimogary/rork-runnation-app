@@ -343,8 +343,8 @@ export default function ExerciseScreen() {
       const { count, error: countError } = await supabase
         .from("activities")
         .select("*", { count: "exact", head: true })
-        .eq("RegistrationID", user.id)
-        .eq("Activity_Date", today);
+        .eq("registration_id", user.id)
+        .eq("activity_date", today);
 
       if (countError) {
         console.error('[ActivityLimit] Count error:', countError);
@@ -379,14 +379,14 @@ export default function ExerciseScreen() {
       });
 
       const { error } = await supabase.from("activities").insert({
-        ActivityID: nextActivityId,
-        RegistrationID: user.id,
-        Activity_Date: today,
-        Exercise_Type: exerciseType || "Run",
-        Distance_km: parseFloat(distance.toFixed(2)),
-        Start_Time: startTimeStr,
-        End_Time: endTimeStr,
-        Pace_km_h: parseFloat(calculatedPace.toFixed(2)),
+        activity_id: nextActivityId,
+        registration_id: user.id,
+        activity_date: today,
+        exercise_type: exerciseType || "Run",
+        distance_km: parseFloat(distance.toFixed(2)),
+        start_time: startTimeStr,
+        end_time: endTimeStr,
+        pace_km_h: parseFloat(calculatedPace.toFixed(2)),
       });
 
       if (error) {
@@ -455,13 +455,13 @@ export default function ExerciseScreen() {
     }
 
     const { error } = await supabase.from("pending_activities").insert({
-      RegistrationID: user.id,
-      Exercise_Type: "Treadmill",
-      Distance_Entered: distanceKm,
-      Distance_Unit: "km",
-      Time_Entered: timeInterval,
-      Photo_Path: treadmillImage,
-      Status: "pending",
+      registration_id: user.id,
+      exercise_type: "Treadmill",
+      distance_entered: distanceKm,
+      distance_unit: "km",
+      time_entered: timeInterval,
+      photo_path: treadmillImage,
+      status: "pending",
     });
 
     if (error) {

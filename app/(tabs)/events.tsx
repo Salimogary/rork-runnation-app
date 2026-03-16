@@ -10,10 +10,10 @@ import { useSubscription } from "@/contexts/SubscriptionContext";
 import SubscriptionGate from "@/components/SubscriptionGate";
 
 interface Event {
-  eventId: string;
-  eventName: string;
-  startsAt: string;
-  endsAt: string;
+  event_id: string;
+  event_name: string;
+  starts_at: string;
+  ends_at: string;
 }
 
 type EventsQueryResult = Event[] | undefined;
@@ -63,7 +63,7 @@ export default function EventsScreen() {
   };
 
   const sortedEvents = events
-    ? [...events].sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime())
+    ? [...events].sort((a, b) => new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime())
     : [];
 
   return (
@@ -113,10 +113,10 @@ export default function EventsScreen() {
         ) : (
           <View style={styles.eventsContainer}>
             {sortedEvents.map((event) => (
-              <LinearGradient key={event.eventId} colors={[themeColors.cardBackground, themeColors.elevated]} style={styles.eventCard}>
+              <LinearGradient key={event.event_id} colors={[themeColors.cardBackground, themeColors.elevated]} style={styles.eventCard}>
                 <View style={styles.eventHeader}>
                   <CalendarIcon size={24} color={colors.primary} />
-                  <Text style={[styles.eventName, { color: themeColors.text }]} numberOfLines={2}>{event.eventName}</Text>
+                  <Text style={[styles.eventName, { color: themeColors.text }]} numberOfLines={2}>{event.event_name}</Text>
                 </View>
                 
                 <View style={styles.eventDates}>
@@ -124,21 +124,21 @@ export default function EventsScreen() {
                     <Clock size={16} color={colors.textSecondary} />
                     <View style={styles.dateContent}>
                       <Text style={[styles.dateLabel, { color: themeColors.textSecondary }]}>Starts</Text>
-                      <Text style={[styles.dateValue, { color: themeColors.text }]}>{formatDate(event.startsAt)}</Text>
+                      <Text style={[styles.dateValue, { color: themeColors.text }]}>{formatDate(event.starts_at)}</Text>
                     </View>
                   </View>
                   <View style={styles.dateRow}>
                     <Clock size={16} color={colors.textSecondary} />
                     <View style={styles.dateContent}>
                       <Text style={[styles.dateLabel, { color: themeColors.textSecondary }]}>Ends</Text>
-                      <Text style={[styles.dateValue, { color: themeColors.text }]}>{formatDate(event.endsAt)}</Text>
+                      <Text style={[styles.dateValue, { color: themeColors.text }]}>{formatDate(event.ends_at)}</Text>
                     </View>
                   </View>
                 </View>
                 
                 <TouchableOpacity 
                   style={styles.enrollButton}
-                  onPress={() => handleEnrollPress(event.eventId)}
+                  onPress={() => handleEnrollPress(event.event_id)}
                   activeOpacity={0.8}
                 >
                   <LinearGradient colors={colors.gradient.orange} style={styles.enrollGradient}>

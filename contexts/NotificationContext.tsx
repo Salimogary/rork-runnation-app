@@ -43,15 +43,15 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
       if (!user?.id) return { earnedCount: 0, totalDistance: 0, totalActivities: 0 };
       const { data, error } = await supabase
         .from('activities')
-        .select('Distance_km, Exercise_Type')
-        .eq('RegistrationID', user.id);
+        .select('distance_km, exercise_type')
+        .eq('registration_id', user.id);
       if (error) {
         console.error('[NotifContext] Badge data error:', error.message, error.code, error.details);
         return { earnedCount: 0, totalDistance: 0, totalActivities: 0 };
       }
       const validTypes = ['Run', 'Walk', 'Treadmill', 'Tredmill'];
-      const filtered = (data || []).filter((a: any) => validTypes.includes(a.Exercise_Type || ''));
-      const totalDistance = filtered.reduce((sum: number, a: any) => sum + (a.Distance_km || 0), 0);
+      const filtered = (data || []).filter((a: any) => validTypes.includes(a.exercise_type || ''));
+      const totalDistance = filtered.reduce((sum: number, a: any) => sum + (a.distance_km || 0), 0);
       const totalActivities = filtered.length;
       return { totalDistance, totalActivities };
     },
@@ -76,35 +76,35 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
         subscriptionRes, fitnessGoalRes, weightTargetRes, enrollmentRes,
       ] = await Promise.all([
         supabase.from('registrations')
-          .select('"First Name", "Other Names", "Username", "Email", "Sex", "Residence", "Country", "Date of Birth", "email_verified"')
-          .eq('RegistrationID', user.id).maybeSingle(),
+          .select('first_name, other_names, username, email, sex, "city / town / district", country, dob, email_verified')
+          .eq('registration_id', user.id).maybeSingle(),
         supabase.from('user_photos').select('file_path')
           .eq('registration_id', user.id).eq('is_profile_photo', true).maybeSingle(),
         supabase.from('user_goals').select('user_goals_id')
           .eq('registration_id', user.id).limit(1),
         supabase.from('club_membership_request').select('club')
           .eq('registration_id', user.id).maybeSingle(),
-        supabase.from('activities').select('Distance_km, Exercise_Type')
-          .eq('RegistrationID', user.id),
+        supabase.from('activities').select('distance_km, exercise_type')
+          .eq('registration_id', user.id),
         supabase.from('subscriptions').select('status, expires_at')
           .eq('registration_id', user.id).maybeSingle(),
-        supabase.from('fitness_goal').select('id')
+        supabase.from('fitness_goal').select('fitness_goal_id')
           .eq('registration_id', user.id).limit(1),
-        supabase.from('weight_target_goal').select('id')
+        supabase.from('weight_target_goal').select('weight_target_goal_id')
           .eq('registration_id', user.id).limit(1),
-        supabase.from('event_enrollments').select('EnrollmentID')
-          .eq('RegistrationID', user.id).limit(1),
+        supabase.from('event_enrollments').select('enrollment_id')
+          .eq('registration_id', user.id).limit(1),
       ]);
 
       const p = profileRes.data as any;
-      const allFieldsFilled = !!(p && p['First Name'] && p['Other Names'] && p.Username && p.Email && p.Sex && p.Residence && p.Country && p['Date of Birth']);
+      const allFieldsFilled = !!(p && p.first_name && p.other_names && p.username && p.email && p.sex && p['city / town / district'] && p.country && p.dob);
       const hasProfilePhoto = !!photoRes.data?.file_path;
       const hasGoal = (goalsRes.data?.length ?? 0) > 0;
       const hasClub = !!(clubRes.data?.club && clubRes.data.club !== '');
       const validTypes = ['Run', 'Walk', 'Treadmill', 'Tredmill'];
-      const filtered = (activitiesRes.data || []).filter((a: any) => validTypes.includes(a.Exercise_Type || ''));
+      const filtered = (activitiesRes.data || []).filter((a: any) => validTypes.includes(a.exercise_type || ''));
       const hasFiveActivities = filtered.length >= 5;
-      const totalDist = filtered.reduce((s: number, a: any) => s + (a.Distance_km || 0), 0);
+      const totalDist = filtered.reduce((s: number, a: any) => s + (a.distance_km || 0), 0);
       const hasAtLeastOneBadge = getEarnedBadgeCount(totalDist, filtered.length) > 0;
       const sub = subscriptionRes.data as any;
       let hasSubscription = false;
@@ -140,16 +140,16 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
       if (fitnessGoal) {
         const { data: recentActivities } = await supabase
           .from('activities')
-          .select('Pace_km_h')
-          .eq('RegistrationID', user.id)
-          .order('Activity_Date', { ascending: false })
+          .select('pace_km_h')
+          .eq('registration_id', user.id)
+          .order('activity_date', { ascending: false })
           .limit(5);
 
-        const valid = (recentActivities || []).filter((a: any) => a.Pace_km_h > 0);
+        const valid = (recentActivities || []).filter((a: any) => a.pace_km_h > 0);
         if (valid.length > 0) {
-          const avgPaceKmh = valid.reduce((sum: number, a: any) => sum + a.Pace_km_h, 0) / valid.length;
+          const avgPaceKmh = valid.reduce((sum: number, a: any) => sum + a.pace_km_h, 0) / valid.length;
           const avgMinPerKm = convertKmhToMinPerKm(avgPaceKmh);
-          const targetMinPerKm = convertKmhToMinPerKm(fitnessGoal.target_pace_kmh);
+          const targetMinPerKm = convertKmhToMinPerKm(fitnessGoal.target_pace);
           fitnessProgress = targetMinPerKm > 0
             ? Math.min(100, Math.max(0, (targetMinPerKm / avgMinPerKm) * 100))
             : 0;
@@ -166,8 +166,8 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
       if (weightTarget) {
         const { data: profile } = await supabase
           .from('registrations')
-          .select('"Weight Current"')
-          .eq('RegistrationID', user.id)
+          .select('registration_id')
+          .eq('registration_id', user.id)
           .maybeSingle();
 
         const { data: latestEntry } = await supabase

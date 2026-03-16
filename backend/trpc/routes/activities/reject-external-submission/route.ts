@@ -14,12 +14,8 @@ export default publicProcedure
 
       const { error } = await ctx.supabase
         .from("external_activity_submissions")
-        .update({
-          Status: "rejected",
-          Reviewed_At: new Date().toISOString(),
-          Admin_Notes: input.adminNotes || null,
-        })
-        .eq("SubmissionID", input.submissionId);
+        .delete()
+        .eq("submission_id", input.submissionId);
 
       if (error) {
         console.error("[Reject External Submission] Error:", error);

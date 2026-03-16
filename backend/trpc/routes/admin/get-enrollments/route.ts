@@ -13,7 +13,7 @@ export default publicProcedure
     let query = ctx.supabase
       .from("event_enrollments")
       .select(`
-        EnrollmentID,
+        enrollment_id,
         EventID,
         First_Name,
         Other_Names,

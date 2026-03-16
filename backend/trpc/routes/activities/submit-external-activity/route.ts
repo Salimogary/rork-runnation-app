@@ -19,12 +19,12 @@ export default publicProcedure
       const { data, error } = await ctx.supabase
         .from("external_activity_submissions")
         .insert({
-          RegistrationID: input.registrationId,
-          Activity_Date: input.activityDate,
-          Exercise_Type: input.exerciseType,
-          Start_Time: input.startTime,
-          Duration: input.duration,
-          Distance_km: input.distanceKm,
+          registration_id: input.registrationId,
+          activity_date: input.activityDate,
+          exercise_type: input.exerciseType,
+          start_time: input.startTime,
+          duration: input.duration,
+          distance_km: input.distanceKm,
         })
         .select()
         .single();

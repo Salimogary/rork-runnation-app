@@ -8,7 +8,7 @@ export default publicProcedure.query(async ({ ctx }) => {
     const { data, error } = await ctx.supabase
       .from("events")
       .select("*")
-      .order("startsAt", { ascending: false });
+      .order("starts_at", { ascending: false });
 
     console.log('[getEvents] Query result:', { dataCount: data?.length, error });
 

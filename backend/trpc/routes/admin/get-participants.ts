@@ -13,19 +13,19 @@ export const getParticipants = publicProcedure
     let query = ctx.supabase
       .from("events_participants")
       .select(`
-        ParticipantID,
-        eventId,
-        RegistrationID,
-        Registration_Date,
-        events!events_participants_eventId_fkey(eventName),
-        registrations!events_participants_RegistrationID_fkey(first_name, other_names, sex, "city / town / district")
+        event_participant_id,
+        event_id,
+        registration_id,
+        registration_date,
+        events!events_participants_event_id_fkey(event_name),
+        registrations!events_participants_registration_id_fkey(first_name, other_names, sex, "city / town / district")
       `);
 
     if (input.eventId) {
-      query = query.eq("eventId", input.eventId);
+      query = query.eq("event_id", input.eventId);
     }
 
-    query = query.order("Registration_Date", { ascending: false });
+    query = query.order("registration_date", { ascending: false });
 
     const { data, error } = await query;
 
@@ -37,10 +37,10 @@ export const getParticipants = publicProcedure
     console.log("[getParticipants] Raw data:", data);
 
     const participants = (data || []).map((item: any) => ({
-      ParticipantID: item.ParticipantID,
-      EventID: item.eventId,
-      RegistrationID: item.RegistrationID,
-      Registration_Date: item.Registration_Date,
+      ParticipantID: item.event_participant_id,
+      EventID: item.event_id,
+      RegistrationID: item.registration_id,
+      Registration_Date: item.registration_date,
       Status: "Active",
       Days_Completed: 0,
       user: {

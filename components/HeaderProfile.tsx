@@ -82,15 +82,15 @@ export default function HeaderProfile() {
       if (!user) return { totalDistance: 0, totalActivities: 0 };
       const { data, error } = await supabase
         .from("activities")
-        .select("Distance_km, Exercise_Type")
-        .eq("RegistrationID", user.id);
+        .select("distance_km, exercise_type")
+        .eq("registration_id", user.id);
       if (error) {
         console.error("[HeaderBadges] Error:", error);
         return { totalDistance: 0, totalActivities: 0 };
       }
       const validTypes = ["Run", "Walk", "Treadmill", "Tredmill"];
-      const filtered = (data || []).filter((a) => validTypes.includes(a.Exercise_Type || ""));
-      const totalDistance = filtered.reduce((sum, a) => sum + (a.Distance_km || 0), 0);
+      const filtered = (data || []).filter((a) => validTypes.includes(a.exercise_type || ""));
+      const totalDistance = filtered.reduce((sum, a) => sum + (a.distance_km || 0), 0);
       const totalActivities = filtered.length;
       return { totalDistance, totalActivities };
     },
@@ -129,8 +129,8 @@ export default function HeaderProfile() {
       ] = await Promise.all([
         supabase
           .from("registrations")
-          .select('"First Name", "Other Names", "Username", "Email", "Sex", "City/Town/District", "Country", dob, email_verified')
-          .eq("RegistrationID", user.id)
+          .select('first_name, other_names, username, email, sex, "city / town / district", country, dob, email_verified')
+          .eq("registration_id", user.id)
           .maybeSingle(),
         supabase
           .from("user_photos")
@@ -150,8 +150,8 @@ export default function HeaderProfile() {
           .maybeSingle(),
         supabase
           .from("activities")
-          .select("Distance_km, Exercise_Type")
-          .eq("RegistrationID", user.id),
+          .select("distance_km, exercise_type")
+          .eq("registration_id", user.id),
         supabase
           .from("subscriptions")
           .select("status, expires_at")
@@ -159,18 +159,18 @@ export default function HeaderProfile() {
           .maybeSingle(),
         supabase
           .from("fitness_goal")
-          .select("id")
+          .select("fitness_goal_id")
           .eq("registration_id", user.id)
           .limit(1),
         supabase
           .from("weight_target_goal")
-          .select("id")
+          .select("weight_target_goal_id")
           .eq("registration_id", user.id)
           .limit(1),
         supabase
           .from("event_enrollments")
-          .select("EnrollmentID")
-          .eq("RegistrationID", user.id)
+          .select("enrollment_id")
+          .eq("registration_id", user.id)
           .limit(1),
       ]);
 
@@ -193,11 +193,11 @@ export default function HeaderProfile() {
 
       const validTypes = ["Run", "Walk", "Treadmill", "Tredmill"];
       const filteredActivities = (activitiesRes.data || []).filter((a: any) =>
-        validTypes.includes(a.Exercise_Type || "")
+        validTypes.includes(a.exercise_type || "")
       );
       const hasFiveActivities = filteredActivities.length >= 5;
 
-      const totalDistance = filteredActivities.reduce((sum: number, a: any) => sum + (a.Distance_km || 0), 0);
+      const totalDistance = filteredActivities.reduce((sum: number, a: any) => sum + (a.distance_km || 0), 0);
       const totalActivities = filteredActivities.length;
       const hasAtLeastOneBadge = getEarnedBadgeCount(totalDistance, totalActivities) > 0;
 

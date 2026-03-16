@@ -13,7 +13,7 @@ export default publicProcedure
     const { error } = await ctx.supabase
       .from("event_enrollments")
       .delete()
-      .eq("EnrollmentID", input.enrollmentId)
+      .eq("enrollment_id", input.enrollmentId)
       .eq("Status", "pending");
 
     if (error) {

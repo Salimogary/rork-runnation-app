@@ -14,7 +14,7 @@ export default publicProcedure
       const { data: submission, error: fetchError } = await ctx.supabase
         .from("external_activity_submissions")
         .select("*")
-        .eq("SubmissionID", input.submissionId)
+        .eq("submission_id", input.submissionId)
         .single();
 
       if (fetchError || !submission) {
@@ -23,40 +23,46 @@ export default publicProcedure
 
       const { data: lastActivity } = await ctx.supabase
         .from("activities")
-        .select("ActivityID")
-        .order("ActivityID", { ascending: false })
+        .select("activity_id")
+        .order("activity_id", { ascending: false })
         .limit(1)
         .single();
 
       let newActivityId = "1";
-      if (lastActivity?.ActivityID) {
-        const lastNum = parseInt(lastActivity.ActivityID);
+      if (lastActivity?.activity_id) {
+        const lastNum = parseInt(lastActivity.activity_id);
         if (!isNaN(lastNum)) {
           newActivityId = (lastNum + 1).toString();
         }
       }
 
-      const startTimeParts = submission.Start_Time.split(":");
+      const durationParts = (submission.duration || "00:00:00").split(":");
+      const durationHours = parseInt(durationParts[0] || "0");
+      const durationMins = parseInt(durationParts[1] || "0");
+      const durationSecs = parseInt(durationParts[2] || "0");
+      const totalDurationMinutes = durationHours * 60 + durationMins + durationSecs / 60;
+
+      const startTimeParts = submission.start_time.split(":");
       const startHours = parseInt(startTimeParts[0]);
       const startMinutes = parseInt(startTimeParts[1]);
-      const totalMinutes = startHours * 60 + startMinutes + submission.Duration_Minutes;
+      const totalMinutes = startHours * 60 + startMinutes + Math.round(totalDurationMinutes);
       const endHours = Math.floor(totalMinutes / 60) % 24;
       const endMinutes = totalMinutes % 60;
       const endTime = `${endHours.toString().padStart(2, "0")}:${endMinutes.toString().padStart(2, "0")}:00`;
 
-      const paceKmH = submission.Distance_km / (submission.Duration_Minutes / 60);
+      const paceKmH = totalDurationMinutes > 0 ? submission.distance_km / (totalDurationMinutes / 60) : 0;
 
       const { error: insertError } = await ctx.supabase
         .from("activities")
         .insert({
-          ActivityID: newActivityId,
-          RegistrationID: submission.RegistrationID,
-          Activity_Date: submission.Activity_Date,
-          Exercise_Type: submission.Exercise_Type,
-          Distance_km: submission.Distance_km,
-          Start_Time: submission.Start_Time,
-          End_Time: endTime,
-          Pace_km_h: paceKmH,
+          activity_id: newActivityId,
+          registration_id: submission.registration_id,
+          activity_date: submission.activity_date,
+          exercise_type: submission.exercise_type,
+          distance_km: submission.distance_km,
+          start_time: submission.start_time,
+          end_time: endTime,
+          pace_km_h: paceKmH,
         });
 
       if (insertError) {
@@ -64,17 +70,13 @@ export default publicProcedure
         throw new Error(insertError.message || "Failed to create activity");
       }
 
-      const { error: updateError } = await ctx.supabase
+      const { error: deleteError } = await ctx.supabase
         .from("external_activity_submissions")
-        .update({
-          Status: "approved",
-          Reviewed_At: new Date().toISOString(),
-        })
-        .eq("SubmissionID", input.submissionId);
+        .delete()
+        .eq("submission_id", input.submissionId);
 
-      if (updateError) {
-        console.error("[Approve External Submission] Update error:", updateError);
-        throw new Error(updateError.message || "Failed to update submission status");
+      if (deleteError) {
+        console.error("[Approve External Submission] Delete error:", deleteError);
       }
 
       console.log("[Approve External Submission] Success");

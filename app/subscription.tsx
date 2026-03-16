@@ -135,7 +135,7 @@ export default function SubscriptionScreen() {
       const { error: regError } = await supabase
         .from('registrations')
         .update({ subscription: 3 })
-        .eq('RegistrationID', user.id);
+        .eq('registration_id', user.id);
 
       if (regError) {
         console.log('[Subscription] Error updating registration subscription column:', regError);

@@ -7,10 +7,10 @@ export default publicProcedure.query(async ({ ctx }) => {
     const { data: submissions, error } = await ctx.supabase
       .from("external_activity_submissions")
       .select(`
-        RegistrationID,
-        Activity_Date
+        registration_id,
+        activity_date
       `)
-      .order("Activity_Date", { ascending: false });
+      .order("activity_date", { ascending: false });
 
     if (error) {
       console.error("[Get External Submissions] Error:", error);
@@ -41,13 +41,13 @@ export default publicProcedure.query(async ({ ctx }) => {
     const groupedByDate = new Map<string, Map<string, number>>();
 
     submissions?.forEach((sub) => {
-      const date = sub.Activity_Date;
+      const date = sub.activity_date;
       if (!groupedByDate.has(date)) {
         groupedByDate.set(date, new Map());
       }
       const dateGroup = groupedByDate.get(date)!;
-      const currentCount = dateGroup.get(sub.RegistrationID) || 0;
-      dateGroup.set(sub.RegistrationID, currentCount + 1);
+      const currentCount = dateGroup.get(sub.registration_id) || 0;
+      dateGroup.set(sub.registration_id, currentCount + 1);
     });
 
     const result = [];

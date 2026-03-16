@@ -12,14 +12,14 @@ import { Lock } from "lucide-react-native";
 
 
 interface ActivityData {
-  ActivityID: number;
-  RegistrationID: string;
-  Activity_Date: string;
-  Exercise_Type: string;
-  Distance_km: number;
-  Start_Time: string;
-  End_Time: string;
-  Pace_km_h: number;
+  activity_id: string;
+  registration_id: string;
+  activity_date: string;
+  exercise_type: string;
+  distance_km: number;
+  start_time: string;
+  end_time: string;
+  pace_km_h: number;
   user?: {
     name?: string;
     username?: string;
@@ -28,7 +28,7 @@ interface ActivityData {
 
 interface RegisteredEvent {
   eventId: string;
-  RegistrationID: string;
+  registrationId: string;
   eventName: string;
   startsAt: string;
   endsAt: string;
@@ -37,7 +37,7 @@ interface RegisteredEvent {
 }
 
 interface CommunityData {
-  RegistrationID: string;
+  registrationId: string;
   Name: string;
   Country: string;
   Residence: string;
@@ -83,8 +83,8 @@ export default function ActivityScreen() {
       try {
         const { data: participantData, error: pError } = await supabase
           .from("events_participants")
-          .select("eventId, RegistrationID")
-          .eq("RegistrationID", user.id);
+          .select("event_id, registration_id")
+          .eq("registration_id", user.id);
 
         if (pError) {
           console.error("[RegisteredEvents] Participant fetch error:", JSON.stringify(pError));
@@ -92,11 +92,11 @@ export default function ActivityScreen() {
         }
         if (!participantData || participantData.length === 0) return [];
 
-        const eventIds = participantData.map(p => p.eventId);
+        const eventIds = participantData.map(p => p.event_id);
         const { data: eventsData, error: eError } = await supabase
           .from("events")
-          .select("eventId, eventName, startsAt, endsAt, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
-          .in("eventId", eventIds);
+          .select("event_id, event_name, starts_at, ends_at, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
+          .in("event_id", eventIds);
 
         if (eError) {
           console.error("[RegisteredEvents] Events fetch error:", JSON.stringify(eError));
@@ -108,8 +108,8 @@ export default function ActivityScreen() {
 
         const results: RegisteredEvent[] = await Promise.all(
           (eventsData || []).map(async (event: any) => {
-            const startDate = new Date(event.startsAt);
-            const endDate = new Date(event.endsAt);
+            const startDate = new Date(event.starts_at);
+            const endDate = new Date(event.ends_at);
             let status: RegisteredEvent['status'] = 'upcoming';
             if (today >= startDate && today <= endDate) status = 'ongoing';
             else if (today > endDate) status = 'completed';
@@ -133,17 +133,17 @@ export default function ActivityScreen() {
               } else {
                 const { data: acts } = await supabase
                   .from("activities")
-                  .select("Activity_Date, Distance_km")
-                  .eq("RegistrationID", user.id)
-                  .gte("Activity_Date", medalStart)
-                  .lte("Activity_Date", cutoffStr);
+                  .select("activity_date, distance_km")
+                  .eq("registration_id", user.id)
+                  .gte("activity_date", medalStart)
+                  .lte("activity_date", cutoffStr);
 
                 let totalDist = 0;
                 const byDate = new Map<string, number>();
                 (acts || []).forEach((a: any) => {
-                  const dk = a.Activity_Date ? a.Activity_Date.split('T')[0] : a.Activity_Date;
-                  byDate.set(dk, (byDate.get(dk) || 0) + (a.Distance_km || 0));
-                  totalDist += a.Distance_km || 0;
+                  const dk = a.activity_date ? a.activity_date.split('T')[0] : a.activity_date;
+                  byDate.set(dk, (byDate.get(dk) || 0) + (a.distance_km || 0));
+                  totalDist += a.distance_km || 0;
                 });
 
                 let qualified = true;
@@ -167,11 +167,11 @@ export default function ActivityScreen() {
             }
 
             return {
-              eventId: event.eventId,
-              RegistrationID: user.id,
-              eventName: event.eventName || 'Unnamed Event',
-              startsAt: event.startsAt,
-              endsAt: event.endsAt,
+              eventId: event.event_id,
+              registrationId: user.id,
+              eventName: event.event_name || 'Unnamed Event',
+              startsAt: event.starts_at,
+              endsAt: event.ends_at,
               isOnMedalList,
               status,
             };
@@ -199,7 +199,7 @@ export default function ActivityScreen() {
           .select("*");
 
         if (user) {
-          query = query.eq("RegistrationID", user.id);
+          query = query.eq("registration_id", user.id);
         }
 
         const { data, error } = await query;
@@ -229,7 +229,7 @@ export default function ActivityScreen() {
         const { data: membership, error: memError } = await supabase
           .from("club_members")
           .select("coordinator_id")
-          .eq("RegistrationID", user.id)
+          .eq("registration_id", user.id)
           .maybeSingle();
         if (memError) {
           console.error("[UserClub] Membership fetch error:", JSON.stringify(memError));
@@ -266,13 +266,13 @@ export default function ActivityScreen() {
       try {
         const { data, error } = await supabase
           .from("club_members")
-          .select("RegistrationID")
+          .select("registration_id")
           .eq("coordinator_id", userClub.coordinator_id);
         if (error) {
           console.error("[ClubMembers] Fetch error:", JSON.stringify(error));
           return [];
         }
-        const ids = (data || []).map((m: any) => m.RegistrationID).filter(Boolean);
+        const ids = (data || []).map((m: any) => m.registration_id).filter(Boolean);
         console.log("[ClubMembers] Found", ids.length, "members in club", userClub.club_name);
         return ids;
       } catch (error: any) {
@@ -291,8 +291,8 @@ export default function ActivityScreen() {
       try {
         const { data: activities, error: activityError } = await supabase
           .from("activities")
-          .select("RegistrationID, Activity_Date, Distance_km, Start_Time, End_Time, Pace_km_h")
-          .in("RegistrationID", clubMemberIds);
+          .select("registration_id, activity_date, distance_km, start_time, end_time, pace_km_h")
+          .in("registration_id", clubMemberIds);
 
         if (activityError) {
           console.error("[ClubCommunity] Activity fetch error:", activityError);
@@ -319,10 +319,10 @@ export default function ActivityScreen() {
         }>();
 
         activities?.forEach(activity => {
-          const regId = activity.RegistrationID;
+          const regId = activity.registration_id;
           if (!regId) return;
-          const startParts = activity.Start_Time.split(':');
-          const endParts = activity.End_Time.split(':');
+          const startParts = activity.start_time.split(':');
+          const endParts = activity.end_time.split(':');
           const startMinutes = parseInt(startParts[0]) * 60 + parseInt(startParts[1]);
           const endMinutes = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
           let duration = endMinutes - startMinutes;
@@ -331,11 +331,11 @@ export default function ActivityScreen() {
           const existing = userStats.get(regId) || {
             totalDistance: 0, totalTime: 0, paceSum: 0, activityCount: 0, activeDays: new Set<string>(),
           };
-          existing.totalDistance += activity.Distance_km || 0;
+          existing.totalDistance += activity.distance_km || 0;
           existing.totalTime += duration;
-          existing.paceSum += activity.Pace_km_h || 0;
+          existing.paceSum += activity.pace_km_h || 0;
           existing.activityCount += 1;
-          existing.activeDays.add(activity.Activity_Date);
+          existing.activeDays.add(activity.activity_date);
           userStats.set(regId, existing);
         });
 
@@ -348,7 +348,7 @@ export default function ActivityScreen() {
           const fullName = [firstName, otherNames].filter(n => n).join(" ") || "Unknown";
           const activeDays = stats.activeDays.size;
           result.push({
-            RegistrationID: regId,
+            registrationId: regId,
             Name: fullName,
             Country: registration.country || "-",
             Residence: registration["city / town / district"] || "-",
@@ -379,12 +379,12 @@ export default function ActivityScreen() {
         const { data: activities, error: activityError } = await supabase
           .from("activities")
           .select(`
-            RegistrationID,
-            Activity_Date,
-            Distance_km,
-            Start_Time,
-            End_Time,
-            Pace_km_h
+            registration_id,
+            activity_date,
+            distance_km,
+            start_time,
+            end_time,
+            pace_km_h
           `);
 
         if (activityError) {
@@ -418,11 +418,11 @@ export default function ActivityScreen() {
       }>();
 
       activities?.forEach(activity => {
-        const regId = activity.RegistrationID;
+        const regId = activity.registration_id;
         if (!regId) return;
 
-        const startParts = activity.Start_Time.split(':');
-        const endParts = activity.End_Time.split(':');
+        const startParts = activity.start_time.split(':');
+        const endParts = activity.end_time.split(':');
         const startMinutes = parseInt(startParts[0]) * 60 + parseInt(startParts[1]);
         const endMinutes = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
         let duration = endMinutes - startMinutes;
@@ -436,11 +436,11 @@ export default function ActivityScreen() {
           activeDays: new Set<string>(),
         };
 
-        existing.totalDistance += activity.Distance_km || 0;
+        existing.totalDistance += activity.distance_km || 0;
         existing.totalTime += duration;
-        existing.paceSum += activity.Pace_km_h || 0;
+        existing.paceSum += activity.pace_km_h || 0;
         existing.activityCount += 1;
-        existing.activeDays.add(activity.Activity_Date);
+        existing.activeDays.add(activity.activity_date);
 
         userStats.set(regId, existing);
       });
@@ -456,7 +456,7 @@ export default function ActivityScreen() {
 
         const activeDays = stats.activeDays.size;
         result.push({
-          RegistrationID: regId,
+          registrationId: regId,
           Name: fullName,
           Country: registration.country || "-",
           Residence: registration["city / town / district"] || "-",
@@ -483,7 +483,7 @@ export default function ActivityScreen() {
   const sortedActivities = useMemo(() => 
     activities
       ? [...activities].sort((a, b) => {
-          return new Date(b.Activity_Date).getTime() - new Date(a.Activity_Date).getTime();
+          return new Date(b.activity_date).getTime() - new Date(a.activity_date).getTime();
         })
       : [],
     [activities]
@@ -491,14 +491,14 @@ export default function ActivityScreen() {
 
   const uniqueDaysCount = useMemo(() => 
     activities
-      ? new Set(activities.map(a => a.Activity_Date)).size
+      ? new Set(activities.map(a => a.activity_date)).size
       : 0,
     [activities]
   );
 
   const totalDistance = useMemo(() => 
     activities
-      ? activities.reduce((sum, a) => sum + a.Distance_km, 0)
+      ? activities.reduce((sum, a) => sum + a.distance_km, 0)
       : 0,
     [activities]
   );
@@ -506,8 +506,8 @@ export default function ActivityScreen() {
   const totalTimeMinutes = useMemo(() => 
     activities
       ? activities.reduce((sum, activity) => {
-          const startParts = activity.Start_Time.split(':');
-          const endParts = activity.End_Time.split(':');
+          const startParts = activity.start_time.split(':');
+          const endParts = activity.end_time.split(':');
           const startMinutes = parseInt(startParts[0]) * 60 + parseInt(startParts[1]);
           const endMinutes = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
           let duration = endMinutes - startMinutes;
@@ -565,7 +565,7 @@ export default function ActivityScreen() {
     if (!communityData) return [];
     let filtered = communityData;
     if (privateMode && user?.id) {
-      filtered = filtered.filter(item => item.RegistrationID !== user.id);
+      filtered = filtered.filter(item => item.registrationId !== user.id);
     }
     return [...filtered].sort((a, b) => {
       const distDiff = b.AvgDistance - a.AvgDistance;
@@ -580,7 +580,7 @@ export default function ActivityScreen() {
     if (!clubCommunityData) return [];
     let filtered = clubCommunityData;
     if (privateMode && user?.id) {
-      filtered = filtered.filter(item => item.RegistrationID !== user.id);
+      filtered = filtered.filter(item => item.registrationId !== user.id);
     }
     return [...filtered].sort((a, b) => {
       const distDiff = b.AvgDistance - a.AvgDistance;
@@ -653,14 +653,14 @@ export default function ActivityScreen() {
       const { count, error: countError } = await supabase
         .from("External Activity Submissions")
         .select("*", { count: "exact", head: true })
-        .eq("RegistrationID", user.id)
-        .eq("Activity_Date", formData.activityDate);
+        .eq("registration_id", user.id)
+        .eq("activity_date", formData.activityDate);
 
       const { count: existingCount, error: existingError } = await supabase
         .from("activities")
         .select("*", { count: "exact", head: true })
-        .eq("RegistrationID", user.id)
-        .eq("Activity_Date", formData.activityDate);
+        .eq("registration_id", user.id)
+        .eq("activity_date", formData.activityDate);
 
       if (countError) console.error("[ActivityLimit] Submissions count error:", countError);
       if (existingError) console.error("[ActivityLimit] Activities count error:", existingError);
@@ -683,12 +683,12 @@ export default function ActivityScreen() {
     try {
       console.log("[Submit External Activity] Passed all validations");
       console.log("[Submit External Activity] Submitting data:", {
-        RegistrationID: user.id,
-        Activity_Date: formData.activityDate,
-        Exercise_Type: formData.exerciseType,
-        Start_Time: formData.startTime + ":00",
+        registration_id: user.id,
+        activity_date: formData.activityDate,
+        exercise_type: formData.exerciseType,
+        start_time: formData.startTime + ":00",
         Duration: formData.duration,
-        Distance_km: distanceNum,
+        distance_km: distanceNum,
       });
 
       const { data, error } = await supabase
@@ -699,7 +699,7 @@ export default function ActivityScreen() {
           Exercise_Type: formData.exerciseType,
           Start_Time: formData.startTime + ":00",
           Duration: formData.duration,
-          Distance_km: distanceNum,
+          distance_km: distanceNum,
         })
         .select()
         .single();
@@ -933,7 +933,7 @@ export default function ActivityScreen() {
           ) : (
             <View style={styles.leaderboardContainer}>
               {sortedClubData.map((item, index) => (
-                <View key={item.RegistrationID} style={[styles.leaderboardCard, { backgroundColor: themeColors.cardBackground }]}>
+                <View key={item.registrationId} style={[styles.leaderboardCard, { backgroundColor: themeColors.cardBackground }]}>
                   <View style={styles.leaderboardHeader}>
                     <View style={styles.nameBadge}>
                       <Text style={styles.runnerName} numberOfLines={1}>{item.Name}</Text>
@@ -1004,7 +1004,7 @@ export default function ActivityScreen() {
           ) : (
             <View style={styles.leaderboardContainer}>
               {sortedCommunityData.map((item, index) => (
-                <View key={item.RegistrationID} style={[styles.leaderboardCard, { backgroundColor: themeColors.cardBackground }]}>
+                <View key={item.registrationId} style={[styles.leaderboardCard, { backgroundColor: themeColors.cardBackground }]}>
                   <View style={styles.leaderboardHeader}>
                     <View style={styles.nameBadge}>
                       <Text style={styles.runnerName} numberOfLines={1}>{item.Name}</Text>
@@ -1075,25 +1075,25 @@ export default function ActivityScreen() {
           ) : (
             <View style={styles.activitiesContainer}>
               {sortedActivities.map((activity) => (
-                <View key={activity.ActivityID} style={[styles.activityCard, { backgroundColor: themeColors.cardBackground }]}>
+                <View key={activity.activity_id} style={[styles.activityCard, { backgroundColor: themeColors.cardBackground }]}>
                   <View style={styles.activityRow}>
                     <View style={styles.activityMainInfo}>
-                      <Text style={styles.activityType}>{activity.Exercise_Type}</Text>
-                      <Text style={styles.activityDate}>{formatDate(activity.Activity_Date)}</Text>
+                      <Text style={styles.activityType}>{activity.exercise_type}</Text>
+                      <Text style={styles.activityDate}>{formatDate(activity.activity_date)}</Text>
                     </View>
                     <View style={styles.activityMetrics}>
                       <View style={styles.metricItem}>
-                        <Text style={styles.metricValue}>{activity.Distance_km.toFixed(1)}</Text>
+                        <Text style={styles.metricValue}>{activity.distance_km.toFixed(1)}</Text>
                         <Text style={styles.metricLabel}>km</Text>
                       </View>
                       <View style={styles.metricDot} />
                       <View style={styles.metricItem}>
-                        <Text style={styles.metricValue}>{calculateDuration(activity.Start_Time, activity.End_Time)}</Text>
+                        <Text style={styles.metricValue}>{calculateDuration(activity.start_time, activity.end_time)}</Text>
                         <Text style={styles.metricLabel}>time</Text>
                       </View>
                       <View style={styles.metricDot} />
                       <View style={styles.metricItem}>
-                        <Text style={styles.metricValue}>{convertPaceToMinPerKm(activity.Pace_km_h)}</Text>
+                        <Text style={styles.metricValue}>{convertPaceToMinPerKm(activity.pace_km_h)}</Text>
                         <Text style={styles.metricLabel}>pace</Text>
                       </View>
                     </View>

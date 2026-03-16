@@ -150,15 +150,15 @@ export default function ProfileScreen() {
       if (!user) return { totalDistance: 0, totalActivities: 0 };
       const { data, error } = await supabase
         .from("activities")
-        .select("Distance_km, Exercise_Type")
-        .eq("RegistrationID", user.id);
+        .select("distance_km, exercise_type")
+        .eq("registration_id", user.id);
       if (error) {
         console.error("[BadgeStats] Error:", error);
         return { totalDistance: 0, totalActivities: 0 };
       }
       const validTypes = ["Run", "Walk", "Treadmill", "Tredmill"];
-      const filtered = (data || []).filter((a) => validTypes.includes(a.Exercise_Type || ""));
-      const totalDistance = filtered.reduce((sum, a) => sum + (a.Distance_km || 0), 0);
+      const filtered = (data || []).filter((a) => validTypes.includes(a.exercise_type || ""));
+      const totalDistance = filtered.reduce((sum, a) => sum + (a.distance_km || 0), 0);
       return { totalDistance, totalActivities: filtered.length };
     },
     enabled: !!user,
@@ -267,16 +267,16 @@ export default function ProfileScreen() {
           .eq("registration_id", user.id).limit(1),
         supabase.from("club_membership_request").select("club")
           .eq("registration_id", user.id).maybeSingle(),
-        supabase.from("activities").select("Distance_km, Exercise_Type")
-          .eq("RegistrationID", user.id),
+        supabase.from("activities").select("distance_km, exercise_type")
+          .eq("registration_id", user.id),
         supabase.from("subscriptions").select("status, expires_at")
           .eq("registration_id", user.id).maybeSingle(),
-        supabase.from("fitness_goal").select("id")
+        supabase.from("fitness_goal").select("fitness_goal_id")
           .eq("registration_id", user.id).limit(1),
-        supabase.from("weight_target_goal").select("id")
+        supabase.from("weight_target_goal").select("weight_target_goal_id")
           .eq("registration_id", user.id).limit(1),
-        supabase.from("event_enrollments").select("EnrollmentID")
-          .eq("RegistrationID", user.id).limit(1),
+        supabase.from("event_enrollments").select("enrollment_id")
+          .eq("registration_id", user.id).limit(1),
       ]);
       const p = profileRes.data as any;
       const allFieldsFilled = !!(p && p.first_name && p.other_names && p.username && p.email && p.sex && p["city / town / district"] && p.country && p.dob);
@@ -284,9 +284,9 @@ export default function ProfileScreen() {
       const hasGoal = (goalsRes.data?.length ?? 0) > 0;
       const hasClub = !!(clubRes.data?.club && clubRes.data.club !== "");
       const validTypes = ["Run", "Walk", "Treadmill", "Tredmill"];
-      const filtered = (activitiesRes.data || []).filter((a: any) => validTypes.includes(a.Exercise_Type || ""));
+      const filtered = (activitiesRes.data || []).filter((a: any) => validTypes.includes(a.exercise_type || ""));
       const hasFiveActivities = filtered.length >= 5;
-      const totalDist = filtered.reduce((s: number, a: any) => s + (a.Distance_km || 0), 0);
+      const totalDist = filtered.reduce((s: number, a: any) => s + (a.distance_km || 0), 0);
       const hasAtLeastOneBadge = getEarnedBadgeCount(totalDist, filtered.length) > 0;
       const sub = subscriptionRes.data;
       let hasSubscription = false;

@@ -19,18 +19,18 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
 
 interface PendingActivity {
-  PendingActivityID: string;
-  RegistrationID: string;
-  Exercise_Type: string;
-  Distance_Entered: number;
-  Distance_Unit: string;
-  Time_Entered: string;
-  Photo_Path: string;
-  Status: string;
-  Admin_Notes: string | null;
-  Created_At: string;
-  Reviewed_At: string | null;
-  Reviewed_By: string | null;
+  pending_activity_id: string;
+  registration_id: string;
+  exercise_type: string;
+  distance_entered: number;
+  distance_unit: string;
+  time_entered: string;
+  photo_path: string;
+  status: string;
+  admin_notes: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
 }
 
 export default function AdminScreen() {
@@ -231,9 +231,9 @@ export default function AdminScreen() {
 
       const { data: activities, error: actError } = await supabase
         .from('activities')
-        .select('RegistrationID, Activity_Date')
-        .in('RegistrationID', regIds)
-        .order('Activity_Date', { ascending: false });
+        .select('registration_id, activity_date')
+        .in('registration_id', regIds)
+        .order('activity_date', { ascending: false });
 
       if (actError) {
         console.error('[Archive] Error fetching activities:', JSON.stringify(actError, null, 2));
@@ -242,13 +242,13 @@ export default function AdminScreen() {
 
       const activityMap = new Map<string, { lastDate: string; count: number }>();
       (activities || []).forEach((a: any) => {
-        const existing = activityMap.get(a.RegistrationID);
+        const existing = activityMap.get(a.registration_id);
         if (!existing) {
-          activityMap.set(a.RegistrationID, { lastDate: a.Activity_Date, count: 1 });
+          activityMap.set(a.registration_id, { lastDate: a.activity_date, count: 1 });
         } else {
           existing.count++;
-          if (a.Activity_Date > existing.lastDate) {
-            existing.lastDate = a.Activity_Date;
+          if (a.activity_date > existing.lastDate) {
+            existing.lastDate = a.activity_date;
           }
         }
       });
@@ -286,7 +286,7 @@ export default function AdminScreen() {
         const { data: userActivities, error: fetchErr } = await supabase
           .from('activities')
           .select('*')
-          .eq('RegistrationID', regId);
+          .eq('registration_id', regId);
 
         if (fetchErr) {
           console.error('[Archive] Error fetching activities for', regId, fetchErr);
@@ -306,7 +306,7 @@ export default function AdminScreen() {
           const { error: deleteErr } = await supabase
             .from('activities')
             .delete()
-            .eq('RegistrationID', regId);
+            .eq('registration_id', regId);
 
           if (deleteErr) {
             console.error('[Archive] Error deleting activities for', regId, deleteErr);
@@ -424,8 +424,8 @@ const { data: pendingActivities = [], error: pendingActivitiesError, isLoading: 
       const { data, error } = await supabase
         .from("pending_activities")
         .select("*")
-        .eq("Status", "pending")
-        .order("Created_At", { ascending: false });
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
 
       if (error) {
         const errorMessage = `Failed to fetch pending activities: ${error.message || 'Unknown error'}`;
@@ -446,14 +446,14 @@ const { data: pendingActivities = [], error: pendingActivitiesError, isLoading: 
 
   const approveMutation = useMutation({
     mutationFn: async (activity: PendingActivity) => {
-      const timeParts = activity.Time_Entered.split(':');
+      const timeParts = activity.time_entered.split(':');
       const hours = parseInt(timeParts[0] || '0', 10);
       const minutes = parseInt(timeParts[1] || '0', 10);
       const totalMinutes = hours * 60 + minutes;
       
-      let distanceKm = activity.Distance_Entered;
-      if (activity.Distance_Unit === 'mi') {
-        distanceKm = activity.Distance_Entered * 1.60934;
+      let distanceKm = activity.distance_entered;
+      if (activity.distance_unit === 'mi') {
+        distanceKm = activity.distance_entered * 1.60934;
       }
 
       const endTime = new Date();
@@ -463,13 +463,13 @@ const { data: pendingActivities = [], error: pendingActivitiesError, isLoading: 
       const { data, error } = await supabase
         .from("activities")
         .insert({
-          RegistrationID: activity.RegistrationID,
-          Activity_Date: new Date().toISOString().split('T')[0],
-          Exercise_Type: activity.Exercise_Type,
-          Distance_km: distanceKm,
-          Start_Time: startTime.toISOString().split('T')[1].split('.')[0],
-          End_Time: endTime.toISOString().split('T')[1].split('.')[0],
-          Pace_km_h: calculatedPace,
+          registration_id: activity.registration_id,
+          activity_date: new Date().toISOString().split('T')[0],
+          exercise_type: activity.exercise_type,
+          distance_km: distanceKm,
+          start_time: startTime.toISOString().split('T')[1].split('.')[0],
+          end_time: endTime.toISOString().split('T')[1].split('.')[0],
+          pace_km_h: calculatedPace,
         })
         .select();
 
@@ -478,7 +478,7 @@ const { data: pendingActivities = [], error: pendingActivitiesError, isLoading: 
       const { error: deleteError } = await supabase
         .from("pending_activities")
         .delete()
-        .eq("PendingActivityID", activity.PendingActivityID);
+        .eq("pending_activity_id", activity.pending_activity_id);
 
       if (deleteError) throw deleteError;
 
@@ -501,7 +501,7 @@ const { data: pendingActivities = [], error: pendingActivitiesError, isLoading: 
       const { error } = await supabase
         .from("pending_activities")
         .delete()
-        .eq("PendingActivityID", activityId);
+        .eq("pending_activity_id", activityId);
 
       if (error) throw error;
     },
@@ -1638,7 +1638,7 @@ const getStatusColor = (status: string) => {
           ) : (
             pendingActivities.map((activity) => (
               <TouchableOpacity
-                key={activity.PendingActivityID}
+                key={activity.pending_activity_id}
                 style={styles.activityCard}
                 onPress={() => {
                   setSelectedActivity(activity);
@@ -1646,14 +1646,14 @@ const getStatusColor = (status: string) => {
                 }}
               >
                 <View style={styles.activityInfo}>
-                  <Text style={styles.activityType}>{activity.Exercise_Type}</Text>
-                  <Text style={styles.activityDate}>{formatDate(activity.Created_At)}</Text>
+                  <Text style={styles.activityType}>{activity.exercise_type}</Text>
+                  <Text style={styles.activityDate}>{formatDate(activity.created_at)}</Text>
                   <View style={styles.activityStats}>
                     <Text style={styles.activityStat}>
-                      {activity.Distance_Entered.toFixed(2)} {activity.Distance_Unit}
+                      {activity.distance_entered.toFixed(2)} {activity.distance_unit}
                     </Text>
                     <Text style={styles.activityStat}>
-                      {formatTimeInterval(activity.Time_Entered)}
+                      {formatTimeInterval(activity.time_entered)}
                     </Text>
                   </View>
                 </View>
@@ -1768,23 +1768,23 @@ const getStatusColor = (status: string) => {
                 <ScrollView style={styles.activityModalBody}>
                   <View style={styles.detailSection}>
                     <Text style={styles.detailLabel}>Type</Text>
-                    <Text style={styles.detailValue}>{selectedActivity.Exercise_Type}</Text>
+                    <Text style={styles.detailValue}>{selectedActivity.exercise_type}</Text>
                   </View>
 
                   <View style={styles.detailSection}>
                     <Text style={styles.detailLabel}>Submitted At</Text>
-                    <Text style={styles.detailValue}>{formatDate(selectedActivity.Created_At)}</Text>
+                    <Text style={styles.detailValue}>{formatDate(selectedActivity.created_at)}</Text>
                   </View>
 
                   <View style={styles.detailRow}>
                     <View style={styles.detailSection}>
                       <Text style={styles.detailLabel}>Distance</Text>
-                      <Text style={styles.detailValue}>{selectedActivity.Distance_Entered.toFixed(2)} {selectedActivity.Distance_Unit}</Text>
+                      <Text style={styles.detailValue}>{selectedActivity.distance_entered.toFixed(2)} {selectedActivity.distance_unit}</Text>
                     </View>
                     <View style={styles.detailSection}>
                       <Text style={styles.detailLabel}>Time</Text>
                       <Text style={styles.detailValue}>
-                        {formatTimeInterval(selectedActivity.Time_Entered)}
+                        {formatTimeInterval(selectedActivity.time_entered)}
                       </Text>
                     </View>
                   </View>
@@ -1792,7 +1792,7 @@ const getStatusColor = (status: string) => {
                   <View style={styles.detailSection}>
                     <Text style={styles.detailLabel}>Treadmill Photo</Text>
                     <Image
-                      source={{ uri: selectedActivity.Photo_Path }}
+                      source={{ uri: selectedActivity.photo_path }}
                       style={styles.activityImage}
                       resizeMode="contain"
                     />
@@ -1802,7 +1802,7 @@ const getStatusColor = (status: string) => {
                 <View style={styles.activityActions}>
                   <TouchableOpacity
                     style={styles.rejectBtn}
-                    onPress={() => rejectMutation.mutate(selectedActivity.PendingActivityID)}
+                    onPress={() => rejectMutation.mutate(selectedActivity.pending_activity_id)}
                     disabled={rejectMutation.isPending}
                   >
                     <XCircle size={22} color="#fff" />
