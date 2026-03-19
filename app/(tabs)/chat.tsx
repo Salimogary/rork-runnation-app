@@ -22,7 +22,7 @@ import SubscriptionGate from "@/components/SubscriptionGate";
 
 interface Post {
   social_post_id: string;
-  user_id: string;
+  registration_id: string;
   photo_url?: string | null;
   caption?: string | null;
   activity_data?: {
@@ -75,7 +75,7 @@ export default function ChatScreen() {
         .from("social_posts")
         .select(`
           social_post_id,
-          user_id,
+          registration_id,
           photo_url,
           caption,
           activity_data,
@@ -94,7 +94,7 @@ export default function ChatScreen() {
         throw new Error(error.message || "Failed to fetch posts");
       }
 
-      const userIds = [...new Set((data || []).map(p => p.user_id))];
+      const userIds = [...new Set((data || []).map((p: any) => p.registration_id))];
       const { data: userData } = await supabase
         .from("registrations")
         .select("registration_id, first_name, username")
@@ -108,14 +108,14 @@ export default function ChatScreen() {
         const likes = post.post_likes || [];
         return {
           social_post_id: post.social_post_id,
-          user_id: post.user_id,
+          registration_id: post.registration_id,
           photo_url: post.photo_url,
           caption: post.caption,
           activity_data: post.activity_data,
           created_at: post.created_at,
           likes_count: likes.length,
           user_liked: likes.some((like: any) => like.user_id === registrationId),
-          user: userMap.get(post.user_id),
+          user: userMap.get(post.registration_id),
         };
       });
 
@@ -174,7 +174,7 @@ export default function ChatScreen() {
       const { data, error } = await supabase
         .from("social_posts")
         .insert({
-          user_id: registrationId,
+          registration_id: registrationId,
           photo_url: photoUri || null,
           caption: postCaption || null,
           activity_data: activityData || null,
@@ -490,7 +490,7 @@ export default function ChatScreen() {
                       </Text>
                     </View>
                   </View>
-                  {registrationId === post.user_id && (
+                  {registrationId === post.registration_id && (
                     <TouchableOpacity onPress={() => handleDeletePost(post.social_post_id)}>
                       <Trash2 size={20} color="#ef4444" />
                     </TouchableOpacity>
