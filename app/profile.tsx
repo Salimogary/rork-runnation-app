@@ -53,6 +53,7 @@ interface UserProfile {
   username: string;
   email?: string;
   phone?: string;
+  country_code?: string;
   sex?: string;
   city_town_district?: string;
   country?: string;
@@ -136,17 +137,13 @@ export default function ProfileScreen() {
       const contactEmail = contactRes.data?.email ?? null;
       const contactCountryCode = contactRes.data?.country_code ?? null;
       const contactPhone = contactRes.data?.phone ?? null;
-      const phoneDisplay = contactCountryCode && contactPhone
-        ? `${contactCountryCode}${contactPhone}`
-        : contactPhone
-        ? String(contactPhone)
-        : null;
-      console.log("Profile fetched:", regRes.data, "Contact email:", contactEmail, "Phone:", phoneDisplay);
+      console.log("Profile fetched:", regRes.data, "Contact email:", contactEmail, "Country code:", contactCountryCode, "Phone:", contactPhone);
 
       return {
         ...regRes.data,
         email: contactEmail || regRes.data.email,
-        phone: phoneDisplay,
+        country_code: contactCountryCode,
+        phone: contactPhone ? String(contactPhone) : null,
       };
     },
     enabled: !!user,
@@ -553,6 +550,8 @@ export default function ProfileScreen() {
         other_names: profile.other_names,
         username: profile.username,
         email: profile.email,
+        country_code: profile.country_code,
+        phone: profile.phone,
         sex: profile.sex,
         city_town_district: profile.city_town_district,
         country: profile.country,
@@ -600,7 +599,25 @@ export default function ProfileScreen() {
   }, [profile, userGoals, goals, clubMembership, clubs]);
 
   const handleSaveProfile = () => {
-    updateProfileMutation.mutate(formData);
+    const { country_code, phone, email, ...regFields } = formData;
+    updateProfileMutation.mutate(regFields, {
+      onSuccess: async () => {
+        if (user) {
+          const { error } = await supabase
+            .from("contacts")
+            .update({
+              country_code: country_code ?? null,
+              phone: phone ?? null,
+              email: email ?? null,
+            })
+            .eq("registration_id", user.id);
+          if (error) {
+            console.error("Error updating contacts:", error);
+          }
+          void queryClient.invalidateQueries({ queryKey: ["profile"] });
+        }
+      },
+    });
   };
 
   const handleSaveGoals = () => {
@@ -818,6 +835,26 @@ export default function ProfileScreen() {
               )}
             </TouchableOpacity>
           )}
+        </View>
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Phone</Text>
+        <View style={styles.phoneFieldRow}>
+          <TextInput
+            style={[styles.input, styles.countryCodeInput]}
+            value={String(formData.country_code ?? "")}
+            onChangeText={(text) => setFormData({ ...formData, country_code: text })}
+            placeholder="+1"
+            keyboardType="phone-pad"
+          />
+          <TextInput
+            style={[styles.input, styles.phoneNumberInput]}
+            value={String(formData.phone ?? "")}
+            onChangeText={(text) => setFormData({ ...formData, phone: text })}
+            placeholder="Phone number"
+            keyboardType="phone-pad"
+          />
         </View>
       </View>
 
@@ -1259,7 +1296,9 @@ export default function ProfileScreen() {
           <View style={styles.emailViewRow}>
             <Phone size={16} color="#666" style={{ marginLeft: 4 }} />
             <Text style={[styles.fieldValue, styles.emailViewValue]}>
-              {profile.phone || "Not set"}
+              {profile.country_code && profile.phone
+                ? `${profile.country_code} ${profile.phone}`
+                : profile.phone || "Not set"}
             </Text>
           </View>
         </View>
@@ -2096,6 +2135,16 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   emailInput: {
+    flex: 1,
+  },
+  phoneFieldRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  countryCodeInput: {
+    width: 80,
+  },
+  phoneNumberInput: {
     flex: 1,
   },
   verifyButton: {
