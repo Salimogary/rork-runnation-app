@@ -48,7 +48,7 @@ export default function HeaderProfile() {
       if (!user) throw new Error("Not authenticated");
       const { data, error } = await supabase
         .from("registrations")
-        .select('first_name, other_names, username, email, sex, city_town_district, country, dob, email_verified')
+        .select('first_name, other_names, username, sex, city_town_district, country, dob, email_verified, contacts(email)')
         .eq("registration_id", user.id)
         .maybeSingle();
       if (error) {
@@ -56,7 +56,8 @@ export default function HeaderProfile() {
         throw error;
       }
       console.log('[HeaderProfile] Profile data:', data);
-      return data || { first_name: "User" };
+      const contactEmail = (data as any)?.contacts?.[0]?.email ?? (data as any)?.contacts?.email ?? undefined;
+      return { ...data, email: contactEmail, first_name: data?.first_name || "User" } as HeaderUserProfile;
     },
     enabled: !!user,
   });
@@ -129,7 +130,7 @@ export default function HeaderProfile() {
       ] = await Promise.all([
         supabase
           .from("registrations")
-          .select('first_name, other_names, username, email, sex, city_town_district, country, dob, email_verified')
+          .select('first_name, other_names, username, sex, city_town_district, country, dob, email_verified, contacts(email)')
           .eq("registration_id", user.id)
           .maybeSingle(),
         supabase
@@ -174,7 +175,9 @@ export default function HeaderProfile() {
           .limit(1),
       ]);
 
-      const p = profileRes.data as HeaderUserProfile | null;
+      const rawP = profileRes.data as any;
+      const contactEmail = rawP?.contacts?.[0]?.email ?? rawP?.contacts?.email ?? undefined;
+      const p: HeaderUserProfile | null = rawP ? { ...rawP, email: contactEmail } : null;
       const allFieldsFilled = !!(
         p &&
         p.first_name &&
