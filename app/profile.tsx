@@ -182,7 +182,7 @@ export default function ProfileScreen() {
         .select("goal_id, Goal")
         .order("goal_id", { ascending: true });
       if (error) {
-        console.error("Error fetching goals:", error);
+        console.error("Error fetching goals:", JSON.stringify(error));
         return [];
       }
       return (data as GoalItem[]) || [];

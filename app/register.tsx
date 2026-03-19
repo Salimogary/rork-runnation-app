@@ -169,7 +169,7 @@ export default function RegisterScreen() {
         .order('goal_id', { ascending: true });
 
       if (error) {
-        console.error('Error fetching goals:', error);
+        console.error('Error fetching goals:', JSON.stringify(error));
       } else if (data) {
         setGoals(data as GoalItem[]);
       }
