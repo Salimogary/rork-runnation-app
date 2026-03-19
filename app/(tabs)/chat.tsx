@@ -15,6 +15,8 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
+import { decode } from "base64-arraybuffer";
 import { Camera, Heart, MessageCircle, User as UserIcon, Trash2, Activity, Smile } from "lucide-react-native";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useSubscription } from "@/contexts/SubscriptionContext";
@@ -150,6 +152,54 @@ export default function ChatScreen() {
 
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
+  const uploadImageToStorage = async (uri: string): Promise<string> => {
+    const fileName = `${registrationId}/${Date.now()}.jpg`;
+
+    if (Platform.OS === 'web') {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const { data, error } = await supabase.storage
+        .from('chat-photos')
+        .upload(fileName, blob, {
+          contentType: 'image/jpeg',
+          upsert: false,
+        });
+
+      if (error) {
+        console.error('Storage upload error (web):', error);
+        throw new Error(error.message || 'Failed to upload image');
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('chat-photos')
+        .getPublicUrl(data.path);
+
+      return urlData.publicUrl;
+    } else {
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: 'base64',
+      });
+
+      const { data, error } = await supabase.storage
+        .from('chat-photos')
+        .upload(fileName, decode(base64), {
+          contentType: 'image/jpeg',
+          upsert: false,
+        });
+
+      if (error) {
+        console.error('Storage upload error (native):', error);
+        throw new Error(error.message || 'Failed to upload image');
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('chat-photos')
+        .getPublicUrl(data.path);
+
+      return urlData.publicUrl;
+    }
+  };
+
   const createPostMutation = useMutation({
     mutationFn: async ({ 
       photoUri, 
@@ -162,12 +212,19 @@ export default function ChatScreen() {
     }) => {
       if (!registrationId) throw new Error("Not authenticated");
 
+      let publicPhotoUrl: string | null = null;
+      if (photoUri) {
+        console.log("Uploading image to storage...");
+        publicPhotoUrl = await uploadImageToStorage(photoUri);
+        console.log("Image uploaded:", publicPhotoUrl);
+      }
+
       console.log("Creating post...");
       const { data, error } = await supabase
         .from("social_posts")
         .insert({
           registration_id: registrationId,
-          photo_url: photoUri || null,
+          photo_url: publicPhotoUrl,
           caption: postCaption || null,
           activity_data: activityData || null,
         })
