@@ -37,6 +37,7 @@ import {
   BadgeCheck,
   Mail,
   Phone,
+  Lock,
 } from "lucide-react-native";
 import { getAllBadges, getEarnedBadgeCount, getProfileCompleteBadge } from "@/utils/badges";
 import type { Badge } from "@/utils/badges";
@@ -109,6 +110,9 @@ export default function ProfileScreen() {
   const [selectedClubId, setSelectedClubId] = useState<number | null>(null);
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [verificationCode, setVerificationCode] = useState("");
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState("");
 
   const { data: profile, isLoading } = useQuery<UserProfile>({
     queryKey: ["profile", user?.id, user],
@@ -1398,7 +1402,11 @@ export default function ProfileScreen() {
         {!editSection && (
           <TouchableOpacity
             style={styles.editButton}
-            onPress={() => setShowEditMenu(true)}
+            onPress={() => {
+              setPinInput("");
+              setPinError("");
+              setShowPinModal(true);
+            }}
           >
             <Edit2 size={20} color="#10b981" />
             <Text style={styles.editButtonText}>Edit</Text>
@@ -1482,6 +1490,110 @@ export default function ProfileScreen() {
                   </Text>
                 </View>
               ))}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal
+        visible={showPinModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowPinModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowPinModal(false)}
+        >
+          <View style={styles.pinModalContainer}>
+            <View style={styles.pinModalIconWrap}>
+              <Lock size={32} color="#10b981" />
+            </View>
+            <Text style={styles.pinModalTitle}>Enter Your PIN</Text>
+            <Text style={styles.pinModalDesc}>
+              Enter your 4-digit PIN to access editing
+            </Text>
+            <View style={styles.pinDotsRow}>
+              {[0, 1, 2, 3].map((i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.pinDot,
+                    pinInput.length > i && styles.pinDotFilled,
+                    pinError ? styles.pinDotError : null,
+                  ]}
+                />
+              ))}
+            </View>
+            <TextInput
+              style={styles.pinHiddenInput}
+              value={pinInput}
+              onChangeText={(text) => {
+                const digits = text.replace(/[^0-9]/g, "").slice(0, 4);
+                setPinInput(digits);
+                setPinError("");
+              }}
+              keyboardType="number-pad"
+              maxLength={4}
+              autoFocus
+              secureTextEntry
+              caretHidden
+            />
+            {pinError ? (
+              <Text style={styles.pinErrorText}>{pinError}</Text>
+            ) : null}
+            <View style={styles.pinModalActions}>
+              <TouchableOpacity
+                style={styles.pinModalCancel}
+                onPress={() => {
+                  setShowPinModal(false);
+                  setPinInput("");
+                  setPinError("");
+                }}
+              >
+                <Text style={styles.pinModalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.pinModalSubmit,
+                  pinInput.length !== 4 && styles.pinModalSubmitDisabled,
+                ]}
+                onPress={async () => {
+                  if (!user) return;
+                  try {
+                    const { data, error } = await supabase
+                      .from("registrations")
+                      .select("pin_hash")
+                      .eq("registration_id", user.id)
+                      .maybeSingle();
+                    if (error) {
+                      console.error("[PIN] Fetch error:", error);
+                      setPinError("Something went wrong. Try again.");
+                      return;
+                    }
+                    if (!data?.pin_hash) {
+                      setPinError("No PIN set. Please contact support.");
+                      return;
+                    }
+                    if (pinInput === data.pin_hash) {
+                      setShowPinModal(false);
+                      setPinInput("");
+                      setPinError("");
+                      setShowEditMenu(true);
+                    } else {
+                      setPinError("Incorrect PIN. Please try again.");
+                      setPinInput("");
+                    }
+                  } catch (err) {
+                    console.error("[PIN] Validation error:", err);
+                    setPinError("Something went wrong. Try again.");
+                  }
+                }}
+                disabled={pinInput.length !== 4}
+              >
+                <Text style={styles.pinModalSubmitText}>Confirm</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </TouchableOpacity>
@@ -2273,6 +2385,101 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#1d9bf0",
     fontWeight: "600" as const,
+  },
+  pinModalContainer: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 28,
+    width: "100%",
+    maxWidth: 340,
+    alignItems: "center",
+    gap: 12,
+  },
+  pinModalIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#ecfdf5",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+  },
+  pinModalTitle: {
+    fontSize: 20,
+    fontWeight: "700" as const,
+    color: "#111",
+  },
+  pinModalDesc: {
+    fontSize: 14,
+    color: "#666",
+    textAlign: "center" as const,
+    lineHeight: 20,
+  },
+  pinDotsRow: {
+    flexDirection: "row" as const,
+    gap: 16,
+    marginVertical: 12,
+  },
+  pinDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: "#d1d5db",
+    backgroundColor: "#fff",
+  },
+  pinDotFilled: {
+    backgroundColor: "#10b981",
+    borderColor: "#10b981",
+  },
+  pinDotError: {
+    borderColor: "#ef4444",
+    backgroundColor: "#fef2f2",
+  },
+  pinHiddenInput: {
+    position: "absolute" as const,
+    opacity: 0,
+    height: 1,
+    width: 1,
+  },
+  pinErrorText: {
+    fontSize: 13,
+    color: "#ef4444",
+    fontWeight: "600" as const,
+    textAlign: "center" as const,
+  },
+  pinModalActions: {
+    flexDirection: "row" as const,
+    gap: 12,
+    width: "100%",
+    marginTop: 4,
+  },
+  pinModalCancel: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center" as const,
+    backgroundColor: "#f5f5f5",
+  },
+  pinModalCancelText: {
+    fontSize: 15,
+    fontWeight: "600" as const,
+    color: "#666",
+  },
+  pinModalSubmit: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center" as const,
+    backgroundColor: "#10b981",
+  },
+  pinModalSubmitDisabled: {
+    opacity: 0.5,
+  },
+  pinModalSubmitText: {
+    fontSize: 15,
+    fontWeight: "700" as const,
+    color: "#fff",
   },
   subBanner: {
     flexDirection: "row",
