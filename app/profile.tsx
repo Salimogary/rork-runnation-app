@@ -61,7 +61,7 @@ interface UserProfile {
 
 interface GoalItem {
   goal_id: number;
-  Goal: string;
+  goal: string;
 }
 
 interface UserGoal {
@@ -179,7 +179,7 @@ export default function ProfileScreen() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("goals")
-        .select("goal_id, Goal")
+        .select("goal_id, goal")
         .order("goal_id", { ascending: true });
       if (error) {
         console.error("Error fetching goals:", JSON.stringify(error));
@@ -537,15 +537,15 @@ export default function ProfileScreen() {
     } else if (section === "goals") {
       const userGoalTexts = userGoals.map((ug) => ug.goal);
       const matchedIds = goals
-        .filter((g) => userGoalTexts.some((ut) => ut.toLowerCase() === g.Goal.toLowerCase()))
+        .filter((g) => userGoalTexts.some((ut) => ut.toLowerCase() === g.goal.toLowerCase()))
         .map((g) => g.goal_id);
       setSelectedGoalIds(matchedIds);
 
       const unmatchedGoals = userGoalTexts.filter(
-        (ut) => !goals.some((g) => g.Goal.toLowerCase() === ut.toLowerCase())
+        (ut) => !goals.some((g) => g.goal.toLowerCase() === ut.toLowerCase())
       );
       if (unmatchedGoals.length > 0) {
-        const otherGoal = goals.find((g) => g.Goal.toLowerCase() === "other");
+        const otherGoal = goals.find((g) => g.goal.toLowerCase() === "other");
         if (otherGoal && !matchedIds.includes(otherGoal.goal_id)) {
           setSelectedGoalIds((prev) => [...prev, otherGoal.goal_id]);
         }
@@ -587,10 +587,10 @@ export default function ProfileScreen() {
     }
     const goalTexts = selectedGoalIds.map((id) => {
       const goal = goals.find((g) => g.goal_id === id);
-      if (goal?.Goal?.toLowerCase() === "other") {
+      if (goal?.goal?.toLowerCase() === "other") {
         return otherGoalText || "Other";
       }
-      return goal?.Goal || "";
+      return goal?.goal || "";
     });
     updateGoalsMutation.mutate(goalTexts);
   };
@@ -643,7 +643,7 @@ export default function ProfileScreen() {
 
   const showsOtherInput = selectedGoalIds.some((id) => {
     const goal = goals.find((g) => g.goal_id === id);
-    return goal?.Goal?.toLowerCase() === "other";
+    return goal?.goal?.toLowerCase() === "other";
   });
 
   const getTrialEndDate = useCallback(() => {
@@ -856,7 +856,7 @@ export default function ProfileScreen() {
                   {isSelected && <Check size={14} color="#fff" />}
                 </View>
                 <Text style={[styles.goalCardText, isSelected && styles.goalCardTextSelected]}>
-                  {goal.Goal}
+                  {goal.goal}
                 </Text>
               </TouchableOpacity>
             );

@@ -52,7 +52,7 @@ interface ContactData {
 
 interface GoalItem {
   goal_id: number;
-  Goal: string;
+  goal: string;
 }
 
 interface ClubItem {
@@ -165,7 +165,7 @@ export default function RegisterScreen() {
       setGoalsLoading(true);
       const { data, error } = await supabase
         .from('goals')
-        .select('goal_id, Goal')
+        .select('goal_id, goal')
         .order('goal_id', { ascending: true });
 
       if (error) {
@@ -486,13 +486,13 @@ export default function RegisterScreen() {
     try {
       const hasOtherGoal = selectedGoalIds.some(id => {
         const goal = goals.find(g => g.goal_id === id);
-        return goal?.Goal?.toLowerCase() === 'other';
+        return goal?.goal?.toLowerCase() === 'other';
       });
 
       const rowsToInsert = selectedGoalIds.map(goalId => {
         const goal = goals.find(g => g.goal_id === goalId);
-        const isOther = goal?.Goal?.toLowerCase() === 'other';
-        const goalText = isOther && hasOtherGoal ? (otherGoalText || 'Other') : (goal?.Goal || '');
+        const isOther = goal?.goal?.toLowerCase() === 'other';
+        const goalText = isOther && hasOtherGoal ? (otherGoalText || 'Other') : (goal?.goal || '');
         return {
           registration_id: registrationId,
           goal: goalText,
@@ -644,7 +644,7 @@ export default function RegisterScreen() {
 
   const showsOtherInput = selectedGoalIds.some(id => {
     const goal = goals.find(g => g.goal_id === id);
-    return goal?.Goal?.toLowerCase() === 'other';
+    return goal?.goal?.toLowerCase() === 'other';
   });
 
   const COUNTRY_CODES = [
@@ -1090,7 +1090,7 @@ export default function RegisterScreen() {
                   {isSelected && <Check size={14} color="#fff" />}
                 </View>
                 <Text style={[styles.goalCardText, isSelected && styles.goalCardTextSelected]}>
-                  {goal.Goal}
+                  {goal.goal}
                 </Text>
               </TouchableOpacity>
             );

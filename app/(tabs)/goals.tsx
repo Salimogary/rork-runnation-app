@@ -67,7 +67,7 @@ interface HabitDeclaration {
 
 interface GoalItem {
   goal_id: number;
-  Goal: string;
+  goal: string;
 }
 
 interface RecentActivity {
@@ -191,7 +191,7 @@ export default function GoalsScreen() {
       try {
         const { data, error } = await supabase
           .from("goals")
-          .select("goal_id, Goal")
+          .select("goal_id, goal")
           .order("goal_id", { ascending: true });
         if (error) {
           console.log("[Goals] Goal order table not available, using defaults:", JSON.stringify(error));
@@ -223,7 +223,7 @@ export default function GoalsScreen() {
   const orderedGoalKeys = useMemo(() => {
     const keys: string[] = [];
     for (const g of goalOrder) {
-      const key = goalNameToKey(g.Goal);
+      const key = goalNameToKey(g.goal);
       if (key && !keys.includes(key)) {
         keys.push(key);
       }
