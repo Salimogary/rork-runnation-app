@@ -159,7 +159,7 @@ export default function ChatScreen() {
       const response = await fetch(uri);
       const blob = await response.blob();
       const { data, error } = await supabase.storage
-        .from('chat-photos')
+        .from('social_uploads')
         .upload(fileName, blob, {
           contentType: 'image/jpeg',
           upsert: false,
@@ -171,7 +171,7 @@ export default function ChatScreen() {
       }
 
       const { data: urlData } = supabase.storage
-        .from('chat-photos')
+        .from('social_uploads')
         .getPublicUrl(data.path);
 
       return urlData.publicUrl;
@@ -181,7 +181,7 @@ export default function ChatScreen() {
       });
 
       const { data, error } = await supabase.storage
-        .from('chat-photos')
+        .from('social_uploads')
         .upload(fileName, decode(base64), {
           contentType: 'image/jpeg',
           upsert: false,
@@ -193,7 +193,7 @@ export default function ChatScreen() {
       }
 
       const { data: urlData } = supabase.storage
-        .from('chat-photos')
+        .from('social_uploads')
         .getPublicUrl(data.path);
 
       return urlData.publicUrl;
