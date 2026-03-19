@@ -223,10 +223,18 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
+const defaultThemeValue: ThemeContextValue = {
+  isDark: false,
+  colors: lightColors,
+  toggleTheme: () => {},
+  setDarkMode: () => {},
+};
+
 export function useTheme(): ThemeContextValue {
   const context = useContext(ThemeContext);
   if (!context) {
-    throw new Error('useTheme must be used within a ThemeProvider');
+    console.warn('[ThemeContext] useTheme called outside ThemeProvider, returning defaults');
+    return defaultThemeValue;
   }
   return context;
 }

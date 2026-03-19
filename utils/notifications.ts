@@ -82,8 +82,8 @@ export async function sendLocalNotification(
         data: data ?? {},
         sound: 'default',
       },
-      trigger: null as any,
-    });
+      trigger: null,
+    } as any);
     console.log('[Notifications] Sent:', title);
   } catch (error) {
     console.error('[Notifications] Send error:', error);

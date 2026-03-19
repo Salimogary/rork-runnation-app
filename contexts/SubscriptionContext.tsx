@@ -225,10 +225,23 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   );
 }
 
+const defaultSubscriptionValue: SubscriptionContextValue = {
+  subscriptionStatus: 'trial',
+  isLoading: true,
+  trialDaysRemaining: 90,
+  trialExpired: false,
+  isSubscribed: true,
+  subscription: null,
+  userRegion: 'international',
+  availablePlans: [],
+  refreshSubscription: () => {},
+};
+
 export function useSubscription(): SubscriptionContextValue {
   const context = useContext(SubscriptionContext);
   if (context === undefined) {
-    throw new Error('useSubscription must be used within a SubscriptionProvider');
+    console.warn('[SubscriptionContext] useSubscription called outside SubscriptionProvider, returning defaults');
+    return defaultSubscriptionValue;
   }
   return context;
 }

@@ -27,13 +27,11 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
   const setupDone = useRef(false);
 
   useEffect(() => {
-    if (!setupDone.current) {
+    if (!setupDone.current && Platform.OS !== 'web') {
       setupDone.current = true;
-      try {
-        void setupNotifications();
-      } catch (e) {
+      setupNotifications().catch((e) => {
         console.warn('[NotifContext] Setup failed:', e);
-      }
+      });
     }
   }, []);
 
