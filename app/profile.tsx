@@ -36,6 +36,7 @@ import {
   Award,
   BadgeCheck,
   Mail,
+  Phone,
 } from "lucide-react-native";
 import { getAllBadges, getEarnedBadgeCount, getProfileCompleteBadge } from "@/utils/badges";
 import type { Badge } from "@/utils/badges";
@@ -51,6 +52,7 @@ interface UserProfile {
   other_names?: string;
   username: string;
   email?: string;
+  phone?: string;
   sex?: string;
   city_town_district?: string;
   country?: string;
@@ -120,7 +122,7 @@ export default function ProfileScreen() {
           .maybeSingle(),
         supabase
           .from("contacts")
-          .select("email")
+          .select("email, country_code, phone")
           .eq("registration_id", user.id)
           .maybeSingle(),
       ]);
@@ -132,11 +134,19 @@ export default function ProfileScreen() {
       if (!regRes.data) throw new Error("No profile found for this user");
 
       const contactEmail = contactRes.data?.email ?? null;
-      console.log("Profile fetched:", regRes.data, "Contact email:", contactEmail);
+      const contactCountryCode = contactRes.data?.country_code ?? null;
+      const contactPhone = contactRes.data?.phone ?? null;
+      const phoneDisplay = contactCountryCode && contactPhone
+        ? `${contactCountryCode}${contactPhone}`
+        : contactPhone
+        ? String(contactPhone)
+        : null;
+      console.log("Profile fetched:", regRes.data, "Contact email:", contactEmail, "Phone:", phoneDisplay);
 
       return {
         ...regRes.data,
         email: contactEmail || regRes.data.email,
+        phone: phoneDisplay,
       };
     },
     enabled: !!user,
@@ -1243,6 +1253,16 @@ export default function ProfileScreen() {
             <Text style={styles.fieldValue}>{field.value || "Not set"}</Text>
           </View>
         ))}
+
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>Phone</Text>
+          <View style={styles.emailViewRow}>
+            <Phone size={16} color="#666" style={{ marginLeft: 4 }} />
+            <Text style={[styles.fieldValue, styles.emailViewValue]}>
+              {profile.phone || "Not set"}
+            </Text>
+          </View>
+        </View>
 
         <View style={styles.field}>
           <Text style={styles.fieldLabel}>Email</Text>
