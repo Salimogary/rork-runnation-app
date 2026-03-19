@@ -41,14 +41,6 @@ export default function ShopScreen() {
   const { registrationId, verifyPin } = useAuth();
   const { colors: themeColors } = useTheme();
   const { isSubscribed } = useSubscription();
-
-  if (!isSubscribed) {
-    return (
-      <SubscriptionGate featureName="Shop">
-        <></>
-      </SubscriptionGate>
-    );
-  }
   const router = useRouter();
   const trpcUtils = trpc.useUtils();
   const [pinUnlocked, setPinUnlocked] = useState(false);
@@ -263,6 +255,14 @@ export default function ShopScreen() {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     router.push("/checkout" as any);
   };
+
+  if (!isSubscribed) {
+    return (
+      <SubscriptionGate featureName="Shop">
+        <></>
+      </SubscriptionGate>
+    );
+  }
 
   if (!pinUnlocked) {
     return (

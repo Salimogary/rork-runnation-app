@@ -53,14 +53,6 @@ export default function ChatScreen() {
   const { user, registrationId } = useAuth();
   const { colors: themeColors } = useTheme();
   const { isSubscribed } = useSubscription();
-
-  if (!isSubscribed) {
-    return (
-      <SubscriptionGate featureName="Chat">
-        <></>
-      </SubscriptionGate>
-    );
-  }
   const queryClient = useQueryClient();
   const [caption, setCaption] = useState("");
   const [showActivity, setShowActivity] = useState(false);
@@ -313,6 +305,14 @@ export default function ChatScreen() {
   const addEmoji = (emoji: string) => {
     setCaption(caption + emoji);
   };
+
+  if (!isSubscribed) {
+    return (
+      <SubscriptionGate featureName="Chat">
+        <></>
+      </SubscriptionGate>
+    );
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>

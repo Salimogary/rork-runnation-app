@@ -5,7 +5,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { Plus, X, Calendar, MapPin, TrendingUp, Clock, Award, ChevronRight, Users, Download } from "lucide-react-native";
-import { File, Paths } from 'expo-file-system/next';
+
 import { Platform } from 'react-native';
 import colors from "@/constants/colors";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -113,7 +113,8 @@ export default function ActivityScreen() {
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
       } else {
-        const file = new File(Paths.cache, 'my_activities.csv');
+        const { File: FSFile, Paths: FSPaths } = await import('expo-file-system/next');
+        const file = new FSFile(FSPaths.cache, 'my_activities.csv');
         file.write(csvContent);
         const sharingModule = await import('expo-sharing');
         await sharingModule.shareAsync(file.uri, {

@@ -22,14 +22,6 @@ export default function EventsScreen() {
   const { registrationId } = useAuth();
   const { colors: themeColors } = useTheme();
   const { isSubscribed } = useSubscription();
-
-  if (!isSubscribed) {
-    return (
-      <SubscriptionGate featureName="Events">
-        <></>
-      </SubscriptionGate>
-    );
-  }
   const router = useRouter();
 
   const { data: events, isLoading: eventsLoading, refetch: refetchEvents } = trpc.admin.getEvents.useQuery(undefined, {
@@ -65,6 +57,14 @@ export default function EventsScreen() {
   const sortedEvents = events
     ? [...events].sort((a, b) => new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime())
     : [];
+
+  if (!isSubscribed) {
+    return (
+      <SubscriptionGate featureName="Events">
+        <></>
+      </SubscriptionGate>
+    );
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>

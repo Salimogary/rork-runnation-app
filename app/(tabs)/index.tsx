@@ -43,13 +43,6 @@ export default function ExerciseScreen() {
   const { colors: themeColors } = useTheme();
   const { isSubscribed } = useSubscription();
 
-  if (!isSubscribed) {
-    return (
-      <SubscriptionGate featureName="Exercise">
-        <></>
-      </SubscriptionGate>
-    );
-  }
   const [runState, setRunState] = useState<RunState>("idle");
   const [distance, setDistance] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -508,6 +501,14 @@ export default function ExerciseScreen() {
       setPace(calculatedPace);
     }
   }, [distance, duration]);
+
+  if (!isSubscribed) {
+    return (
+      <SubscriptionGate featureName="Exercise">
+        <></>
+      </SubscriptionGate>
+    );
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
