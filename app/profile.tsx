@@ -112,19 +112,32 @@ export default function ProfileScreen() {
     queryFn: async () => {
       if (!user) throw new Error("Not authenticated");
       console.log("Fetching profile for user:", user.id);
-      const { data, error } = await supabase
-        .from("registrations")
-        .select("*")
-        .eq("registration_id", user.id)
-        .maybeSingle();
+      const [regRes, contactRes] = await Promise.all([
+        supabase
+          .from("registrations")
+          .select("*")
+          .eq("registration_id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("contacts")
+          .select("email")
+          .eq("registration_id", user.id)
+          .maybeSingle(),
+      ]);
 
-      if (error) {
-        console.error("Error fetching profile:", JSON.stringify(error, null, 2));
-        throw new Error(`Profile fetch failed: ${error.message || JSON.stringify(error)}`);
+      if (regRes.error) {
+        console.error("Error fetching profile:", JSON.stringify(regRes.error, null, 2));
+        throw new Error(`Profile fetch failed: ${regRes.error.message || JSON.stringify(regRes.error)}`);
       }
-      if (!data) throw new Error("No profile found for this user");
-      console.log("Profile fetched:", data);
-      return data;
+      if (!regRes.data) throw new Error("No profile found for this user");
+
+      const contactEmail = contactRes.data?.email ?? null;
+      console.log("Profile fetched:", regRes.data, "Contact email:", contactEmail);
+
+      return {
+        ...regRes.data,
+        email: contactEmail || regRes.data.email,
+      };
     },
     enabled: !!user,
   });
