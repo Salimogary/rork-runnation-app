@@ -839,7 +839,7 @@ export default function ExerciseScreen() {
               <View style={styles.categorySection}>
                 <View style={styles.categoryHeaderRow}>
                   <View style={[styles.categoryDot, { backgroundColor: colors.primary }]} />
-                  <Text style={[styles.categoryTitle, { color: themeColors.text }]}>Exercise</Text>
+                  <Text style={[styles.categoryTitle, { color: themeColors.text }]}>Record Exercise</Text>
                 </View>
                 <Text style={[styles.categorySubtitle, { color: themeColors.textSecondary }]}>GPS-tracked outdoor activities</Text>
 
@@ -856,7 +856,6 @@ export default function ExerciseScreen() {
                     >
                       <Footprints size={28} color={colors.white} />
                       <Text style={styles.exerciseCardTitle}>Walk</Text>
-                      <Text style={styles.exerciseCardSub}>Outdoor</Text>
                     </LinearGradient>
                   </TouchableOpacity>
 
@@ -872,7 +871,6 @@ export default function ExerciseScreen() {
                     >
                       <Play size={28} color={colors.white} />
                       <Text style={styles.exerciseCardTitle}>Run</Text>
-                      <Text style={styles.exerciseCardSub}>Outdoor</Text>
                     </LinearGradient>
                   </TouchableOpacity>
                 </View>
@@ -883,7 +881,7 @@ export default function ExerciseScreen() {
               <View style={styles.categorySection}>
                 <View style={styles.categoryHeaderRow}>
                   <View style={[styles.categoryDot, { backgroundColor: colors.secondary }]} />
-                  <Text style={[styles.categoryTitle, { color: themeColors.text }]}>Add Activity</Text>
+                  <Text style={[styles.categoryTitle, { color: themeColors.text }]}>Add Exercise Recordings from Other Source</Text>
                 </View>
                 <Text style={[styles.categorySubtitle, { color: themeColors.textSecondary }]}>Import from other sources</Text>
 
