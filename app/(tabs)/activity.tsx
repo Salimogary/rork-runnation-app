@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, X, Calendar, MapPin, TrendingUp, Clock, Award, ChevronRight, Users, Download } from "lucide-react-native";
+import { X, Calendar, MapPin, TrendingUp, Clock, Award, Users, Download } from "lucide-react-native";
 
 import { Platform } from 'react-native';
 import colors from "@/constants/colors";
@@ -850,15 +850,6 @@ export default function ActivityScreen() {
         {activeTab === "runs" && (
           <View style={styles.headerButtonsRow}>
             <TouchableOpacity
-              style={styles.addButton}
-              onPress={() => setShowExternalForm(true)}
-              disabled={isSubmitting}
-              activeOpacity={0.8}
-            >
-              <Plus size={20} color={colors.primary} />
-              <Text style={styles.addButtonText}>Add Activity</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
               style={[styles.saveButton, !isSubscribed && styles.saveButtonLocked]}
               onPress={handleSaveCSV}
               disabled={isSaving}
@@ -867,7 +858,7 @@ export default function ActivityScreen() {
             >
               {!isSubscribed ? <Lock size={16} color="#9CA3AF" /> : <Download size={16} color={colors.primary} />}
               <Text style={[styles.saveButtonText, !isSubscribed && styles.saveButtonTextLocked]}>
-                {isSaving ? 'Saving...' : 'Save'}
+                {isSaving ? 'Exporting...' : 'Export My Runs data'}
               </Text>
             </TouchableOpacity>
           </View>
