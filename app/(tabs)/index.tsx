@@ -1167,7 +1167,7 @@ export default function ExerciseScreen() {
               <View style={styles.inputGroup}>
                 <Text style={[styles.inputLabel, { color: themeColors.text }]}>Activity Type *</Text>
                 <View style={styles.typeChipsContainer}>
-                  {(["Run", "Walk", "Treadmill"] as const).map((type) => (
+                  {(["Run", "Walk"] as const).map((type) => (
                     <TouchableOpacity
                       key={type}
                       style={[
