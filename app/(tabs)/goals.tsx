@@ -213,7 +213,7 @@ export default function GoalsScreen() {
     if (name.includes("fitness") || name.includes("pace")) return "fitness";
     if (name.includes("weight")) return "weight";
     if (name.includes("health")) return "health";
-    if (name.includes("habit") || name.includes("discipline")) return "habit";
+    if (name.includes("habit") || name.includes("discipline") || name.includes("training plan")) return "habit";
     if (name.includes("medal")) return "medals";
     if (name.includes("community") || name.includes("compete")) return "community";
     if (name.includes("event")) return "events";
@@ -827,7 +827,7 @@ export default function GoalsScreen() {
       void queryClient.invalidateQueries({ queryKey: ["habitActivities", user?.id] });
       setShowHabitModal(false);
       resetHabitForm();
-      Alert.alert("Success", "Your habit declaration has been saved!");
+      Alert.alert("Success", "Your training plan has been saved!");
     },
     onError: (error: any) => {
       console.error("[Goals] Save habit declaration error:", error);
@@ -1488,7 +1488,7 @@ export default function GoalsScreen() {
       fitness: { key: "fitness", label: "Improve Fitness", isTracked: !!fitnessGoal, icon: "zap" },
       weight: { key: "weight", label: "Weight Loss", isTracked: !!weightTargetGoal, icon: "scale" },
       health: { key: "health", label: "General Health", isTracked: healthEntries.length > 0, icon: "heart" },
-      habit: { key: "habit", label: "Build My Habit", isTracked: !!habitDeclaration, icon: "flame" },
+      habit: { key: "habit", label: "Commit to a Training Plan", isTracked: !!habitDeclaration, icon: "flame" },
       medals: { key: "medals", label: "Earn Medals", isTracked: !!medalGoalData && medalGoalData.enrolledEvents > 0, icon: "trophy" },
       community: { key: "community", label: "Compete in Community", isTracked: !!communityRanking, icon: "users" },
     };
@@ -1921,7 +1921,7 @@ export default function GoalsScreen() {
               <View key="habit" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Flame size={18} color="#0D9488" />
-                  <Text style={styles.sectionTitle}>Build My Habit</Text>
+                  <Text style={styles.sectionTitle}>Commit to a Training Plan</Text>
                   <TouchableOpacity onPress={openEditHabit} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -1976,7 +1976,7 @@ export default function GoalsScreen() {
                     <View style={styles.noActivitiesInfo}>
                       <Flame size={24} color={colors.textLight} />
                       <Text style={styles.noActivitiesText}>
-                        Start logging activities to track your commitment
+                        Start logging activities to track your training progress
                       </Text>
                     </View>
                   )}
@@ -1986,17 +1986,17 @@ export default function GoalsScreen() {
               <View key="habit" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Flame size={18} color="#0D9488" />
-                  <Text style={styles.sectionTitle}>Build My Habit</Text>
+                  <Text style={styles.sectionTitle}>Commit to a Training Plan</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={() => { resetHabitForm(); setShowHabitModal(true); }} activeOpacity={0.8}>
                   <LinearGradient colors={["#0D9488", "#14B8A6"]} style={styles.setupGoalGradient}>
                     <Flame size={32} color={colors.white} />
-                    <Text style={styles.setupGoalTitle}>Build My Habit</Text>
+                    <Text style={styles.setupGoalTitle}>Commit to a Training Plan</Text>
                     <Text style={styles.setupGoalSubtext}>
-                      Make your declaration and track your commitment
+                      Set your training plan and track your consistency
                     </Text>
                     <View style={styles.setupGoalButton}>
-                      <Text style={[styles.setupGoalButtonText, { color: "#0D9488" }]}>Make Declaration</Text>
+                      <Text style={[styles.setupGoalButtonText, { color: "#0D9488" }]}>Set Training Plan</Text>
                       <ChevronRight size={16} color="#0D9488" />
                     </View>
                   </LinearGradient>
