@@ -97,6 +97,7 @@ export default function ExerciseScreen() {
 
   const [showOtherSportsModal, setShowOtherSportsModal] = useState(false);
   const [otherSportsForm, setOtherSportsForm] = useState({
+    sportsApp: "",
     activityDate: "",
     exerciseType: "Run" as "Run" | "Walk" | "Treadmill",
     startTime: "",
@@ -606,6 +607,11 @@ export default function ExerciseScreen() {
       return;
     }
 
+    if (!otherSportsForm.sportsApp.trim()) {
+      Alert.alert("Error", "Please enter the Sports App name");
+      return;
+    }
+
     if (!otherSportsForm.activityDate || !otherSportsForm.startTime || !otherSportsForm.duration || !otherSportsForm.distanceKm) {
       Alert.alert("Error", "Please fill in all fields");
       return;
@@ -690,14 +696,15 @@ export default function ExerciseScreen() {
       });
 
       const { data, error } = await supabase
-        .from("External Activity Submissions")
+        .from("external_activity_submissions")
         .insert({
-          RegistrationID: user.id,
-          Activity_Date: otherSportsForm.activityDate,
-          Exercise_Type: otherSportsForm.exerciseType,
-          Start_Time: otherSportsForm.startTime + ":00",
-          Duration: otherSportsForm.duration,
+          registration_id: user.id,
+          activity_date: otherSportsForm.activityDate,
+          exercise_type: otherSportsForm.exerciseType,
+          start_time: otherSportsForm.startTime + ":00",
+          duration: otherSportsForm.duration,
           distance_km: distanceNum,
+          sports_app: otherSportsForm.sportsApp.trim(),
         })
         .select()
         .single();
@@ -713,6 +720,7 @@ export default function ExerciseScreen() {
 
       setShowOtherSportsModal(false);
       setOtherSportsForm({
+        sportsApp: "",
         activityDate: "",
         exerciseType: "Run",
         startTime: "",
@@ -1152,6 +1160,17 @@ export default function ExerciseScreen() {
               <Text style={[styles.modalSubtitle, { color: themeColors.textSecondary }]}>
                 📱 Import from other running apps
               </Text>
+
+              <View style={styles.inputGroup}>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Sports App Name *</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                  placeholder="e.g., Strava, Nike Run Club, Garmin"
+                  value={otherSportsForm.sportsApp}
+                  onChangeText={(text) => setOtherSportsForm((prev) => ({ ...prev, sportsApp: text }))}
+                  placeholderTextColor={themeColors.textLight}
+                />
+              </View>
 
               <View style={styles.inputGroup}>
                 <Text style={[styles.inputLabel, { color: themeColors.text }]}>Date *</Text>
