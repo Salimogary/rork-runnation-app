@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { Target, TrendingDown, TrendingUp, Award, Calendar, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints, Users, ArrowUp, ArrowDown, Minus, Trophy, Flame } from "lucide-react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import colors from "@/constants/colors";
@@ -176,6 +177,11 @@ export default function GoalsScreen() {
   const [habitFrequency, setHabitFrequency] = useState<string>("daily");
   const [habitStartDate, setHabitStartDate] = useState<string>("");
   const [previousRank, setPreviousRank] = useState<StoredRankSnapshot | null>(null);
+  const router = useRouter();
+
+  const navigateToSmartWatch = useCallback(() => {
+    router.push('/?openSmartWatch=true');
+  }, [router]);
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -598,7 +604,7 @@ export default function GoalsScreen() {
     },
   });
 
-  const healthScore = useMemo(() => {
+  const _healthScore = useMemo(() => {
     if (healthEntries.length === 0) return null;
 
     let stepsTotal = 0;
@@ -726,18 +732,29 @@ export default function GoalsScreen() {
   }, [healthStepsInput, healthHeartRateInput, healthSleepInput, healthSpo2Input, logHealthMutation]);
 
   const getHealthScoreColor = (score: number): string => {
-    if (score >= 80) return "#10B981";
-    if (score >= 60) return "#F59E0B";
-    if (score >= 40) return "#FF6B35";
+    if (score >= 85) return "#10B981";
+    if (score >= 70) return "#F59E0B";
+    if (score >= 50) return "#FF6B35";
     return "#EF4444";
   };
 
   const getHealthScoreLabel = (score: number): string => {
-    if (score >= 80) return "Excellent";
-    if (score >= 60) return "Good";
-    if (score >= 40) return "Fair";
+    if (score >= 85) return "Excellent";
+    if (score >= 70) return "Good";
+    if (score >= 50) return "Fair";
     return "Needs Work";
   };
+
+  const last3HealthScores = useMemo(() => {
+    return healthEntries
+      .filter((e) => e.overall_health_score !== null && e.overall_health_score !== undefined)
+      .slice(0, 3)
+      .map((e) => ({
+        health_id: e.health_id,
+        date: e.record_date,
+        score: e.overall_health_score as number,
+      }));
+  }, [healthEntries]);
 
   const { data: habitDeclaration, isLoading: habitDeclarationLoading, refetch: refetchHabit } = useQuery<HabitDeclaration | null>({
     queryKey: ["habitDeclaration", user?.id],
@@ -1775,122 +1792,82 @@ export default function GoalsScreen() {
           }
 
           if (goalKey === "health") {
-            return healthScore ? (
+            return last3HealthScores.length > 0 ? (
               <View key="health" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Heart size={18} color="#E11D48" />
                   <Text style={styles.sectionTitle}>General Health</Text>
-                  <TouchableOpacity onPress={() => setShowHealthForm(true)} style={styles.editButton} activeOpacity={0.7}>
+                  <TouchableOpacity onPress={navigateToSmartWatch} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Log</Text>
                     <Plus size={14} color={colors.primary} />
                   </TouchableOpacity>
                 </View>
                 <View style={styles.healthCard}>
                   <View style={styles.healthScoreCircleContainer}>
-                    <View style={[styles.healthScoreCircle, { borderColor: getHealthScoreColor(healthScore.overall) }]}>
-                      <Text style={[styles.healthScoreNumber, { color: getHealthScoreColor(healthScore.overall) }]}>
-                        {healthScore.overall}
+                    <View style={[styles.healthScoreCircle, { borderColor: getHealthScoreColor(last3HealthScores[0].score) }]}>
+                      <Text style={[styles.healthScoreNumber, { color: getHealthScoreColor(last3HealthScores[0].score) }]}>
+                        {last3HealthScores[0].score}
                       </Text>
                       <Text style={styles.healthScoreOutOf}>/100</Text>
                     </View>
-                    <View style={[styles.healthScorePill, { backgroundColor: getHealthScoreColor(healthScore.overall) + "18" }]}>
-                      <Text style={[styles.healthScorePillText, { color: getHealthScoreColor(healthScore.overall) }]}>
-                        {getHealthScoreLabel(healthScore.overall)}
+                    <View style={[styles.healthScorePill, { backgroundColor: getHealthScoreColor(last3HealthScores[0].score) + "18" }]}>
+                      <Text style={[styles.healthScorePillText, { color: getHealthScoreColor(last3HealthScores[0].score) }]}>
+                        {getHealthScoreLabel(last3HealthScores[0].score)}
                       </Text>
                     </View>
+                    <Text style={styles.healthLatestDateText}>Latest: {formatGoalDate(last3HealthScores[0].date)}</Text>
                   </View>
 
-                  <View style={styles.healthBreakdown}>
-                    <View style={styles.healthMetricRow}>
-                      <View style={styles.healthMetricIcon}>
-                        <Footprints size={16} color="#4A90E2" />
-                      </View>
-                      <View style={styles.healthMetricInfo}>
-                        <Text style={styles.healthMetricLabel}>Steps</Text>
-                        <Text style={styles.healthMetricValue}>{healthScore.steps.avg.toLocaleString()}/day</Text>
-                      </View>
-                      <View style={styles.healthMetricBarContainer}>
-                        <View style={styles.healthMetricBarTrack}>
-                          <View style={[styles.healthMetricBarFill, { width: `${healthScore.steps.score}%`, backgroundColor: "#4A90E2" }]} />
-                        </View>
-                        <Text style={styles.healthMetricScore}>{healthScore.steps.score}</Text>
-                      </View>
-                    </View>
-
-                    {healthScore.heartRate && (
-                      <View style={styles.healthMetricRow}>
-                        <View style={styles.healthMetricIcon}>
-                          <Heart size={16} color="#E11D48" />
-                        </View>
-                        <View style={styles.healthMetricInfo}>
-                          <Text style={styles.healthMetricLabel}>Heart Rate</Text>
-                          <Text style={styles.healthMetricValue}>{healthScore.heartRate.avg} bpm</Text>
-                        </View>
-                        <View style={styles.healthMetricBarContainer}>
-                          <View style={styles.healthMetricBarTrack}>
-                            <View style={[styles.healthMetricBarFill, { width: `${healthScore.heartRate.score}%`, backgroundColor: "#E11D48" }]} />
+                  <View style={styles.healthScoresListSection}>
+                    <Text style={styles.weightHistoryTitle}>Last 3 Health Scores</Text>
+                    {last3HealthScores.map((item, idx) => {
+                      const ratingColor = getHealthScoreColor(item.score);
+                      const ratingLabel = getHealthScoreLabel(item.score);
+                      return (
+                        <View key={item.health_id} style={styles.healthScoreRow}>
+                          <View style={styles.healthScoreRowLeft}>
+                            <View style={[styles.healthScoreRankBadge, idx === 0 && { backgroundColor: ratingColor + "20" }]}>
+                              <Text style={[styles.healthScoreRankText, idx === 0 && { color: ratingColor }]}>{idx + 1}</Text>
+                            </View>
+                            <Text style={styles.healthScoreRowDate}>{formatGoalDate(item.date)}</Text>
                           </View>
-                          <Text style={styles.healthMetricScore}>{healthScore.heartRate.score}</Text>
-                        </View>
-                      </View>
-                    )}
-
-                    {healthScore.sleep && (
-                      <View style={styles.healthMetricRow}>
-                        <View style={styles.healthMetricIcon}>
-                          <Moon size={16} color="#8B5CF6" />
-                        </View>
-                        <View style={styles.healthMetricInfo}>
-                          <Text style={styles.healthMetricLabel}>Sleep</Text>
-                          <Text style={styles.healthMetricValue}>{healthScore.sleep.avg}h/night</Text>
-                        </View>
-                        <View style={styles.healthMetricBarContainer}>
-                          <View style={styles.healthMetricBarTrack}>
-                            <View style={[styles.healthMetricBarFill, { width: `${healthScore.sleep.score}%`, backgroundColor: "#8B5CF6" }]} />
+                          <View style={styles.healthScoreRowRight}>
+                            <Text style={[styles.healthScoreRowValue, { color: ratingColor }]}>{item.score}</Text>
+                            <View style={[styles.healthScoreRatingPill, { backgroundColor: ratingColor + "15" }]}>
+                              <Text style={[styles.healthScoreRatingText, { color: ratingColor }]}>{ratingLabel}</Text>
+                            </View>
                           </View>
-                          <Text style={styles.healthMetricScore}>{healthScore.sleep.score}</Text>
                         </View>
-                      </View>
-                    )}
-
-                    {healthScore.spo2 && (
-                      <View style={styles.healthMetricRow}>
-                        <View style={styles.healthMetricIcon}>
-                          <Droplets size={16} color="#0EA5E9" />
-                        </View>
-                        <View style={styles.healthMetricInfo}>
-                          <Text style={styles.healthMetricLabel}>Blood Oxygen</Text>
-                          <Text style={styles.healthMetricValue}>{healthScore.spo2.avg}% SpO2</Text>
-                        </View>
-                        <View style={styles.healthMetricBarContainer}>
-                          <View style={styles.healthMetricBarTrack}>
-                            <View style={[styles.healthMetricBarFill, { width: `${healthScore.spo2.score}%`, backgroundColor: "#0EA5E9" }]} />
-                          </View>
-                          <Text style={styles.healthMetricScore}>{healthScore.spo2.score}</Text>
-                        </View>
-                      </View>
-                    )}
+                      );
+                    })}
                   </View>
 
-                  <Text style={styles.fitnessFootnote}>
-                    Based on last {healthScore.entriesUsed} {healthScore.entriesUsed === 1 ? "day" : "days"}
-                  </Text>
-
-                  {healthEntries.length > 0 && (
-                    <View style={styles.healthHistorySection}>
-                      <Text style={styles.weightHistoryTitle}>Recent Entries</Text>
-                      {healthEntries.slice(0, 5).map((entry) => (
-                        <View key={entry.health_id} style={styles.healthHistoryRow}>
-                          <Text style={styles.weightHistoryDate}>{formatGoalDate(entry.record_date)}</Text>
-                          <View style={styles.healthHistoryStats}>
-                            <Text style={styles.healthHistoryStat}>{entry.steps?.toLocaleString() ?? "-"} steps</Text>
-                            {entry.heart_rate_bpm ? <Text style={styles.healthHistoryStatSub}>{entry.heart_rate_bpm} bpm</Text> : null}
-                            {entry.blood_oxygen_spo2 ? <Text style={styles.healthHistoryStatSub}>{entry.blood_oxygen_spo2}% SpO2</Text> : null}
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                  )}
+                  <View style={styles.healthEncouragementBox}>
+                    <Heart size={16} color="#E11D48" />
+                    <Text style={styles.healthEncouragementText}>
+                      Log your smart watch data after every exercise to track your health trends
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ) : healthEntries.length > 0 && last3HealthScores.length === 0 ? (
+              <View key="health" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Heart size={18} color="#E11D48" />
+                  <Text style={styles.sectionTitle}>General Health</Text>
+                  <TouchableOpacity onPress={navigateToSmartWatch} style={styles.editButton} activeOpacity={0.7}>
+                    <Text style={styles.editButtonText}>Log</Text>
+                    <Plus size={14} color={colors.primary} />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.healthCard}>
+                  <View style={styles.noActivitiesInfo}>
+                    <Heart size={28} color={colors.textLight} />
+                    <Text style={styles.noActivitiesTitle}>No Health Scores Yet</Text>
+                    <Text style={styles.noActivitiesText}>
+                      Your entries don't have an overall health score yet. Use Exercise {'>'} Smart Watch to log data with scores.
+                    </Text>
+                  </View>
                 </View>
               </View>
             ) : !healthLoading ? (
@@ -1899,12 +1876,12 @@ export default function GoalsScreen() {
                   <Heart size={18} color="#E11D48" />
                   <Text style={styles.sectionTitle}>General Health</Text>
                 </View>
-                <TouchableOpacity style={styles.setupGoalCard} onPress={() => setShowHealthForm(true)} activeOpacity={0.8}>
+                <TouchableOpacity style={styles.setupGoalCard} onPress={navigateToSmartWatch} activeOpacity={0.8}>
                   <LinearGradient colors={["#E11D48", "#F43F5E"]} style={styles.setupGoalGradient}>
                     <Heart size={32} color={colors.white} />
                     <Text style={styles.setupGoalTitle}>Track Your Health</Text>
                     <Text style={styles.setupGoalSubtext}>
-                      Enter daily data from your smartwatch to get an overall health score based on steps, heart rate, sleep, and blood oxygen
+                      After every exercise, enter your smart watch data to build your health score over time
                     </Text>
                     <View style={styles.setupGoalButton}>
                       <Text style={[styles.setupGoalButtonText, { color: "#E11D48" }]}>Log Today</Text>
@@ -3450,6 +3427,77 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.textSecondary,
     marginTop: 1,
+  },
+  healthLatestDateText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 6,
+  },
+  healthScoresListSection: {
+    marginBottom: 16,
+  },
+  healthScoreRow: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  healthScoreRowLeft: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+  },
+  healthScoreRankBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.extraLightGray,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  healthScoreRankText: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+    color: colors.textSecondary,
+  },
+  healthScoreRowDate: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  healthScoreRowRight: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+  },
+  healthScoreRowValue: {
+    fontSize: 20,
+    fontWeight: "800" as const,
+  },
+  healthScoreRatingPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  healthScoreRatingText: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+  },
+  healthEncouragementBox: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    backgroundColor: "#FFF1F2",
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 4,
+  },
+  healthEncouragementText: {
+    fontSize: 12,
+    color: "#9F1239",
+    flex: 1,
+    lineHeight: 17,
   },
   healthInputHeader: {
     flexDirection: "row" as const,

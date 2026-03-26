@@ -52,7 +52,7 @@ export default function HeaderProfile() {
         .eq("registration_id", user.id)
         .maybeSingle();
       if (error) {
-        console.error('[HeaderProfile] Error fetching profile:', JSON.stringify(error));
+        console.warn('[HeaderProfile] Error fetching profile:', error.message ?? 'Unknown error');
         throw error;
       }
       console.log('[HeaderProfile] Profile data:', data);
@@ -60,6 +60,8 @@ export default function HeaderProfile() {
       return { ...data, email: contactEmail, first_name: data?.first_name || "User" } as HeaderUserProfile;
     },
     enabled: !!user,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const { data: profilePhoto } = useQuery<string | null>({
@@ -75,6 +77,8 @@ export default function HeaderProfile() {
       return data?.file_path || null;
     },
     enabled: !!user,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const { data: badgeStats } = useQuery<{ totalDistance: number; totalActivities: number }>({
@@ -86,8 +90,8 @@ export default function HeaderProfile() {
         .select("distance_km, exercise_type")
         .eq("registration_id", user.id);
       if (error) {
-        console.error("[HeaderBadges] Error:", error);
-        return { totalDistance: 0, totalActivities: 0 };
+        console.warn("[HeaderBadges] Error:", error.message ?? 'Unknown error');
+        throw error;
       }
       const validTypes = ["Run", "Walk", "Treadmill", "Tredmill"];
       const filtered = (data || []).filter((a) => validTypes.includes(a.exercise_type || ""));
@@ -97,6 +101,8 @@ export default function HeaderProfile() {
     },
     enabled: !!user,
     staleTime: 60000,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const { data: completionInputs } = useQuery<ProfileCompletionInputs>({
@@ -236,6 +242,8 @@ export default function HeaderProfile() {
     },
     enabled: !!user,
     staleTime: 30000,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const completion = useMemo(() => {

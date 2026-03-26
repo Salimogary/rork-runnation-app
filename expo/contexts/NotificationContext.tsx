@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useCallback, useMemo } from 'react';
 import { Platform } from 'react-native';
-import Constants from "expo-constants";
 import createContextHook from '@nkzw/create-context-hook';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
@@ -28,8 +27,7 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
   const setupDone = useRef(false);
 
   useEffect(() => {
-    const isExpoGoAndroid = Platform.OS === "android" && Constants.appOwnership === "expo";
-    if (!setupDone.current && Platform.OS !== 'web' && !isExpoGoAndroid) {
+    if (!setupDone.current && Platform.OS !== 'web') {
       setupDone.current = true;
       setupNotifications().catch((e) => {
         console.warn('[NotifContext] Setup failed:', e);
@@ -46,8 +44,8 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
         .select('distance_km, exercise_type')
         .eq('registration_id', user.id);
       if (error) {
-        console.error('[NotifContext] Badge data error:', error.message, error.code, error.details);
-        return { earnedCount: 0, totalDistance: 0, totalActivities: 0 };
+        console.warn('[NotifContext] Badge data error:', error.message ?? 'Unknown error');
+        throw error;
       }
       const validTypes = ['Run', 'Walk', 'Treadmill', 'Tredmill'];
       const filtered = (data || []).filter((a: any) => validTypes.includes(a.exercise_type || ''));
@@ -58,6 +56,8 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
     enabled: !!user?.id,
     staleTime: 60000,
     refetchInterval: 120000,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const { data: completionData } = useQuery({
@@ -123,6 +123,8 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
     enabled: !!user?.id,
     staleTime: 60000,
     refetchInterval: 120000,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const { data: goalProgressData } = useQuery({
@@ -199,6 +201,8 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
     enabled: !!user?.id,
     staleTime: 60000,
     refetchInterval: 120000,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   useEffect(() => {

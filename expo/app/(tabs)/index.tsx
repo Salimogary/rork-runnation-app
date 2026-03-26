@@ -7,7 +7,7 @@ import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
 import MapView, { Polyline } from "react-native-maps";
 import { LinearGradient } from "expo-linear-gradient";
-import { Stack } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -84,6 +84,8 @@ export default function ExerciseScreen() {
   const [treadmillImage, setTreadmillImage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  const { openSmartWatch } = useLocalSearchParams<{ openSmartWatch?: string }>();
+  const router = useRouter();
   const [showSmartWatchModal, setShowSmartWatchModal] = useState(false);
   const [smartWatchValues, setSmartWatchValues] = useState<Record<string, string>>({
     heart_rate: "",
@@ -105,6 +107,13 @@ export default function ExerciseScreen() {
     distanceKm: "",
   });
   const [isSubmittingOtherSports, setIsSubmittingOtherSports] = useState(false);
+
+  useEffect(() => {
+    if (openSmartWatch === 'true') {
+      setShowSmartWatchModal(true);
+      router.setParams({ openSmartWatch: '' });
+    }
+  }, [openSmartWatch, router]);
 
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
   const timerInterval = useRef<ReturnType<typeof setInterval> | null>(null);
