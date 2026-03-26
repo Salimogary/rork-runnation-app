@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useCallback, useMemo } from 'react';
 import { Platform } from 'react-native';
+import Constants from "expo-constants";
 import createContextHook from '@nkzw/create-context-hook';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
@@ -27,7 +28,8 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
   const setupDone = useRef(false);
 
   useEffect(() => {
-    if (!setupDone.current && Platform.OS !== 'web') {
+    const isExpoGoAndroid = Platform.OS === "android" && Constants.appOwnership === "expo";
+    if (!setupDone.current && Platform.OS !== 'web' && !isExpoGoAndroid) {
       setupDone.current = true;
       setupNotifications().catch((e) => {
         console.warn('[NotifContext] Setup failed:', e);

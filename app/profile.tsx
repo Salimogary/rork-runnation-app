@@ -5,11 +5,12 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
+  TouchableWithoutFeedback,
   Alert,
   ActivityIndicator,
   Modal,
 } from "react-native";
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -113,6 +114,17 @@ export default function ProfileScreen() {
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
+  const pinInputRef = useRef<TextInput | null>(null);
+
+  useEffect(() => {
+    if (!showPinModal) return;
+    // Android frequently ignores TextInput autoFocus inside a Modal.
+    // Explicitly focusing ensures the keyboard appears.
+    const t = setTimeout(() => {
+      pinInputRef.current?.focus();
+    }, 200);
+    return () => clearTimeout(t);
+  }, [showPinModal]);
 
   const { data: profile, isLoading } = useQuery<UserProfile>({
     queryKey: ["profile", user?.id, user],
@@ -1506,96 +1518,107 @@ export default function ProfileScreen() {
           activeOpacity={1}
           onPress={() => setShowPinModal(false)}
         >
-          <View style={styles.pinModalContainer}>
-            <View style={styles.pinModalIconWrap}>
-              <Lock size={32} color="#10b981" />
-            </View>
-            <Text style={styles.pinModalTitle}>Enter Your PIN</Text>
-            <Text style={styles.pinModalDesc}>
-              Enter your 4-digit PIN to access editing
-            </Text>
-            <View style={styles.pinDotsRow}>
-              {[0, 1, 2, 3].map((i) => (
-                <View
-                  key={i}
-                  style={[
-                    styles.pinDot,
-                    pinInput.length > i && styles.pinDotFilled,
-                    pinError ? styles.pinDotError : null,
-                  ]}
-                />
-              ))}
-            </View>
-            <TextInput
-              style={styles.pinHiddenInput}
-              value={pinInput}
-              onChangeText={(text) => {
-                const digits = text.replace(/[^0-9]/g, "").slice(0, 4);
-                setPinInput(digits);
-                setPinError("");
-              }}
-              keyboardType="number-pad"
-              maxLength={4}
-              autoFocus
-              secureTextEntry
-              caretHidden
-            />
-            {pinError ? (
-              <Text style={styles.pinErrorText}>{pinError}</Text>
-            ) : null}
-            <View style={styles.pinModalActions}>
-              <TouchableOpacity
-                style={styles.pinModalCancel}
-                onPress={() => {
-                  setShowPinModal(false);
-                  setPinInput("");
+          <TouchableWithoutFeedback
+            onPress={() => {
+              // Tapping inside the modal should not dismiss it.
+              // Instead, ensure the hidden input is focused so the keyboard appears.
+              pinInputRef.current?.focus();
+            }}
+          >
+            <View style={styles.pinModalContainer}>
+              <View style={styles.pinModalIconWrap}>
+                <Lock size={32} color="#10b981" />
+              </View>
+              <Text style={styles.pinModalTitle}>Enter Your PIN</Text>
+              <Text style={styles.pinModalDesc}>
+                Enter your 4-digit PIN to access editing
+              </Text>
+              <View style={styles.pinDotsRow}>
+                {[0, 1, 2, 3].map((i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.pinDot,
+                      pinInput.length > i && styles.pinDotFilled,
+                      pinError ? styles.pinDotError : null,
+                    ]}
+                  />
+                ))}
+              </View>
+              <TextInput
+                ref={(r) => {
+                  pinInputRef.current = r;
+                }}
+                style={styles.pinHiddenInput}
+                value={pinInput}
+                onChangeText={(text) => {
+                  const digits = text.replace(/[^0-9]/g, "").slice(0, 4);
+                  setPinInput(digits);
                   setPinError("");
                 }}
-              >
-                <Text style={styles.pinModalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.pinModalSubmit,
-                  pinInput.length !== 4 && styles.pinModalSubmitDisabled,
-                ]}
-                onPress={async () => {
-                  if (!user) return;
-                  try {
-                    const { data, error } = await supabase
-                      .from("registrations")
-                      .select("pin_hash")
-                      .eq("registration_id", user.id)
-                      .maybeSingle();
-                    if (error) {
-                      console.error("[PIN] Fetch error:", error);
+                keyboardType="number-pad"
+                maxLength={4}
+                autoFocus
+                secureTextEntry
+                caretHidden
+              />
+              {pinError ? (
+                <Text style={styles.pinErrorText}>{pinError}</Text>
+              ) : null}
+              <View style={styles.pinModalActions}>
+                <TouchableOpacity
+                  style={styles.pinModalCancel}
+                  onPress={() => {
+                    setShowPinModal(false);
+                    setPinInput("");
+                    setPinError("");
+                  }}
+                >
+                  <Text style={styles.pinModalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.pinModalSubmit,
+                    pinInput.length !== 4 && styles.pinModalSubmitDisabled,
+                  ]}
+                  onPress={async () => {
+                    if (!user) return;
+                    try {
+                      const { data, error } = await supabase
+                        .from("registrations")
+                        .select("pin_hash")
+                        .eq("registration_id", user.id)
+                        .maybeSingle();
+                      if (error) {
+                        console.error("[PIN] Fetch error:", error);
+                        setPinError("Something went wrong. Try again.");
+                        return;
+                      }
+                      if (!data?.pin_hash) {
+                        setPinError("No PIN set. Please contact support.");
+                        return;
+                      }
+                      if (pinInput === data.pin_hash) {
+                        setShowPinModal(false);
+                        setPinInput("");
+                        setPinError("");
+                        setShowEditMenu(true);
+                      } else {
+                        setPinError("Incorrect PIN. Please try again.");
+                        setPinInput("");
+                      }
+                    } catch (err) {
+                      console.error("[PIN] Validation error:", err);
                       setPinError("Something went wrong. Try again.");
-                      return;
                     }
-                    if (!data?.pin_hash) {
-                      setPinError("No PIN set. Please contact support.");
-                      return;
-                    }
-                    if (pinInput === data.pin_hash) {
-                      setShowPinModal(false);
-                      setPinInput("");
-                      setPinError("");
-                      setShowEditMenu(true);
-                    } else {
-                      setPinError("Incorrect PIN. Please try again.");
-                      setPinInput("");
-                    }
-                  } catch (err) {
-                    console.error("[PIN] Validation error:", err);
-                    setPinError("Something went wrong. Try again.");
-                  }
-                }}
-                disabled={pinInput.length !== 4}
-              >
-                <Text style={styles.pinModalSubmitText}>Confirm</Text>
-              </TouchableOpacity>
+                  }}
+                  disabled={pinInput.length !== 4}
+                >
+                  <Text style={styles.pinModalSubmitText}>Confirm</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          </TouchableWithoutFeedback>
         </TouchableOpacity>
       </Modal>
 

@@ -1,5 +1,5 @@
-import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { Platform } from "react-native";
+import Constants from "expo-constants";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEYS = {
@@ -11,10 +11,28 @@ const STORAGE_KEYS = {
   TRIAL_NOTIFIED_MILESTONES: 'notif_trial_milestones',
 };
 
+function isExpoGoAndroid(): boolean {
+  return Platform.OS === "android" && Constants.appOwnership === "expo";
+}
+
+async function getNotificationsModule() {
+  // Expo Go on Android (SDK 53+) throws when importing expo-notifications due to
+  // removed remote push support. Skip notifications entirely in that case.
+  if (isExpoGoAndroid()) return null;
+  const mod = await import("expo-notifications");
+  return mod;
+}
+
 export async function setupNotifications(): Promise<boolean> {
   try {
     if (Platform.OS === 'web') {
       console.log('[Notifications] Web platform — skipping notification setup');
+      return false;
+    }
+
+    const Notifications = await getNotificationsModule();
+    if (!Notifications) {
+      console.log("[Notifications] Expo Go Android — skipping notification setup");
       return false;
     }
 
@@ -66,6 +84,12 @@ export async function sendLocalNotification(
   try {
     if (Platform.OS === 'web') {
       console.log('[Notifications] Web — skipping local notification:', title);
+      return;
+    }
+
+    const Notifications = await getNotificationsModule();
+    if (!Notifications) {
+      console.log("[Notifications] Expo Go Android — skipping local notification:", title);
       return;
     }
 
