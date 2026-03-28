@@ -189,7 +189,7 @@ export default function RegisterScreen() {
         .order('club_name', { ascending: true });
 
       if (error) {
-        console.error('Error fetching clubs:', error);
+        console.error('Error fetching clubs:', JSON.stringify(error));
       } else if (data) {
         setClubs(data as ClubItem[]);
       }

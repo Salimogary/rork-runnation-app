@@ -151,6 +151,8 @@ export default function ProfileScreen() {
       };
     },
     enabled: !!user,
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const { data: profilePhoto } = useQuery<string | null>({
@@ -166,6 +168,8 @@ export default function ProfileScreen() {
       return data?.file_path || null;
     },
     enabled: !!user,
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const { data: activityStats } = useQuery<{ totalDistance: number; totalActivities: number }>({
@@ -177,7 +181,7 @@ export default function ProfileScreen() {
         .select("distance_km, exercise_type")
         .eq("registration_id", user.id);
       if (error) {
-        console.error("[BadgeStats] Error:", error);
+        console.error("[BadgeStats] Error:", JSON.stringify(error));
         return { totalDistance: 0, totalActivities: 0 };
       }
       const validTypes = ["Run", "Walk", "Treadmill", "Tredmill"];
@@ -187,6 +191,8 @@ export default function ProfileScreen() {
     },
     enabled: !!user,
     staleTime: 60000,
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const distanceBadges = useMemo(() => {
@@ -211,6 +217,8 @@ export default function ProfileScreen() {
       }
       return (data as GoalItem[]) || [];
     },
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const { data: userGoals = [], refetch: refetchUserGoals } = useQuery<UserGoal[]>({
@@ -222,12 +230,14 @@ export default function ProfileScreen() {
         .select("*")
         .eq("registration_id", user.id);
       if (error) {
-        console.error("Error fetching user goals:", error);
+        console.error("Error fetching user goals:", JSON.stringify(error));
         return [];
       }
       return (data as UserGoal[]) || [];
     },
     enabled: !!user,
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const { data: clubs = [] } = useQuery<ClubItem[]>({
@@ -238,11 +248,13 @@ export default function ProfileScreen() {
         .select("club_id, club_name, country, location, description")
         .order("club_name", { ascending: true });
       if (error) {
-        console.error("Error fetching clubs:", error);
+        console.error("Error fetching clubs:", JSON.stringify(error));
         return [];
       }
       return (data as ClubItem[]) || [];
     },
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const { data: clubMembership, refetch: refetchClubMembership } = useQuery<ClubMembership | null>({
@@ -255,12 +267,14 @@ export default function ProfileScreen() {
         .eq("registration_id", user.id)
         .maybeSingle();
       if (error) {
-        console.error("Error fetching club membership:", error);
+        console.error("Error fetching club membership:", JSON.stringify(error));
         return null;
       }
       return data as ClubMembership | null;
     },
     enabled: !!user,
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const isEmailVerified = profile?.email_verified === true;

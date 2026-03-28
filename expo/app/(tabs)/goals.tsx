@@ -255,7 +255,7 @@ export default function GoalsScreen() {
         .limit(1)
         .maybeSingle();
       if (error) {
-        console.error("[Goals] Error fetching fitness goal:", error);
+        console.error("[Goals] Error fetching fitness goal:", JSON.stringify(error));
         return null;
       }
       console.log("[Goals] Fitness goal:", data);
@@ -263,6 +263,8 @@ export default function GoalsScreen() {
     },
     enabled: !!user?.id,
     staleTime: 30000,
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const { data: recentActivities = [], refetch: refetchRecent } = useQuery<RecentActivity[]>({
@@ -276,7 +278,7 @@ export default function GoalsScreen() {
         .order("activity_date", { ascending: false })
         .limit(5);
       if (error) {
-        console.error("[Goals] Error fetching recent activities for pace:", error);
+        console.error("[Goals] Error fetching recent activities for pace:", JSON.stringify(error));
         return [];
       }
       console.log("[Goals] Recent activities for pace:", data?.length);
@@ -284,6 +286,8 @@ export default function GoalsScreen() {
     },
     enabled: !!user?.id,
     staleTime: 30000,
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const saveFitnessGoalMutation = useMutation({
@@ -395,13 +399,15 @@ export default function GoalsScreen() {
         .select("*")
         .eq("registration_id", user.id);
       if (error) {
-        console.error("[Goals] Error fetching user goals:", error);
+        console.error("[Goals] Error fetching user goals:", JSON.stringify(error));
         return [];
       }
       return (data as UserGoal[]) || [];
     },
     enabled: !!user?.id,
     staleTime: 30000,
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const { data: weightTargetGoal, isLoading: weightTargetLoading, refetch: refetchWeightTarget } = useQuery<WeightTargetGoal | null>({
@@ -414,7 +420,7 @@ export default function GoalsScreen() {
         .eq("registration_id", user.id)
         .maybeSingle();
       if (error) {
-        console.error("[Goals] Error fetching weight target goal:", error);
+        console.error("[Goals] Error fetching weight target goal:", JSON.stringify(error));
         return null;
       }
       console.log("[Goals] Weight target goal:", data);
@@ -422,6 +428,8 @@ export default function GoalsScreen() {
     },
     enabled: !!user?.id,
     staleTime: 30000,
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const { data: weightEntries = [], refetch: refetchWeightEntries } = useQuery<WeightGoalEntry[]>({
@@ -434,7 +442,7 @@ export default function GoalsScreen() {
         .eq("registration_id", user.id)
         .order("date", { ascending: true });
       if (error) {
-        console.error("[Goals] Error fetching weight entries:", error);
+        console.error("[Goals] Error fetching weight entries:", JSON.stringify(error));
         return [];
       }
       console.log("[Goals] Weight entries:", data?.length);
@@ -442,6 +450,8 @@ export default function GoalsScreen() {
     },
     enabled: !!user?.id,
     staleTime: 30000,
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const saveWeightTargetMutation = useMutation({
@@ -482,7 +492,7 @@ export default function GoalsScreen() {
       Alert.alert("Success", "Weight target saved!");
     },
     onError: (error: any) => {
-      console.error("[Goals] Save weight target error:", error);
+      console.error("[Goals] Save weight target error:", JSON.stringify(error));
       Alert.alert("Error", error?.message || "Failed to save weight target");
     },
   });
@@ -527,7 +537,7 @@ export default function GoalsScreen() {
       Alert.alert("Success", "Weight logged!");
     },
     onError: (error: any) => {
-      console.error("[Goals] Log weight error:", error);
+      console.error("[Goals] Log weight error:", JSON.stringify(error));
       Alert.alert("Error", error?.message || "Failed to log weight");
     },
   });
@@ -543,7 +553,7 @@ export default function GoalsScreen() {
         .order("record_date", { ascending: false })
         .limit(7);
       if (error) {
-        console.error("[Goals] Error fetching health entries:", error);
+        console.error("[Goals] Error fetching health entries:", JSON.stringify(error));
         return [];
       }
       console.log("[Goals] Health entries:", data?.length);
@@ -551,6 +561,8 @@ export default function GoalsScreen() {
     },
     enabled: !!user?.id,
     staleTime: 30000,
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const logHealthMutation = useMutation({
@@ -599,7 +611,7 @@ export default function GoalsScreen() {
       Alert.alert("Success", "Health data logged!");
     },
     onError: (error: any) => {
-      console.error("[Goals] Log health error:", error);
+      console.error("[Goals] Log health error:", JSON.stringify(error));
       Alert.alert("Error", error?.message || "Failed to log health data");
     },
   });
@@ -769,7 +781,7 @@ export default function GoalsScreen() {
         .limit(1)
         .maybeSingle();
       if (error) {
-        console.error("[Goals] Error fetching habit declaration:", error);
+        console.error("[Goals] Error fetching habit declaration:", JSON.stringify(error));
         return null;
       }
       console.log("[Goals] Habit declaration:", data);
@@ -777,6 +789,8 @@ export default function GoalsScreen() {
     },
     enabled: !!user?.id,
     staleTime: 30000,
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const { data: habitActivities = [] } = useQuery<any[]>({
@@ -790,7 +804,7 @@ export default function GoalsScreen() {
           .eq("registration_id", user.id)
           .gte("record_date", habitDeclaration.start_date);
         if (error) {
-          console.error("[Goals] Error fetching habit steps:", error);
+          console.error("[Goals] Error fetching habit steps:", JSON.stringify(error));
           return [];
         }
         return data || [];
@@ -801,7 +815,7 @@ export default function GoalsScreen() {
           .eq("registration_id", user.id)
           .gte("activity_date", habitDeclaration.start_date);
         if (error) {
-          console.error("[Goals] Error fetching habit activities:", error);
+          console.error("[Goals] Error fetching habit activities:", JSON.stringify(error));
           return [];
         }
         return (data || []).filter((a: any) =>
@@ -811,6 +825,8 @@ export default function GoalsScreen() {
     },
     enabled: !!user?.id && !!habitDeclaration,
     staleTime: 30000,
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const saveHabitMutation = useMutation({
@@ -847,7 +863,7 @@ export default function GoalsScreen() {
       Alert.alert("Success", "Your training plan has been saved!");
     },
     onError: (error: any) => {
-      console.error("[Goals] Save habit declaration error:", error);
+      console.error("[Goals] Save habit declaration error:", JSON.stringify(error));
       Alert.alert("Error", error?.message || "Failed to save declaration");
     },
   });
@@ -1019,7 +1035,7 @@ export default function GoalsScreen() {
         .eq("registration_id", user.id);
 
       if (error) {
-        console.error("[Goals] Error fetching activities:", error);
+        console.error("[Goals] Error fetching activities:", JSON.stringify(error));
         return { totalDistance: 0, totalTime: 0, activeDays: 0, avgDistance: 0, avgPace: 0, streakDays: 0 };
       }
 
@@ -1077,6 +1093,8 @@ export default function GoalsScreen() {
     },
     enabled: !!user?.id,
     staleTime: 30000,
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
 
@@ -1143,6 +1161,8 @@ export default function GoalsScreen() {
     },
     enabled: !!user?.id,
     staleTime: 30000,
+    retry: 2,
+    retryDelay: (attempt: number) => Math.min(1000 * 2 ** attempt, 10000),
   });
 
   const communityRanking = useMemo(() => {
