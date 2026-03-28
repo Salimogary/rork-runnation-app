@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   Modal,
 } from "react-native";
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -112,6 +112,7 @@ export default function ProfileScreen() {
   const [verificationCode, setVerificationCode] = useState("");
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput] = useState("");
+  const pinInputRef = useRef<TextInput>(null);
   const [pinError, setPinError] = useState("");
 
   const { data: profile, isLoading } = useQuery<UserProfile>({
@@ -1528,7 +1529,7 @@ export default function ProfileScreen() {
             <Text style={styles.pinModalDesc}>
               Enter your 4-digit PIN to access editing
             </Text>
-            <View style={styles.pinDotsRow}>
+            <TouchableOpacity activeOpacity={0.8} onPress={() => pinInputRef.current?.focus()} style={styles.pinDotsRow}>
               {[0, 1, 2, 3].map((i) => (
                 <View
                   key={i}
@@ -1539,8 +1540,9 @@ export default function ProfileScreen() {
                   ]}
                 />
               ))}
-            </View>
+            </TouchableOpacity>
             <TextInput
+              ref={pinInputRef}
               style={styles.pinHiddenInput}
               value={pinInput}
               onChangeText={(text) => {
@@ -2453,8 +2455,10 @@ const styles = StyleSheet.create({
   pinHiddenInput: {
     position: "absolute" as const,
     opacity: 0,
-    height: 1,
-    width: 1,
+    height: 50,
+    width: "100%" as unknown as number,
+    top: 0,
+    left: 0,
   },
   pinErrorText: {
     fontSize: 13,
