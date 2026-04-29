@@ -1,19 +1,26 @@
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Platform, Modal, TextInput, Alert, Image, AppState, AppStateStatus } from "react-native";
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Platform, Modal, TextInput, Alert, Image, AppState, AppStateStatus, AccessibilityInfo, Share } from "react-native";
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge, Watch, Smartphone, ChevronRight, Heart, Activity, Droplets, Flame, Stethoscope } from "lucide-react-native";
 import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
+import * as Speech from "expo-speech";
 import MapView, { Polyline } from "react-native-maps";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack } from "expo-router";
+import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import colors from "@/constants/colors";
+import { WORLD_COUNTRIES } from "@/constants/countries";
+import { formatCountryName } from "@/constants/country-utils";
 import { useSubscription } from "@/contexts/SubscriptionContext";
 import SubscriptionGate from "@/components/SubscriptionGate";
+import { getServerClient } from "@/lib/server-client";
+import { trpc } from "@/lib/trpc";
+import { getActivityVoiceAssistantEnabled } from "@/utils/activityVoice";
 
 type RunState = "idle" | "running" | "paused" | "finished";
 type ExerciseType = "Walk" | "Run" | "Treadmill" | null;
@@ -30,6 +37,23 @@ interface LocationPoint {
   timestamp: number;
 }
 
+interface RegisteredEventRun {
+  eventId: string;
+  eventName: string;
+  startsAt: string | null;
+  endsAt: string | null;
+  distanceKm?: number | null;
+  timeSeconds?: number | null;
+}
+
+interface RunnerProfile {
+  name: string;
+  town: string;
+  country: string;
+  countryFlag: string;
+  photoUrl: string | null;
+}
+
 type ImportanceLevel = "VERY HIGH" | "HIGH" | "MEDIUM" | "LOW";
 
 interface SmartWatchField {
@@ -41,13 +65,50 @@ interface SmartWatchField {
   icon: React.ReactNode;
 }
 
+const toRad = (value: number): number => {
+  return (value * Math.PI) / 180;
+};
+
+const calculateDistance = (coord1: Coordinates, coord2: Coordinates): number => {
+  const R = 6371;
+  const dLat = toRad(coord2.latitude - coord1.latitude);
+  const dLon = toRad(coord2.longitude - coord1.longitude);
+  const lat1 = toRad(coord1.latitude);
+  const lat2 = toRad(coord2.latitude);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
 const GPS_ACCURACY_THRESHOLD = 25;
 const MAX_SPEED_KMH_RUN = 45;
 const MAX_SPEED_KMH_WALK = 15;
 const MIN_DISTANCE_BETWEEN_POINTS = 0.002;
-const MIN_DISTANCE_WALK = 0.25;
-const MIN_DISTANCE_RUN = 0.45;
+const MIN_DISTANCE_ACTIVITY = 0.1;
+const MIN_DISTANCE_WALK = MIN_DISTANCE_ACTIVITY;
+const MIN_DISTANCE_RUN = MIN_DISTANCE_ACTIVITY;
+const MIN_ACTIVITY_DURATION_MINUTES = 3;
 const MAX_DAILY_ACTIVITIES = 5;
+
+const countryFlagFromCountry = (country: string | null | undefined): string => {
+  if (!country) return "";
+
+  const trimmed = country.trim();
+  const matchedCode =
+    trimmed.length === 2
+      ? trimmed.toUpperCase()
+      : WORLD_COUNTRIES.find((item) => item.name.toLowerCase() === trimmed.toLowerCase())?.iso_alpha2?.toUpperCase();
+
+  if (!matchedCode || matchedCode.length !== 2) return "";
+
+  return matchedCode
+    .split("")
+    .map((char) => String.fromCodePoint(127397 + char.charCodeAt(0)))
+    .join("");
+};
 
 const IMPORTANCE_COLORS: Record<ImportanceLevel, string> = {
   "VERY HIGH": "#DC2626",
@@ -66,7 +127,9 @@ const SMART_WATCH_FIELDS: SmartWatchField[] = [
 ];
 
 export default function ExerciseScreen() {
-  const { user } = useAuth();
+  const { user, registrationId } = useAuth();
+  const trpcUtils = trpc.useUtils();
+  const effectiveRegistrationId = registrationId || user?.id || "";
   const { colors: themeColors } = useTheme();
   const { isSubscribed } = useSubscription();
 
@@ -78,6 +141,14 @@ export default function ExerciseScreen() {
   const [currentLocation, setCurrentLocation] = useState<Coordinates | null>(null);
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [exerciseType, setExerciseType] = useState<ExerciseType>(null);
+  const [countdownValue, setCountdownValue] = useState<string | null>(null);
+  const [isCountdownActive, setIsCountdownActive] = useState(false);
+  const [activityVoiceAssistantEnabled, setActivityVoiceAssistantEnabled] = useState(true);
+  const [showRunDetailsModal, setShowRunDetailsModal] = useState(false);
+  const [activitySaved, setActivitySaved] = useState(false);
+  const [runnerProfile, setRunnerProfile] = useState<RunnerProfile | null>(null);
+  const [runCardTheme, setRunCardTheme] = useState<"light" | "dark">("dark");
+  const [runCardBackgroundImage, setRunCardBackgroundImage] = useState<string | null>(null);
   const [showTreadmillModal, setShowTreadmillModal] = useState(false);
   const [treadmillDistance, setTreadmillDistance] = useState("");
   const [treadmillTime, setTreadmillTime] = useState("");
@@ -96,6 +167,8 @@ export default function ExerciseScreen() {
   const [isSubmittingSmartWatch, setIsSubmittingSmartWatch] = useState(false);
 
   const [showOtherSportsModal, setShowOtherSportsModal] = useState(false);
+  const [showEventRunModal, setShowEventRunModal] = useState(false);
+  const [selectedEventRun, setSelectedEventRun] = useState<RegisteredEventRun | null>(null);
   const [otherSportsForm, setOtherSportsForm] = useState({
     sportsApp: "",
     activityDate: "",
@@ -105,6 +178,16 @@ export default function ExerciseScreen() {
     distanceKm: "",
   });
   const [isSubmittingOtherSports, setIsSubmittingOtherSports] = useState(false);
+  const completeEventRunMutation = trpc.activities.completeEventRun.useMutation();
+  const { data: registeredEvents = [], refetch: refetchRegisteredEvents } = trpc.events.getRegisteredEvents.useQuery(
+    { registrationId: effectiveRegistrationId },
+    {
+      enabled: !!effectiveRegistrationId,
+      staleTime: 0,
+      refetchOnMount: "always",
+      refetchOnReconnect: true,
+    }
+  );
 
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
   const timerInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -116,6 +199,7 @@ export default function ExerciseScreen() {
   const totalPauseDuration = useRef<number>(0);
   const pauseStartTimestamp = useRef<number | null>(null);
   const filteredPointCount = useRef<number>(0);
+  const countdownTimeouts = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const updateDuration = useCallback(() => {
     if (runningStartTimestamp.current !== null) {
@@ -127,6 +211,7 @@ export default function ExerciseScreen() {
 
   useEffect(() => {
     void requestLocationPermission();
+    void getActivityVoiceAssistantEnabled().then(setActivityVoiceAssistantEnabled);
 
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
@@ -144,8 +229,82 @@ export default function ExerciseScreen() {
       if (timerInterval.current) {
         clearInterval(timerInterval.current);
       }
+      countdownTimeouts.current.forEach(clearTimeout);
+      countdownTimeouts.current = [];
+      Speech.stop();
     };
   }, [updateDuration]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'active') {
+        void getActivityVoiceAssistantEnabled().then(setActivityVoiceAssistantEnabled);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!effectiveRegistrationId) {
+      return;
+    }
+
+    void refetchRegisteredEvents();
+  }, [effectiveRegistrationId, refetchRegisteredEvents]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setRunnerProfile(null);
+      return;
+    }
+
+    const loadRunnerProfile = async () => {
+      try {
+        const [{ data: registration }, { data: photo }] = await Promise.all([
+          supabase
+            .from("registrations")
+            .select("first_name, other_names, username, city_town_district, country")
+            .eq("registration_id", user.id)
+            .maybeSingle(),
+          supabase
+            .from("user_photos")
+            .select("file_path")
+            .eq("registration_id", user.id)
+            .eq("is_profile_photo", true)
+            .maybeSingle(),
+        ]);
+
+        const name =
+          [registration?.first_name, registration?.other_names].filter(Boolean).join(" ").trim() ||
+          registration?.username ||
+          user.username ||
+          "RunNation Runner";
+        const country = formatCountryName(registration?.country) || registration?.country || "";
+
+        setRunnerProfile({
+          name,
+          town: registration?.city_town_district || "",
+          country,
+          countryFlag: countryFlagFromCountry(registration?.country || country),
+          photoUrl: photo?.file_path || null,
+        });
+      } catch (error) {
+        console.error("[Run Details] Failed to load runner profile:", error);
+        setRunnerProfile({
+          name: user.username || "RunNation Runner",
+          town: "",
+          country: "",
+          countryFlag: "",
+          photoUrl: null,
+        });
+      }
+    };
+
+    void loadRunnerProfile();
+  }, [user?.id, user?.username]);
 
   const requestLocationPermission = async () => {
     if (Platform.OS === 'web') {
@@ -258,7 +417,7 @@ export default function ExerciseScreen() {
     );
   }, [handleLocationUpdate]);
 
-  const startTracking = async (type: ExerciseType) => {
+  const startTracking = useCallback(async (type: ExerciseType, eventRun: RegisteredEventRun | null = null) => {
     if (!type) return;
 
     if (type === "Treadmill") {
@@ -271,6 +430,7 @@ export default function ExerciseScreen() {
     }
 
     setExerciseType(type);
+    setSelectedEventRun(eventRun);
     setRunState("running");
     setStartTime(new Date());
     setCoords([]);
@@ -295,7 +455,89 @@ export default function ExerciseScreen() {
     }, 1000) as any;
 
     await startLocationWatch(type);
-  };
+  }, [startLocationWatch]);
+
+  const playCountdownCue = useCallback((value: string) => {
+    if (!activityVoiceAssistantEnabled) {
+      return;
+    }
+
+    const spokenValue = value === "START" ? "Start" : value;
+    AccessibilityInfo.announceForAccessibility(spokenValue);
+
+    if (Platform.OS === "web") {
+      const webGlobal = globalThis as any;
+      const SpeechUtterance = webGlobal.SpeechSynthesisUtterance;
+      if (webGlobal.speechSynthesis && SpeechUtterance) {
+        webGlobal.speechSynthesis.cancel();
+        webGlobal.speechSynthesis.speak(new SpeechUtterance(spokenValue));
+      }
+      return;
+    }
+
+    Speech.stop();
+    Speech.speak(spokenValue, {
+      rate: 0.95,
+      pitch: 1,
+    });
+  }, [activityVoiceAssistantEnabled]);
+
+  const speakActivityMessage = useCallback((message: string) => {
+    if (!activityVoiceAssistantEnabled) {
+      return;
+    }
+
+    AccessibilityInfo.announceForAccessibility(message);
+
+    if (Platform.OS === "web") {
+      const webGlobal = globalThis as any;
+      const SpeechUtterance = webGlobal.SpeechSynthesisUtterance;
+      if (webGlobal.speechSynthesis && SpeechUtterance) {
+        webGlobal.speechSynthesis.cancel();
+        webGlobal.speechSynthesis.speak(new SpeechUtterance(message));
+      }
+      return;
+    }
+
+    Speech.stop();
+    Speech.speak(message, {
+      rate: 0.95,
+      pitch: 1,
+    });
+  }, [activityVoiceAssistantEnabled]);
+
+  const waitForCountdownStep = useCallback((milliseconds: number) => {
+    return new Promise<void>((resolve) => {
+      const timeout = setTimeout(resolve, milliseconds);
+      countdownTimeouts.current.push(timeout);
+    });
+  }, []);
+
+  const startTrackingWithCountdown = useCallback(async (type: ExerciseType, eventRun: RegisteredEventRun | null = null) => {
+    if (!type || isCountdownActive || runState !== "idle") {
+      return;
+    }
+
+    if (type === "Treadmill") {
+      setShowTreadmillModal(true);
+      return;
+    }
+
+    setIsCountdownActive(true);
+    try {
+      for (const value of ["3", "2", "1", "START"]) {
+        setCountdownValue(value);
+        playCountdownCue(value);
+        await waitForCountdownStep(value === "START" ? 500 : 900);
+      }
+      setCountdownValue(null);
+      await startTracking(type, eventRun);
+    } finally {
+      setCountdownValue(null);
+      setIsCountdownActive(false);
+      countdownTimeouts.current = [];
+    }
+  }, [isCountdownActive, playCountdownCue, runState, startTracking, waitForCountdownStep]);
 
   const pauseTracking = () => {
     if (runningStartTimestamp.current !== null) {
@@ -373,13 +615,28 @@ export default function ExerciseScreen() {
       Alert.alert("Activity Not Saved", `A Run must be at least ${MIN_DISTANCE_RUN} km to be saved. You covered ${distance.toFixed(2)} km.`);
       return;
     }
-    if ((exerciseType === "Walk" || exerciseType === "Run") && durationMinutes < 10) {
-      Alert.alert("Activity Not Saved", `A ${exerciseType} must be at least 10 minutes. Your activity was ${Math.floor(durationMinutes)} minutes.`);
+    if ((exerciseType === "Walk" || exerciseType === "Run") && durationMinutes < MIN_ACTIVITY_DURATION_MINUTES) {
+      Alert.alert("Activity Not Saved", `A ${exerciseType} must be at least ${MIN_ACTIVITY_DURATION_MINUTES} minutes. Your activity was ${Math.floor(durationMinutes)} minutes.`);
       return;
     }
 
-    setIsSaving(true);
+    setActivitySaved(false);
+    setShowRunDetailsModal(true);
+  };
 
+  const saveFinishedActivity = async () => {
+    if (activitySaved) {
+      Alert.alert("Already Saved", "This activity has already been saved.");
+      return;
+    }
+
+    if (!user || !startTime) {
+      Alert.alert("Error", "Missing activity details. Please try again.");
+      return;
+    }
+
+    const finalDuration = duration;
+    setIsSaving(true);
     try {
       const today = startTime.toISOString().split('T')[0];
       const { count, error: countError } = await supabase
@@ -392,51 +649,98 @@ export default function ExerciseScreen() {
         console.error('[ActivityLimit] Count error:', countError);
       }
 
+      let error: { message?: string } | null = null;
+
       if ((count || 0) >= MAX_DAILY_ACTIVITIES) {
-        Alert.alert(
-          "Daily Limit Reached",
-          `You can only save a maximum of ${MAX_DAILY_ACTIVITIES} activities per day. This activity was not saved.`
-        );
-        setIsSaving(false);
-        return;
+        if (selectedEventRun) {
+          error = {
+            message: `Daily activity limit reached. The event result will still be saved, but the regular activity log entry will be skipped.`,
+          };
+        } else {
+          Alert.alert(
+            "Daily Limit Reached",
+            `You can only save a maximum of ${MAX_DAILY_ACTIVITIES} activities per day. This activity was not saved.`
+          );
+          setIsSaving(false);
+          return;
+        }
       }
 
-      const calculatedPace = finalDuration > 0 ? (distance / (finalDuration / 3600)) : 0;
+      if (!error) {
+        const calculatedPace = finalDuration > 0 ? (distance / (finalDuration / 3600)) : 0;
 
-      const actualEndTime = new Date(startTime.getTime() + (finalDuration * 1000));
+        const actualEndTime = new Date(startTime.getTime() + (finalDuration * 1000));
 
-      const startTimeStr = startTime.toISOString().split('T')[1].split('.')[0];
-      const endTimeStr = actualEndTime.toISOString().split('T')[1].split('.')[0];
+        const startTimeStr = startTime.toISOString().split('T')[1].split('.')[0];
+        const endTimeStr = actualEndTime.toISOString().split('T')[1].split('.')[0];
 
-      const nextActivityId = uuidv4();
+        const nextActivityId = uuidv4();
 
-      console.log('[Tracking] Saving activity:', {
-        id: nextActivityId,
-        type: exerciseType,
-        distance: distance.toFixed(3),
-        duration: finalDuration,
-        pace: calculatedPace.toFixed(2),
-        startTime: startTimeStr,
-        endTime: endTimeStr,
-      });
+        console.log('[Tracking] Saving activity:', {
+          id: nextActivityId,
+          type: exerciseType,
+          distance: distance.toFixed(3),
+          duration: finalDuration,
+          pace: calculatedPace.toFixed(2),
+          startTime: startTimeStr,
+          endTime: endTimeStr,
+        });
 
-      const { error } = await supabase.from("activities").insert({
-        activity_id: nextActivityId,
-        registration_id: user.id,
-        activity_date: today,
-        exercise_type: exerciseType || "Run",
-        distance_km: parseFloat(distance.toFixed(2)),
-        start_time: startTimeStr,
-        end_time: endTimeStr,
-        pace_km_h: parseFloat(calculatedPace.toFixed(2)),
-      });
+        const insertResult = await supabase.from("activities").insert({
+          activity_id: nextActivityId,
+          registration_id: user.id,
+          activity_date: today,
+          exercise_type: exerciseType || "Run",
+          distance_km: parseFloat(distance.toFixed(2)),
+          start_time: startTimeStr,
+          end_time: endTimeStr,
+          pace_km_h: parseFloat(calculatedPace.toFixed(2)),
+        });
 
-      if (error) {
-        console.error("[Tracking] Error saving activity:", error);
-        Alert.alert("Error", "Failed to save activity");
-      } else {
-        console.log("[Tracking] Activity saved successfully with ID:", nextActivityId);
+        error = insertResult.error;
+
+        if (error) {
+          console.error("[Tracking] Error saving activity:", error);
+        } else {
+          console.log("[Tracking] Activity saved successfully with ID:", nextActivityId);
+        }
+      }
+
+      let eventResultSaved = false;
+      let eventResultError = "";
+
+      if (selectedEventRun && effectiveRegistrationId) {
+        try {
+          await completeEventRunMutation.mutateAsync({
+            eventId: selectedEventRun.eventId,
+            registrationId: effectiveRegistrationId,
+            distanceKm: parseFloat(distance.toFixed(2)),
+            timeSeconds: finalDuration,
+          });
+          eventResultSaved = true;
+        } catch (eventError: any) {
+          eventResultError = eventError?.message || "Failed to save your event result.";
+        }
+      }
+
+      if (!error && selectedEventRun && eventResultSaved) {
+        setActivitySaved(true);
+        Alert.alert("Success", "Activity and event result saved successfully!");
+        speakActivityMessage("Congratulations, activity completed");
+      } else if (!error && selectedEventRun && !eventResultSaved) {
+        setActivitySaved(true);
+        Alert.alert("Saved with Caution", `Your activity was saved, but the event result could not be updated.\n\n${eventResultError}`);
+        speakActivityMessage("Congratulations, activity completed");
+      } else if (!error) {
+        setActivitySaved(true);
         Alert.alert("Success", "Activity saved successfully!");
+        speakActivityMessage("Congratulations, activity completed");
+      } else if (selectedEventRun && eventResultSaved) {
+        setActivitySaved(true);
+        Alert.alert("Event Saved", "Your event result was saved, but the normal activity log could not be added.");
+        speakActivityMessage("Congratulations, activity completed");
+      } else {
+        Alert.alert("Error", "Failed to save activity");
       }
     } catch (err) {
       console.error("[Tracking] Unexpected error saving:", err);
@@ -454,6 +758,10 @@ export default function ExerciseScreen() {
     setCoords([]);
     setStartTime(null);
     setExerciseType(null);
+    setSelectedEventRun(null);
+    setShowRunDetailsModal(false);
+    setActivitySaved(false);
+    setRunCardBackgroundImage(null);
     elapsedBeforePause.current = 0;
     runningStartTimestamp.current = null;
     lastValidPoint.current = null;
@@ -461,6 +769,57 @@ export default function ExerciseScreen() {
     totalPauseDuration.current = 0;
     pauseStartTimestamp.current = null;
     filteredPointCount.current = 0;
+    countdownTimeouts.current.forEach(clearTimeout);
+    countdownTimeouts.current = [];
+    setCountdownValue(null);
+    setIsCountdownActive(false);
+    Speech.stop();
+  };
+
+  const pickRunCardBackground = async () => {
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permissionResult.granted) {
+      Alert.alert("Permission Required", "Permission to access your photos is required.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.85,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      setRunCardBackgroundImage(result.assets[0].uri);
+    }
+  };
+
+  const getRunShareMessage = () => {
+    const runnerName = runnerProfile?.name || user?.username || "RunNation Runner";
+    const eventLine = selectedEventRun ? `\nEvent: ${selectedEventRun.eventName}` : "";
+    const dateLine = startTime ? startTime.toLocaleDateString() : new Date().toLocaleDateString();
+    const startLine = startTime ? startTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-";
+
+    return [
+      `${runnerName} completed a ${exerciseType || "Run"} on RunNation.`,
+      `Distance: ${distance.toFixed(2)} km`,
+      `Time: ${formatTime(duration)}`,
+      `Pace: ${pace.toFixed(1)} km/h`,
+      `Date: ${dateLine}`,
+      `Start: ${startLine}${eventLine}`,
+      "RunNation - Where runners belong",
+    ].join("\n");
+  };
+
+  const shareRunDetails = async () => {
+    try {
+      await Share.share({
+        title: "RunNation Activity",
+        message: getRunShareMessage(),
+      });
+    } catch (error) {
+      console.error("[Share Run] Error:", error);
+      Alert.alert("Error", "Could not open sharing options.");
+    }
   };
 
   const pickImage = async () => {
@@ -489,26 +848,27 @@ export default function ExerciseScreen() {
       return;
     }
 
-    const timeInterval = `${Math.floor(timeMinutes / 60)}:${Math.floor(timeMinutes % 60)}:00`;
-
     if (!user) {
       Alert.alert("Error", "You must be logged in to submit activities");
       return;
     }
 
-    const { error } = await supabase.from("pending_activities").insert({
-      registration_id: user.id,
-      exercise_type: "Treadmill",
-      distance_entered: distanceKm,
-      distance_unit: "km",
-      time_entered: timeInterval,
-      photo_path: treadmillImage,
-      status: "pending",
-    });
+    try {
+      const imageBase64 = await FileSystem.readAsStringAsync(treadmillImage, {
+        encoding: "base64",
+      });
+      const mimeType = treadmillImage.toLowerCase().includes(".png") ? "image/png" : "image/jpeg";
 
-    if (error) {
+      await getServerClient().activities.submitTreadmillActivity.mutate({
+        registrationId: user.id,
+        distanceKm,
+        timeMinutes,
+        imageBase64,
+        mimeType,
+      });
+    } catch (error: any) {
       console.error("Error submitting treadmill activity:", error);
-      Alert.alert("Error", "Failed to submit activity");
+      Alert.alert("Error", error?.message || "Failed to submit activity");
       return;
     }
 
@@ -633,21 +993,21 @@ export default function ExerciseScreen() {
     const durationMinutes = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]) + parseInt(durationParts[2]) / 60;
 
     if (otherSportsForm.exerciseType === "Walk") {
-      if (distanceNum < 0.25) {
-        Alert.alert("Activity Not Saved", "A Walk must be at least 0.25 km to be saved.");
+      if (distanceNum < MIN_DISTANCE_WALK) {
+        Alert.alert("Activity Not Saved", `A Walk must be at least ${MIN_DISTANCE_WALK} km to be saved.`);
         return;
       }
-      if (durationMinutes < 10) {
-        Alert.alert("Activity Not Saved", "A Walk must be at least 10 minutes to be saved.");
+      if (durationMinutes < MIN_ACTIVITY_DURATION_MINUTES) {
+        Alert.alert("Activity Not Saved", `A Walk must be at least ${MIN_ACTIVITY_DURATION_MINUTES} minutes to be saved.`);
         return;
       }
     } else if (otherSportsForm.exerciseType === "Run") {
-      if (distanceNum < 0.45) {
-        Alert.alert("Activity Not Saved", "A Run must be at least 0.45 km to be saved.");
+      if (distanceNum < MIN_DISTANCE_RUN) {
+        Alert.alert("Activity Not Saved", `A Run must be at least ${MIN_DISTANCE_RUN} km to be saved.`);
         return;
       }
-      if (durationMinutes < 10) {
-        Alert.alert("Activity Not Saved", "A Run must be at least 10 minutes to be saved.");
+      if (durationMinutes < MIN_ACTIVITY_DURATION_MINUTES) {
+        Alert.alert("Activity Not Saved", `A Run must be at least ${MIN_ACTIVITY_DURATION_MINUTES} minutes to be saved.`);
         return;
       }
     }
@@ -655,67 +1015,14 @@ export default function ExerciseScreen() {
     setIsSubmittingOtherSports(true);
 
     try {
-      const { count, error: countError } = await supabase
-        .from("External Activity Submissions")
-        .select("*", { count: "exact", head: true })
-        .eq("registration_id", user.id)
-        .eq("activity_date", otherSportsForm.activityDate);
-
-      const { count: existingCount, error: existingError } = await supabase
-        .from("activities")
-        .select("*", { count: "exact", head: true })
-        .eq("registration_id", user.id)
-        .eq("activity_date", otherSportsForm.activityDate);
-
-      if (countError) console.error("[ActivityLimit] Submissions count error:", countError);
-      if (existingError) console.error("[ActivityLimit] Activities count error:", existingError);
-
-      const totalToday = (count || 0) + (existingCount || 0);
-      console.log("[ActivityLimit] Total activities for", otherSportsForm.activityDate, ":", totalToday);
-
-      if (totalToday >= 5) {
-        Alert.alert(
-          "Daily Limit Reached",
-          "You can only save a maximum of 5 activities per day. This activity was not saved."
-        );
-        setIsSubmittingOtherSports(false);
-        return;
-      }
-    } catch (err: any) {
-      console.error("[ActivityLimit] Error checking daily limit:", err);
-    }
-
-    try {
-      console.log("[Submit Other Sports] Submitting data:", {
-        registration_id: user.id,
-        activity_date: otherSportsForm.activityDate,
-        exercise_type: otherSportsForm.exerciseType,
-        start_time: otherSportsForm.startTime + ":00",
-        Duration: otherSportsForm.duration,
-        distance_km: distanceNum,
+      await getServerClient().activities.submitExternalActivity.mutate({
+        registrationId: user.id,
+        activityDate: otherSportsForm.activityDate,
+        exerciseType: otherSportsForm.exerciseType,
+        startTime: `${otherSportsForm.startTime}:00`,
+        duration: otherSportsForm.duration,
+        distanceKm: distanceNum,
       });
-
-      const { data, error } = await supabase
-        .from("external_activity_submissions")
-        .insert({
-          registration_id: user.id,
-          activity_date: otherSportsForm.activityDate,
-          exercise_type: otherSportsForm.exerciseType,
-          start_time: otherSportsForm.startTime + ":00",
-          duration: otherSportsForm.duration,
-          distance_km: distanceNum,
-          sports_app: otherSportsForm.sportsApp.trim(),
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error("[Submit Other Sports] Error:", error);
-        Alert.alert("Error", error.message || "Failed to submit activity");
-        return;
-      }
-
-      console.log("[Submit Other Sports] Success:", data);
       Alert.alert("Success", "Your activity has been submitted successfully!");
 
       setShowOtherSportsModal(false);
@@ -735,29 +1042,24 @@ export default function ExerciseScreen() {
     }
   };
 
-  const calculateDistance = (coord1: Coordinates, coord2: Coordinates): number => {
-    const R = 6371;
-    const dLat = toRad(coord2.latitude - coord1.latitude);
-    const dLon = toRad(coord2.longitude - coord1.longitude);
-    const lat1 = toRad(coord1.latitude);
-    const lat2 = toRad(coord2.latitude);
-
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  };
-
-  const toRad = (value: number): number => {
-    return (value * Math.PI) / 180;
-  };
-
   const formatTime = (seconds: number): string => {
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getEventWindow = (startsAt?: string | null, endsAt?: string | null) => {
+    const now = Date.now();
+    const startMs = startsAt ? new Date(startsAt).getTime() : 0;
+    const endMs = endsAt ? new Date(endsAt).getTime() : 0;
+    const msToStart = startMs - now;
+
+    return {
+      isEnded: !!endMs && now > endMs,
+      isSoon: !!startMs && msToStart <= 24 * 60 * 60 * 1000,
+      daysTo: startMs ? Math.max(0, Math.ceil(msToStart / (24 * 60 * 60 * 1000))) : null,
+    };
   };
 
   useEffect(() => {
@@ -812,6 +1114,13 @@ export default function ExerciseScreen() {
           </View>
         )}
 
+        {selectedEventRun && runState !== 'idle' && (
+          <View style={[styles.eventRunBanner, { backgroundColor: themeColors.cardBackground }]}>
+            <Text style={[styles.eventRunBannerLabel, { color: themeColors.textSecondary }]}>Exercise Event</Text>
+            <Text style={[styles.eventRunBannerTitle, { color: themeColors.text }]}>{selectedEventRun.eventName}</Text>
+          </View>
+        )}
+
         {runState !== 'idle' && (
           <View style={styles.statsContainer}>
             <LinearGradient colors={colors.gradient.orange} style={styles.statCardSmall}>
@@ -846,7 +1155,8 @@ export default function ExerciseScreen() {
                 <View style={styles.exerciseRow}>
                   <TouchableOpacity
                     style={styles.exerciseCard}
-                    onPress={() => startTracking("Walk")}
+                    onPress={() => void startTrackingWithCountdown("Walk")}
+                    disabled={isCountdownActive}
                     activeOpacity={0.7}
                     testID="exercise-walk"
                   >
@@ -861,7 +1171,8 @@ export default function ExerciseScreen() {
 
                   <TouchableOpacity
                     style={styles.exerciseCard}
-                    onPress={() => startTracking("Run")}
+                    onPress={() => void startTrackingWithCountdown("Run")}
+                    disabled={isCountdownActive}
                     activeOpacity={0.7}
                     testID="exercise-run"
                   >
@@ -874,6 +1185,44 @@ export default function ExerciseScreen() {
                     </LinearGradient>
                   </TouchableOpacity>
                 </View>
+              </View>
+
+              <View style={styles.categorySeparator} />
+
+              <View style={styles.categorySection}>
+                <View style={styles.categoryHeaderRow}>
+                  <View style={[styles.categoryDot, { backgroundColor: "#2563EB" }]} />
+                  <Text style={[styles.categoryTitle, { color: themeColors.text }]}>Event Run</Text>
+                </View>
+                <Text style={[styles.categorySubtitle, { color: themeColors.textSecondary }]}>Run an event you are already registered for</Text>
+
+                <TouchableOpacity
+                  style={[styles.addActivityCard, { backgroundColor: themeColors.cardBackground }]}
+                  onPress={async () => {
+                    if (effectiveRegistrationId) {
+                      await Promise.all([
+                        trpcUtils.events.getRegisteredEvents.invalidate({ registrationId: effectiveRegistrationId }),
+                        refetchRegisteredEvents(),
+                      ]);
+                    }
+                    setShowEventRunModal(true);
+                  }}
+                  activeOpacity={0.7}
+                  testID="run-event"
+                >
+                  <LinearGradient colors={colors.gradient.blue} style={styles.addActivityIcon}>
+                    <Footprints size={20} color={colors.white} />
+                  </LinearGradient>
+                  <View style={styles.addActivityInfo}>
+                    <Text style={[styles.addActivityTitle, { color: themeColors.text }]}>Run Event</Text>
+                    <Text style={[styles.addActivitySub, { color: themeColors.textSecondary }]}>
+                      {registeredEvents.length > 0
+                        ? `${registeredEvents.length} registered event${registeredEvents.length === 1 ? "" : "s"} ready`
+                        : "Choose from your registered events"}
+                    </Text>
+                  </View>
+                  <ChevronRight size={18} color={themeColors.textLight} />
+                </TouchableOpacity>
               </View>
 
               <View style={styles.categorySeparator} />
@@ -976,7 +1325,10 @@ export default function ExerciseScreen() {
             <View style={styles.finishedContainer}>
               <LinearGradient colors={colors.gradient.sunset} style={styles.finishedCard}>
                 <Text style={styles.finishedEmoji}>🎉</Text>
-                <Text style={styles.finishedTitle}>{exerciseType} Complete!</Text>
+                <Text style={styles.finishedTitle}>{selectedEventRun ? "Exercise Event Complete!" : `${exerciseType} Complete!`}</Text>
+                {selectedEventRun ? (
+                  <Text style={styles.finishedSubtitle}>{selectedEventRun.eventName}</Text>
+                ) : null}
                 <View style={styles.summaryRow}>
                   <View style={styles.summaryItem}>
                     <Text style={styles.summaryLabel}>Distance</Text>
@@ -994,6 +1346,12 @@ export default function ExerciseScreen() {
                   </View>
                 </View>
               </LinearGradient>
+
+              <TouchableOpacity style={styles.resetButton} onPress={() => setShowRunDetailsModal(true)} activeOpacity={0.8}>
+                <LinearGradient colors={colors.gradient.blue} style={styles.resetButtonGradient}>
+                  <Text style={styles.resetButtonText}>{activitySaved ? "View Share Card" : "Review / Save Activity"}</Text>
+                </LinearGradient>
+              </TouchableOpacity>
               
               <TouchableOpacity style={styles.resetButton} onPress={resetTracking} activeOpacity={0.8}>
                 <LinearGradient colors={colors.gradient.orange} style={styles.resetButtonGradient}>
@@ -1004,6 +1362,250 @@ export default function ExerciseScreen() {
           )}
         </View>
       </ScrollView>
+
+      <Modal
+        visible={showRunDetailsModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowRunDetailsModal(false)}
+      >
+        <View style={[styles.runDetailsOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.runDetailsShell, { backgroundColor: themeColors.surface }]}>
+            <ScrollView contentContainerStyle={styles.runDetailsScroll}>
+              <View style={[
+                styles.shareCard,
+                runCardTheme === "dark" ? styles.shareCardDark : styles.shareCardLight,
+              ]}>
+                {runCardBackgroundImage ? (
+                  <Image source={{ uri: runCardBackgroundImage }} style={styles.shareCardBackground} resizeMode="cover" />
+                ) : null}
+                <View style={[
+                  styles.shareCardTint,
+                  runCardTheme === "dark" ? styles.shareCardTintDark : styles.shareCardTintLight,
+                ]} />
+
+                <View style={styles.shareBrandRow}>
+                  <Text style={styles.shareBrand}>RunNation</Text>
+                  <Text style={styles.shareTagline}>Where runners belong</Text>
+                </View>
+
+                <View style={styles.shareRunnerRow}>
+                  {runnerProfile?.photoUrl ? (
+                    <Image source={{ uri: runnerProfile.photoUrl }} style={styles.shareAvatar} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.shareAvatarFallback}>
+                      <Text style={styles.shareAvatarInitial}>
+                        {(runnerProfile?.name || user?.username || "R").charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.shareRunnerInfo}>
+                    <Text style={[styles.shareRunnerName, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]} numberOfLines={1}>
+                      {runnerProfile?.name || user?.username || "RunNation Runner"}
+                    </Text>
+                    <Text style={[styles.shareRunnerMeta, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]} numberOfLines={1}>
+                      {[runnerProfile?.town, runnerProfile?.countryFlag, runnerProfile?.country].filter(Boolean).join("  ")}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.shareTitleRow}>
+                  <Text style={[styles.shareActivityType, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>
+                    {exerciseType || "Run"}
+                  </Text>
+                  <Text style={styles.shareMedalBadge}>{selectedEventRun ? "Medal eligible" : "No medal"}</Text>
+                </View>
+
+                {selectedEventRun ? (
+                  <Text style={[styles.shareEventName, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]} numberOfLines={2}>
+                    {selectedEventRun.eventName}
+                  </Text>
+                ) : null}
+
+                <View style={styles.shareMetricsGrid}>
+                  <View style={styles.shareMetric}>
+                    <Text style={styles.shareMetricLabel}>Distance</Text>
+                    <Text style={styles.shareMetricValue}>{distance.toFixed(2)} km</Text>
+                  </View>
+                  <View style={styles.shareMetric}>
+                    <Text style={styles.shareMetricLabel}>Time</Text>
+                    <Text style={styles.shareMetricValue}>{formatTime(duration)}</Text>
+                  </View>
+                  <View style={styles.shareMetric}>
+                    <Text style={styles.shareMetricLabel}>Pace</Text>
+                    <Text style={styles.shareMetricValue}>{pace.toFixed(1)} km/h</Text>
+                  </View>
+                </View>
+
+                <View style={styles.shareDateRow}>
+                  <Text style={styles.shareDateText}>{startTime ? startTime.toLocaleDateString() : "-"}</Text>
+                  <Text style={styles.shareDateText}>
+                    {startTime ? startTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-"}
+                  </Text>
+                </View>
+
+                <View style={styles.shareMapBox}>
+                  {Platform.OS !== "web" && coords.length > 0 ? (
+                    <MapView
+                      style={styles.shareMap}
+                      pointerEvents="none"
+                      initialRegion={{
+                        latitude: coords[0].latitude,
+                        longitude: coords[0].longitude,
+                        latitudeDelta: 0.01,
+                        longitudeDelta: 0.01,
+                      }}
+                    >
+                      <Polyline coordinates={coords} strokeColor="#F97316" strokeWidth={5} />
+                    </MapView>
+                  ) : (
+                    <View style={styles.shareMapPlaceholder}>
+                      <Text style={styles.shareMapPlaceholderText}>Route map</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              <View style={styles.runDetailsOptions}>
+                <Text style={[styles.runDetailsOptionTitle, { color: themeColors.text }]}>Card options</Text>
+                <View style={styles.runDetailsOptionRow}>
+                  {(["dark", "light"] as const).map((mode) => (
+                    <TouchableOpacity
+                      key={mode}
+                      style={[styles.runDetailsChip, runCardTheme === mode && styles.runDetailsChipActive]}
+                      onPress={() => setRunCardTheme(mode)}
+                    >
+                      <Text style={[styles.runDetailsChipText, runCardTheme === mode && styles.runDetailsChipTextActive]}>
+                        {mode === "dark" ? "Dark" : "Light"}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                  <TouchableOpacity style={styles.runDetailsChip} onPress={pickRunCardBackground}>
+                    <Text style={styles.runDetailsChipText}>Background image</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </ScrollView>
+
+            <View style={[styles.runDetailsActions, { borderTopColor: themeColors.border }]}>
+              <TouchableOpacity
+                style={[styles.runDetailsActionButton, styles.runDetailsCloseButton]}
+                onPress={() => setShowRunDetailsModal(false)}
+              >
+                <Text style={styles.runDetailsCloseText}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.runDetailsActionButton, styles.runDetailsShareButton]} onPress={shareRunDetails}>
+                <Text style={styles.runDetailsActionText}>Share</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.runDetailsActionButton, styles.runDetailsSaveButton, (isSaving || activitySaved) && styles.runDetailsDisabledButton]}
+                onPress={saveFinishedActivity}
+                disabled={isSaving || activitySaved}
+              >
+                <Text style={styles.runDetailsActionText}>{activitySaved ? "Saved" : isSaving ? "Saving..." : "Save"}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!countdownValue}
+        transparent={true}
+        animationType="fade"
+        statusBarTranslucent
+      >
+        <View style={styles.countdownOverlay}>
+          <LinearGradient colors={colors.gradient.orange} style={styles.countdownCircle}>
+            <Text style={styles.countdownText}>{countdownValue}</Text>
+          </LinearGradient>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showEventRunModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowEventRunModal(false)}
+      >
+        <View style={[styles.modalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.modalContentCenter, { backgroundColor: themeColors.surface }]}>
+            <LinearGradient colors={colors.gradient.blue} style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Run Event</Text>
+              <TouchableOpacity onPress={() => setShowEventRunModal(false)}>
+                <X size={24} color={colors.white} />
+              </TouchableOpacity>
+            </LinearGradient>
+
+            <ScrollView style={styles.modalBody}>
+              <Text style={[styles.modalSubtitle, { color: themeColors.textSecondary }]}>
+                Choose an event you are already registered for.
+              </Text>
+
+              {registeredEvents.length === 0 ? (
+                <View style={styles.eventRunEmptyState}>
+                  <Text style={[styles.eventRunEmptyTitle, { color: themeColors.text }]}>No registered events yet</Text>
+                  <Text style={[styles.eventRunEmptyText, { color: themeColors.textSecondary }]}>
+                    Join an event first, then come back here to record your official event run.
+                  </Text>
+                </View>
+              ) : (
+                registeredEvents.map((eventItem) => {
+                  if (!eventItem) {
+                    return null;
+                  }
+
+                  const eventWindow = getEventWindow(eventItem.startsAt, eventItem.endsAt);
+                  return (
+                    <View key={eventItem.eventId} style={[styles.eventRunCard, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.border }]}>
+                      <View style={styles.eventRunCardHeader}>
+                        <Text style={[styles.eventRunCardTitle, { color: themeColors.text }]}>{eventItem.eventName}</Text>
+                        {eventWindow.isSoon && !eventWindow.isEnded ? (
+                          <View style={styles.eventRunReadyBadge}>
+                            <Footprints size={14} color={colors.white} />
+                          </View>
+                        ) : null}
+                      </View>
+                      <Text style={[styles.eventRunMeta, { color: themeColors.textSecondary }]}>
+                        {eventItem.startsAt ? `Starts ${eventItem.startsAt}` : "Start date pending"}
+                      </Text>
+                      <Text style={[styles.eventRunCountdown, { color: themeColors.text }]}>
+                        {eventWindow.isEnded
+                          ? "Event closed"
+                          : eventWindow.isSoon
+                          ? "Run symbol active"
+                          : `${eventWindow.daysTo ?? 0} day${eventWindow.daysTo === 1 ? "" : "s"} to go`}
+                      </Text>
+                      {eventWindow.isSoon && !eventWindow.isEnded ? (
+                        <Text style={styles.eventRunCaution}>
+                          Only start your event when the official event has been flagged off.
+                        </Text>
+                      ) : null}
+                      <TouchableOpacity
+                        style={[styles.eventRunStartButton, eventWindow.isEnded && styles.eventRunStartButtonDisabled]}
+                        onPress={() => {
+                          setShowEventRunModal(false);
+                          void startTrackingWithCountdown("Run", eventItem);
+                        }}
+                        disabled={eventWindow.isEnded || isCountdownActive}
+                        activeOpacity={0.8}
+                      >
+                        <LinearGradient
+                          colors={eventWindow.isEnded ? ["#9CA3AF", "#9CA3AF"] : colors.gradient.orange}
+                          style={styles.eventRunStartGradient}
+                        >
+                          <Play size={18} color={colors.white} />
+                          <Text style={styles.eventRunStartText}>{eventWindow.isEnded ? "Ended" : "Start"}</Text>
+                        </LinearGradient>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={showTreadmillModal}
@@ -1277,6 +1879,23 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
+    paddingBottom: 24,
+  },
+  eventRunBanner: {
+    margin: 16,
+    marginBottom: 0,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
+  },
+  eventRunBannerLabel: {
+    fontSize: 12,
+    fontWeight: "600" as const,
+    marginBottom: 2,
+  },
+  eventRunBannerTitle: {
+    fontSize: 18,
+    fontWeight: "700" as const,
   },
   mapContainer: {
     height: 300,
@@ -1469,6 +2088,274 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "700" as const,
   },
+  runDetailsOverlay: {
+    flex: 1,
+    justifyContent: "flex-end" as const,
+  },
+  runDetailsShell: {
+    maxHeight: "94%",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: "hidden" as const,
+  },
+  runDetailsScroll: {
+    padding: 16,
+    gap: 14,
+  },
+  shareCard: {
+    borderRadius: 18,
+    overflow: "hidden" as const,
+    padding: 18,
+    gap: 14,
+    minHeight: 620,
+  },
+  shareCardDark: {
+    backgroundColor: "#111827",
+  },
+  shareCardLight: {
+    backgroundColor: "#F8FAFC",
+  },
+  shareCardBackground: {
+    ...StyleSheet.absoluteFillObject,
+    width: "100%",
+    height: "100%",
+  },
+  shareCardTint: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  shareCardTintDark: {
+    backgroundColor: "rgba(17,24,39,0.72)",
+  },
+  shareCardTintLight: {
+    backgroundColor: "rgba(248,250,252,0.82)",
+  },
+  shareBrandRow: {
+    alignItems: "center" as const,
+    gap: 2,
+  },
+  shareBrand: {
+    color: "#F97316",
+    fontSize: 24,
+    fontWeight: "900" as const,
+  },
+  shareTagline: {
+    color: "#10B981",
+    fontSize: 13,
+    fontWeight: "700" as const,
+  },
+  shareRunnerRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 12,
+    zIndex: 1,
+  },
+  shareAvatar: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    borderWidth: 2,
+    borderColor: "#F97316",
+  },
+  shareAvatarFallback: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    backgroundColor: "#F97316",
+  },
+  shareAvatarInitial: {
+    color: colors.white,
+    fontSize: 24,
+    fontWeight: "900" as const,
+  },
+  shareRunnerInfo: {
+    flex: 1,
+  },
+  shareRunnerName: {
+    fontSize: 22,
+    fontWeight: "900" as const,
+  },
+  shareRunnerMeta: {
+    fontSize: 13,
+    fontWeight: "600" as const,
+    marginTop: 2,
+  },
+  shareTextLight: {
+    color: colors.white,
+  },
+  shareTextDark: {
+    color: "#111827",
+  },
+  shareTextMutedDark: {
+    color: "rgba(255,255,255,0.78)",
+  },
+  shareTextMutedLight: {
+    color: "#475569",
+  },
+  shareTitleRow: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    zIndex: 1,
+  },
+  shareActivityType: {
+    fontSize: 30,
+    fontWeight: "900" as const,
+  },
+  shareMedalBadge: {
+    color: colors.white,
+    backgroundColor: "#10B981",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: "800" as const,
+    overflow: "hidden" as const,
+  },
+  shareEventName: {
+    fontSize: 15,
+    fontWeight: "700" as const,
+    zIndex: 1,
+  },
+  shareMetricsGrid: {
+    flexDirection: "row" as const,
+    gap: 8,
+    zIndex: 1,
+  },
+  shareMetric: {
+    flex: 1,
+    borderRadius: 12,
+    padding: 10,
+    backgroundColor: "rgba(249,115,22,0.92)",
+  },
+  shareMetricLabel: {
+    color: "rgba(255,255,255,0.82)",
+    fontSize: 11,
+    fontWeight: "700" as const,
+  },
+  shareMetricValue: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: "900" as const,
+    marginTop: 4,
+  },
+  shareDateRow: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    zIndex: 1,
+  },
+  shareDateText: {
+    color: "#10B981",
+    fontSize: 13,
+    fontWeight: "800" as const,
+  },
+  shareMapBox: {
+    height: 230,
+    borderRadius: 16,
+    overflow: "hidden" as const,
+    backgroundColor: "#E5E7EB",
+    zIndex: 1,
+  },
+  shareMap: {
+    flex: 1,
+  },
+  shareMapPlaceholder: {
+    flex: 1,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  shareMapPlaceholderText: {
+    color: "#6B7280",
+    fontWeight: "800" as const,
+  },
+  runDetailsOptions: {
+    gap: 10,
+  },
+  runDetailsOptionTitle: {
+    fontSize: 14,
+    fontWeight: "800" as const,
+  },
+  runDetailsOptionRow: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 8,
+  },
+  runDetailsChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: "#E5E7EB",
+  },
+  runDetailsChipActive: {
+    backgroundColor: "#F97316",
+  },
+  runDetailsChipText: {
+    color: "#374151",
+    fontSize: 13,
+    fontWeight: "800" as const,
+  },
+  runDetailsChipTextActive: {
+    color: colors.white,
+  },
+  runDetailsActions: {
+    flexDirection: "row" as const,
+    gap: 10,
+    padding: 14,
+    borderTopWidth: 1,
+  },
+  runDetailsActionButton: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: "center" as const,
+  },
+  runDetailsCloseButton: {
+    backgroundColor: "#E5E7EB",
+  },
+  runDetailsShareButton: {
+    backgroundColor: "#2563EB",
+  },
+  runDetailsSaveButton: {
+    backgroundColor: "#10B981",
+  },
+  runDetailsDisabledButton: {
+    opacity: 0.65,
+  },
+  runDetailsActionText: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: "900" as const,
+  },
+  runDetailsCloseText: {
+    color: "#374151",
+    fontSize: 15,
+    fontWeight: "900" as const,
+  },
+  countdownOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.72)",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  countdownCircle: {
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  countdownText: {
+    color: colors.white,
+    fontSize: 48,
+    fontWeight: "900" as const,
+  },
   finishedContainer: {
     gap: 20,
   },
@@ -1491,6 +2378,14 @@ const styles = StyleSheet.create({
     fontWeight: "800" as const,
     color: colors.white,
     marginBottom: 24,
+  },
+  finishedSubtitle: {
+    fontSize: 14,
+    fontWeight: "600" as const,
+    color: "rgba(255,255,255,0.92)",
+    marginTop: -10,
+    marginBottom: 20,
+    textAlign: "center" as const,
   },
   summaryRow: {
     flexDirection: "row",
@@ -1576,6 +2471,79 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginBottom: 20,
     fontWeight: "600" as const,
+  },
+  eventRunEmptyState: {
+    paddingVertical: 24,
+    alignItems: "center" as const,
+  },
+  eventRunEmptyTitle: {
+    fontSize: 18,
+    fontWeight: "700" as const,
+    marginBottom: 8,
+    textAlign: "center" as const,
+  },
+  eventRunEmptyText: {
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center" as const,
+  },
+  eventRunCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 14,
+    gap: 8,
+  },
+  eventRunCardHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    gap: 12,
+  },
+  eventRunCardTitle: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: "700" as const,
+  },
+  eventRunMeta: {
+    fontSize: 13,
+  },
+  eventRunCountdown: {
+    fontSize: 14,
+    fontWeight: "700" as const,
+  },
+  eventRunCaution: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#B45309",
+  },
+  eventRunReadyBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    backgroundColor: "#2563EB",
+  },
+  eventRunStartButton: {
+    borderRadius: 14,
+    overflow: "hidden" as const,
+    marginTop: 4,
+  },
+  eventRunStartButtonDisabled: {
+    opacity: 0.7,
+  },
+  eventRunStartGradient: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 8,
+    paddingVertical: 12,
+  },
+  eventRunStartText: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: "700" as const,
   },
   inputGroup: {
     marginBottom: 18,

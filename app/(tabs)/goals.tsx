@@ -145,14 +145,6 @@ export default function GoalsScreen() {
   const { user } = useAuth();
   const { colors: themeColors } = useTheme();
   const { isSubscribed } = useSubscription();
-
-  if (!isSubscribed) {
-    return (
-      <SubscriptionGate featureName="Goals">
-        <></>
-      </SubscriptionGate>
-    );
-  }
   const queryClient = useQueryClient();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [showGoalForm, setShowGoalForm] = useState(false);
@@ -1503,6 +1495,14 @@ export default function GoalsScreen() {
   const trackedGoalsCount = useMemo(() => allGoalTypes.filter(g => g.isTracked).length, [allGoalTypes]);
   const untrackedGoals = useMemo(() => allGoalTypes.filter(g => !g.isTracked), [allGoalTypes]);
 
+  if (!isSubscribed) {
+    return (
+      <SubscriptionGate featureName="Goals">
+        <></>
+      </SubscriptionGate>
+    );
+  }
+
   return (
     <Animated.View style={[styles.container, { opacity: fadeAnim, backgroundColor: themeColors.background }]}>
       <ScrollView
@@ -2376,7 +2376,7 @@ export default function GoalsScreen() {
                   keyboardType="decimal-pad"
                   placeholderTextColor={colors.textLight}
                 />
-                <Text style={styles.inputHint}>Today's date will be used automatically</Text>
+                <Text style={styles.inputHint}>Today&apos;s date will be used automatically</Text>
               </View>
 
               <TouchableOpacity
@@ -2619,7 +2619,7 @@ export default function GoalsScreen() {
 
             <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
               <Text style={styles.modalSubtitle}>
-                Enter today's data from your smartwatch. Steps are required, other fields are optional.
+                Enter today&apos;s data from your smartwatch. Steps are required, other fields are optional.
               </Text>
 
               <View style={styles.inputGroup}>
@@ -2680,7 +2680,7 @@ export default function GoalsScreen() {
                   keyboardType="decimal-pad"
                   placeholderTextColor={colors.textLight}
                 />
-                <Text style={styles.inputHint}>Today's date will be used automatically</Text>
+                <Text style={styles.inputHint}>Today&apos;s date will be used automatically</Text>
               </View>
 
               <TouchableOpacity

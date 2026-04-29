@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import { requireAdminPermission } from "../../../rbac";
 
 export default publicProcedure
   .input(
@@ -10,7 +11,11 @@ export default publicProcedure
   )
   .mutation(async ({ ctx, input }) => {
     try {
-      console.log("[Reject External Submission] Starting rejection...", input);
+      await requireAdminPermission(ctx, {
+        allowSuperAdmin: true,
+              allowCountryCoordinator: true,
+        allowClubCoordinator: true,
+      });
 
       const { error } = await ctx.supabase
         .from("external_activity_submissions")
@@ -22,10 +27,10 @@ export default publicProcedure
         throw new Error(error.message || "Failed to reject submission");
       }
 
-      console.log("[Reject External Submission] Success");
       return { success: true };
     } catch (error: any) {
       console.error("[Reject External Submission] Error:", error);
       throw new Error(error.message || "Failed to reject submission");
     }
   });
+

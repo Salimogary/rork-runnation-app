@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { Stack } from 'expo-router';
 import { Shield, Eye, MapPin, Database, Lock, Users, Trash2, Scale, ChevronDown } from 'lucide-react-native';
-import colors from '@/constants/colors';
+import brandColors from '@/constants/colors';
 
 type SectionId = 'overview' | 'data_collection' | 'location' | 'storage' | 'sharing' | 'security' | 'rights' | 'terms';
 
@@ -21,7 +21,7 @@ interface PolicySection {
   content: string[];
 }
 
-const LAST_UPDATED = '21 February 2026';
+const LAST_UPDATED = '27 April 2026';
 
 const SECTIONS: PolicySection[] = [
   {
@@ -30,8 +30,9 @@ const SECTIONS: PolicySection[] = [
     icon: <Eye size={20} color="#3b82f6" />,
     accentColor: '#3b82f6',
     content: [
-      'RunNation ("the App") is a fitness and community platform that enables users to track walking, running, and treadmill activities, participate in events, engage with a social feed, and purchase merchandise.',
-      'This document outlines how we collect, use, store, and protect your personal data in compliance with applicable data protection laws. By using the App, you agree to the practices described herein.',
+      'RunNation ("the App") is a fitness, community, events, shopping, chat, and magazine platform for runners and walkers. It helps users track activity, join clubs, participate in events, share social content, discover country-specific shop items, and read or submit RunNation Magazine stories.',
+      'This document explains how we collect, use, store, protect, moderate, and display your information. By creating an account, signing in with email or a supported social provider, or using the App, you agree to these practices and terms.',
+      'Some features are country-specific or role-specific. For example, shopping and event access may depend on your profile country, while admin tools are available only to users with approved roles.',
     ],
   },
   {
@@ -40,13 +41,15 @@ const SECTIONS: PolicySection[] = [
     icon: <Database size={20} color="#10b981" />,
     accentColor: '#10b981',
     content: [
-      'Account Information: When you register, we collect your first name, other names, username, email address, sex, age, country, residence, occupation, academic year, and a profile photo (optional).',
-      'Activity Data: We record exercise type (Walk, Run, Treadmill), distance covered, start/end times, pace, activity date, and GPS route coordinates for outdoor activities.',
+      'Account Information: When you register or complete your profile, we may collect your name, username, email address, phone number, sex, date of birth, country, residence, occupation, club, profile photo, and other profile details you choose to provide.',
+      'Authentication Information: Accounts are created through Supabase Auth using email/password or supported social sign-in providers such as Google. Apple sign-in may be shown as a future or coming-soon option until fully enabled.',
+      'Activity Data: We record exercise type (Walk, Run, Treadmill), distance covered, start/end times, pace, activity date, GPS route coordinates for outdoor activities, and any supporting evidence required for activity verification.',
       'Treadmill Submissions: For treadmill activities, we collect distance, duration, and a photo of the treadmill screen for admin verification.',
-      'Event Participation: We store event enrollment details including your name, email, registration status, and medal/completion progress.',
-      'Social Posts: Any photos, captions, or activity data you choose to share on the community feed.',
-      'Shop & Orders: Delivery information, order details, and purchase history when you use the merchandise shop.',
-      'Device Information: We may collect device identifiers and platform information for app functionality and security purposes.',
+      'Events and Clubs: We store event enrollment details, country and club information, registration status, medal or completion progress, event entry type (such as free, club-approved, or paid), and whether an event is local, virtual, or available to all users.',
+      'Chat and Social Content: We store posts, photos, captions, comments, reactions, mentions, polls, and activity summaries that you choose to share in the community areas of the App.',
+      'Magazine Submissions: If you submit a story, attachment, event pictorial, or photo for Picture of the Week, we collect the submitted text, images, files, country, club, event date, and related details for admin review and possible publication.',
+      'Shop and Orders: We collect delivery information, order details, currency, country, and purchase history when you use the merchandise shop. Shop availability may vary by country.',
+      'Device and Session Information: We may collect device identifiers, platform information, app logs, and session data needed for app functionality, troubleshooting, security, and abuse prevention.',
     ],
   },
   {
@@ -67,11 +70,13 @@ const SECTIONS: PolicySection[] = [
     icon: <Lock size={20} color="#8b5cf6" />,
     accentColor: '#8b5cf6',
     content: [
-      'Your data is stored securely using Supabase, a cloud-hosted database platform with enterprise-grade security, including encryption at rest and in transit.',
-      'Authentication credentials (PIN) are hashed and stored securely. We never store plain-text passwords or PINs.',
+      'Your data is stored using Supabase database, authentication, and storage services. Data is protected using encryption in transit and platform security controls.',
+      'Authentication credentials are handled by Supabase Auth and are never stored by RunNation as plain-text passwords. Passwords and recovery flows should use the secure authentication provider process.',
       'Sensitive session data is stored on your device using encrypted secure storage (Expo SecureStore) and is not transmitted to external servers.',
-      'Activity records and account data are retained for as long as your account is active. You may request deletion of your data at any time (see Your Rights below).',
+      'Images, attachments, social uploads, magazine submissions, and pictorial photos may be stored in Supabase Storage or an equivalent app storage service so they can be displayed in the App.',
+      'Activity records, account data, social content, order records, event records, role assignments, and magazine submissions are retained for as long as needed to operate the App, maintain records, resolve disputes, or comply with lawful requirements.',
       'Rejected treadmill submissions and rejected event enrollments are deleted from our systems upon rejection.',
+      'Deleted posts, submissions, images, or account data may not disappear immediately from backups or logs, but they will no longer be actively displayed once removed from the live App.',
     ],
   },
   {
@@ -80,10 +85,12 @@ const SECTIONS: PolicySection[] = [
     icon: <Users size={20} color="#ec4899" />,
     accentColor: '#ec4899',
     content: [
-      'Community Feed: Posts you share on the social feed (photos, captions, activity summaries) are visible to all App users. You control what you post.',
-      'Activity Leaderboards: Your username and activity statistics may appear on event leaderboards and medal lists visible to other participants.',
+      'Community Feed and Chat: Posts, photos, comments, reactions, mentions, polls, and activity summaries you share may be visible to other App users. You are responsible for the content you choose to publish.',
+      'Magazine and Pictorials: Stories, attachments, event pictorial photos, and Picture of the Week submissions may be reviewed by admins and, if selected, displayed in RunNation Magazine or on magazine front-page areas.',
+      'Activity Leaderboards: Your username, profile details, country or club, and activity statistics may appear on event leaderboards, medal lists, and community views visible to other participants.',
       'Private Mode: You can enable Private Mode in Settings to hide your data from public leaderboards and community views.',
-      'Admin Access: App administrators can view activity records, pending submissions, event enrollments, and shop orders for operational and verification purposes.',
+      'Admin Access: Approved admins can view relevant records such as activities, pending submissions, event enrollments, shop orders, social reports, magazine submissions, pictorials, and role assignments for operational, moderation, and verification purposes.',
+      'Role-Based Access: Global admins, country admins, and club coordinators may see different information depending on their role and scope. Admin actions may be logged for accountability.',
       'We do not share your personal data with third-party advertisers. We do not sell your data to any external entity.',
       'We may disclose data if required by law or to protect the safety and rights of our users.',
     ],
@@ -91,14 +98,16 @@ const SECTIONS: PolicySection[] = [
   {
     id: 'security',
     title: 'Security Measures',
-    icon: <Shield size={20} color={colors.primary} />,
-    accentColor: colors.primary,
+    icon: <Shield size={20} color={brandColors.primary} />,
+    accentColor: brandColors.primary,
     content: [
-      'PIN-based authentication with configurable lockout after multiple failed attempts (5 attempts, 15-minute lockout).',
-      'Biometric authentication (Face ID / Fingerprint) support for convenient and secure access on supported devices.',
+      'Authentication is handled through Supabase Auth using email/password and supported social sign-in providers. Password reset and account recovery are handled through secure authentication flows.',
+      'Biometric authentication (Face ID / Fingerprint) may be supported for convenient access on supported devices where enabled.',
       'All network communications between the App and our servers use HTTPS encryption.',
-      'Row-level security policies are enforced at the database level, ensuring users can only access and modify their own data.',
-      'Admin access is protected by a separate authentication system with restricted permissions.',
+      'The App uses backend checks, database permissions, and role-based access controls to restrict sensitive operations.',
+      'Admin access uses the same main authentication system and is restricted by assigned roles such as super_admin, country_admin, and club_coordinator.',
+      'Country and club scope may limit what admins can view or manage. For example, country-specific shop and event operations may be restricted to the relevant country.',
+      'No system is perfectly secure, but we take reasonable technical and operational steps to protect user data and reduce unauthorized access.',
     ],
   },
   {
@@ -111,7 +120,8 @@ const SECTIONS: PolicySection[] = [
       'Correction: You may update your personal information at any time through your profile settings.',
       'Deletion: You may request complete deletion of your account and all associated data by contacting an administrator through the Send Feedback feature in Settings.',
       'Portability: You may request an export of your activity data by contacting an administrator.',
-      'Withdraw Consent: You may stop using the App at any time. Disabling location services or notifications does not affect your account status.',
+      'Content Removal: You may request removal of your own posts, submitted stories, pictorial photos, or other user-generated content, subject to operational, safety, legal, or recordkeeping needs.',
+      'Withdraw Consent: You may stop using the App at any time. Disabling location services, notifications, or optional profile fields may limit certain features but does not automatically delete your account.',
       'Objection: If you believe your data is being processed unfairly, you may raise a concern through the feedback system or contact the App administrators directly.',
     ],
   },
@@ -122,10 +132,15 @@ const SECTIONS: PolicySection[] = [
     accentColor: '#0ea5e9',
     content: [
       'Eligibility: You must provide accurate registration information to use the App. Falsifying activity data (e.g. fraudulent treadmill submissions) may result in account suspension.',
-      'Acceptable Use: The App is intended for personal fitness tracking and community engagement. You agree not to misuse the platform, harass other users, or upload inappropriate content to the social feed.',
-      'Admin Decisions: Administrators reserve the right to approve or reject treadmill activity submissions, event enrollments, and external activity submissions at their discretion.',
-      'Shop Purchases: All merchandise purchases are subject to availability. Order statuses are managed by administrators. Refund and return policies are handled on a case-by-case basis.',
-      'Intellectual Property: All content, design, and functionality of the RunNation app are the property of the App operators. User-generated content (posts, photos) remains the property of the user but is licensed to the App for display purposes.',
+      'Acceptable Use: The App is intended for personal fitness tracking, community engagement, events, shopping, and editorial participation. You agree not to misuse the platform, harass users, impersonate others, post harmful content, spam, or upload illegal or inappropriate material.',
+      'Country and Event Rules: Some events and shop items are country-specific. You may be prevented from enrolling in non-virtual events outside your registered country unless the App operators allow it.',
+      'Event Fees and Payment Handling: Some events may be free, may require club approval, or may require payment before confirmation. Where event fees apply, payment instructions should be communicated clearly through the app or the relevant RunNation-administered process. Bulk-collected event funds may be remitted to the relevant club or independent event organiser through the approved RunNation payment handling workflow.',
+      'Admin Decisions: Administrators may approve, reject, edit visibility, remove, or moderate treadmill submissions, event enrollments, shop orders, social posts, comments, reactions, magazine submissions, pictorials, and reported content.',
+      'Magazine Rights: You keep ownership of stories, photos, and attachments you submit, but you grant RunNation permission to review, store, edit for formatting, display, promote, and publish accepted submissions inside the App and related RunNation channels.',
+      'Picture of the Week: By submitting an event pictorial or photo, you agree that selected images may be used as a magazine cover, front-page background, highlight, or promotional community feature with appropriate contextual details where practical.',
+      'Shop Purchases: All merchandise purchases are subject to availability, supported country, local currency, delivery limits, and admin processing. Refund and return policies are handled on a case-by-case basis unless a specific policy is published.',
+      'Admin Roles: Users with admin roles must use their access only for legitimate RunNation operations. Global admins may have broader rights, including deletion and role management, while country admins and club coordinators may be limited by assigned scope.',
+      'Intellectual Property: All content, design, branding, and functionality of the RunNation app are the property of the App operators. User-generated content remains the property of the user but is licensed to the App for display, moderation, community, and magazine purposes.',
       'Modifications: We reserve the right to update this policy and these terms at any time. Continued use of the App after changes constitutes acceptance of the updated terms.',
       'Limitation of Liability: The App is provided "as is" for fitness tracking purposes. We are not liable for inaccuracies in distance tracking, GPS data, or any health-related decisions made based on App data. Always consult a medical professional before starting any exercise programme.',
     ],
@@ -217,7 +232,7 @@ export default function PolicyScreen() {
         options={{
           title: 'Policy & Terms',
           headerStyle: { backgroundColor: '#fff' },
-          headerTintColor: colors.dark,
+          headerTintColor: brandColors.dark,
         }}
       />
       <ScrollView
@@ -347,11 +362,11 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 16,
-    backgroundColor: colors.primary,
+    backgroundColor: brandColors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 4,
-    shadowColor: colors.primary,
+    shadowColor: brandColors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -370,12 +385,12 @@ const styles = StyleSheet.create({
     fontWeight: '500' as const,
   },
   infoCard: {
-    backgroundColor: colors.primary + '0D',
+    backgroundColor: brandColors.primary + '0D',
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: colors.primary + '20',
+    borderColor: brandColors.primary + '20',
   },
   infoText: {
     fontSize: 14,

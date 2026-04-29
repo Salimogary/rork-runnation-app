@@ -54,7 +54,7 @@ const getMedalList = publicProcedure
 
       const { data: registrations, error: regError } = await ctx.supabase
         .from("registrations")
-        .select('registration_id, first_name, other_names, country, city_town_district')
+        .select('registration_id, first_name, other_names, country')
         .in("registration_id", regIds);
 
       if (regError) {
@@ -65,6 +65,43 @@ const getMedalList = publicProcedure
       console.log("[getMedalList] Registrations found:", registrations?.length);
 
       const regMap = new Map((registrations || []).map((r: any) => [r.registration_id, r]));
+      const { data: memberships, error: membershipsError } = await ctx.supabase
+        .from("club_members")
+        .select("registration_id, coordinator_id")
+        .in("registration_id", regIds);
+
+      if (membershipsError) {
+        console.error("[getMedalList] Error fetching club memberships:", membershipsError);
+        throw new Error(`Failed to fetch club memberships: ${membershipsError.message}`);
+      }
+
+      const coordinatorIds = Array.from(
+        new Set((memberships || []).map((membership: any) => membership.coordinator_id).filter(Boolean))
+      );
+
+      let clubByCoordinator = new Map<string, string>();
+      if (coordinatorIds.length > 0) {
+        const { data: clubs, error: clubsError } = await ctx.supabase
+          .from("clubs")
+          .select("coordinator_id, club_name")
+          .in("coordinator_id", coordinatorIds);
+
+        if (clubsError) {
+          console.error("[getMedalList] Error fetching clubs:", clubsError);
+          throw new Error(`Failed to fetch clubs: ${clubsError.message}`);
+        }
+
+        clubByCoordinator = new Map(
+          (clubs || []).map((club: any) => [club.coordinator_id, club.club_name || ""])
+        );
+      }
+
+      const clubByRegistration = new Map(
+        (memberships || []).map((membership: any) => [
+          membership.registration_id,
+          clubByCoordinator.get(membership.coordinator_id) || "",
+        ])
+      );
 
       const qualifiedParticipants = await Promise.all(
         participants.map(async (participant: any) => {
@@ -191,7 +228,7 @@ const getMedalList = publicProcedure
             firstName: registration?.first_name || "",
             otherNames: registration?.other_names || "",
             country: registration?.country ?? "",
-            residence: registration?.city_town_district ?? "",
+            club: clubByRegistration.get(participant.registration_id) ?? "",
             eventName: event?.event_name || "",
             medalMinDailyDistance,
             medalMinCumulativeDistance,

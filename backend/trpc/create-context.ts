@@ -1,22 +1,44 @@
-import { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
 import { initTRPC } from "@trpc/server";
 import superjson from "superjson";
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from "@supabase/supabase-js";
+import { CreateExpressContextOptions } from "@trpc/server/adapters/express";
+import { env } from "./env";
 
-const supabaseUrl = 'https://mbbjijvxmwluubkzgkpl.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1iYmppanZ4bXdsdXVia3pna3BsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIwMjMzMjEsImV4cCI6MjA3NzU5OTMyMX0.Hpy30sfwABdmEIb67M7nABhCeESmnL8m33Nmi0cJnV4';
+function getBearerToken(req: CreateExpressContextOptions["req"]): string | null {
+  const rawHeader = req.headers.authorization;
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
+  if (!rawHeader) {
+    return null;
+  }
 
-export const createContext = async (opts: FetchCreateContextFnOptions) => {
+  const headerValue = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+  const [scheme, token] = headerValue.split(" ");
+
+  if (scheme?.toLowerCase() !== "bearer" || !token) {
+    return null;
+  }
+
+  return token;
+}
+
+// ✅ Correct context for Express
+export const createContext = async ({ req }: CreateExpressContextOptions) => {
+  const supabase = createClient(env.supabaseUrl, env.supabaseServiceRoleKey);
+
+  let authUserId: string | null = null;
+  const bearerToken = getBearerToken(req);
+
+  if (bearerToken) {
+    const { data, error } = await supabase.auth.getUser(bearerToken);
+    if (!error) {
+      authUserId = data.user?.id ?? null;
+    }
+  }
+
   return {
-    req: opts.req,
+    req,
     supabase,
+    authUserId,
   };
 };
 
@@ -24,6 +46,15 @@ export type Context = Awaited<ReturnType<typeof createContext>>;
 
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
+  errorFormatter({ shape }) {
+    return {
+      ...shape,
+      data: {
+        ...shape.data,
+        stack: env.isProduction ? undefined : shape.data.stack,
+      },
+    };
+  },
 });
 
 export const createTRPCRouter = t.router;

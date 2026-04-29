@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import { requireAdminPermission } from "../../../rbac";
 
 export default publicProcedure
   .input(
@@ -9,7 +10,11 @@ export default publicProcedure
   )
   .mutation(async ({ ctx, input }) => {
     try {
-      console.log("[Approve External Submission] Starting approval...", input);
+      await requireAdminPermission(ctx, {
+        allowSuperAdmin: true,
+              allowCountryCoordinator: true,
+        allowClubCoordinator: true,
+      });
 
       const { data: submission, error: fetchError } = await ctx.supabase
         .from("external_activity_submissions")
@@ -19,21 +24,6 @@ export default publicProcedure
 
       if (fetchError || !submission) {
         throw new Error("Submission not found");
-      }
-
-      const { data: lastActivity } = await ctx.supabase
-        .from("activities")
-        .select("activity_id")
-        .order("activity_id", { ascending: false })
-        .limit(1)
-        .single();
-
-      let newActivityId = "1";
-      if (lastActivity?.activity_id) {
-        const lastNum = parseInt(lastActivity.activity_id);
-        if (!isNaN(lastNum)) {
-          newActivityId = (lastNum + 1).toString();
-        }
       }
 
       const durationParts = (submission.duration || "00:00:00").split(":");
@@ -55,7 +45,6 @@ export default publicProcedure
       const { error: insertError } = await ctx.supabase
         .from("activities")
         .insert({
-          activity_id: newActivityId,
           registration_id: submission.registration_id,
           activity_date: submission.activity_date,
           exercise_type: submission.exercise_type,
@@ -79,10 +68,10 @@ export default publicProcedure
         console.error("[Approve External Submission] Delete error:", deleteError);
       }
 
-      console.log("[Approve External Submission] Success");
       return { success: true };
     } catch (error: any) {
       console.error("[Approve External Submission] Error:", error);
       throw new Error(error.message || "Failed to approve submission");
     }
   });
+

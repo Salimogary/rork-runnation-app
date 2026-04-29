@@ -1,31 +1,38 @@
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, TextInput, ActivityIndicator, Share } from "react-native";
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, TextInput, ActivityIndicator, Share, useWindowDimensions } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIcon, MessageSquare, Paperclip, EyeOff, Lock, Trash2, AlertTriangle, Star, Share2, Crown, HelpCircle, Phone, Globe } from "lucide-react-native";
+import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIcon, MessageSquare, Paperclip, EyeOff, Lock, Trash2, AlertTriangle, Star, Share2, Crown, HelpCircle, Phone, Globe, Volume2, VolumeX } from "lucide-react-native";
 import { Linking } from "react-native";
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { trpc } from "@/lib/trpc";
 import { supabase } from "@/lib/supabase";
 import { useState, useEffect, useRef, useCallback } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 import { getNotificationsEnabled, setNotificationsEnabled as saveNotificationsEnabled } from "@/utils/notifications";
+import { getServerClient } from "@/lib/server-client";
+import { formatCountryName } from "@/constants/country-utils";
+import { getActivityVoiceAssistantEnabled, setActivityVoiceAssistantEnabled as saveActivityVoiceAssistantEnabled } from "@/utils/activityVoice";
 
 export default function SettingsScreen() {
-  const { signOut, user, privateMode, setPrivateMode, verifyPin, deleteAccount } = useAuth();
+  const { signOut, user, roleSession, privateMode, setPrivateMode, verifyPin, deleteAccount } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { width } = useWindowDimensions();
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [activityVoiceAssistantEnabled, setActivityVoiceAssistantEnabled] = useState(true);
 
   useEffect(() => {
     void getNotificationsEnabled().then(setNotificationsEnabled);
+    void getActivityVoiceAssistantEnabled().then(setActivityVoiceAssistantEnabled);
   }, []);
   const [locationEnabled, setLocationEnabled] = useState(true);
   const { isDark, setDarkMode, colors: themeColors } = useTheme();
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackCategory, setFeedbackCategory] = useState<"bug" | "feature" | "support" | "billing">("feature");
   const [feedbackAttachment, setFeedbackAttachment] = useState<string | null>(null);
   const [showPinModal, setShowPinModal] = useState(false);
   const [signOutPin, setSignOutPin] = useState('');
@@ -41,12 +48,17 @@ export default function SettingsScreen() {
   const [ratingFeedback, setRatingFeedback] = useState('');
   const { subscriptionStatus, trialDaysRemaining, subscription } = useSubscription();
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [showFaqModal, setShowFaqModal] = useState(false);
+  const [expandedFaqIds, setExpandedFaqIds] = useState<string[]>([]);
   const adminTapCount = useRef<number>(0);
   const adminTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const helpGridColumns = width >= 700 ? 2 : 1;
 
   const handleVersionTap = useCallback(() => {
     adminTapCount.current += 1;
-    if (adminTapTimer.current) clearTimeout(adminTapTimer.current);
+    if (adminTapTimer.current) {
+      clearTimeout(adminTapTimer.current);
+    }
     if (adminTapCount.current >= 5) {
       adminTapCount.current = 0;
       if (Platform.OS !== 'web') {
@@ -60,63 +72,19 @@ export default function SettingsScreen() {
     }, 2000);
   }, [router]);
 
-  interface SupportContact {
-    support_contacy_id: number;
-    created_at: string;
-    country: string | null;
-    name: string | null;
-    phone: string | null;
-    email: string | null;
-  }
+  const handleAdminPortalPress = useCallback(async () => {
+    router.push('/admin' as any);
+  }, [router]);
 
-  const { data: supportContacts = [], isLoading: isLoadingContacts } = useQuery<SupportContact[]>({
-    queryKey: ['supportContacts'],
-    queryFn: async () => {
-      const regId = await AsyncStorage.getItem('registrationId');
-      let userCountry: string | null = null;
+  const { data: supportContacts = [], isLoading: isLoadingContacts } = trpc.support.getAdminContacts.useQuery(
+    undefined,
+    { enabled: showHelpModal }
+  );
 
-      if (regId) {
-        const { data: regData } = await supabase
-          .from('registrations')
-          .select('country')
-          .eq('registration_id', regId)
-          .maybeSingle();
-        if (regData?.country) {
-          userCountry = regData.country;
-          console.log('User country for support contacts:', userCountry);
-        }
-      }
-
-      const { data: allContacts, error } = await supabase
-        .from('support_contacts')
-        .select('*')
-        .order('support_contacy_id', { ascending: true });
-
-      if (error) {
-        console.error('Error fetching support contacts:', error);
-        throw new Error(error.message);
-      }
-
-      if (!allContacts || allContacts.length === 0) {
-        console.log('No support contacts found in table');
-        return [];
-      }
-
-      if (userCountry) {
-        const countryMatch = allContacts.filter(
-          (c) => c.country?.toLowerCase() === userCountry!.toLowerCase()
-        );
-        if (countryMatch.length > 0) {
-          console.log('Found country-matched support contacts:', countryMatch.length);
-          return countryMatch;
-        }
-      }
-
-      console.log('Using default (first) support contact');
-      return [allContacts[0]];
-    },
-    enabled: showHelpModal,
-  });
+  const { data: faqEntries = [], isLoading: isLoadingFaqs } = trpc.support.getFaqEntries.useQuery(
+    undefined,
+    { enabled: showFaqModal }
+  );
 
 
   const handleSignOut = () => {
@@ -126,8 +94,8 @@ export default function SettingsScreen() {
   };
 
   const handlePinVerifyAndSignOut = async () => {
-    if (signOutPin.length !== 4) {
-      setSignOutPinError('Enter your 4-digit PIN');
+    if (!signOutPin.trim()) {
+      setSignOutPinError('Enter your password');
       return;
     }
     setIsVerifyingPin(true);
@@ -139,10 +107,10 @@ export default function SettingsScreen() {
         setShowPinModal(false);
         setSignOutPin('');
         await signOut();
-        router.replace('/(tabs)' as any);
+        router.replace('/register' as any);
       } else {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        setSignOutPinError('Incorrect PIN. Please try again.');
+        setSignOutPinError('Incorrect password. Please try again.');
         setSignOutPin('');
       }
     } catch {
@@ -161,6 +129,46 @@ export default function SettingsScreen() {
     }
   };
 
+  const toggleFaq = (faqId: string) => {
+    setExpandedFaqIds((current) =>
+      current.includes(faqId) ? current.filter((id) => id !== faqId) : [...current, faqId]
+    );
+  };
+
+  const openWhatsApp = async (phone: string) => {
+    const digits = phone.replace(/[^\d]/g, "");
+    const url = `https://wa.me/${digits}`;
+    if (Platform.OS === "web") {
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+    await Linking.openURL(url);
+  };
+
+  const openEmail = async (email: string) => {
+    const url = `mailto:${email}`;
+    if (Platform.OS === "web") {
+      window.open(url, "_self");
+      return;
+    }
+    await Linking.openURL(url);
+  };
+
+  const formatHelpPhone = (phone: string) => {
+    const raw = phone.trim();
+    if (raw.startsWith("0")) return raw;
+    if (raw.startsWith("+")) return raw;
+
+    const digits = raw.replace(/[^\d]/g, "");
+    if (digits.length === 12 && digits.startsWith("256")) {
+      return `0${digits.slice(3)}`;
+    }
+    if (digits.length === 9) {
+      return `0${digits}`;
+    }
+    return raw;
+  };
+
   const APP_STORE_URL = '';
   const APP_DOWNLOAD_LINK = '';
 
@@ -168,7 +176,7 @@ export default function SettingsScreen() {
     queryKey: ['appRating', user?.id],
     queryFn: async () => {
       if (!user) return null;
-      const regId = await AsyncStorage.getItem('registrationId');
+      const regId = user.id;
       if (!regId) return null;
       const { data, error } = await supabase
         .from('app_ratings')
@@ -188,18 +196,16 @@ export default function SettingsScreen() {
     mutationFn: async (suggestion: string) => {
       const regId = user?.id;
       if (!regId) throw new Error('Not registered');
-      const { error } = await supabase
-        .from('suggestions')
-        .insert({
-          registration_id: regId,
-          suggestion: suggestion.trim(),
-        });
-      if (error) throw error;
+      await getServerClient().feedback.submitSuggestion.mutate({
+        registrationId: regId,
+        suggestion: suggestion.trim(),
+      });
     },
     onSuccess: () => {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setShowFeedbackModal(false);
       setFeedbackText('');
+      setFeedbackCategory('feature');
       setFeedbackAttachment(null);
       if (Platform.OS !== 'web') {
         Alert.alert('Thank You!', 'Your suggestion has been submitted. We appreciate your feedback!');
@@ -219,16 +225,13 @@ export default function SettingsScreen() {
 
   const ratingMutation = useMutation({
     mutationFn: async ({ rating, feedback }: { rating: number; feedback: string }) => {
-      const regId = await AsyncStorage.getItem('registrationId');
+      const regId = user?.id;
       if (!regId) throw new Error('Not registered');
-      const { error } = await supabase
-        .from('app_ratings')
-        .upsert({
-          registration_id: regId,
-          rating,
-          feedback: feedback.trim() || null,
-        }, { onConflict: 'registration_id' });
-      if (error) throw error;
+      await getServerClient().feedback.submitRating.mutate({
+        registrationId: regId,
+        rating,
+        feedback: feedback.trim() || null,
+      });
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['appRating'] });
@@ -298,6 +301,13 @@ export default function SettingsScreen() {
       default: return 'Tap a star';
     }
   };
+
+  const feedbackCategories: Array<{ key: "bug" | "feature" | "support" | "billing"; label: string }> = [
+    { key: "feature", label: "Feature" },
+    { key: "bug", label: "Bug" },
+    { key: "support", label: "Support" },
+    { key: "billing", label: "Billing" },
+  ];
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: themeColors.background }]}>
@@ -372,6 +382,35 @@ export default function SettingsScreen() {
           </View>
           <View style={[styles.radioButton, notificationsEnabled && styles.radioButtonActive]}>
             {notificationsEnabled && <View style={styles.radioButtonInner} />}
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
+          onPress={() => {
+            const next = !activityVoiceAssistantEnabled;
+            setActivityVoiceAssistantEnabled(next);
+            void saveActivityVoiceAssistantEnabled(next);
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          }}
+        >
+          <View style={styles.settingLeft}>
+            <View style={[styles.iconContainer, { backgroundColor: activityVoiceAssistantEnabled ? '#ECFDF5' : '#F3F4F6' }]}>
+              {activityVoiceAssistantEnabled ? (
+                <Volume2 size={22} color="#10b981" />
+              ) : (
+                <VolumeX size={22} color="#6b7280" />
+              )}
+            </View>
+            <View style={styles.settingTextContainer}>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Activity Voice Assistant</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>
+                {activityVoiceAssistantEnabled ? 'Start and finish voice prompts on' : 'Start and finish voice prompts off'}
+              </Text>
+            </View>
+          </View>
+          <View style={[styles.radioButton, activityVoiceAssistantEnabled && styles.radioButtonActive]}>
+            {activityVoiceAssistantEnabled && <View style={styles.radioButtonInner} />}
           </View>
         </TouchableOpacity>
 
@@ -454,6 +493,22 @@ export default function SettingsScreen() {
 
         <TouchableOpacity
           style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
+          onPress={() => setShowFaqModal(true)}
+        >
+          <View style={styles.settingLeft}>
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
+              <FileText size={22} color="#4b5563" />
+            </View>
+            <View style={styles.settingTextContainer}>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>FAQ</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Quick answers to common RunNation questions</Text>
+            </View>
+          </View>
+          <ChevronRight size={20} color={themeColors.iconMuted} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
           onPress={() => router.push("/policy" as any)}
         >
           <View style={styles.settingLeft}>
@@ -519,6 +574,39 @@ export default function SettingsScreen() {
         </TouchableOpacity>
       </View>
 
+      {user && roleSession.hasAdminAccess && (
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>Admin</Text>
+          <TouchableOpacity
+            style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
+            onPress={() => {
+              void handleAdminPortalPress();
+            }}
+          >
+            <View style={styles.settingLeft}>
+              <View style={[styles.iconContainer, { backgroundColor: '#ECFDF5' }]}>
+                <Crown size={22} color="#10b981" />
+              </View>
+              <View style={styles.settingTextContainer}>
+                <Text style={[styles.settingTitle, { color: themeColors.text }]}>Admin Portal</Text>
+                <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>
+                  {roleSession.isSuperAdmin
+                    ? 'Global access enabled'
+                    : roleSession.isCountryAdmin
+                      ? 'Country admin tools available'
+                      : roleSession.isCountryCoordinator
+                        ? 'Country coordinator tools available'
+                        : roleSession.isEventOrganizer
+                          ? 'Event organizer tools available'
+                      : 'Coordinator tools available'}
+                </Text>
+              </View>
+            </View>
+            <ChevronRight size={20} color={themeColors.iconMuted} />
+          </TouchableOpacity>
+        </View>
+      )}
+
       {user && (
         <View style={styles.section}>
           <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
@@ -568,6 +656,7 @@ export default function SettingsScreen() {
               <TouchableOpacity onPress={() => {
                 setShowFeedbackModal(false);
                 setFeedbackText("");
+                setFeedbackCategory("feature");
                 setFeedbackAttachment(null);
               }}>
                 <XIcon size={24} color={themeColors.iconDefault} />
@@ -575,10 +664,34 @@ export default function SettingsScreen() {
             </View>
 
             <View style={styles.feedbackBody}>
+              <View style={styles.feedbackCategoryRow}>
+                {feedbackCategories.map((category) => {
+                  const isActive = feedbackCategory === category.key;
+                  return (
+                    <TouchableOpacity
+                      key={category.key}
+                      style={[
+                        styles.feedbackCategoryChip,
+                        isActive && styles.feedbackCategoryChipActive,
+                      ]}
+                      onPress={() => setFeedbackCategory(category.key)}
+                    >
+                      <Text
+                        style={[
+                          styles.feedbackCategoryChipText,
+                          isActive && styles.feedbackCategoryChipTextActive,
+                        ]}
+                      >
+                        {category.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
               <Text style={[styles.feedbackLabel, { color: themeColors.text }]}>Your Feedback</Text>
               <TextInput
                 style={[styles.feedbackInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
-                placeholder="Share your thoughts, suggestions, or report issues..."
+                placeholder="Describe the issue or idea in a few clear sentences..."
                 placeholderTextColor={themeColors.textLight}
                 multiline
                 maxLength={300}
@@ -614,6 +727,7 @@ export default function SettingsScreen() {
                 onPress={() => {
                   setShowFeedbackModal(false);
                   setFeedbackText("");
+                  setFeedbackCategory("feature");
                   setFeedbackAttachment(null);
                 }}
               >
@@ -634,7 +748,7 @@ export default function SettingsScreen() {
                       }
                       return;
                     }
-                    suggestionMutation.mutate(feedbackText);
+                    suggestionMutation.mutate(`[${feedbackCategory.toUpperCase()}] ${feedbackText.trim()}`);
                   }
                 }}
                 disabled={!feedbackText.trim() || suggestionMutation.isPending}
@@ -659,7 +773,7 @@ export default function SettingsScreen() {
         <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
           <View style={[styles.pinModalContent, { backgroundColor: themeColors.modalBackground }]}>
             <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
-              <Text style={[styles.detailTitle, { color: themeColors.text }]}>Verify PIN</Text>
+              <Text style={[styles.detailTitle, { color: themeColors.text }]}>Verify Password</Text>
               <TouchableOpacity onPress={() => {
                 setShowPinModal(false);
                 setSignOutPin('');
@@ -673,31 +787,15 @@ export default function SettingsScreen() {
               <View style={[styles.pinLockIcon, { backgroundColor: isDark ? '#3B1515' : '#fef2f2' }]}>
                 <Lock size={28} color="#ef4444" />
               </View>
-              <Text style={[styles.pinModalSubtitle, { color: themeColors.textSecondary }]}>Enter your PIN to sign out</Text>
-
-              <View style={styles.pinDotsRow}>
-                {[0, 1, 2, 3].map((i) => (
-                  <View
-                    key={i}
-                    style={[
-                      styles.pinDot,
-                      signOutPin.length > i && styles.pinDotFilled,
-                      signOutPinError ? styles.pinDotError : null,
-                    ]}
-                  />
-                ))}
-              </View>
+              <Text style={[styles.pinModalSubtitle, { color: themeColors.textSecondary }]}>Enter your password to sign out</Text>
 
               <TextInput
-                style={styles.hiddenPinInput}
+                style={[styles.input, { width: '100%' }]}
                 value={signOutPin}
                 onChangeText={(text) => {
-                  const digits = text.replace(/[^0-9]/g, '').slice(0, 4);
-                  setSignOutPin(digits);
+                  setSignOutPin(text);
                   if (signOutPinError) setSignOutPinError('');
                 }}
-                keyboardType="number-pad"
-                maxLength={4}
                 secureTextEntry
                 autoFocus
                 editable={!isVerifyingPin}
@@ -722,10 +820,10 @@ export default function SettingsScreen() {
               <TouchableOpacity
                 style={[
                   styles.signOutConfirmButton,
-                  (signOutPin.length !== 4 || isVerifyingPin) && styles.submitFeedbackButtonDisabled
+                  (!signOutPin.trim() || isVerifyingPin) && styles.submitFeedbackButtonDisabled
                 ]}
                 onPress={handlePinVerifyAndSignOut}
-                disabled={signOutPin.length !== 4 || isVerifyingPin}
+                disabled={!signOutPin.trim() || isVerifyingPin}
               >
                 {isVerifyingPin ? (
                   <ActivityIndicator size="small" color="#fff" />
@@ -783,7 +881,7 @@ export default function SettingsScreen() {
             ) : (
               <>
                 <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
-                  <Text style={[styles.detailTitle, { color: themeColors.text }]}>Verify PIN</Text>
+                  <Text style={[styles.detailTitle, { color: themeColors.text }]}>Verify Password</Text>
                   <TouchableOpacity onPress={() => {
                     setShowDeleteModal(false);
                     setDeletePin('');
@@ -797,31 +895,15 @@ export default function SettingsScreen() {
                   <View style={[styles.deleteLockIcon, { backgroundColor: isDark ? '#3B1515' : '#fef2f2' }]}>
                     <Lock size={28} color="#dc2626" />
                   </View>
-                  <Text style={[styles.pinModalSubtitle, { color: themeColors.textSecondary }]}>Enter your PIN to confirm account deletion</Text>
-
-                  <View style={styles.pinDotsRow}>
-                    {[0, 1, 2, 3].map((i) => (
-                      <View
-                        key={i}
-                        style={[
-                          styles.pinDot,
-                          deletePin.length > i && styles.deletePinDotFilled,
-                          deletePinError ? styles.pinDotError : null,
-                        ]}
-                      />
-                    ))}
-                  </View>
+                  <Text style={[styles.pinModalSubtitle, { color: themeColors.textSecondary }]}>Enter your password to confirm account deletion</Text>
 
                   <TextInput
-                    style={styles.hiddenPinInput}
+                    style={[styles.input, { width: '100%' }]}
                     value={deletePin}
                     onChangeText={(text) => {
-                      const digits = text.replace(/[^0-9]/g, '').slice(0, 4);
-                      setDeletePin(digits);
+                      setDeletePin(text);
                       if (deletePinError) setDeletePinError('');
                     }}
-                    keyboardType="number-pad"
-                    maxLength={4}
                     secureTextEntry
                     autoFocus
                     editable={!isDeleting}
@@ -846,11 +928,11 @@ export default function SettingsScreen() {
                   <TouchableOpacity
                     style={[
                       styles.deleteConfirmButton,
-                      (deletePin.length !== 4 || isDeleting) && styles.submitFeedbackButtonDisabled
+                      (!deletePin.trim() || isDeleting) && styles.submitFeedbackButtonDisabled
                     ]}
                     onPress={async () => {
-                      if (deletePin.length !== 4) {
-                        setDeletePinError('Enter your 4-digit PIN');
+                      if (!deletePin.trim()) {
+                        setDeletePinError('Enter your password');
                         return;
                       }
                       setIsDeleting(true);
@@ -870,11 +952,11 @@ export default function SettingsScreen() {
                             } else {
                               alert('Your account has been permanently deleted.');
                             }
-                            router.replace('/(tabs)' as any);
+                            router.replace('/register' as any);
                           }
                         } else {
                           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-                          setDeletePinError('Incorrect PIN. Please try again.');
+                          setDeletePinError('Incorrect password. Please try again.');
                           setDeletePin('');
                         }
                       } catch {
@@ -884,7 +966,7 @@ export default function SettingsScreen() {
                         setIsDeleting(false);
                       }
                     }}
-                    disabled={deletePin.length !== 4 || isDeleting}
+                    disabled={!deletePin.trim() || isDeleting}
                   >
                     {isDeleting ? (
                       <ActivityIndicator size="small" color="#fff" />
@@ -1015,7 +1097,7 @@ export default function SettingsScreen() {
             </View>
 
             <ScrollView style={styles.helpBody}>
-              <Text style={[styles.helpSectionLabel, { color: themeColors.textSecondary }]}>SUPPORT DESK CONTACTS</Text>
+              <Text style={[styles.helpSectionLabel, { color: themeColors.textSecondary }]}>ADMIN CONTACTS</Text>
 
               {isLoadingContacts ? (
                 <View style={styles.helpLoadingContainer}>
@@ -1024,60 +1106,126 @@ export default function SettingsScreen() {
                 </View>
               ) : supportContacts.length === 0 ? (
                 <View style={styles.helpEmptyContainer}>
-                  <Text style={[styles.helpEmptyText, { color: themeColors.textLight }]}>No support contacts available</Text>
+                  <Text style={[styles.helpEmptyText, { color: themeColors.textLight }]}>No admin contacts available yet</Text>
                 </View>
               ) : (
-                supportContacts.map((contact) => (
-                  <View
-                    key={contact.support_contacy_id}
-                    style={[styles.helpContactCard, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}
-                  >
-                    <View style={styles.helpContactHeader}>
-                      {contact.country && (
-                        <View style={styles.helpCountryRow}>
-                          <Globe size={14} color={themeColors.textSecondary} />
-                          <Text style={[styles.helpCountryText, { color: themeColors.textSecondary }]}>{contact.country}</Text>
+                <View style={helpGridColumns > 1 ? styles.helpContactGrid : undefined}>
+                {supportContacts.map((contact) => (
+                  (() => {
+                    const phone = contact.phone ?? null;
+                    const email = contact.email ?? null;
+                    return (
+                      <View
+                        key={contact.id}
+                        style={[
+                          styles.helpContactCard,
+                          helpGridColumns > 1 && styles.helpContactCardGrid,
+                          { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }
+                        ]}
+                      >
+                        <View style={styles.helpContactHeader}>
+                          <View style={styles.helpCountryRow}>
+                            <Globe size={12} color={themeColors.textSecondary} />
+                            <Text style={[styles.helpCountryText, { color: themeColors.textSecondary }]}>
+                              {formatCountryName(contact.countryCode) || contact.countryLabel}
+                            </Text>
+                          </View>
+                          <Text style={[styles.helpContactName, { color: themeColors.text }]}>{contact.name}</Text>
                         </View>
-                      )}
-                      {contact.name && (
-                        <Text style={[styles.helpContactName, { color: themeColors.text }]}>{contact.name}</Text>
-                      )}
-                    </View>
 
-                    <View style={styles.helpContactActions}>
-                      {contact.phone && (
-                        <TouchableOpacity
-                          style={[styles.helpActionButton, { backgroundColor: isDark ? '#0D3320' : '#ECFDF5' }]}
-                          onPress={() => {
-                            if (Platform.OS === 'web') {
-                              window.open(`tel:${contact.phone}`, '_self');
-                            } else {
-                              void Linking.openURL(`tel:${contact.phone}`);
-                            }
-                          }}
-                        >
-                          <Phone size={16} color="#10b981" />
-                          <Text style={[styles.helpActionText, { color: '#10b981' }]}>{contact.phone}</Text>
-                        </TouchableOpacity>
-                      )}
-                      {contact.email && (
-                        <TouchableOpacity
-                          style={[styles.helpActionButton, { backgroundColor: isDark ? '#1E3A5F' : '#EFF6FF' }]}
-                          onPress={() => {
-                            if (Platform.OS === 'web') {
-                              window.open(`mailto:${contact.email}`, '_self');
-                            } else {
-                              void Linking.openURL(`mailto:${contact.email}`);
-                            }
-                          }}
-                        >
-                          <Mail size={16} color="#3b82f6" />
-                          <Text style={[styles.helpActionText, { color: '#3b82f6' }]}>{contact.email}</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  </View>
-                ))
+                        <View style={styles.helpContactDetails}>
+                          {phone ? (
+                            <View style={styles.helpDetailRow}>
+                              <Text style={[styles.helpDetailText, { color: themeColors.text }]}>{formatHelpPhone(phone)}</Text>
+                              <TouchableOpacity
+                                style={[styles.helpMiniButton, { backgroundColor: isDark ? '#0D3320' : '#ECFDF5' }]}
+                                onPress={() => void openWhatsApp(phone)}
+                              >
+                                <Phone size={14} color="#10b981" />
+                                <Text style={[styles.helpMiniButtonText, { color: '#10b981' }]}>WhatsApp</Text>
+                              </TouchableOpacity>
+                            </View>
+                          ) : null}
+                          {email ? (
+                            <View style={styles.helpDetailRow}>
+                              <Text style={[styles.helpDetailText, { color: themeColors.text }]} numberOfLines={1}>
+                                {email}
+                              </Text>
+                              <TouchableOpacity
+                                style={[styles.helpMiniButton, { backgroundColor: isDark ? '#1E3A5F' : '#EFF6FF' }]}
+                                onPress={() => void openEmail(email)}
+                              >
+                                <Mail size={14} color="#3b82f6" />
+                                <Text style={[styles.helpMiniButtonText, { color: '#3b82f6' }]}>Email</Text>
+                              </TouchableOpacity>
+                            </View>
+                          ) : null}
+                        </View>
+                      </View>
+                    );
+                  })()
+                ))}
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showFaqModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowFaqModal(false)}
+      >
+        <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.helpModalContent, { backgroundColor: themeColors.modalBackground }]}>
+            <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.detailTitle, { color: themeColors.text }]}>FAQ</Text>
+              <TouchableOpacity onPress={() => setShowFaqModal(false)}>
+                <XIcon size={24} color={themeColors.iconDefault} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.helpBody}>
+              <Text style={[styles.helpSectionLabel, { color: themeColors.textSecondary }]}>COMMON QUESTIONS</Text>
+              <Text style={[styles.faqHintText, { color: themeColors.textSecondary }]}>
+                FAQ content is sourced from the <Text style={styles.faqHintCode}>public.faq_entries</Text> table, so you can add, edit, or remove entries in Supabase whenever you want.
+              </Text>
+
+              {isLoadingFaqs ? (
+                <View style={styles.helpLoadingContainer}>
+                  <ActivityIndicator size="small" color="#3b82f6" />
+                  <Text style={[styles.helpLoadingText, { color: themeColors.textSecondary }]}>Loading FAQs...</Text>
+                </View>
+              ) : faqEntries.length === 0 ? (
+                <View style={styles.helpEmptyContainer}>
+                  <Text style={[styles.helpEmptyText, { color: themeColors.textLight }]}>No FAQ entries available</Text>
+                </View>
+              ) : (
+                faqEntries.map((faq: any) => {
+                  const expanded = expandedFaqIds.includes(String(faq.faq_id));
+                  return (
+                    <TouchableOpacity
+                      key={faq.faq_id}
+                      activeOpacity={0.85}
+                      onPress={() => toggleFaq(String(faq.faq_id))}
+                      style={[styles.faqCard, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}
+                    >
+                      <View style={styles.faqHeader}>
+                        <Text style={[styles.faqQuestion, { color: themeColors.text }]}>{faq.question}</Text>
+                        <ChevronRight
+                          size={18}
+                          color={themeColors.iconMuted}
+                          style={{ transform: [{ rotate: expanded ? '90deg' : '0deg' }] }}
+                        />
+                      </View>
+                      {expanded ? (
+                        <Text style={[styles.faqAnswer, { color: themeColors.textSecondary }]}>{faq.answer}</Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })
               )}
             </ScrollView>
           </View>
@@ -1353,6 +1501,28 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 16,
   },
+  feedbackCategoryRow: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 8,
+  },
+  feedbackCategoryChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#e5e7eb",
+  },
+  feedbackCategoryChipActive: {
+    backgroundColor: "#dbeafe",
+  },
+  feedbackCategoryChipText: {
+    fontSize: 13,
+    fontWeight: "600" as const,
+    color: "#4b5563",
+  },
+  feedbackCategoryChipTextActive: {
+    color: "#1d4ed8",
+  },
   feedbackLabel: {
     fontSize: 16,
     fontWeight: "600" as const,
@@ -1365,6 +1535,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#000",
     minHeight: 120,
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+  },
+  input: {
+    backgroundColor: "#f5f5f5",
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    color: "#000",
     borderWidth: 1,
     borderColor: "#e0e0e0",
   },
@@ -1686,34 +1865,68 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#999",
   },
+  helpContactGrid: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 8,
+  },
   helpContactCard: {
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: "#e5e7eb",
   },
+  helpContactCardGrid: {
+    width: "48.8%",
+    marginBottom: 0,
+  },
   helpContactHeader: {
-    marginBottom: 12,
-    gap: 4,
+    marginBottom: 8,
+    gap: 2,
   },
   helpCountryRow: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: 6,
+    gap: 4,
   },
   helpCountryText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "600" as const,
     color: "#666",
-    textTransform: "uppercase" as const,
-    letterSpacing: 0.5,
   },
   helpContactName: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: "700" as const,
     color: "#000",
-    marginTop: 2,
+    marginTop: 1,
+  },
+  helpContactDetails: {
+    gap: 6,
+  },
+  helpDetailRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    gap: 8,
+  },
+  helpDetailText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "500" as const,
+  },
+  helpMiniButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+  },
+  helpMiniButtonText: {
+    fontSize: 11,
+    fontWeight: "700" as const,
   },
   helpContactActions: {
     gap: 8,
@@ -1729,5 +1942,36 @@ const styles = StyleSheet.create({
   helpActionText: {
     fontSize: 14,
     fontWeight: "500" as const,
+  },
+  faqHintText: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  faqHintCode: {
+    fontWeight: "700" as const,
+    color: "#374151",
+  },
+  faqCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
+  },
+  faqHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    gap: 10,
+  },
+  faqQuestion: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "700" as const,
+  },
+  faqAnswer: {
+    marginTop: 10,
+    fontSize: 14,
+    lineHeight: 20,
   },
 });

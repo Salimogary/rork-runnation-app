@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import { requireRegistrationOwner } from "../../../rbac";
 
 export default publicProcedure
   .input(
@@ -13,13 +14,15 @@ export default publicProcedure
 
     const { data: cartItem, error: cartError } = await ctx.supabase
       .from("shopping_cart")
-      .select("catalogue_id")
+      .select("catalogue_id, registration_id")
       .eq("cart_id", cartId)
       .single();
 
     if (cartError || !cartItem) {
       throw new Error("Cart item not found");
     }
+
+    await requireRegistrationOwner(ctx, cartItem.registration_id);
 
     const { data: product, error: productError } = await ctx.supabase
       .from("catalogue")

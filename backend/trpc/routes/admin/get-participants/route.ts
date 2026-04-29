@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import { requireAdminPermission } from "../../../rbac";
 
 export default publicProcedure
   .input(
@@ -8,6 +9,13 @@ export default publicProcedure
     })
   )
   .query(async ({ input, ctx }) => {
+    await requireAdminPermission(ctx, {
+      allowSuperAdmin: true,
+      allowCountryAdmin: true,
+      allowCountryCoordinator: true,
+      allowClubCoordinator: true,
+    });
+
     console.log('[getParticipants] Fetching participants for eventId:', input.eventId);
 
     let query = ctx.supabase
@@ -17,6 +25,8 @@ export default publicProcedure
         event_id,
         registration_id,
         registration_date,
+        distance_km,
+        time_seconds,
         events!events_participants_event_id_fkey(event_name),
         registrations!events_participants_registration_id_fkey(first_name, other_names, sex, city_town_district)
       `);
@@ -36,11 +46,21 @@ export default publicProcedure
 
     console.log('[getParticipants] Raw data:', JSON.stringify(data, null, 2));
 
+    const formatDuration = (seconds?: number | null) => {
+      if (!seconds || seconds <= 0) return "";
+      const hrs = Math.floor(seconds / 3600);
+      const mins = Math.floor((seconds % 3600) / 60);
+      const secs = seconds % 60;
+      return `${hrs.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    };
+
     const participants = (data || []).map((item: any) => ({
       ParticipantID: item.event_participant_id,
       EventID: item.event_id,
       RegistrationID: item.registration_id,
       Registration_Date: item.registration_date,
+      Distance_Km: item.distance_km ?? null,
+      Time: formatDuration(item.time_seconds),
       Status: "Active",
       Days_Completed: 0,
       eventName: item.events?.event_name || '',
@@ -56,3 +76,4 @@ export default publicProcedure
 
     return participants;
   });
+

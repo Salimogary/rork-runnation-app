@@ -1,200 +1,240 @@
-import { useState } from "react";
-import { StyleSheet, View, Text, TextInput, TouchableOpacity, Alert, Platform, KeyboardAvoidingView, ScrollView } from "react-native";
-import { useRouter } from "expo-router";
-import { Shield, Lock, User, Eye, EyeOff } from "lucide-react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { supabase } from "@/lib/supabase";
-import * as Crypto from "expo-crypto";
+import { useState } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  Alert,
+  Platform,
+  KeyboardAvoidingView,
+  ScrollView,
+} from 'react-native';
+import { useRouter } from 'expo-router';
+import { Shield, Lock, Mail } from 'lucide-react-native';
+import { supabase } from '@/lib/supabase';
+import { getServerClient } from '@/lib/server-client';
+
+type AdminScreenMode = 'login' | 'requestReset';
 
 export default function AdminLoginScreen() {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [mode, setMode] = useState<AdminScreenMode>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [resetEmail, setResetEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
 
+  const showMessage = (title: string, message: string, onClose?: () => void) => {
+    if (Platform.OS !== 'web') {
+      Alert.alert(title, message, onClose ? [{ text: 'OK', onPress: onClose }] : undefined);
+    } else {
+      alert(message);
+      onClose?.();
+    }
+  };
+
+  const getErrorMessage = (error: unknown, fallback: string) => {
+    if (error instanceof Error && error.message) {
+      return error.message;
+    }
+
+    const maybeError = error as { message?: string; data?: { message?: string } } | null;
+    return maybeError?.data?.message || maybeError?.message || fallback;
+  };
+
   const handleLogin = async () => {
-    if (!username.trim() || !password.trim()) {
-      const message = "Please enter both username and password";
-      if (Platform.OS !== 'web') {
-        Alert.alert("Required Fields", message);
-      } else {
-        alert(message);
-      }
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail || !password.trim()) {
+      showMessage('Required Fields', 'Please enter both email and password.');
       return;
     }
 
     setIsLoading(true);
 
     try {
-      const passwordHash = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        password
+      const { error } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      const roleSession = await getServerClient().session.getRoleSession.query({
+        registrationId: null,
+        username: null,
+      });
+
+      if (!roleSession.hasAdminAccess) {
+        await supabase.auth.signOut();
+        showMessage('Access Denied', 'This account is signed in, but it does not have admin access.');
+        return;
+      }
+
+      showMessage(
+        'Success',
+        `Welcome, ${roleSession.displayName || roleSession.username || normalizedEmail}!`,
+        () => router.replace('/admin' as any)
       );
+    } catch (error) {
+      showMessage(
+        'Login Failed',
+        getErrorMessage(error, 'Unable to log in right now.')
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-      console.log('[AdminLogin] Attempting login with username:', username.toLowerCase().trim());
-      console.log('[AdminLogin] Generated password hash:', passwordHash);
+  const handleRequestReset = async () => {
+    const normalizedEmail = resetEmail.trim().toLowerCase();
 
-      const { data: userByName, error: lookupError } = await supabase
-        .from('admin_users')
-        .select('admin_id, username, display_name, is_active, password_hash')
-        .eq('username', username.toLowerCase().trim())
-        .single();
+    if (!normalizedEmail) {
+      showMessage('Required Field', 'Please enter the admin email address.');
+      return;
+    }
 
-      if (lookupError || !userByName) {
-        console.log('[AdminLogin] Username not found:', lookupError?.message);
-        const message = "Invalid username or password";
-        if (Platform.OS !== 'web') {
-          Alert.alert("Login Failed", message);
-        } else {
-          alert(message);
-        }
-        setIsLoading(false);
-        return;
+    setIsLoading(true);
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail);
+      if (error) {
+        throw error;
       }
 
-      console.log('[AdminLogin] Stored hash:', userByName.password_hash);
-      console.log('[AdminLogin] Hashes match:', userByName.password_hash === passwordHash);
-
-      if (userByName.password_hash !== passwordHash) {
-        console.log('[AdminLogin] Password mismatch. The stored hash in the DB does not match the SHA-256 of entered password.');
-        console.log('[AdminLogin] To fix: update the password_hash in admin_users to:', passwordHash);
-        const message = "Invalid username or password";
-        if (Platform.OS !== 'web') {
-          Alert.alert("Login Failed", message);
-        } else {
-          alert(message);
-        }
-        setIsLoading(false);
-        return;
-      }
-
-      const adminUser = userByName;
-
-      if (!adminUser) {
-        console.log('[AdminLogin] Login failed: no user found');
-        const message = "Invalid username or password";
-        if (Platform.OS !== 'web') {
-          Alert.alert("Login Failed", message);
-        } else {
-          alert(message);
-        }
-        setIsLoading(false);
-        return;
-      }
-
-      if (!adminUser.is_active) {
-        const message = "This admin account has been deactivated";
-        if (Platform.OS !== 'web') {
-          Alert.alert("Access Denied", message);
-        } else {
-          alert(message);
-        }
-        setIsLoading(false);
-        return;
-      }
-
-      await AsyncStorage.setItem("admin_logged_in", "true");
-      await AsyncStorage.setItem("admin_login_time", new Date().toISOString());
-      await AsyncStorage.setItem("admin_display_name", adminUser.display_name || adminUser.username);
-
-      const displayName = adminUser.display_name || adminUser.username;
-      if (Platform.OS !== 'web') {
-        Alert.alert("Success", `Welcome, ${displayName}!`, [
-          { text: "OK", onPress: () => router.replace("/admin" as any) }
-        ]);
-      } else {
-        alert(`Welcome, ${displayName}!`);
-        router.replace("/admin" as any);
-      }
-    } catch (err) {
-      console.error('[AdminLogin] Error:', err);
-      const message = "Login failed. Please try again.";
-      if (Platform.OS !== 'web') {
-        Alert.alert("Error", message);
-      } else {
-        alert(message);
-      }
+      showMessage(
+        'Reset Email Sent',
+        `A password reset link has been sent to ${normalizedEmail}.`,
+        () => setMode('login')
+      );
+    } catch (error) {
+      showMessage(
+        'Reset Failed',
+        getErrorMessage(error, 'Unable to send reset email right now.')
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container} 
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView 
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
           <View style={styles.iconContainer}>
             <Shield size={64} color="#10b981" strokeWidth={2} />
           </View>
           <Text style={styles.title}>Admin Portal</Text>
-          <Text style={styles.subtitle}>Secure access to management features</Text>
+          <Text style={styles.subtitle}>
+            {mode === 'login'
+              ? 'Sign in with your RunNation account. Access is granted by your assigned role.'
+              : 'Enter your admin email address to send a password reset email.'}
+          </Text>
         </View>
 
         <View style={styles.form}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Username</Text>
-            <View style={styles.inputContainer}>
-              <User size={20} color="#6b7280" />
-              <TextInput
-                style={styles.input}
-                value={username}
-                onChangeText={setUsername}
-                placeholder="Enter admin username"
-                placeholderTextColor="#9ca3af"
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!isLoading}
-              />
-            </View>
-          </View>
+          {mode === 'login' ? (
+            <>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Email Address</Text>
+                <View style={styles.inputContainer}>
+                  <Mail size={20} color="#6b7280" />
+                  <TextInput
+                    style={styles.input}
+                    value={email}
+                    onChangeText={setEmail}
+                    placeholder="Enter admin email"
+                    placeholderTextColor="#9ca3af"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="email-address"
+                    editable={!isLoading}
+                  />
+                </View>
+              </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
-            <View style={styles.inputContainer}>
-              <Lock size={20} color="#6b7280" />
-              <TextInput
-                style={styles.input}
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Enter admin password"
-                placeholderTextColor="#9ca3af"
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!isLoading}
-                onSubmitEditing={handleLogin}
-              />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} hitSlop={8}>
-                {showPassword ? (
-                  <EyeOff size={20} color="#6b7280" />
-                ) : (
-                  <Eye size={20} color="#6b7280" />
-                )}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Password</Text>
+                <View style={styles.inputContainer}>
+                  <Lock size={20} color="#6b7280" />
+                  <TextInput
+                    style={styles.input}
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder="Enter password"
+                    placeholderTextColor="#9ca3af"
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    editable={!isLoading}
+                    onSubmitEditing={handleLogin}
+                  />
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.loginButton, isLoading && styles.loginButtonDisabled]}
+                onPress={handleLogin}
+                disabled={isLoading}
+              >
+                <Text style={styles.loginButtonText}>{isLoading ? 'Logging in...' : 'Login'}</Text>
               </TouchableOpacity>
-            </View>
-          </View>
 
-          <TouchableOpacity 
-            style={[styles.loginButton, isLoading && styles.loginButtonDisabled]} 
-            onPress={handleLogin}
-            disabled={isLoading}
-          >
-            <Text style={styles.loginButtonText}>
-              {isLoading ? "Logging in..." : "Login"}
-            </Text>
-          </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.secondaryAction}
+                onPress={() => setMode('requestReset')}
+                disabled={isLoading}
+              >
+                <Text style={styles.secondaryActionText}>Forgot password?</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Admin Email</Text>
+                <View style={styles.inputContainer}>
+                  <Mail size={20} color="#6b7280" />
+                  <TextInput
+                    style={styles.input}
+                    value={resetEmail}
+                    onChangeText={setResetEmail}
+                    placeholder="Enter admin email"
+                    placeholderTextColor="#9ca3af"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="email-address"
+                    editable={!isLoading}
+                  />
+                </View>
+              </View>
 
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => router.replace('/')}
-          >
+              <TouchableOpacity
+                style={[styles.loginButton, isLoading && styles.loginButtonDisabled]}
+                onPress={handleRequestReset}
+                disabled={isLoading}
+              >
+                <Text style={styles.loginButtonText}>
+                  {isLoading ? 'Sending...' : 'Send Reset Email'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.secondaryAction}
+                onPress={() => setMode('login')}
+                disabled={isLoading}
+              >
+                <Text style={styles.secondaryActionText}>Back to login</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          <TouchableOpacity style={styles.backButton} onPress={() => router.replace('/')}>
             <Text style={styles.backButtonText}>Back to App</Text>
           </TouchableOpacity>
         </View>
@@ -206,57 +246,57 @@ export default function AdminLoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f9fafb",
+    backgroundColor: '#f9fafb',
   },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: "center",
+    justifyContent: 'center',
     padding: 20,
   },
   header: {
-    alignItems: "center",
+    alignItems: 'center',
     marginBottom: 40,
   },
   iconContainer: {
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: "#10b98115",
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: '#10b98115',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 20,
   },
   title: {
     fontSize: 32,
-    fontWeight: "800" as const,
-    color: "#111827",
+    fontWeight: '800' as const,
+    color: '#111827',
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
-    color: "#6b7280",
-    textAlign: "center",
+    color: '#6b7280',
+    textAlign: 'center',
   },
   form: {
-    width: "100%",
+    width: '100%',
     maxWidth: 400,
-    alignSelf: "center",
+    alignSelf: 'center',
   },
   inputGroup: {
     marginBottom: 20,
   },
   label: {
     fontSize: 15,
-    fontWeight: "600" as const,
-    color: "#374151",
+    fontWeight: '600' as const,
+    color: '#374151',
     marginBottom: 8,
   },
   inputContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
     borderWidth: 2,
-    borderColor: "#e5e7eb",
+    borderColor: '#e5e7eb',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -265,58 +305,48 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 16,
-    color: "#111827",
-    outlineStyle: "none" as any,
+    color: '#111827',
+    outlineStyle: 'none' as any,
   },
   loginButton: {
-    backgroundColor: "#10b981",
+    backgroundColor: '#10b981',
     paddingVertical: 16,
     borderRadius: 12,
-    alignItems: "center",
+    alignItems: 'center',
     marginTop: 8,
-    shadowColor: "#10b981",
+    shadowColor: '#10b981',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 12,
     elevation: 4,
   },
   loginButtonDisabled: {
-    backgroundColor: "#9ca3af",
+    backgroundColor: '#9ca3af',
     shadowOpacity: 0,
   },
   loginButtonText: {
     fontSize: 18,
-    fontWeight: "700" as const,
-    color: "#fff",
+    fontWeight: '700' as const,
+    color: '#fff',
   },
-  infoBox: {
-    backgroundColor: "#dbeafe",
-    borderWidth: 1,
-    borderColor: "#93c5fd",
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 24,
-    gap: 6,
+  secondaryAction: {
+    marginTop: 14,
+    paddingVertical: 10,
+    alignItems: 'center',
   },
-  infoTitle: {
-    fontSize: 14,
-    fontWeight: "700" as const,
-    color: "#1e40af",
-    marginBottom: 4,
-  },
-  infoText: {
-    fontSize: 13,
-    color: "#1e3a8a",
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  secondaryActionText: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: '#10b981',
   },
   backButton: {
     marginTop: 16,
     paddingVertical: 14,
-    alignItems: "center",
+    alignItems: 'center',
   },
   backButtonText: {
     fontSize: 16,
-    fontWeight: "600" as const,
-    color: "#6b7280",
+    fontWeight: '600' as const,
+    color: '#6b7280',
   },
 });

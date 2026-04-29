@@ -1,29 +1,33 @@
 import { createClient } from '@supabase/supabase-js';
-import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://mbbjijvxmwluubkzgkpl.supabase.co';
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1iYmppanZ4bXdsdXVia3pna3BsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIwMjMzMjEsImV4cCI6MjA3NzU5OTMyMX0.Hpy30sfwABdmEIb67M7nABhCeESmnL8m33Nmi0cJnV4';
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY.');
+}
 
 const secureStorage = {
   getItem: async (key: string) => {
     if (Platform.OS === 'web') {
       return localStorage.getItem(key);
     }
-    return await SecureStore.getItemAsync(key);
+    return await AsyncStorage.getItem(key);
   },
   setItem: async (key: string, value: string) => {
     if (Platform.OS === 'web') {
       localStorage.setItem(key, value);
     } else {
-      await SecureStore.setItemAsync(key, value);
+      await AsyncStorage.setItem(key, value);
     }
   },
   removeItem: async (key: string) => {
     if (Platform.OS === 'web') {
       localStorage.removeItem(key);
     } else {
-      await SecureStore.deleteItemAsync(key);
+      await AsyncStorage.removeItem(key);
     }
   },
 };

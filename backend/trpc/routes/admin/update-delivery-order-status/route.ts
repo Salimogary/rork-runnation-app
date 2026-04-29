@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import { logAdminAction, requireAdminPermission } from "../../../rbac";
 
 export default publicProcedure
   .input(
@@ -9,6 +10,11 @@ export default publicProcedure
     })
   )
   .mutation(async ({ input, ctx }) => {
+    const actor = await requireAdminPermission(ctx, {
+      allowSuperAdmin: true,
+      allowCountryAdmin: true,
+    });
+
     const { orderId, status } = input;
 
     const { data, error } = await ctx.supabase
@@ -22,6 +28,15 @@ export default publicProcedure
       console.error("Error updating delivery order status:", error);
       throw new Error(error.message || "Failed to update order status");
     }
+
+    await logAdminAction(ctx, {
+      actorUserId: actor.authUserId,
+      actionType: "update_delivery_order_status",
+      metadata: {
+        orderId,
+        status,
+      },
+    });
 
     return data;
   });

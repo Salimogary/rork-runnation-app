@@ -1,10 +1,13 @@
 import { Tabs, useRouter } from "expo-router";
-import { Activity, Users, MessageCircle, ShoppingBag, Settings, Calendar, Target, Lock } from "lucide-react-native";
+import { Footprints, Users, MessageCircle, ShoppingBag, Settings, Calendar, Target, Lock, BookOpen } from "lucide-react-native";
 import React from "react";
 import { TouchableOpacity, View, Alert } from "react-native";
 import HeaderProfile from "@/components/HeaderProfile";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useSubscription } from "@/contexts/SubscriptionContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { useQuery } from "@tanstack/react-query";
+import { getServerClient } from "@/lib/server-client";
 
 const LOCKED_TABS = ["goals", "chat", "shop", "events"];
 
@@ -12,6 +15,14 @@ export default function TabLayout() {
   const router = useRouter();
   const { colors } = useTheme();
   const { isSubscribed } = useSubscription();
+  const { registrationId } = useAuth();
+
+  const { data: mentionCount } = useQuery<{ unreadCount: number }>({
+    queryKey: ["mentionCount", registrationId],
+    queryFn: async () => getServerClient().social.getMentionCount.query({ registrationId }),
+    enabled: !!registrationId,
+    refetchInterval: 30000,
+  });
 
   const lockedColor = '#C0C0C0';
 
@@ -75,7 +86,7 @@ export default function TabLayout() {
         name="index"
         options={{
           title: "Exercise",
-          tabBarIcon: ({ color }) => <Activity color={color} size={24} />,
+          tabBarIcon: ({ color }) => <Footprints color={color} size={24} />,
         }}
       />
       <Tabs.Screen
@@ -104,9 +115,17 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="magazine"
+        options={{
+          title: "Magazine",
+          tabBarIcon: ({ color }) => <BookOpen color={color} size={24} />,
+        }}
+      />
+      <Tabs.Screen
         name="chat"
         options={{
           title: "Chat",
+          tabBarBadge: mentionCount?.unreadCount ? mentionCount.unreadCount : undefined,
           tabBarIcon: ({ color }) => (
             <View>
               <MessageCircle color={getTabColor("chat", color)} size={24} />

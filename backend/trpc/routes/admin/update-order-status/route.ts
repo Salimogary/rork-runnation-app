@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import { logAdminAction, requireAdminPermission } from "../../../rbac";
 
 export default publicProcedure
   .input(
@@ -9,6 +10,11 @@ export default publicProcedure
     })
   )
   .mutation(async ({ input, ctx }) => {
+    const actor = await requireAdminPermission(ctx, {
+      allowSuperAdmin: true,
+      allowCountryAdmin: true,
+    });
+
     const { orderId, status } = input;
 
     const { error } = await ctx.supabase
@@ -17,6 +23,15 @@ export default publicProcedure
       .eq("order_id", orderId);
 
     if (error) throw error;
+
+    await logAdminAction(ctx, {
+      actorUserId: actor.authUserId,
+      actionType: "update_order_status",
+      metadata: {
+        orderId,
+        status,
+      },
+    });
 
     return { success: true };
   });

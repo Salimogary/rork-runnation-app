@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import { requireRegistrationOwner } from "../../../rbac";
 
 export default publicProcedure
   .input(z.object({ orderId: z.string() }))
@@ -21,6 +22,7 @@ export default publicProcedure
       .single();
 
     if (orderError) throw orderError;
+    await requireRegistrationOwner(ctx, order.user_id);
 
     const { data: items, error: itemsError } = await ctx.supabase
       .from("order_items")

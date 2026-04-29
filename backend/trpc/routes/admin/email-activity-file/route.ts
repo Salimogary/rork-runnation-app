@@ -1,5 +1,25 @@
 import { publicProcedure } from "../../../create-context";
 import { z } from "zod";
+import { logAdminAction, requireAdminPermission } from "../../../rbac";
+import { ACTIVITY_UPLOADS_BUCKET, getExtensionFromMimeType } from "../../../storage";
+import { WORLD_COUNTRIES } from "../../../countries";
+
+const COUNTRY_NAME_BY_CODE = new Map(
+  WORLD_COUNTRIES.map((country) => [country.iso_alpha2.toUpperCase(), country.name])
+);
+
+function formatCountryName(country: string | null | undefined): string | null {
+  if (!country) return null;
+
+  const trimmed = country.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.length === 2) {
+    return COUNTRY_NAME_BY_CODE.get(trimmed.toUpperCase()) ?? trimmed.toUpperCase();
+  }
+
+  return trimmed;
+}
 
 export default publicProcedure
   .input(
@@ -12,13 +32,18 @@ export default publicProcedure
     })
   )
   .mutation(async ({ input, ctx }) => {
+    const actor = await requireAdminPermission(ctx, {
+      allowSuperAdmin: true,
+            allowCountryCoordinator: true,
+    });
+
     console.log('[EmailActivity] Starting mutation for user:', input.registrationId);
     console.log('[EmailActivity] File:', input.fileName, 'Size:', input.fileSize, 'bytes');
     
     try {
       const { data: user, error: userError } = await ctx.supabase
         .from("registrations")
-        .select('registration_id, first_name, other_names, email, username')
+        .select('registration_id, first_name, other_names, email, username, country')
         .eq("registration_id", input.registrationId)
         .single();
 
@@ -36,6 +61,7 @@ export default publicProcedure
 
       const userName = `${user.first_name || ""} ${user.other_names || ""}`.trim() || user.username || "Unknown";
       const userEmail = user.email || "N/A";
+      const userCountry = formatCountryName(user.country) || "N/A";
 
       const emailContent = `
 New Activity File Upload
@@ -44,6 +70,7 @@ User Details:
 - Name: ${userName}
 - Registration ID: ${input.registrationId}
 - Email: ${userEmail}
+- Country: ${userCountry}
 - Username: ${user.username || "N/A"}
 
 File Details:
@@ -84,6 +111,10 @@ This file was submitted by a user for admin review and processing.
                 <tr>
                   <td style="padding: 8px 0; color: #6b7280;"><strong>Email:</strong></td>
                   <td style="padding: 8px 0;">${userEmail}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; color: #6b7280;"><strong>Country:</strong></td>
+                  <td style="padding: 8px 0;">${userCountry}</td>
                 </tr>
                 <tr>
                   <td style="padding: 8px 0; color: #6b7280;"><strong>Username:</strong></td>
@@ -130,6 +161,21 @@ This file was submitted by a user for admin review and processing.
       
       const resendApiKey = process.env.RESEND_API_KEY;
       
+      const sanitizedName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 80);
+      const fallbackName = `upload.${getExtensionFromMimeType(input.mimeType)}`;
+      const storagePath = `admin-uploads/${input.registrationId}/${Date.now()}-${sanitizedName || fallbackName}`;
+
+      const { data: storageUpload, error: storageError } = await ctx.supabase.storage
+        .from(ACTIVITY_UPLOADS_BUCKET)
+        .upload(storagePath, Buffer.from(input.fileContent, "utf-8"), {
+          contentType: input.mimeType || "text/csv",
+          upsert: false,
+        });
+
+      if (storageError || !storageUpload) {
+        throw new Error(storageError?.message || "Failed to store activity file");
+      }
+
       if (!resendApiKey) {
         console.log("[Email] No Resend API key found, logging email content instead");
         console.log("[Email] Would send to:", adminEmail);
@@ -141,7 +187,7 @@ This file was submitted by a user for admin review and processing.
           .insert({
             RegistrationID: input.registrationId,
             file_name: input.fileName,
-            file_path: `email-sent-to-${adminEmail}`,
+            file_path: storageUpload.path,
             file_size: input.fileSize,
             mime_type: input.mimeType,
             uploaded_at: new Date().toISOString(),
@@ -150,6 +196,18 @@ This file was submitted by a user for admin review and processing.
         if (dbError) {
           console.warn("[Email] Could not log to database:", dbError.message);
         }
+
+        await logAdminAction(ctx, {
+          actorUserId: actor.authUserId,
+          actionType: "email_activity_file_preview",
+          targetUserId: null,
+          metadata: {
+            registrationId: input.registrationId,
+            fileName: input.fileName,
+            fileSize: input.fileSize,
+            mimeType: input.mimeType,
+          },
+        });
 
         return {
           success: true,
@@ -181,7 +239,7 @@ This file was submitted by a user for admin review and processing.
         .insert({
           RegistrationID: input.registrationId,
           file_name: input.fileName,
-          file_path: `emailed-to-${adminEmail}-${result.id}`,
+          file_path: storageUpload.path,
           file_size: input.fileSize,
           mime_type: input.mimeType,
           uploaded_at: new Date().toISOString(),
@@ -190,6 +248,18 @@ This file was submitted by a user for admin review and processing.
       if (dbError) {
         console.warn("[Email] Could not log to database:", dbError.message);
       }
+
+      await logAdminAction(ctx, {
+        actorUserId: actor.authUserId,
+        actionType: "email_activity_file",
+        metadata: {
+          registrationId: input.registrationId,
+          fileName: input.fileName,
+          fileSize: input.fileSize,
+          mimeType: input.mimeType,
+          emailId: result.id,
+        },
+      });
 
       return {
         success: true,
@@ -201,3 +271,4 @@ This file was submitted by a user for admin review and processing.
       throw new Error(error.message || "Failed to send email");
     }
   });
+

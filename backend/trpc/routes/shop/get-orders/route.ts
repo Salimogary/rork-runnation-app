@@ -1,9 +1,12 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import { requireRegistrationOwner } from "../../../rbac";
 
 export default publicProcedure
   .input(z.object({ userId: z.string() }))
   .query(async ({ input, ctx }) => {
+    await requireRegistrationOwner(ctx, input.userId);
+
     const { data, error } = await ctx.supabase
       .from("orders")
       .select(`

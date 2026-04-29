@@ -1,16 +1,17 @@
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, RefreshControl, Alert, Modal, TextInput } from "react-native";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
-import { X, Calendar, MapPin, TrendingUp, Clock, Award, Users, Download } from "lucide-react-native";
+import { X, Calendar, MapPin, TrendingUp, Clock, Award, Users, Download, Filter } from "lucide-react-native";
 
 import { Platform } from 'react-native';
 import colors from "@/constants/colors";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useSubscription } from "@/contexts/SubscriptionContext";
 import { Lock } from "lucide-react-native";
+import { getServerClient } from "@/lib/server-client";
 
 
 interface ActivityData {
@@ -42,7 +43,7 @@ interface CommunityData {
   registrationId: string;
   Name: string;
   Country: string;
-  Residence: string;
+  Club: string;
   Sex: string;
   AvgDistance: number;
   AvgTime: number;
@@ -52,6 +53,22 @@ interface CommunityData {
 
 type CommunitySortOption = "distance" | "time";
 type ActiveTab = "runs" | "club" | "community";
+type FilterSexOption = "all" | "Male" | "Female";
+type LeaderboardTab = "club" | "community";
+type LeaderboardFilters = {
+  startDate: string;
+  endDate: string;
+  sex: FilterSexOption;
+  country: string;
+};
+
+const EMPTY_LEADERBOARD_FILTERS: LeaderboardFilters = {
+  startDate: "",
+  endDate: "",
+  sex: "all",
+  country: "all",
+};
+const MIN_ACTIVITY_DURATION_MINUTES = 3;
 
 export default function ActivityScreen() {
   const { user, privateMode } = useAuth();
@@ -61,6 +78,15 @@ export default function ActivityScreen() {
   const [communitySortBy, setCommunitySortBy] = useState<CommunitySortOption>("distance");
   const [clubSortBy, setClubSortBy] = useState<CommunitySortOption>("distance");
   const [activeTab, setActiveTab] = useState<ActiveTab>("runs");
+  const [showLeaderboardFilters, setShowLeaderboardFilters] = useState(false);
+  const [leaderboardFilters, setLeaderboardFilters] = useState<Record<LeaderboardTab, LeaderboardFilters>>({
+    club: EMPTY_LEADERBOARD_FILTERS,
+    community: EMPTY_LEADERBOARD_FILTERS,
+  });
+  const [datePickerTarget, setDatePickerTarget] = useState<{
+    tab: LeaderboardTab;
+    field: "startDate" | "endDate";
+  } | null>(null);
   const [showExternalForm, setShowExternalForm] = useState(false);
   const [formData, setFormData] = useState({
     activityDate: "",
@@ -72,6 +98,151 @@ export default function ActivityScreen() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  const activeLeaderboardTab: LeaderboardTab = activeTab === "club" ? "club" : "community";
+  const currentFilters = leaderboardFilters[activeLeaderboardTab];
+  const filterStartDate = currentFilters.startDate;
+  const filterEndDate = currentFilters.endDate;
+  const filterSex = currentFilters.sex;
+  const filterCountry = currentFilters.country;
+
+  const updateLeaderboardFilters = useCallback(
+    (tab: LeaderboardTab, updates: Partial<LeaderboardFilters>) => {
+      setLeaderboardFilters((prev) => ({
+        ...prev,
+        [tab]: {
+          ...prev[tab],
+          ...updates,
+        },
+      }));
+    },
+    []
+  );
+
+  const clearLeaderboardFilters = useCallback((tab: LeaderboardTab) => {
+    setLeaderboardFilters((prev) => ({
+      ...prev,
+      [tab]: { ...EMPTY_LEADERBOARD_FILTERS },
+    }));
+  }, []);
+
+  const formatDateLabel = useCallback((value: string) => {
+    if (!value) return "Select date";
+    const parsed = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  }, []);
+
+  const datePickerOptions = useMemo(() => {
+    const days: string[] = [];
+    const cursor = new Date();
+    cursor.setHours(0, 0, 0, 0);
+    for (let i = 0; i < 365; i += 1) {
+      days.push(cursor.toISOString().split("T")[0]);
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    return days;
+  }, []);
+
+  const getClubNameMap = useCallback(async (registrationIds: string[]) => {
+    const uniqueRegistrationIds = Array.from(new Set(registrationIds.filter(Boolean)));
+    if (uniqueRegistrationIds.length === 0) {
+      return new Map<string, string>();
+    }
+
+    const { data: memberships, error: membershipError } = await supabase
+      .from("club_members")
+      .select("registration_id, coordinator_id")
+      .in("registration_id", uniqueRegistrationIds);
+
+    if (membershipError) {
+      console.error("[ClubLookup] Membership fetch error:", membershipError);
+      throw membershipError;
+    }
+
+    const coordinatorIds = Array.from(
+      new Set((memberships || []).map((membership: any) => membership.coordinator_id).filter(Boolean))
+    );
+
+    if (coordinatorIds.length === 0) {
+      return new Map<string, string>();
+    }
+
+    const { data: clubs, error: clubsError } = await supabase
+      .from("clubs")
+      .select("coordinator_id, club_name")
+      .in("coordinator_id", coordinatorIds);
+
+    if (clubsError) {
+      console.error("[ClubLookup] Club fetch error:", clubsError);
+      throw clubsError;
+    }
+
+    const clubByCoordinator = new Map(
+      (clubs || []).map((club: any) => [club.coordinator_id, club.club_name || ""])
+    );
+
+    return new Map(
+      (memberships || []).map((membership: any) => [
+        membership.registration_id,
+        clubByCoordinator.get(membership.coordinator_id) || "",
+      ])
+    );
+  }, []);
+
+  const resolveCanonicalRegistrationIds = useCallback(async (registrationIds: string[]) => {
+    const uniqueRegistrationIds = Array.from(new Set(registrationIds.filter(Boolean)));
+    if (uniqueRegistrationIds.length === 0) {
+      return new Map<string, string>();
+    }
+
+    const [byAuthIdResult, byLegacyIdResult] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("profile_id, registration_id")
+        .in("profile_id", uniqueRegistrationIds),
+      supabase
+        .from("profiles")
+        .select("profile_id, registration_id")
+        .in("registration_id", uniqueRegistrationIds),
+    ]);
+
+    if (byAuthIdResult.error) {
+      console.error("[RegistrationResolve] Profile auth-id lookup error:", byAuthIdResult.error);
+      throw byAuthIdResult.error;
+    }
+
+    if (byLegacyIdResult.error) {
+      console.error("[RegistrationResolve] Profile legacy-id lookup error:", byLegacyIdResult.error);
+      throw byLegacyIdResult.error;
+    }
+
+    const resolved = new Map<string, string>();
+
+    uniqueRegistrationIds.forEach((id) => {
+      resolved.set(id, id);
+    });
+
+    [...(byAuthIdResult.data || []), ...(byLegacyIdResult.data || [])].forEach((profile: any) => {
+      const authId = String(profile.profile_id || "").trim();
+      const legacyId = String(profile.registration_id || "").trim();
+
+      if (authId && legacyId) {
+        resolved.set(authId, legacyId);
+        resolved.set(legacyId, legacyId);
+      }
+    });
+
+    return resolved;
+  }, []);
+
+  const formatCountryClub = useCallback((country?: string, club?: string) => {
+    return [country, club].filter((value) => value && value !== "-").join(", ");
+  }, []);
 
   const handleSaveCSV = async () => {
     if (!isSubscribed) {
@@ -348,14 +519,23 @@ export default function ActivityScreen() {
   });
 
   const { data: clubCommunityData, isLoading: clubLoading, refetch: refetchClub, error: clubError } = useQuery<CommunityData[]>({
-    queryKey: ["club-community", clubMemberIds],
+    queryKey: ["club-community", clubMemberIds, filterStartDate, filterEndDate],
     queryFn: async () => {
       if (!clubMemberIds || clubMemberIds.length === 0) return [];
       try {
-        const { data: activities, error: activityError } = await supabase
+        let activitiesQuery = supabase
           .from("activities")
           .select("registration_id, activity_date, distance_km, start_time, end_time, pace_km_h")
           .in("registration_id", clubMemberIds);
+
+        if (filterStartDate) {
+          activitiesQuery = activitiesQuery.gte("activity_date", filterStartDate);
+        }
+        if (filterEndDate) {
+          activitiesQuery = activitiesQuery.lte("activity_date", filterEndDate);
+        }
+
+        const { data: activities, error: activityError } = await activitiesQuery;
 
         if (activityError) {
           console.error("[ClubCommunity] Activity fetch error:", activityError);
@@ -373,6 +553,10 @@ export default function ActivityScreen() {
         }
 
         const regMap = new Map(registrations?.map(r => [r.registration_id, r]));
+        const clubNameMap = await getClubNameMap(clubMemberIds);
+        const resolvedRegistrationIds = await resolveCanonicalRegistrationIds(
+          (activities || []).map((activity: any) => activity.registration_id)
+        );
         const userStats = new Map<string, {
           totalDistance: number;
           totalTime: number;
@@ -382,8 +566,10 @@ export default function ActivityScreen() {
         }>();
 
         activities?.forEach(activity => {
-          const regId = activity.registration_id;
+          const rawRegId = activity.registration_id;
+          const regId = resolvedRegistrationIds.get(rawRegId) || rawRegId;
           if (!regId) return;
+          const activityDateKey = String(activity.activity_date || "").split("T")[0];
           const startParts = activity.start_time.split(':');
           const endParts = activity.end_time.split(':');
           const startMinutes = parseInt(startParts[0]) * 60 + parseInt(startParts[1]);
@@ -398,14 +584,23 @@ export default function ActivityScreen() {
           existing.totalTime += duration;
           existing.paceSum += activity.pace_km_h || 0;
           existing.activityCount += 1;
-          existing.activeDays.add(activity.activity_date);
+          if (activityDateKey) {
+            existing.activeDays.add(activityDateKey);
+          }
           userStats.set(regId, existing);
         });
 
         const result: CommunityData[] = [];
-        userStats.forEach((stats, regId) => {
-          const registration = regMap.get(regId);
-          if (!registration) return;
+        (registrations || []).forEach((registration: any) => {
+          const regId = registration.registration_id;
+          if (!regId) return;
+          const stats = userStats.get(regId) || {
+            totalDistance: 0,
+            totalTime: 0,
+            paceSum: 0,
+            activityCount: 0,
+            activeDays: new Set<string>(),
+          };
           const firstName = registration.first_name || "";
           const otherNames = registration.other_names || "";
           const fullName = [firstName, otherNames].filter(n => n).join(" ") || "Unknown";
@@ -414,7 +609,7 @@ export default function ActivityScreen() {
             registrationId: regId,
             Name: fullName,
             Country: registration.country || "-",
-            Residence: registration.city_town_district || "-",
+            Club: clubNameMap.get(regId) || "",
             Sex: registration.sex || "-",
             AvgDistance: activeDays > 0 ? stats.totalDistance / activeDays : 0,
             AvgTime: activeDays > 0 ? stats.totalTime / activeDays : 0,
@@ -423,8 +618,9 @@ export default function ActivityScreen() {
           });
         });
 
-        console.log("[ClubCommunity] Processed", result.length, "club members");
-        return result;
+        const filteredResult = result.filter((item) => item.ActiveDays >= 1);
+        console.log("[ClubCommunity] Processed", filteredResult.length, "club members");
+        return filteredResult;
       } catch (error: any) {
         console.error("[ClubCommunity] Query failed:", error);
         throw error;
@@ -436,10 +632,10 @@ export default function ActivityScreen() {
   });
 
   const { data: communityData, isLoading: communityLoading, refetch: refetchCommunity, error: communityError } = useQuery<CommunityData[]>({
-    queryKey: ["community"],
+    queryKey: ["community", filterStartDate, filterEndDate],
     queryFn: async () => {
       try {
-        const { data: activities, error: activityError } = await supabase
+        let activitiesQuery = supabase
           .from("activities")
           .select(`
             registration_id,
@@ -449,6 +645,15 @@ export default function ActivityScreen() {
             end_time,
             pace_km_h
           `);
+
+        if (filterStartDate) {
+          activitiesQuery = activitiesQuery.gte("activity_date", filterStartDate);
+        }
+        if (filterEndDate) {
+          activitiesQuery = activitiesQuery.lte("activity_date", filterEndDate);
+        }
+
+        const { data: activities, error: activityError } = await activitiesQuery;
 
         if (activityError) {
           console.error("[Community] Activity fetch error:", activityError);
@@ -462,7 +667,6 @@ export default function ActivityScreen() {
             first_name,
             other_names,
             country,
-            city_town_district,
             sex
           `);
 
@@ -472,6 +676,10 @@ export default function ActivityScreen() {
         }
 
       const regMap = new Map(registrations?.map(r => [r.registration_id, r]));
+      const clubNameMap = await getClubNameMap((registrations || []).map((registration: any) => registration.registration_id));
+      const resolvedRegistrationIds = await resolveCanonicalRegistrationIds(
+        (activities || []).map((activity: any) => activity.registration_id)
+      );
       const userStats = new Map<string, {
         totalDistance: number;
         totalTime: number;
@@ -481,8 +689,10 @@ export default function ActivityScreen() {
       }>();
 
       activities?.forEach(activity => {
-        const regId = activity.registration_id;
+        const rawRegId = activity.registration_id;
+        const regId = resolvedRegistrationIds.get(rawRegId) || rawRegId;
         if (!regId) return;
+        const activityDateKey = String(activity.activity_date || "").split("T")[0];
 
         const startParts = activity.start_time.split(':');
         const endParts = activity.end_time.split(':');
@@ -503,15 +713,24 @@ export default function ActivityScreen() {
         existing.totalTime += duration;
         existing.paceSum += activity.pace_km_h || 0;
         existing.activityCount += 1;
-        existing.activeDays.add(activity.activity_date);
+        if (activityDateKey) {
+          existing.activeDays.add(activityDateKey);
+        }
 
         userStats.set(regId, existing);
       });
 
       const result: CommunityData[] = [];
-      userStats.forEach((stats, regId) => {
-        const registration = regMap.get(regId);
-        if (!registration) return;
+      (registrations || []).forEach((registration: any) => {
+        const regId = registration.registration_id;
+        if (!regId) return;
+        const stats = userStats.get(regId) || {
+          totalDistance: 0,
+          totalTime: 0,
+          paceSum: 0,
+          activityCount: 0,
+          activeDays: new Set<string>(),
+        };
 
         const firstName = registration.first_name || "";
         const otherNames = registration.other_names || "";
@@ -522,7 +741,7 @@ export default function ActivityScreen() {
           registrationId: regId,
           Name: fullName,
           Country: registration.country || "-",
-          Residence: registration.city_town_district || "-",
+          Club: clubNameMap.get(regId) || "",
           Sex: registration.sex || "-",
           AvgDistance: activeDays > 0 ? stats.totalDistance / activeDays : 0,
           AvgTime: activeDays > 0 ? stats.totalTime / activeDays : 0,
@@ -531,8 +750,9 @@ export default function ActivityScreen() {
         });
       });
 
-      console.log("[Community] Processed", result.length, "users");
-      return result;
+      const filteredResult = result.filter((item) => item.ActiveDays >= 1);
+      console.log("[Community] Processed", filteredResult.length, "users");
+      return filteredResult;
       } catch (error: any) {
         console.error("[Community] Query failed:", error);
         throw error;
@@ -554,7 +774,7 @@ export default function ActivityScreen() {
 
   const uniqueDaysCount = useMemo(() => 
     activities
-      ? new Set(activities.map(a => a.activity_date)).size
+      ? new Set(activities.map(a => String(a.activity_date || "").split("T")[0]).filter(Boolean)).size
       : 0,
     [activities]
   );
@@ -624,35 +844,63 @@ export default function ActivityScreen() {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
+  const availableCountries = useMemo(() => {
+    const source = activeTab === "club" ? clubCommunityData : communityData;
+    const values = (source || [])
+      .map((item) => item.Country)
+      .filter((country) => country && country !== "-");
+
+    return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
+  }, [activeTab, clubCommunityData, communityData]);
+
+  const applyLeaderboardFilters = useCallback((rows: CommunityData[]) => {
+    return rows.filter((item) => {
+      if (privateMode && user?.id && item.registrationId === user.id) {
+        return false;
+      }
+      if (filterSex !== "all" && item.Sex !== filterSex) {
+        return false;
+      }
+      if (filterCountry !== "all" && item.Country !== filterCountry) {
+        return false;
+      }
+      return true;
+    });
+  }, [filterCountry, filterSex, privateMode, user?.id]);
+
   const sortedCommunityData = useMemo(() => {
     if (!communityData) return [];
-    let filtered = communityData;
-    if (privateMode && user?.id) {
-      filtered = filtered.filter(item => item.registrationId !== user.id);
-    }
+    const filtered = applyLeaderboardFilters(communityData);
     return [...filtered].sort((a, b) => {
-      const distDiff = b.AvgDistance - a.AvgDistance;
-      if (distDiff !== 0) return distDiff;
+      if (communitySortBy === "time") {
+        const timeDiff = b.AvgTime - a.AvgTime;
+        if (timeDiff !== 0) return timeDiff;
+      } else {
+        const distDiff = b.AvgDistance - a.AvgDistance;
+        if (distDiff !== 0) return distDiff;
+      }
       const daysDiff = b.ActiveDays - a.ActiveDays;
       if (daysDiff !== 0) return daysDiff;
       return a.AveragePace - b.AveragePace;
     });
-  }, [communityData, privateMode, user?.id]);
+  }, [applyLeaderboardFilters, communityData, communitySortBy]);
 
   const sortedClubData = useMemo(() => {
     if (!clubCommunityData) return [];
-    let filtered = clubCommunityData;
-    if (privateMode && user?.id) {
-      filtered = filtered.filter(item => item.registrationId !== user.id);
-    }
+    const filtered = applyLeaderboardFilters(clubCommunityData);
     return [...filtered].sort((a, b) => {
-      const distDiff = b.AvgDistance - a.AvgDistance;
-      if (distDiff !== 0) return distDiff;
+      if (clubSortBy === "time") {
+        const timeDiff = b.AvgTime - a.AvgTime;
+        if (timeDiff !== 0) return timeDiff;
+      } else {
+        const distDiff = b.AvgDistance - a.AvgDistance;
+        if (distDiff !== 0) return distDiff;
+      }
       const daysDiff = b.ActiveDays - a.ActiveDays;
       if (daysDiff !== 0) return daysDiff;
       return a.AveragePace - b.AveragePace;
     });
-  }, [clubCommunityData, privateMode, user?.id]);
+  }, [applyLeaderboardFilters, clubCommunityData, clubSortBy]);
 
   const formatTime = (minutes: number): string => {
     const hours = Math.floor(minutes / 60);
@@ -691,21 +939,21 @@ export default function ActivityScreen() {
     const durationMinutes = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]) + parseInt(durationParts[2]) / 60;
 
     if (formData.exerciseType === "Walk") {
-      if (distanceNum < 0.25) {
-        Alert.alert("Activity Not Saved", "A Walk must be at least 0.25 km to be saved.");
+      if (distanceNum < 0.1) {
+        Alert.alert("Activity Not Saved", "A Walk must be at least 0.1 km to be saved.");
         return;
       }
-      if (durationMinutes < 10) {
-        Alert.alert("Activity Not Saved", "A Walk must be at least 10 minutes to be saved.");
+      if (durationMinutes < MIN_ACTIVITY_DURATION_MINUTES) {
+        Alert.alert("Activity Not Saved", `A Walk must be at least ${MIN_ACTIVITY_DURATION_MINUTES} minutes to be saved.`);
         return;
       }
     } else if (formData.exerciseType === "Run") {
-      if (distanceNum < 0.45) {
-        Alert.alert("Activity Not Saved", "A Run must be at least 0.45 km to be saved.");
+      if (distanceNum < 0.1) {
+        Alert.alert("Activity Not Saved", "A Run must be at least 0.1 km to be saved.");
         return;
       }
-      if (durationMinutes < 10) {
-        Alert.alert("Activity Not Saved", "A Run must be at least 10 minutes to be saved.");
+      if (durationMinutes < MIN_ACTIVITY_DURATION_MINUTES) {
+        Alert.alert("Activity Not Saved", `A Run must be at least ${MIN_ACTIVITY_DURATION_MINUTES} minutes to be saved.`);
         return;
       }
     }
@@ -713,67 +961,14 @@ export default function ActivityScreen() {
     setIsSubmitting(true);
 
     try {
-      const { count, error: countError } = await supabase
-        .from("External Activity Submissions")
-        .select("*", { count: "exact", head: true })
-        .eq("registration_id", user.id)
-        .eq("activity_date", formData.activityDate);
-
-      const { count: existingCount, error: existingError } = await supabase
-        .from("activities")
-        .select("*", { count: "exact", head: true })
-        .eq("registration_id", user.id)
-        .eq("activity_date", formData.activityDate);
-
-      if (countError) console.error("[ActivityLimit] Submissions count error:", countError);
-      if (existingError) console.error("[ActivityLimit] Activities count error:", existingError);
-
-      const totalToday = (count || 0) + (existingCount || 0);
-      console.log("[ActivityLimit] Total activities for", formData.activityDate, ":", totalToday);
-
-      if (totalToday >= 5) {
-        Alert.alert(
-          "Daily Limit Reached",
-          "You can only save a maximum of 5 activities per day. This activity was not saved."
-        );
-        setIsSubmitting(false);
-        return;
-      }
-    } catch (err: any) {
-      console.error("[ActivityLimit] Error checking daily limit:", err);
-    }
-
-    try {
-      console.log("[Submit External Activity] Passed all validations");
-      console.log("[Submit External Activity] Submitting data:", {
-        registration_id: user.id,
-        activity_date: formData.activityDate,
-        exercise_type: formData.exerciseType,
-        start_time: formData.startTime + ":00",
-        Duration: formData.duration,
-        distance_km: distanceNum,
+      await getServerClient().activities.submitExternalActivity.mutate({
+        registrationId: user.id,
+        activityDate: formData.activityDate,
+        exerciseType: formData.exerciseType,
+        startTime: `${formData.startTime}:00`,
+        duration: formData.duration,
+        distanceKm: distanceNum,
       });
-
-      const { data, error } = await supabase
-        .from("External Activity Submissions")
-        .insert({
-          RegistrationID: user.id,
-          Activity_Date: formData.activityDate,
-          Exercise_Type: formData.exerciseType,
-          Start_Time: formData.startTime + ":00",
-          Duration: formData.duration,
-          distance_km: distanceNum,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error("[Submit External Activity] Error:", error);
-        Alert.alert("Error", error.message || "Failed to submit activity");
-        return;
-      }
-
-      console.log("[Submit External Activity] Success:", data);
       
       Alert.alert(
         "Success",
@@ -872,29 +1067,115 @@ export default function ActivityScreen() {
         )}
 
         {(activeTab === "community" || activeTab === "club") && (
-          <View style={styles.sortContainer}>
-            <Text style={styles.sortLabel}>Sort:</Text>
-            <TouchableOpacity
-              style={[styles.sortChip, (activeTab === "community" ? communitySortBy : clubSortBy) === "distance" && styles.sortChipActive]}
-              onPress={() => activeTab === "community" ? setCommunitySortBy("distance") : setClubSortBy("distance")}
-              activeOpacity={0.7}
-            >
-              <TrendingUp size={14} color={(activeTab === "community" ? communitySortBy : clubSortBy) === "distance" ? colors.primary : colors.white} />
-              <Text style={[styles.sortChipText, (activeTab === "community" ? communitySortBy : clubSortBy) === "distance" && styles.sortChipTextActive]}>
-                Distance
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.sortChip, (activeTab === "community" ? communitySortBy : clubSortBy) === "time" && styles.sortChipActive]}
-              onPress={() => activeTab === "community" ? setCommunitySortBy("time") : setClubSortBy("time")}
-              activeOpacity={0.7}
-            >
-              <Clock size={14} color={(activeTab === "community" ? communitySortBy : clubSortBy) === "time" ? colors.primary : colors.white} />
-              <Text style={[styles.sortChipText, (activeTab === "community" ? communitySortBy : clubSortBy) === "time" && styles.sortChipTextActive]}>
-                Time
-              </Text>
-            </TouchableOpacity>
-          </View>
+          <>
+            <View style={styles.sortContainer}>
+              <Text style={styles.sortLabel}>Sort:</Text>
+              <TouchableOpacity
+                style={[styles.sortChip, (activeTab === "community" ? communitySortBy : clubSortBy) === "distance" && styles.sortChipActive]}
+                onPress={() => activeTab === "community" ? setCommunitySortBy("distance") : setClubSortBy("distance")}
+                activeOpacity={0.7}
+              >
+                <TrendingUp size={14} color={(activeTab === "community" ? communitySortBy : clubSortBy) === "distance" ? colors.primary : colors.white} />
+                <Text style={[styles.sortChipText, (activeTab === "community" ? communitySortBy : clubSortBy) === "distance" && styles.sortChipTextActive]}>
+                  Distance
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.sortChip, (activeTab === "community" ? communitySortBy : clubSortBy) === "time" && styles.sortChipActive]}
+                onPress={() => activeTab === "community" ? setCommunitySortBy("time") : setClubSortBy("time")}
+                activeOpacity={0.7}
+              >
+                <Clock size={14} color={(activeTab === "community" ? communitySortBy : clubSortBy) === "time" ? colors.primary : colors.white} />
+                <Text style={[styles.sortChipText, (activeTab === "community" ? communitySortBy : clubSortBy) === "time" && styles.sortChipTextActive]}>
+                  Time
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.sortChip, showLeaderboardFilters && styles.sortChipActive]}
+                onPress={() => setShowLeaderboardFilters((value) => !value)}
+                activeOpacity={0.7}
+              >
+                <Filter size={14} color={showLeaderboardFilters ? colors.primary : colors.white} />
+                <Text style={[styles.sortChipText, showLeaderboardFilters && styles.sortChipTextActive]}>
+                  Filters
+                </Text>
+              </TouchableOpacity>
+            </View>
+            {showLeaderboardFilters && (
+              <View style={styles.filterPanel}>
+                <View style={styles.filterRow}>
+                  <View style={styles.filterField}>
+                    <Text style={styles.filterFieldLabel}>Start Date</Text>
+                    <TouchableOpacity
+                      style={styles.filterDateButton}
+                      onPress={() => setDatePickerTarget({ tab: activeLeaderboardTab, field: "startDate" })}
+                    >
+                      <Calendar size={14} color={colors.white} />
+                      <Text style={styles.filterDateButtonText}>
+                        {formatDateLabel(filterStartDate)}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.filterField}>
+                    <Text style={styles.filterFieldLabel}>End Date</Text>
+                    <TouchableOpacity
+                      style={styles.filterDateButton}
+                      onPress={() => setDatePickerTarget({ tab: activeLeaderboardTab, field: "endDate" })}
+                    >
+                      <Calendar size={14} color={colors.white} />
+                      <Text style={styles.filterDateButtonText}>
+                        {formatDateLabel(filterEndDate)}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <View style={styles.filterGroup}>
+                  <Text style={styles.filterFieldLabel}>Sex</Text>
+                  <View style={styles.filterChipRow}>
+                    {(["all", "Male", "Female"] as const).map((option) => (
+                      <TouchableOpacity
+                        key={option}
+                        style={[styles.filterChip, filterSex === option && styles.filterChipActive]}
+                        onPress={() => updateLeaderboardFilters(activeLeaderboardTab, { sex: option })}
+                      >
+                        <Text style={[styles.filterChipText, filterSex === option && styles.filterChipTextActive]}>
+                          {option === "all" ? "All" : option}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+                <View style={styles.filterGroup}>
+                  <Text style={styles.filterFieldLabel}>Country</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipRow}>
+                    <TouchableOpacity
+                      style={[styles.filterChip, filterCountry === "all" && styles.filterChipActive]}
+                      onPress={() => updateLeaderboardFilters(activeLeaderboardTab, { country: "all" })}
+                    >
+                      <Text style={[styles.filterChipText, filterCountry === "all" && styles.filterChipTextActive]}>All</Text>
+                    </TouchableOpacity>
+                    {availableCountries.map((country) => (
+                      <TouchableOpacity
+                        key={country}
+                        style={[styles.filterChip, filterCountry === country && styles.filterChipActive]}
+                        onPress={() => updateLeaderboardFilters(activeLeaderboardTab, { country })}
+                      >
+                        <Text style={[styles.filterChipText, filterCountry === country && styles.filterChipTextActive]}>
+                          {country}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+                <TouchableOpacity
+                  style={styles.clearFiltersButton}
+                  onPress={() => clearLeaderboardFilters(activeLeaderboardTab)}
+                >
+                  <Text style={styles.clearFiltersButtonText}>Clear Filters</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </>
         )}
       </LinearGradient>
 
@@ -995,8 +1276,8 @@ export default function ActivityScreen() {
           ) : sortedClubData.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyEmoji}>🏃‍♂️</Text>
-              <Text style={styles.emptyText}>No active club members</Text>
-              <Text style={styles.emptySubtext}>Club members will appear once they log activities</Text>
+              <Text style={styles.emptyText}>No club members yet</Text>
+              <Text style={styles.emptySubtext}>Club members will appear here as soon as they join your club.</Text>
             </View>
           ) : (
             <View style={styles.leaderboardContainer}>
@@ -1009,11 +1290,7 @@ export default function ActivityScreen() {
                     <View style={styles.locationBadge}>
                       <MapPin size={10} color={colors.textSecondary} />
                       <Text style={styles.locationText} numberOfLines={1}>
-                        {item.Country !== "-" && item.Residence !== "-" 
-                          ? `${item.Country}, ${item.Residence}`
-                          : item.Country !== "-" 
-                          ? item.Country
-                          : item.Residence}
+                        {formatCountryClub(item.Country, item.Club)}
                       </Text>
                     </View>
                   </View>
@@ -1066,8 +1343,8 @@ export default function ActivityScreen() {
           ) : sortedCommunityData.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyEmoji}>🏃‍♂️</Text>
-              <Text style={styles.emptyText}>No runners yet</Text>
-              <Text style={styles.emptySubtext}>Be the first to hit the road!</Text>
+              <Text style={styles.emptyText}>No registered runners yet</Text>
+              <Text style={styles.emptySubtext}>Runners will appear here even before they record their first run.</Text>
             </View>
           ) : (
             <View style={styles.leaderboardContainer}>
@@ -1080,11 +1357,7 @@ export default function ActivityScreen() {
                     <View style={styles.locationBadge}>
                       <MapPin size={10} color={colors.textSecondary} />
                       <Text style={styles.locationText} numberOfLines={1}>
-                        {item.Country !== "-" && item.Residence !== "-" 
-                          ? `${item.Country}, ${item.Residence}`
-                          : item.Country !== "-" 
-                          ? item.Country
-                          : item.Residence}
+                        {formatCountryClub(item.Country, item.Club)}
                       </Text>
                     </View>
                   </View>
@@ -1291,6 +1564,69 @@ export default function ActivityScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={!!datePickerTarget}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setDatePickerTarget(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.datePickerModal}>
+            <View style={styles.datePickerHeader}>
+              <Text style={styles.datePickerTitle}>
+                {datePickerTarget?.field === "startDate" ? "Select Start Date" : "Select End Date"}
+              </Text>
+              <TouchableOpacity onPress={() => setDatePickerTarget(null)}>
+                <X size={22} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.datePickerList} contentContainerStyle={styles.datePickerListContent}>
+              {datePickerTarget ? (
+                <>
+                  <TouchableOpacity
+                    style={styles.datePickerOption}
+                    onPress={() => {
+                      updateLeaderboardFilters(datePickerTarget.tab, {
+                        [datePickerTarget.field]: "",
+                      });
+                      setDatePickerTarget(null);
+                    }}
+                  >
+                    <Text style={styles.datePickerOptionText}>Clear date</Text>
+                  </TouchableOpacity>
+                  {datePickerOptions.map((dateValue) => (
+                    <TouchableOpacity
+                      key={dateValue}
+                      style={[
+                        styles.datePickerOption,
+                        leaderboardFilters[datePickerTarget.tab][datePickerTarget.field] === dateValue &&
+                          styles.datePickerOptionActive,
+                      ]}
+                      onPress={() => {
+                        updateLeaderboardFilters(datePickerTarget.tab, {
+                          [datePickerTarget.field]: dateValue,
+                        });
+                        setDatePickerTarget(null);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.datePickerOptionText,
+                          leaderboardFilters[datePickerTarget.tab][datePickerTarget.field] === dateValue &&
+                            styles.datePickerOptionTextActive,
+                        ]}
+                      >
+                        {formatDateLabel(dateValue)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1382,6 +1718,7 @@ const styles = StyleSheet.create({
   sortContainer: {
     flexDirection: "row",
     alignItems: "center",
+    flexWrap: "wrap" as const,
     gap: 10,
   },
   sortLabel: {
@@ -1408,6 +1745,89 @@ const styles = StyleSheet.create({
   },
   sortChipTextActive: {
     color: colors.primary,
+  },
+  filterPanel: {
+    marginTop: 12,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderRadius: 14,
+    padding: 12,
+    gap: 12,
+  },
+  filterRow: {
+    flexDirection: "row" as const,
+    gap: 10,
+  },
+  filterField: {
+    flex: 1,
+    gap: 6,
+  },
+  filterFieldLabel: {
+    fontSize: 12,
+    color: colors.white,
+    fontWeight: "700" as const,
+  },
+  filterInput: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    color: colors.white,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  filterDateButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  filterDateButtonText: {
+    fontSize: 13,
+    color: colors.white,
+    fontWeight: "600" as const,
+  },
+  filterGroup: {
+    gap: 8,
+  },
+  filterChipRow: {
+    flexDirection: "row" as const,
+    gap: 8,
+    paddingRight: 4,
+  },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.14)",
+  },
+  filterChipActive: {
+    backgroundColor: colors.white,
+  },
+  filterChipText: {
+    fontSize: 12,
+    color: colors.white,
+    fontWeight: "700" as const,
+  },
+  filterChipTextActive: {
+    color: colors.primary,
+  },
+  clearFiltersButton: {
+    alignSelf: "flex-start" as const,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.16)",
+  },
+  clearFiltersButtonText: {
+    fontSize: 12,
+    color: colors.white,
+    fontWeight: "700" as const,
   },
   scrollView: {
     flex: 1,
@@ -1835,6 +2255,54 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700" as const,
     color: colors.white,
+  },
+  datePickerModal: {
+    backgroundColor: colors.white,
+    borderRadius: 20,
+    width: "100%",
+    maxWidth: 420,
+    maxHeight: "80%",
+    overflow: "hidden" as const,
+  },
+  datePickerHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  datePickerTitle: {
+    fontSize: 18,
+    fontWeight: "800" as const,
+    color: colors.text,
+  },
+  datePickerList: {
+    flexGrow: 0,
+  },
+  datePickerListContent: {
+    padding: 14,
+    gap: 8,
+  },
+  datePickerOption: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: colors.extraLightGray,
+  },
+  datePickerOptionActive: {
+    backgroundColor: "rgba(255,149,0,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,149,0,0.35)",
+  },
+  datePickerOptionText: {
+    fontSize: 14,
+    color: colors.text,
+    fontWeight: "600" as const,
+  },
+  datePickerOptionTextActive: {
+    color: colors.primary,
   },
   clubHeaderInfo: {
     flexDirection: "row",

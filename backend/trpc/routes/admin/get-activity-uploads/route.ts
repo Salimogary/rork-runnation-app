@@ -1,8 +1,14 @@
 import { publicProcedure } from "../../../create-context";
+import { requireAdminPermission } from "../../../rbac";
+import { resolvePrivateActivityUploadUrl } from "../../../storage";
 
 export default publicProcedure.query(async ({ ctx }) => {
   try {
-    console.log("[Admin] Fetching activity uploads...");
+    await requireAdminPermission(ctx, {
+      allowSuperAdmin: true,
+            allowCountryCoordinator: true,
+      allowClubCoordinator: true,
+    });
 
     const { data, error } = await ctx.supabase
       .from("activity_uploads_admin_log")
@@ -24,18 +30,20 @@ export default publicProcedure.query(async ({ ctx }) => {
       throw new Error(`Failed to fetch activity uploads: ${error.message}`);
     }
 
-    console.log("[Admin] Activity uploads fetched:", data?.length || 0);
-
-    const formattedData = data?.map((upload: any) => ({
-      id: upload.upload_id,
-      registrationId: upload.registration_id,
-      fileName: upload.file_name,
-      uploadedAt: upload.uploaded_at,
-      userName: upload["registrations"]
-        ? `${upload["registrations"].first_name || ""} ${upload["registrations"].other_names || ""}`.trim()
-        : "Unknown",
-      email: upload["registrations"]?.email || "N/A",
-    })) || [];
+    const formattedData = await Promise.all(
+      (data || []).map(async (upload: any) => ({
+        id: upload.upload_id,
+        registrationId: upload.registration_id,
+        fileName: upload.file_name,
+        filePath: upload.file_path ?? null,
+        downloadUrl: await resolvePrivateActivityUploadUrl(ctx.supabase, upload.file_path),
+        uploadedAt: upload.uploaded_at,
+        userName: upload["registrations"]
+          ? `${upload["registrations"].first_name || ""} ${upload["registrations"].other_names || ""}`.trim()
+          : "Unknown",
+        email: upload["registrations"]?.email || "N/A",
+      }))
+    );
 
     return formattedData;
   } catch (error: any) {
@@ -43,3 +51,4 @@ export default publicProcedure.query(async ({ ctx }) => {
     throw new Error(error.message || "Failed to fetch activity uploads");
   }
 });
+

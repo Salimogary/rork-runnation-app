@@ -1,9 +1,11 @@
-import React, { createContext, useContext, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
-import * as Crypto from 'expo-crypto';
+import { getServerClient } from '@/lib/server-client';
+import { EMPTY_ROLE_SESSION, type RoleSession } from '@/lib/role-session';
 
 interface UserData {
   id: string;
@@ -31,21 +33,26 @@ interface RegistrationData {
 interface AuthContextValue {
   user: UserData | null;
   isLoading: boolean;
+  roleSession: RoleSession;
+  isRoleSessionLoading: boolean;
   registrationId: string;
   privateMode: boolean;
   setPrivateMode: (enabled: boolean) => Promise<void>;
-  signIn: (username: string, pin: string) => Promise<{ error: { message: string } | null }>;
-  signUp: (username: string, pin: string, registrationData?: Partial<RegistrationData>) => Promise<{ error: { message: string } | null; registrationId?: string }>;
+  signIn: (email: string, password: string) => Promise<{ error: { message: string } | null }>;
+  signUp: (
+    username: string,
+    password: string,
+    registrationData?: Partial<RegistrationData>
+  ) => Promise<{ error: { message: string } | null; registrationId?: string }>;
   signOut: () => Promise<{ error: { message: string } | null }>;
   deleteAccount: () => Promise<{ error: { message: string } | null }>;
   verifyPin: (pin: string) => Promise<boolean>;
   getBiometricStatus: (username: string) => Promise<boolean>;
   disableBiometric: (username: string) => Promise<void>;
+  refreshRoleSession: () => Promise<RoleSession>;
 }
 
 const STORAGE_KEYS = {
-  CURRENT_USER: 'current_user',
-  USERS: 'users_data',
   PRIVATE_MODE: 'private_mode',
 };
 
@@ -77,52 +84,173 @@ const secureStorage = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+function normalizeRoleSession(session: Partial<RoleSession> | null | undefined): RoleSession {
+  const normalized = {
+    ...EMPTY_ROLE_SESSION,
+    ...session,
+  };
+
+  if (normalized.source !== 'auth' && normalized.source !== 'legacy' && normalized.source !== 'none') {
+    normalized.source = EMPTY_ROLE_SESSION.source;
+  }
+
+  return normalized;
+}
+
+function buildUserFromSession(session: Session, roleSession: RoleSession): UserData {
+  return {
+    id: roleSession.registrationId ?? roleSession.authUserId ?? session.user.id,
+    username:
+      roleSession.username ??
+      session.user.user_metadata?.username ??
+      session.user.email?.split('@')[0] ??
+      'runner',
+    createdAt: session.user.created_at ?? new Date().toISOString(),
+  };
+}
+
+function mapAuthErrorMessage(message: string): string {
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes('invalid login credentials')) {
+    return 'Invalid email or password.';
+  }
+
+  if (normalized.includes('email not confirmed')) {
+    return 'Please confirm your email address before signing in.';
+  }
+
+  return message;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [roleSession, setRoleSession] = useState<RoleSession>(EMPTY_ROLE_SESSION);
+  const [isRoleSessionLoading, setIsRoleSessionLoading] = useState(false);
   const [privateMode, setPrivateModeState] = useState(false);
-  const [loginAttempts, setLoginAttempts] = useState<{ [key: string]: { count: number; timestamp: number } }>({});
+  const [loginAttempts, setLoginAttempts] = useState<Record<string, { count: number; timestamp: number }>>({});
+
+  const hydrateFromSession = useCallback(async (session: Session | null): Promise<RoleSession> => {
+    setIsRoleSessionLoading(true);
+
+    try {
+      if (!session) {
+        setUser(null);
+        setRoleSession(EMPTY_ROLE_SESSION);
+        return EMPTY_ROLE_SESSION;
+      }
+
+      const nextRoleSession = await getServerClient().session.getRoleSession.query({
+        registrationId: null,
+        username: null,
+      });
+
+      const resolvedRoleSession = normalizeRoleSession(nextRoleSession as Partial<RoleSession>);
+      setRoleSession(resolvedRoleSession);
+      setUser(buildUserFromSession(session, resolvedRoleSession));
+      return resolvedRoleSession;
+    } catch (error) {
+      console.warn(
+        '[AuthContext] Failed to hydrate role session from Supabase auth:',
+        error instanceof Error ? error.message : error
+      );
+
+      const fallbackRoleSession: RoleSession = {
+        ...EMPTY_ROLE_SESSION,
+        authUserId: session?.user.id ?? null,
+        source: session ? 'auth' : 'none',
+      };
+
+      setRoleSession(fallbackRoleSession);
+      setUser(
+        session
+          ? {
+              id: session.user.id,
+              username: session.user.email?.split('@')[0] ?? 'runner',
+              createdAt: session.user.created_at ?? new Date().toISOString(),
+            }
+          : null
+      );
+      return fallbackRoleSession;
+    } finally {
+      setIsRoleSessionLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     const init = async () => {
       try {
-        const currentUserJson = await AsyncStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-        if (currentUserJson) {
-          setUser(JSON.parse(currentUserJson));
+        const storedPrivateMode = await AsyncStorage.getItem(STORAGE_KEYS.PRIVATE_MODE);
+        if (storedPrivateMode !== null) {
+          setPrivateModeState(storedPrivateMode === 'true');
         }
+      } catch (error) {
+        console.error('Error loading private mode:', error);
+      }
+
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        await hydrateFromSession(session);
       } catch (error) {
         console.error('Error checking auth status:', error);
       } finally {
         setIsLoading(false);
       }
-
-      try {
-        const stored = await AsyncStorage.getItem(STORAGE_KEYS.PRIVATE_MODE);
-        if (stored !== null) {
-          setPrivateModeState(stored === 'true');
-        }
-      } catch (error) {
-        console.error('Error loading private mode:', error);
-      }
     };
+
     void init();
-  }, []);
+  }, [hydrateFromSession]);
+
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      void hydrateFromSession(session).finally(() => {
+        setIsLoading(false);
+      });
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [hydrateFromSession]);
 
   const setPrivateMode = useCallback(async (enabled: boolean) => {
     try {
       setPrivateModeState(enabled);
       await AsyncStorage.setItem(STORAGE_KEYS.PRIVATE_MODE, enabled ? 'true' : 'false');
-      console.log('[AuthContext] Private mode set to:', enabled);
     } catch (error) {
       console.error('Error saving private mode:', error);
     }
   }, []);
 
-  const signIn = useCallback(async (username: string, pin: string) => {
+  const refreshRoleSession = useCallback(async (): Promise<RoleSession> => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    return hydrateFromSession(session);
+  }, [hydrateFromSession]);
+
+  const signIn = useCallback(async (email: string, password: string) => {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPassword = password.trim();
+
     try {
-      const attempts = loginAttempts[username.toLowerCase()];
+      if (!cleanEmail.includes('@')) {
+        return {
+          error: {
+            message: 'Use your email address to sign in.',
+          },
+        };
+      }
+
+      const attempts = loginAttempts[cleanEmail];
       if (attempts) {
         const timeSinceLockout = Date.now() - attempts.timestamp;
+
         if (attempts.count >= MAX_LOGIN_ATTEMPTS) {
           if (timeSinceLockout < LOCKOUT_DURATION) {
             const remainingTime = Math.ceil((LOCKOUT_DURATION - timeSinceLockout) / 60000);
@@ -131,187 +259,94 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 message: `Too many failed attempts. Please try again in ${remainingTime} minutes.`,
               },
             };
-          } else {
-            setLoginAttempts(prev => {
-              const updated = { ...prev };
-              delete updated[username.toLowerCase()];
-              return updated;
-            });
           }
+
+          setLoginAttempts((prev) => {
+            const updated = { ...prev };
+            delete updated[cleanEmail];
+            return updated;
+          });
         }
       }
 
-      const pinHash = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        pin
-      );
+      const { error } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: cleanPassword,
+      });
 
-      const { data: userData, error: queryError } = await supabase
-        .from('registrations')
-        .select('registration_id, username, email, created_at')
-        .eq('username', username.toLowerCase())
-        .eq('pin_hash', pinHash)
-        .single();
-
-      if (queryError || !userData) {
-        console.log('Sign in query error:', queryError);
-        setLoginAttempts(prev => {
-          const current = prev[username.toLowerCase()] || { count: 0, timestamp: Date.now() };
+      if (error) {
+        setLoginAttempts((prev) => {
+          const current = prev[cleanEmail] || { count: 0, timestamp: Date.now() };
           return {
             ...prev,
-            [username.toLowerCase()]: {
+            [cleanEmail]: {
               count: current.count + 1,
               timestamp: Date.now(),
             },
           };
         });
-        return { error: { message: 'Username not found or incorrect PIN' } };
+
+        return {
+          error: {
+            message: mapAuthErrorMessage(error.message),
+          },
+        };
       }
 
-      const userObj: UserData = {
-        id: userData.registration_id,
-        username: userData.username,
-        createdAt: userData.created_at || new Date().toISOString(),
-      };
-
-      await AsyncStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(userObj));
-      await secureStorage.setItem(`biometric_enabled_${username.toLowerCase()}`, 'true');
-
-      setLoginAttempts(prev => {
+      setLoginAttempts((prev) => {
         const updated = { ...prev };
-        delete updated[username.toLowerCase()];
+        delete updated[cleanEmail];
         return updated;
       });
-      setUser(userObj);
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      await hydrateFromSession(session);
+
       return { error: null };
     } catch (error) {
       console.error('Sign in error:', error);
-      return { error: { message: 'Sign in failed' } };
+      return {
+        error: {
+          message: error instanceof Error ? error.message : 'Sign in failed',
+        },
+      };
     }
-  }, [loginAttempts]);
+  }, [hydrateFromSession, loginAttempts]);
 
-  const signUp = useCallback(async (username: string, pin: string, registrationData?: Partial<RegistrationData>) => {
+  const signUp = useCallback(async (_username: string, password: string, registrationData?: Partial<RegistrationData>) => {
     try {
-      const { data: existingUser } = await supabase
-        .from('registrations')
-        .select('username')
-        .eq('username', username.toLowerCase())
-        .single();
-
-      if (existingUser) {
-        return { error: { message: 'Username already exists' } };
-      }
-
-      const pinHash = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        pin
-      );
-
-      if (registrationData) {
-        let registrationId: string | null = null;
-        try {
-          const residenceValue = registrationData.residence;
-
-          const { data: newUserData, error: insertError } = await supabase
-            .from('registrations')
-            .insert({
-              first_name: registrationData.firstName,
-              other_names: registrationData.otherNames,
-              username: username.toLowerCase(),
-              sex: registrationData.sex,
-              dob: registrationData.dob ? (() => { const match = registrationData.dob!.match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return match ? `${match[3]}-${match[2]}-${match[1]}` : registrationData.dob; })() : null,
-              city_town_district: residenceValue,
-              country: registrationData.country,
-              pin_hash: pinHash,
-            })
-            .select('registration_id, username, created_at')
-            .single();
-
-          if (insertError || !newUserData) {
-            console.error('registrations insert error:', insertError);
-            return { error: { message: insertError?.message || 'Failed to create account' } };
-          }
-
-          registrationId = newUserData.registration_id;
-
-          if (registrationData.photoUri) {
-            try {
-              const photoUri = registrationData.photoUri;
-              const photoFileName = `${registrationId}_${Date.now()}.jpg`;
-
-              const response = await fetch(photoUri);
-              const blob = await response.blob();
-              const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result as ArrayBuffer);
-                reader.onerror = reject;
-                reader.readAsArrayBuffer(blob);
-              });
-
-              const { data: uploadData, error: uploadError } = await supabase.storage
-                .from('user-photos')
-                .upload(photoFileName, arrayBuffer, {
-                  contentType: 'image/jpeg',
-                  upsert: false,
-                });
-
-              if (uploadError) {
-                console.error('Photo upload error:', JSON.stringify(uploadError, null, 2));
-              } else if (uploadData) {
-                const { data: urlData } = supabase.storage
-                  .from('user-photos')
-                  .getPublicUrl(photoFileName);
-
-                const { error: photoError } = await supabase
-                  .from('user_photos')
-                  .insert({
-                    registration_id: registrationId,
-                    file_path: urlData.publicUrl,
-                    file_name: photoFileName,
-                    file_size: blob.size,
-                    mime_type: 'image/jpeg',
-                    is_profile_photo: true,
-                  });
-
-                if (photoError) {
-                  console.error('Photo insert error:', JSON.stringify(photoError, null, 2));
-                }
-              }
-            } catch (photoError) {
-              console.error('Failed to save photo:', photoError instanceof Error ? photoError.message : JSON.stringify(photoError, null, 2));
-            }
-          }
-
-          const newUser: UserData = {
-            id: registrationId!,
-            username: newUserData.username,
-            createdAt: newUserData.created_at || new Date().toISOString(),
-          };
-
-          await AsyncStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(newUser));
-          setUser(newUser);
-          return { error: null, registrationId: registrationId! };
-        } catch (dbError) {
-          console.error('Failed to save registration data:', dbError);
-          if (registrationId) {
-            await supabase.from('registrations').delete().eq('registration_id', registrationId);
-          }
-          return { error: { message: 'Failed to save registration data. Please try again.' } };
-        }
-      } else {
+      if (!registrationData) {
         return { error: { message: 'Registration data is required' } };
       }
+
+      const newUserData = await getServerClient().auth.register.mutate({
+        firstName: registrationData.firstName || '',
+        otherNames: registrationData.otherNames || '',
+        username: registrationData.username || '',
+        sex: registrationData.sex || '',
+        dob: registrationData.dob || '',
+        residence: registrationData.residence || '',
+        country: registrationData.country || '',
+      });
+
+      return { error: null, registrationId: newUserData.id };
     } catch (error) {
       console.error('Sign up error:', error);
-      return { error: { message: 'Sign up failed' } };
+      return {
+        error: {
+          message: error instanceof Error ? error.message : 'Sign up failed',
+        },
+      };
     }
   }, []);
 
   const signOut = useCallback(async () => {
     try {
       await supabase.auth.signOut();
-      await AsyncStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
       setUser(null);
+      setRoleSession(EMPTY_ROLE_SESSION);
       return { error: null };
     } catch (error) {
       console.error('Sign out error:', error);
@@ -321,10 +356,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const deleteAccount = useCallback(async (): Promise<{ error: { message: string } | null }> => {
     if (!user) return { error: { message: 'No user logged in' } };
+
     const regId = user.id;
     try {
-      console.log('[AuthContext] Deleting account for:', regId);
-
       const deletions = [
         supabase.from('activities').delete().eq('registration_id', regId),
         supabase.from('pending_activities').delete().eq('registration_id', regId),
@@ -335,16 +369,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         supabase.from('events_participants').delete().eq('registration_id', regId),
         supabase.from('event_enrollments').delete().eq('registration_id', regId),
         supabase.from('external_activity_submissions').delete().eq('registration_id', regId),
+        supabase.from('profiles').delete().eq('registration_id', regId),
       ];
 
-      const results = await Promise.allSettled(deletions);
-      results.forEach((r, i) => {
-        if (r.status === 'rejected') {
-          console.warn(`[AuthContext] Deletion step ${i} failed:`, r.reason);
-        } else if (r.value?.error) {
-          console.warn(`[AuthContext] Deletion step ${i} error:`, r.value.error.message);
-        }
-      });
+      await Promise.allSettled(deletions);
 
       const { error: regDeleteError } = await supabase
         .from('registrations')
@@ -352,13 +380,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .eq('registration_id', regId);
 
       if (regDeleteError) {
-        console.error('[AuthContext] Failed to delete registration:', regDeleteError);
         return { error: { message: 'Failed to delete account. Please contact support.' } };
       }
 
-      await AsyncStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      await supabase.auth.signOut();
       setUser(null);
-      console.log('[AuthContext] Account deleted successfully');
+      setRoleSession(EMPTY_ROLE_SESSION);
+
       return { error: null };
     } catch (error) {
       console.error('[AuthContext] Delete account error:', error);
@@ -376,34 +404,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const verifyPin = useCallback(async (pin: string): Promise<boolean> => {
-    if (!user) return false;
-    try {
-      const pinHash = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        pin
-      );
-      const { data, error } = await supabase
-        .from('registrations')
-        .select('registration_id')
-        .eq('registration_id', user.id)
-        .eq('pin_hash', pinHash)
-        .single();
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
 
-      if (error || !data) {
-        console.log('[AuthContext] PIN verification failed');
-        return false;
-      }
-      return true;
-    } catch (error) {
-      console.error('[AuthContext] PIN verification error:', error);
+    if (!authUser?.email) {
       return false;
     }
-  }, [user]);
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: authUser.email,
+      password: pin.trim(),
+    });
+
+    return !error;
+  }, []);
 
   const value = useMemo<AuthContextValue>(() => ({
     user,
     isLoading,
-    registrationId: user?.id || '',
+    roleSession,
+    isRoleSessionLoading,
+    registrationId: roleSession.registrationId || '',
     privateMode,
     setPrivateMode,
     signIn,
@@ -413,18 +435,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     verifyPin,
     getBiometricStatus,
     disableBiometric,
-  }), [user, isLoading, privateMode, setPrivateMode, signIn, signUp, signOut, deleteAccount, verifyPin, getBiometricStatus, disableBiometric]);
+    refreshRoleSession,
+  }), [
+    deleteAccount,
+    disableBiometric,
+    getBiometricStatus,
+    isLoading,
+    isRoleSessionLoading,
+    privateMode,
+    refreshRoleSession,
+    roleSession,
+    setPrivateMode,
+    signIn,
+    signOut,
+    signUp,
+    user,
+    verifyPin,
+  ]);
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 const defaultAuthValue: AuthContextValue = {
   user: null,
   isLoading: true,
+  roleSession: EMPTY_ROLE_SESSION,
+  isRoleSessionLoading: false,
   registrationId: '',
   privateMode: false,
   setPrivateMode: async () => {},
@@ -435,6 +471,7 @@ const defaultAuthValue: AuthContextValue = {
   verifyPin: async () => false,
   getBiometricStatus: async () => false,
   disableBiometric: async () => {},
+  refreshRoleSession: async () => EMPTY_ROLE_SESSION,
 };
 
 export function useAuth(): AuthContextValue {

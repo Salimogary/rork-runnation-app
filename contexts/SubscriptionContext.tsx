@@ -106,8 +106,13 @@ function calculateTrialDaysRemaining(createdAt: string): number {
 const SubscriptionContext = createContext<SubscriptionContextValue | undefined>(undefined);
 
 export function SubscriptionProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, roleSession } = useAuth();
   const queryClient = useQueryClient();
+  const hasFreeAdminAccess =
+    roleSession.isSuperAdmin ||
+    roleSession.isCountryAdmin ||
+    roleSession.isCountryCoordinator ||
+    roleSession.isEventOrganizer;
 
   const userProfileQuery = useQuery({
     queryKey: ['subscriptionUserProfile', user?.id],
@@ -153,10 +158,11 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   }, [userProfileQuery.data, user]);
 
   const trialDaysRemaining = useMemo(() => {
+    if (hasFreeAdminAccess) return TRIAL_DURATION_DAYS;
     return calculateTrialDaysRemaining(createdAt);
-  }, [createdAt]);
+  }, [createdAt, hasFreeAdminAccess]);
 
-  const trialExpired = trialDaysRemaining <= 0;
+  const trialExpired = hasFreeAdminAccess ? false : trialDaysRemaining <= 0;
 
   const userRegion = useMemo(() => {
     return getRegionFromCountry(userProfileQuery.data?.country ?? undefined);
@@ -165,6 +171,8 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const subscriptionStatus = useMemo<SubscriptionStatus>(() => {
     const subColumn = userProfileQuery.data?.subscription;
     console.log('[Subscription] subscription column value:', subColumn);
+
+    if (hasFreeAdminAccess) return 'active';
 
     if (subColumn === 3) return 'active';
     if (subColumn === 2) return 'expired';
@@ -185,9 +193,9 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
     }
     if (!trialExpired) return 'trial';
     return 'expired';
-  }, [userProfileQuery.data?.subscription, subscriptionQuery.data, trialExpired]);
+  }, [userProfileQuery.data?.subscription, subscriptionQuery.data, trialExpired, hasFreeAdminAccess]);
 
-  const isSubscribed = subscriptionStatus === 'active' || subscriptionStatus === 'trial';
+  const isSubscribed = hasFreeAdminAccess || subscriptionStatus === 'active' || subscriptionStatus === 'trial';
 
   const availablePlans = useMemo(() => {
     const regionPlans = ALL_PLANS.filter(p => p.region === userRegion);

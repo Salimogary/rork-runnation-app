@@ -1,8 +1,13 @@
 import { publicProcedure } from "../../../create-context";
+import { requireAdminPermission } from "../../../rbac";
 
 export default publicProcedure.query(async ({ ctx }) => {
   try {
-    console.log("[Get External Submissions] Fetching submissions...");
+    await requireAdminPermission(ctx, {
+      allowSuperAdmin: true,
+            allowCountryCoordinator: true,
+      allowClubCoordinator: true,
+    });
 
     const { data: submissions, error } = await ctx.supabase
       .from("external_activity_submissions")
@@ -73,10 +78,10 @@ export default publicProcedure.query(async ({ ctx }) => {
 
     result.sort((a, b) => a.activityDate.localeCompare(b.activityDate));
 
-    console.log("[Get External Submissions] Success:", result.length, "grouped entries");
     return result;
   } catch (error: any) {
     console.error("[Get External Submissions] Error:", error);
     throw new Error(error.message || "Failed to fetch submissions");
   }
 });
+

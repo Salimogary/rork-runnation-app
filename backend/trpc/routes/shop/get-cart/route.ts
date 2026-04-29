@@ -1,15 +1,15 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import { requireRegistrationOwner } from "../../../rbac";
 
 export default publicProcedure
   .input(z.object({ userId: z.string() }))
   .query(async ({ input, ctx }) => {
-    console.log("[getCart] Fetching cart for user:", JSON.stringify(input.userId), "length:", input.userId.length);
-    
     if (!input.userId || input.userId.trim() === '') {
-      console.log("[getCart] Empty userId, returning empty array");
       return [];
     }
+
+    await requireRegistrationOwner(ctx, input.userId);
 
     const { data: cartItems, error: cartError } = await ctx.supabase
       .from("shopping_cart")
@@ -17,7 +17,6 @@ export default publicProcedure
       .eq("registration_id", input.userId)
       .order("created_at", { ascending: false });
 
-    console.log("[getCart] Cart items count:", cartItems?.length, "Error:", cartError, "Raw:", JSON.stringify(cartItems));
     if (cartError) {
       console.error("[getCart] Cart query error:", JSON.stringify(cartError));
       throw cartError;

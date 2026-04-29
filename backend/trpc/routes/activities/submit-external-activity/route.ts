@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { ensureActionCooldown } from "../../../abuse";
 import { publicProcedure } from "../../../create-context";
+import { requireRegistrationOwner } from "../../../rbac";
 
 export default publicProcedure
   .input(
@@ -14,7 +16,13 @@ export default publicProcedure
   )
   .mutation(async ({ ctx, input }) => {
     try {
-      console.log("[Submit External Activity] Starting submission...", input);
+      await requireRegistrationOwner(ctx, input.registrationId);
+      await ensureActionCooldown(ctx, {
+        table: "external_activity_submissions",
+        filters: [{ column: "registration_id", value: input.registrationId }],
+        cooldownSeconds: 45,
+        errorMessage: "Please wait a moment before submitting another manual activity.",
+      });
 
       const { data, error } = await ctx.supabase
         .from("external_activity_submissions")
@@ -34,7 +42,6 @@ export default publicProcedure
         throw new Error(error.message || "Failed to submit activity");
       }
 
-      console.log("[Submit External Activity] Success:", data);
       return { success: true, submission: data };
     } catch (error: any) {
       console.error("[Submit External Activity] Error:", error);

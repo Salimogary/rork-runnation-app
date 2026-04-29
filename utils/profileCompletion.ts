@@ -22,6 +22,8 @@ export interface ProfileCompletionInputs {
   hasEventEnrollment: boolean;
   hasVerifiedEmail: boolean;
   hasAtLeastOneBadge: boolean;
+  requiresAdminTerms?: boolean;
+  hasAcceptedAdminTerms?: boolean;
 }
 
 export function calculateProfileCompletion(inputs: ProfileCompletionInputs): ProfileCompletionData {
@@ -38,8 +40,17 @@ export function calculateProfileCompletion(inputs: ProfileCompletionInputs): Pro
     { id: "badge", label: "At least one badge", completed: inputs.hasAtLeastOneBadge },
   ];
 
-  const completedCount = items.filter((i) => i.completed).length;
-  const percentage = completedCount * 10;
+  if (inputs.requiresAdminTerms) {
+    items.push({
+      id: "admin_terms",
+      label: "Accepted admin terms",
+      completed: !!inputs.hasAcceptedAdminTerms,
+    });
+  }
 
-  return { percentage, items, completedCount, totalCount: 10 };
+  const completedCount = items.filter((i) => i.completed).length;
+  const totalCount = items.length;
+  const percentage = totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100);
+
+  return { percentage, items, completedCount, totalCount };
 }

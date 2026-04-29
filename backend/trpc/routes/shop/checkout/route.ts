@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import { requireRegistrationOwner } from "../../../rbac";
 
 export default publicProcedure
   .input(
@@ -12,6 +13,7 @@ export default publicProcedure
   )
   .mutation(async ({ input, ctx }) => {
     const { userId, deliveryName, deliveryPhone, deliveryAddress } = input;
+    await requireRegistrationOwner(ctx, userId);
 
     const { data: cartItems, error: cartError } = await ctx.supabase
       .from("shopping_cart")

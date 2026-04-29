@@ -1,8 +1,8 @@
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, RefreshControl, Dimensions, Alert, TextInput, ActivityIndicator, Animated } from "react-native";
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, RefreshControl, Dimensions, Alert, ActivityIndicator } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "@/lib/supabase";
-import { Package, ShoppingCart, Lock, ShieldCheck, Trash2, Plus, Minus, ArrowRight } from "lucide-react-native";
+import { Globe2, Package, ShoppingCart, Trash2, Plus, Minus, ArrowRight } from "lucide-react-native";
 import { Image } from "expo-image";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/contexts/AuthContext";
@@ -11,11 +11,23 @@ import colors from "@/constants/colors";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useSubscription } from "@/contexts/SubscriptionContext";
 import SubscriptionGate from "@/components/SubscriptionGate";
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import * as Haptics from "expo-haptics";
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
+const ACTIVE_SHOP_COUNTRY_CODE = "UG";
+const ACTIVE_SHOP_COUNTRY_NAME = "Uganda";
+const COUNTRY_CURRENCY: Record<string, { label: string; locale: string }> = {
+  UG: { label: "UGX", locale: "en-UG" },
+};
+
+function normalizeCountryCode(country?: string | null) {
+  const value = String(country || "").trim().toLowerCase();
+  if (!value) return "";
+  if (["ug", "uga", "uganda"].includes(value)) return "UG";
+  return value.slice(0, 2).toUpperCase();
+}
 
 interface CatalogueItemRaw {
   catalogue_id: string;
@@ -38,80 +50,42 @@ interface CatalogueItem {
 type ShopTab = "catalogue" | "cart";
 
 export default function ShopScreen() {
-  const { registrationId, verifyPin } = useAuth();
+  const { registrationId } = useAuth();
   const { colors: themeColors } = useTheme();
   const { isSubscribed } = useSubscription();
   const router = useRouter();
   const trpcUtils = trpc.useUtils();
-  const [pinUnlocked, setPinUnlocked] = useState(false);
-  const [pinValue, setPinValue] = useState('');
-  const [pinError, setPinError] = useState('');
-  const [isVerifying, setIsVerifying] = useState(false);
   const [activeTab, setActiveTab] = useState<ShopTab>("catalogue");
-  const shakeAnim = useRef(new Animated.Value(0)).current;
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const pinInputRef = useRef<TextInput>(null);
-
-  useEffect(() => {
-    if (!pinUnlocked) {
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 400,
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [pinUnlocked, fadeAnim]);
-
-  const triggerShake = useCallback(() => {
-    Animated.sequence([
-      Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
-    ]).start();
-  }, [shakeAnim]);
-
-  const handlePinSubmit = useCallback(async () => {
-    if (pinValue.length !== 4) {
-      setPinError('Enter your 4-digit PIN');
-      return;
-    }
-    setIsVerifying(true);
-    setPinError('');
-    try {
-      const valid = await verifyPin(pinValue);
-      if (valid) {
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setPinUnlocked(true);
-      } else {
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        setPinError('Incorrect PIN. Please try again.');
-        setPinValue('');
-        triggerShake();
-      }
-    } catch {
-      setPinError('Verification failed. Try again.');
-      setPinValue('');
-    } finally {
-      setIsVerifying(false);
-    }
-  }, [pinValue, verifyPin, triggerShake]);
-
-  useEffect(() => {
-    if (pinValue.length === 4 && !pinUnlocked) {
-      void handlePinSubmit();
-    }
-  }, [pinValue, pinUnlocked, handlePinSubmit]);
+  const { data: profileBundle, isLoading: profileLoading } = trpc.profile.getBundle.useQuery(
+    { registrationId },
+    { enabled: !!registrationId }
+  );
+  const profileCountry = String(profileBundle?.profile?.country || "").trim();
+  const profileCountryCode = normalizeCountryCode(profileCountry);
+  const hasCountry = profileCountry.length > 0;
+  const canShopInCountry = profileCountryCode === ACTIVE_SHOP_COUNTRY_CODE;
+  const currency = COUNTRY_CURRENCY[profileCountryCode] ?? { label: "USD", locale: "en-US" };
 
   const { data: products, isLoading, refetch } = useQuery<CatalogueItem[]>({
-    queryKey: ["catalogue"],
+    queryKey: ["catalogue", profileCountryCode],
     queryFn: async () => {
       console.log("Fetching catalogue items...");
-      const { data, error } = await supabase
+      let query = supabase
         .from("catalogue")
         .select("*")
         .order("catalogue_item", { ascending: true });
+      if (profileCountryCode) {
+        query = query.eq("country_code", profileCountryCode);
+      }
+      let { data, error } = await query;
+      if (error && error.message?.toLowerCase().includes("country_code")) {
+        const fallback = await supabase
+          .from("catalogue")
+          .select("*")
+          .order("catalogue_item", { ascending: true });
+        data = fallback.data;
+        error = fallback.error;
+      }
 
       if (error) {
         console.error("Error fetching catalogue:", {
@@ -133,13 +107,14 @@ export default function ShopScreen() {
         photo_url: item.photo_url,
       }));
     },
+    enabled: canShopInCountry,
   });
 
   console.log('[Shop] registrationId for cart query:', JSON.stringify(registrationId), 'enabled:', !!registrationId);
 
   const { data: cartData, refetch: refetchCart, error: cartError } = trpc.shop.getCart.useQuery(
     { userId: registrationId },
-    { enabled: !!registrationId }
+    { enabled: !!registrationId && canShopInCountry }
   );
 
   useEffect(() => {
@@ -151,10 +126,10 @@ export default function ShopScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      if (registrationId) {
+      if (registrationId && canShopInCountry) {
         void refetchCart();
       }
-    }, [registrationId, refetchCart])
+    }, [canShopInCountry, registrationId, refetchCart])
   );
 
   const cartCount = cartData?.reduce((total: number, item: any) => total + (item.quantity || 0), 0) || 0;
@@ -203,15 +178,24 @@ export default function ShopScreen() {
   });
 
   const handleAddToCart = (item: CatalogueItem) => {
-    if ((item.stock) <= 0) {
-      Alert.alert("Out of Stock", "This item is currently unavailable");
-      return;
-    }
-    addToCartMutation.mutate({
-      userId: registrationId,
-      catalogueId: item.catalogue_id,
-      quantity: 1,
-    });
+    if (!canShopInCountry) return;
+    console.log("🔥 BUTTON PRESSED");
+  
+    addToCartMutation.mutate(
+      {
+        userId: registrationId,
+        catalogueId: item.catalogue_id,
+        quantity: 1,
+      },
+      {
+        onSuccess: () => {
+          console.log("✅ SUCCESS");
+        },
+        onError: (err) => {
+          console.log("❌ ERROR", err);
+        },
+      }
+    );
   };
 
   const handleQuantityChange = (cartId: string, newQuantity: number) => {
@@ -248,6 +232,7 @@ export default function ShopScreen() {
   };
 
   const handleBuyNow = () => {
+    if (!canShopInCountry) return;
     if (!cartData || cartData.length === 0) {
       Alert.alert("Empty Cart", "Please add items before buying");
       return;
@@ -264,73 +249,50 @@ export default function ShopScreen() {
     );
   }
 
-  if (!pinUnlocked) {
+  if (profileLoading) {
     return (
       <View style={[styles.container, { backgroundColor: themeColors.background }]}>
         <Stack.Screen options={{ title: "Shop" }} />
-        <Animated.View style={[styles.pinGateContainer, { opacity: fadeAnim }]}>
-          <View style={[styles.pinGateContent, { backgroundColor: themeColors.cardBackground }]}>
-            <View style={styles.lockIconWrap}>
-              <Lock size={36} color={themeColors.primary} />
-            </View>
-            <Text style={[styles.pinGateTitle, { color: themeColors.text }]}>Shop Access</Text>
-            <Text style={[styles.pinGateSubtitle, { color: themeColors.textSecondary }]}>Enter your 4-digit PIN to access the shop</Text>
+        <View style={styles.emptyContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>Checking your shopping region...</Text>
+        </View>
+      </View>
+    );
+  }
 
-            <Animated.View style={{ transform: [{ translateX: shakeAnim }] }}>
-              <View style={styles.pinDotsRow}>
-                {[0, 1, 2, 3].map((i) => (
-                  <View
-                    key={i}
-                    style={[
-                      styles.pinDot,
-                      pinValue.length > i && styles.pinDotFilled,
-                      pinError ? styles.pinDotError : null,
-                    ]}
-                  />
-                ))}
-              </View>
-            </Animated.View>
+  if (!hasCountry) {
+    return (
+      <View style={[styles.container, { backgroundColor: themeColors.background }]}>
+        <Stack.Screen options={{ title: "Shop" }} />
+        <View style={styles.emptyContainer}>
+          <Globe2 size={58} color={colors.primary} />
+          <Text style={[styles.emptyTitle, { color: themeColors.text }]}>Add your country first</Text>
+          <Text style={[styles.emptySubtext, { color: themeColors.textSecondary }]}>
+            Shopping is country-specific. Please add your country to your profile before accessing the Shop.
+          </Text>
+          <TouchableOpacity style={styles.goToCatalogueBtn} onPress={() => router.push("/profile" as any)} activeOpacity={0.8}>
+            <LinearGradient colors={colors.gradient.orange} style={styles.goToCatalogueGradient}>
+              <Globe2 size={18} color="#fff" />
+              <Text style={styles.goToCatalogueText}>Update Profile</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
-            <TextInput
-              ref={pinInputRef}
-              style={styles.hiddenPinInput}
-              value={pinValue}
-              onChangeText={(text) => {
-                const digits = text.replace(/[^0-9]/g, '').slice(0, 4);
-                setPinValue(digits);
-                if (pinError) setPinError('');
-              }}
-              keyboardType="number-pad"
-              maxLength={4}
-              secureTextEntry
-              autoFocus
-              editable={!isVerifying}
-            />
-
-            <TouchableOpacity
-              style={styles.pinPadTouchArea}
-              onPress={() => pinInputRef.current?.focus()}
-              activeOpacity={1}
-            >
-              <Text style={styles.tapToEnterText}>
-                {isVerifying ? '' : 'Tap here to enter PIN'}
-              </Text>
-            </TouchableOpacity>
-
-            {isVerifying && (
-              <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 12 }} />
-            )}
-
-            {!!pinError && (
-              <Text style={styles.pinErrorText}>{pinError}</Text>
-            )}
-
-            <View style={styles.pinGateFooter}>
-              <ShieldCheck size={14} color={colors.textLight} />
-              <Text style={styles.pinGateFooterText}>PIN protects your shop purchases</Text>
-            </View>
-          </View>
-        </Animated.View>
+  if (!canShopInCountry) {
+    return (
+      <View style={[styles.container, { backgroundColor: themeColors.background }]}>
+        <Stack.Screen options={{ title: "Shop" }} />
+        <View style={styles.emptyContainer}>
+          <Package size={64} color={colors.primary} />
+          <Text style={[styles.emptyTitle, { color: themeColors.text }]}>Shop coming soon</Text>
+          <Text style={[styles.emptySubtext, { color: themeColors.textSecondary }]}>
+            Your country is set to {profileCountry}. RunNation Shop is currently open for {ACTIVE_SHOP_COUNTRY_NAME}; more countries are coming soon.
+          </Text>
+        </View>
       </View>
     );
   }
@@ -338,6 +300,14 @@ export default function ShopScreen() {
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <Stack.Screen options={{ title: "Shop" }} />
+
+      <View style={[styles.countryBanner, { backgroundColor: themeColors.cardBackground }]}>
+        <Globe2 size={18} color={colors.primary} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.countryBannerTitle, { color: themeColors.text }]}>Shopping in {profileCountry || ACTIVE_SHOP_COUNTRY_NAME}</Text>
+          <Text style={[styles.countryBannerText, { color: themeColors.textSecondary }]}>Prices shown in {currency.label}</Text>
+        </View>
+      </View>
 
       <View style={[styles.tabBar, { backgroundColor: themeColors.cardBackground }]}>
         <TouchableOpacity
@@ -426,9 +396,9 @@ export default function ShopScreen() {
                     </View>
 
                     <View style={styles.priceRow}>
-                      <Text style={styles.priceLabel}>ugx.</Text>
+                      <Text style={styles.priceLabel}>{currency.label}</Text>
                       <Text style={[styles.priceValue, { color: themeColors.text }]}>
-                        {(item.price || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                        {(item.price || 0).toLocaleString(currency.locale, { maximumFractionDigits: 0 })}
                       </Text>
                     </View>
 
@@ -562,7 +532,7 @@ export default function ShopScreen() {
                           </View>
 
                           <Text style={styles.lineTotal}>
-                            ugx.{lineTotal.toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                            {currency.label}.{lineTotal.toLocaleString(currency.locale, { maximumFractionDigits: 0 })}
                           </Text>
                         </View>
                       </View>
@@ -578,7 +548,7 @@ export default function ShopScreen() {
                     Total ({cartCount} {cartCount === 1 ? 'item' : 'items'})
                   </Text>
                   <Text style={[styles.cartFooterTotal, { color: themeColors.text }]}>
-                    ugx.{cartTotal.toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                    {currency.label}.{cartTotal.toLocaleString(currency.locale, { maximumFractionDigits: 0 })}
                   </Text>
                 </View>
 
@@ -655,6 +625,23 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 10,
     fontWeight: "700" as const,
+  },
+  countryBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  countryBannerTitle: {
+    fontSize: 14,
+    fontWeight: "800" as const,
+  },
+  countryBannerText: {
+    fontSize: 12,
+    marginTop: 2,
   },
   scrollView: {
     flex: 1,
@@ -1029,6 +1016,16 @@ const styles = StyleSheet.create({
     marginBottom: 32,
     lineHeight: 22,
   },
+  passwordInput: {
+    width: "100%",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    marginBottom: 12,
+  },
   pinDotsRow: {
     flexDirection: "row",
     gap: 16,
@@ -1069,6 +1066,23 @@ const styles = StyleSheet.create({
     color: colors.error,
     marginTop: 8,
     fontWeight: "500" as const,
+  },
+  unlockButton: {
+    width: "100%",
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 8,
+  },
+  unlockButtonDisabled: {
+    opacity: 0.5,
+  },
+  unlockButtonText: {
+    fontSize: 15,
+    fontWeight: "700" as const,
+    color: colors.white,
   },
   pinGateFooter: {
     flexDirection: "row",

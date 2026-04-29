@@ -5,18 +5,18 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  TouchableWithoutFeedback,
   Alert,
   ActivityIndicator,
   Modal,
 } from "react-native";
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "expo-router";
 import { Image } from "expo-image";
+import { Picker } from "@react-native-picker/picker";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import {
   Camera,
   Edit2,
@@ -32,21 +32,27 @@ import {
   UserPlus,
   UserCheck,
   PlusCircle,
-  FileText,
-  Download,
+  Calendar,
   Award,
   BadgeCheck,
   Mail,
   Phone,
-  Lock,
+  Clock,
+  CreditCard,
+  Zap,
+  Circle,
 } from "lucide-react-native";
 import { getAllBadges, getEarnedBadgeCount, getProfileCompleteBadge } from "@/utils/badges";
 import type { Badge } from "@/utils/badges";
 import { useSubscription } from "@/contexts/SubscriptionContext";
 import { useTheme } from "@/contexts/ThemeContext";
-import { Clock, CreditCard, Zap, Circle } from "lucide-react-native";
 import { calculateProfileCompletion } from "@/utils/profileCompletion";
 import type { ProfileCompletionInputs } from "@/utils/profileCompletion";
+import { getServerClient } from "@/lib/server-client";
+import { supabase } from "@/lib/supabase";
+import { WORLD_COUNTRIES } from "@/constants/countries";
+
+const FALLBACK_COUNTRIES = WORLD_COUNTRIES;
 
 interface UserProfile {
   registration_id: string;
@@ -76,7 +82,7 @@ interface UserGoal {
 }
 
 interface ClubItem {
-  club_id: number;
+  club_id: string;
   club_name: string;
   country: string | null;
   location: string | null;
@@ -87,14 +93,31 @@ interface ClubMembership {
   id: number;
   registration_id: string;
   club: string | null;
+  club_id?: string | null;
   new_member: string | null;
+  request_type?: string | null;
+  proposed_club_name?: string | null;
+  proposed_country?: string | null;
+  proposed_description?: string | null;
 }
 
 type EditSection = "profile" | "goals" | "club" | null;
-type ClubChoice = "join" | "existing" | "start" | "none" | null;
+type ClubChoice = "join" | "existing" | "start" | "organizer" | "none" | null;
+
+interface ClubStartRequestData {
+  clubName: string;
+  country: string;
+  description: string;
+}
+
+interface OrganizerRequestData {
+  organizerName: string;
+  country: string;
+  description: string;
+}
 
 export default function ProfileScreen() {
-  const { user } = useAuth();
+  const { user, roleSession } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { subscriptionStatus, trialDaysRemaining, subscription, isLoading: subLoading } = useSubscription();
@@ -102,104 +125,55 @@ export default function ProfileScreen() {
   const [editSection, setEditSection] = useState<EditSection>(null);
   const [showEditMenu, setShowEditMenu] = useState(false);
   const [formData, setFormData] = useState<Partial<UserProfile>>({});
+  const [authProvider, setAuthProvider] = useState<string | null>(null);
 
   const [selectedGoalIds, setSelectedGoalIds] = useState<number[]>([]);
   const [otherGoalText, setOtherGoalText] = useState("");
 
 
   const [clubChoice, setClubChoice] = useState<ClubChoice>(null);
-  const [selectedClubId, setSelectedClubId] = useState<number | null>(null);
+  const [selectedClubId, setSelectedClubId] = useState<string | null>(null);
+  const [clubStartRequest, setClubStartRequest] = useState<ClubStartRequestData>({
+    clubName: "",
+    country: "",
+    description: "",
+  });
+  const [organizerRequest, setOrganizerRequest] = useState<OrganizerRequestData>({
+    organizerName: "",
+    country: "",
+    description: "",
+  });
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [verificationCode, setVerificationCode] = useState("");
-  const [showPinModal, setShowPinModal] = useState(false);
-  const [pinInput, setPinInput] = useState("");
-  const [pinError, setPinError] = useState("");
-  const pinInputRef = useRef<TextInput | null>(null);
 
-  useEffect(() => {
-    if (!showPinModal) return;
-    // Android frequently ignores TextInput autoFocus inside a Modal.
-    // Explicitly focusing ensures the keyboard appears.
-    const t = setTimeout(() => {
-      pinInputRef.current?.focus();
-    }, 200);
-    return () => clearTimeout(t);
-  }, [showPinModal]);
-
-  const { data: profile, isLoading } = useQuery<UserProfile>({
-    queryKey: ["profile", user?.id, user],
+  const { data: profileBundle, isLoading } = useQuery({
+    queryKey: ["profileBundle", user?.id],
     queryFn: async () => {
       if (!user) throw new Error("Not authenticated");
-      console.log("Fetching profile for user:", user.id);
-      const [regRes, contactRes] = await Promise.all([
-        supabase
-          .from("registrations")
-          .select("*")
-          .eq("registration_id", user.id)
-          .maybeSingle(),
-        supabase
-          .from("contacts")
-          .select("email, country_code, phone")
-          .eq("registration_id", user.id)
-          .maybeSingle(),
-      ]);
-
-      if (regRes.error) {
-        console.error("Error fetching profile:", JSON.stringify(regRes.error, null, 2));
-        throw new Error(`Profile fetch failed: ${regRes.error.message || JSON.stringify(regRes.error)}`);
-      }
-      if (!regRes.data) throw new Error("No profile found for this user");
-
-      const contactEmail = contactRes.data?.email ?? null;
-      const contactCountryCode = contactRes.data?.country_code ?? null;
-      const contactPhone = contactRes.data?.phone ?? null;
-      console.log("Profile fetched:", regRes.data, "Contact email:", contactEmail, "Country code:", contactCountryCode, "Phone:", contactPhone);
-
-      return {
-        ...regRes.data,
-        email: contactEmail || regRes.data.email,
-        country_code: contactCountryCode,
-        phone: contactPhone ? String(contactPhone) : null,
-      };
+      return await getServerClient().profile.getBundle.query({ registrationId: user.id });
     },
     enabled: !!user,
+    staleTime: 30000,
   });
 
-  const { data: profilePhoto } = useQuery<string | null>({
-    queryKey: ["profilePhoto", user?.id, user],
+  const { data: countriesData = FALLBACK_COUNTRIES } = useQuery({
+    queryKey: ["profileCountries"],
     queryFn: async () => {
-      if (!user) return null;
-      const { data } = await supabase
-        .from("user_photos")
-        .select("file_path")
-        .eq("registration_id", user.id)
-        .eq("is_profile_photo", true)
-        .maybeSingle();
-      return data?.file_path || null;
+      try {
+        return await getServerClient().auth.getCountries.query();
+      } catch {
+        return FALLBACK_COUNTRIES;
+      }
     },
-    enabled: !!user,
+    staleTime: 1000 * 60 * 60,
   });
 
-  const { data: activityStats } = useQuery<{ totalDistance: number; totalActivities: number }>({
-    queryKey: ["badgeStats", user?.id],
-    queryFn: async () => {
-      if (!user) return { totalDistance: 0, totalActivities: 0 };
-      const { data, error } = await supabase
-        .from("activities")
-        .select("distance_km, exercise_type")
-        .eq("registration_id", user.id);
-      if (error) {
-        console.error("[BadgeStats] Error:", error);
-        return { totalDistance: 0, totalActivities: 0 };
-      }
-      const validTypes = ["Run", "Walk", "Treadmill", "Tredmill"];
-      const filtered = (data || []).filter((a) => validTypes.includes(a.exercise_type || ""));
-      const totalDistance = filtered.reduce((sum, a) => sum + (a.distance_km || 0), 0);
-      return { totalDistance, totalActivities: filtered.length };
-    },
-    enabled: !!user,
-    staleTime: 60000,
-  });
+  const profile = profileBundle?.profile as UserProfile | undefined;
+  const profilePhoto = profileBundle?.profilePhoto ?? null;
+  const activityStats = useMemo(
+    () => profileBundle?.activityStats ?? { totalDistance: 0, totalActivities: 0 },
+    [profileBundle]
+  );
 
   const distanceBadges = useMemo(() => {
     if (!activityStats) return [];
@@ -210,133 +184,50 @@ export default function ProfileScreen() {
     return getAllBadges(activityStats.totalDistance, activityStats.totalActivities, 0).filter((b) => b.type === "activity_count");
   }, [activityStats]);
 
-  const { data: goals = [] } = useQuery<GoalItem[]>({
-    queryKey: ["allGoals", user?.id, user],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("goals")
-        .select("goal_id, goal")
-        .order("goal_id", { ascending: true });
-      if (error) {
-        console.error("Error fetching goals:", JSON.stringify(error));
-        return [];
-      }
-      return (data as GoalItem[]) || [];
-    },
-  });
-
-  const { data: userGoals = [], refetch: refetchUserGoals } = useQuery<UserGoal[]>({
-    queryKey: ["userGoals", user?.id, user],
-    queryFn: async () => {
-      if (!user) return [];
-      const { data, error } = await supabase
-        .from("user_goals")
-        .select("*")
-        .eq("registration_id", user.id);
-      if (error) {
-        console.error("Error fetching user goals:", error);
-        return [];
-      }
-      return (data as UserGoal[]) || [];
-    },
-    enabled: !!user,
-  });
-
-  const { data: clubs = [] } = useQuery<ClubItem[]>({
-    queryKey: ["allClubs", user?.id, user],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("clubs")
-        .select("club_id, club_name, country, location, description")
-        .order("club_name", { ascending: true });
-      if (error) {
-        console.error("Error fetching clubs:", error);
-        return [];
-      }
-      return (data as ClubItem[]) || [];
-    },
-  });
-
-  const { data: clubMembership, refetch: refetchClubMembership } = useQuery<ClubMembership | null>({
-    queryKey: ["clubMembership", user?.id, user],
-    queryFn: async () => {
-      if (!user) return null;
-      const { data, error } = await supabase
-        .from("club_membership_request")
-        .select("*")
-        .eq("registration_id", user.id)
-        .maybeSingle();
-      if (error) {
-        console.error("Error fetching club membership:", error);
-        return null;
-      }
-      return data as ClubMembership | null;
-    },
-    enabled: !!user,
-  });
+  const goals = useMemo(
+    () => (profileBundle?.goals as GoalItem[] | undefined) ?? [],
+    [profileBundle]
+  );
+  const userGoals = useMemo(
+    () => (profileBundle?.userGoals as UserGoal[] | undefined) ?? [],
+    [profileBundle]
+  );
+  const clubs = useMemo(
+    () => (profileBundle?.clubs as ClubItem[] | undefined) ?? [],
+    [profileBundle]
+  );
+  const countryOptions = useMemo(() => {
+    const rows = (countriesData as { name: string; iso_alpha2: string }[]) || FALLBACK_COUNTRIES;
+    const currentCountry = String(formData.country || profile?.country || "");
+    const hasCurrentCountry = !currentCountry || rows.some((country) => country.name === currentCountry || country.iso_alpha2 === currentCountry);
+    return hasCurrentCountry
+      ? rows
+      : [{ name: currentCountry, iso_alpha2: currentCountry }, ...rows];
+  }, [countriesData, formData.country, profile?.country]);
+  const clubMembership = (profileBundle?.clubMembership as ClubMembership | null | undefined) ?? null;
 
   const isEmailVerified = profile?.email_verified === true;
+  const isSocialAuthUser = authProvider === "google" || authProvider === "apple";
+  const socialProviderLabel = authProvider === "apple" ? "Apple" : "Google";
+
+  useEffect(() => {
+    let isMounted = true;
+    void supabase.auth.getUser().then(({ data }) => {
+      if (!isMounted) return;
+      const provider =
+        data.user?.app_metadata?.provider ||
+        data.user?.identities?.[0]?.provider ||
+        null;
+      setAuthProvider(typeof provider === "string" ? provider : null);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const [showCompletionModal, setShowCompletionModal] = useState(false);
 
-  const { data: completionInputs } = useQuery<ProfileCompletionInputs>({
-    queryKey: ["profileCompletionPage", user?.id],
-    queryFn: async () => {
-      if (!user) {
-        return {
-          allFieldsFilled: false, hasProfilePhoto: false, hasGoal: false,
-          hasClub: false, hasFiveActivities: false, hasSubscription: false,
-          hasTargets: false, hasEventEnrollment: false, hasVerifiedEmail: false,
-          hasAtLeastOneBadge: false,
-        };
-      }
-      const [
-        profileRes, photoRes, goalsRes, clubRes, activitiesRes,
-        subscriptionRes, fitnessGoalRes, weightTargetRes, enrollmentRes,
-      ] = await Promise.all([
-        supabase.from("registrations")
-          .select('first_name, other_names, username, email, sex, city_town_district, country, dob, email_verified')
-          .eq("registration_id", user.id).maybeSingle(),
-        supabase.from("user_photos").select("file_path")
-          .eq("registration_id", user.id).eq("is_profile_photo", true).maybeSingle(),
-        supabase.from("user_goals").select("user_goals_id")
-          .eq("registration_id", user.id).limit(1),
-        supabase.from("club_membership_request").select("club")
-          .eq("registration_id", user.id).maybeSingle(),
-        supabase.from("activities").select("distance_km, exercise_type")
-          .eq("registration_id", user.id),
-        supabase.from("subscriptions").select("status, expires_at")
-          .eq("registration_id", user.id).maybeSingle(),
-        supabase.from("fitness_goal").select("fitness_goal_id")
-          .eq("registration_id", user.id).limit(1),
-        supabase.from("weight_target_goal").select("weight_target_goal_id")
-          .eq("registration_id", user.id).limit(1),
-        supabase.from("event_enrollments").select("event_enrollment_id")
-          .eq("registration_id", user.id).limit(1),
-      ]);
-      const p = profileRes.data as any;
-      const allFieldsFilled = !!(p && p.first_name && p.other_names && p.username && p.email && p.sex && p.city_town_district && p.country && p.dob);
-      const hasProfilePhoto = !!photoRes.data?.file_path;
-      const hasGoal = (goalsRes.data?.length ?? 0) > 0;
-      const hasClub = !!(clubRes.data?.club && clubRes.data.club !== "");
-      const validTypes = ["Run", "Walk", "Treadmill", "Tredmill"];
-      const filtered = (activitiesRes.data || []).filter((a: any) => validTypes.includes(a.exercise_type || ""));
-      const hasFiveActivities = filtered.length >= 5;
-      const totalDist = filtered.reduce((s: number, a: any) => s + (a.distance_km || 0), 0);
-      const hasAtLeastOneBadge = getEarnedBadgeCount(totalDist, filtered.length) > 0;
-      const sub = subscriptionRes.data;
-      let hasSubscription = false;
-      if (sub && sub.status === "active") {
-        hasSubscription = sub.expires_at ? new Date(sub.expires_at) > new Date() : true;
-      }
-      const hasTargets = (fitnessGoalRes.data?.length ?? 0) > 0 || (weightTargetRes.data?.length ?? 0) > 0;
-      const hasEventEnrollment = (enrollmentRes.data?.length ?? 0) > 0;
-      const hasVerifiedEmail = p?.email_verified === true;
-      return { allFieldsFilled, hasProfilePhoto, hasGoal, hasClub, hasFiveActivities, hasSubscription, hasTargets, hasEventEnrollment, hasVerifiedEmail, hasAtLeastOneBadge };
-    },
-    enabled: !!user,
-    staleTime: 30000,
-  });
+  const completionInputs = profileBundle?.completionInputs as ProfileCompletionInputs | undefined;
 
   const completion = useMemo(() => {
     if (!completionInputs) return null;
@@ -354,27 +245,27 @@ export default function ProfileScreen() {
     return getProfileCompleteBadge(completionPct);
   }, [completionPct]);
 
+  const handleAdminPortalPress = useCallback(async () => {
+    router.push('/admin' as any);
+  }, [router]);
+
   const sendVerificationMutation = useMutation({
     mutationFn: async () => {
       if (!user || !profile?.email) throw new Error("No email found");
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      const { error } = await supabase
-        .from("email_verification_codes")
-        .insert({
-          registration_id: user.id,
-          email: profile.email,
-          code,
-        });
-      if (error) throw error;
-      return code;
+      return await getServerClient().profile.sendEmailVerification.mutate({
+        registrationId: user.id,
+        email: profile.email,
+      });
     },
-    onSuccess: (code) => {
-      console.log("[EmailVerify] Code generated:", code);
-      Alert.alert(
-        "Verification Code Sent",
-        `A 6-digit verification code has been generated for ${profile?.email}.\n\nFor testing, your code is: ${code}`,
-        [{ text: "Enter Code", onPress: () => setShowVerifyModal(true) }]
-      );
+    onSuccess: (result) => {
+      const previewCode = "code" in result ? result.code : null;
+      const message = previewCode
+        ? `A 6-digit verification code has been generated for ${profile?.email}.\n\nFor testing, your code is: ${previewCode}`
+        : `A verification code is ready for ${profile?.email}. Enter it when you receive it.`;
+
+      Alert.alert("Verification Code Sent", message, [
+        { text: "Enter Code", onPress: () => setShowVerifyModal(true) },
+      ]);
     },
     onError: (error) => {
       console.error("[EmailVerify] Send error:", error);
@@ -385,32 +276,15 @@ export default function ProfileScreen() {
   const verifyCodeMutation = useMutation({
     mutationFn: async (code: string) => {
       if (!user) throw new Error("Not authenticated");
-      const { data, error } = await supabase
-        .from("email_verification_codes")
-        .select("*")
-        .eq("registration_id", user.id)
-        .eq("code", code)
-        .eq("used", false)
-        .gte("expires_at", new Date().toISOString())
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) throw new Error("Invalid or expired code");
-      await supabase
-        .from("email_verification_codes")
-        .update({ used: true })
-        .eq("id", data.id);
-      const { error: updateError } = await supabase
-        .from("registrations")
-        .update({ email_verified: true })
-        .eq("registration_id", user.id);
-      if (updateError) throw updateError;
+      await getServerClient().profile.verifyEmailCode.mutate({
+        registrationId: user.id,
+        code,
+      });
     },
     onSuccess: () => {
       setShowVerifyModal(false);
       setVerificationCode("");
-      void queryClient.invalidateQueries({ queryKey: ["profile"] });
+      void queryClient.invalidateQueries({ queryKey: ["profileBundle"] });
       Alert.alert("Verified!", "Your email has been verified successfully.");
     },
     onError: (error) => {
@@ -420,16 +294,34 @@ export default function ProfileScreen() {
   });
 
   const updateProfileMutation = useMutation({
-    mutationFn: async (updates: Partial<UserProfile>) => {
+    mutationFn: async ({
+      registration,
+      contact,
+    }: {
+      registration: Partial<UserProfile>;
+      contact: { email?: string; country_code?: string; phone?: string };
+    }) => {
       if (!user) throw new Error("Not authenticated");
-      const { error } = await supabase
-        .from("registrations")
-        .update(updates)
-        .eq("registration_id", user.id);
-      if (error) throw error;
+      await getServerClient().profile.updateProfile.mutate({
+        registrationId: user.id,
+        registration: {
+          first_name: registration.first_name ?? null,
+          other_names: registration.other_names ?? null,
+          username: registration.username ?? null,
+          sex: registration.sex ?? null,
+          dob: registration.dob ?? null,
+          city_town_district: registration.city_town_district ?? null,
+          country: registration.country ?? null,
+        },
+        contact: {
+          email: contact.email ?? null,
+          country_code: contact.country_code ?? null,
+          phone: contact.phone ?? null,
+        },
+      });
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["profile"] });
+      void queryClient.invalidateQueries({ queryKey: ["profileBundle"] });
       setEditSection(null);
       Alert.alert("Success", "Profile updated successfully!");
     },
@@ -442,20 +334,13 @@ export default function ProfileScreen() {
   const updateGoalsMutation = useMutation({
     mutationFn: async (goalTexts: string[]) => {
       if (!user) throw new Error("Not authenticated");
-
-      await supabase.from("user_goals").delete().eq("registration_id", user.id);
-
-      if (goalTexts.length > 0) {
-        const rows = goalTexts.map((goal) => ({
-          registration_id: user.id,
-          goal,
-        }));
-        const { error } = await supabase.from("user_goals").insert(rows);
-        if (error) throw error;
-      }
+      await getServerClient().profile.saveGoals.mutate({
+        registrationId: user.id,
+        goals: goalTexts,
+      });
     },
     onSuccess: () => {
-      void refetchUserGoals();
+      void queryClient.invalidateQueries({ queryKey: ["profileBundle"] });
       setEditSection(null);
       Alert.alert("Success", "Goals updated successfully!");
     },
@@ -466,24 +351,37 @@ export default function ProfileScreen() {
   });
 
   const updateClubMutation = useMutation({
-    mutationFn: async ({ club, newMember }: { club: string | null; newMember: string }) => {
+    mutationFn: async ({
+      club,
+      clubId,
+      newMember,
+      requestType,
+      proposedClubName,
+      proposedCountry,
+      proposedDescription,
+    }: {
+      club: string | null;
+      clubId: string | null;
+      newMember: string;
+      requestType: "membership" | "start_club" | "event_organizer";
+      proposedClubName: string | null;
+      proposedCountry: string | null;
+      proposedDescription: string | null;
+    }) => {
       if (!user) throw new Error("Not authenticated");
-
-      if (clubMembership) {
-        const { error } = await supabase
-          .from("club_membership_request")
-          .update({ club, new_member: newMember })
-          .eq("registration_id", user.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from("club_membership_request")
-          .insert({ registration_id: user.id, club, new_member: newMember });
-        if (error) throw error;
-      }
+      await getServerClient().profile.saveClubMembership.mutate({
+        registrationId: user.id,
+        club,
+        clubId,
+        newMember,
+        requestType,
+        proposedClubName,
+        proposedCountry,
+        proposedDescription,
+      });
     },
     onSuccess: () => {
-      void refetchClubMembership();
+      void queryClient.invalidateQueries({ queryKey: ["profileBundle"] });
       setEditSection(null);
       Alert.alert("Success", "Club membership updated!");
     },
@@ -496,41 +394,18 @@ export default function ProfileScreen() {
   const uploadPhotoMutation = useMutation({
     mutationFn: async (photoUri: string) => {
       if (!user) throw new Error("Not authenticated");
-      console.log("Starting photo upload for user:", user.id);
-      const photoFileName = `${user.id}_${Date.now()}.jpg`;
-      const response = await fetch(photoUri);
-      const blob = await response.blob();
-      const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as ArrayBuffer);
-        reader.onerror = reject;
-        reader.readAsArrayBuffer(blob);
+      const imageBase64 = await FileSystem.readAsStringAsync(photoUri, {
+        encoding: "base64",
       });
 
-      const { error: uploadError } = await supabase.storage
-        .from("user-photos")
-        .upload(photoFileName, arrayBuffer, { contentType: "image/jpeg", upsert: true });
-      if (uploadError) throw uploadError;
-
-      const { data: urlData } = supabase.storage.from("user-photos").getPublicUrl(photoFileName);
-      const publicUrl = urlData.publicUrl;
-
-      await supabase
-        .from("user_photos")
-        .update({ is_profile_photo: false })
-        .eq("registration_id", user.id);
-
-      const { error: insertError } = await supabase.from("user_photos").insert({
-        registration_id: user.id,
-        file_path: publicUrl,
-        file_name: photoFileName,
-        file_size: arrayBuffer.byteLength,
-        mime_type: "image/jpeg",
-        is_profile_photo: true,
+      await getServerClient().profile.uploadPhoto.mutate({
+        registrationId: user.id,
+        imageBase64,
+        mimeType: "image/jpeg",
       });
-      if (insertError) throw insertError;
     },
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["profileBundle"] });
       void queryClient.invalidateQueries({ queryKey: ["profilePhoto"] });
       void queryClient.invalidateQueries({ queryKey: ["headerProfilePhoto"] });
       Alert.alert("Success", "Profile photo updated!");
@@ -569,6 +444,7 @@ export default function ProfileScreen() {
         country_code: profile.country_code,
         phone: profile.phone,
         sex: profile.sex,
+        dob: profile.dob,
         city_town_district: profile.city_town_district,
         country: profile.country,
       });
@@ -595,8 +471,20 @@ export default function ProfileScreen() {
       if (clubMembership) {
         if (!clubMembership.club) {
           setClubChoice("none");
-        } else if (clubMembership.club === "new request") {
+        } else if (clubMembership.request_type === "event_organizer") {
+          setClubChoice("organizer");
+          setOrganizerRequest({
+            organizerName: clubMembership.proposed_club_name || clubMembership.club || "",
+            country: clubMembership.proposed_country || profile?.country || "",
+            description: clubMembership.proposed_description || "",
+          });
+        } else if (clubMembership.request_type === "start_club") {
           setClubChoice("start");
+          setClubStartRequest({
+            clubName: clubMembership.proposed_club_name || clubMembership.club || "",
+            country: clubMembership.proposed_country || profile?.country || "",
+            description: clubMembership.proposed_description || "",
+          });
         } else if (clubMembership.new_member === "Yes") {
           setClubChoice("join");
           const found = clubs.find((c) => c.club_name === clubMembership.club);
@@ -609,6 +497,8 @@ export default function ProfileScreen() {
       } else {
         setClubChoice(null);
         setSelectedClubId(null);
+        setClubStartRequest({ clubName: "", country: profile?.country || "", description: "" });
+        setOrganizerRequest({ organizerName: "", country: profile?.country || "", description: "" });
       }
     }
     setEditSection(section);
@@ -616,22 +506,12 @@ export default function ProfileScreen() {
 
   const handleSaveProfile = () => {
     const { country_code, phone, email, ...regFields } = formData;
-    updateProfileMutation.mutate(regFields, {
-      onSuccess: async () => {
-        if (user) {
-          const { error } = await supabase
-            .from("contacts")
-            .update({
-              country_code: country_code ?? null,
-              phone: phone ?? null,
-              email: email ?? null,
-            })
-            .eq("registration_id", user.id);
-          if (error) {
-            console.error("Error updating contacts:", error);
-          }
-          void queryClient.invalidateQueries({ queryKey: ["profile"] });
-        }
+    updateProfileMutation.mutate({
+      registration: regFields,
+      contact: {
+        country_code,
+        phone,
+        email,
       },
     });
   };
@@ -653,6 +533,7 @@ export default function ProfileScreen() {
 
   const handleSaveClub = () => {
     let clubValue: string | null = null;
+    let clubIdValue: string | null = null;
     let newMemberValue = "No";
 
     if (clubChoice === "join") {
@@ -662,6 +543,7 @@ export default function ProfileScreen() {
       }
       const selectedClub = clubs.find((c) => c.club_id === selectedClubId);
       clubValue = selectedClub?.club_name || null;
+      clubIdValue = selectedClub?.club_id || null;
       newMemberValue = "Yes";
     } else if (clubChoice === "existing") {
       if (!selectedClubId) {
@@ -670,16 +552,64 @@ export default function ProfileScreen() {
       }
       const selectedClub = clubs.find((c) => c.club_id === selectedClubId);
       clubValue = selectedClub?.club_name || null;
+      clubIdValue = selectedClub?.club_id || null;
       newMemberValue = "No";
     } else if (clubChoice === "start") {
-      clubValue = "new request";
+      if (!clubStartRequest.clubName.trim()) {
+        Alert.alert("Club Name Required", "Please enter the club name you want to start.");
+        return;
+      }
+      if (!clubStartRequest.country.trim()) {
+        Alert.alert("Country Required", "Please choose the country for the club request.");
+        return;
+      }
+      clubValue = clubStartRequest.clubName.trim();
       newMemberValue = "Yes";
+    } else if (clubChoice === "organizer") {
+      if (!organizerRequest.organizerName.trim()) {
+        Alert.alert("Organizer Name Required", "Please enter the event organiser name.");
+        return;
+      }
+      if (!organizerRequest.country.trim()) {
+        Alert.alert("Country Required", "Please choose the country for the organiser request.");
+        return;
+      }
+      clubValue = organizerRequest.organizerName.trim();
+      newMemberValue = "No";
     } else {
       clubValue = null;
       newMemberValue = "No";
     }
 
-    updateClubMutation.mutate({ club: clubValue, newMember: newMemberValue });
+    updateClubMutation.mutate({
+      club: clubValue,
+      clubId: clubIdValue,
+      newMember: newMemberValue,
+      requestType:
+        clubChoice === "start"
+          ? "start_club"
+          : clubChoice === "organizer"
+          ? "event_organizer"
+          : "membership",
+      proposedClubName:
+        clubChoice === "start"
+          ? clubStartRequest.clubName.trim()
+          : clubChoice === "organizer"
+          ? organizerRequest.organizerName.trim()
+          : null,
+      proposedCountry:
+        clubChoice === "start"
+          ? clubStartRequest.country.trim()
+          : clubChoice === "organizer"
+          ? organizerRequest.country.trim()
+          : null,
+      proposedDescription:
+        clubChoice === "start"
+          ? clubStartRequest.description.trim()
+          : clubChoice === "organizer"
+          ? organizerRequest.description.trim()
+          : null,
+    });
   };
 
   const handleCancel = () => {
@@ -689,6 +619,8 @@ export default function ProfileScreen() {
     setOtherGoalText("");
     setClubChoice(null);
     setSelectedClubId(null);
+    setClubStartRequest({ clubName: "", country: profile?.country || "", description: "" });
+    setOrganizerRequest({ organizerName: "", country: profile?.country || "", description: "" });
   };
 
   const toggleGoal = (goalId: number) => {
@@ -855,41 +787,91 @@ export default function ProfileScreen() {
       </View>
 
       <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Password Verification</Text>
+        <TouchableOpacity
+          style={[styles.oauthVerifiedButton, !isSocialAuthUser && styles.passwordVerifyButton]}
+          onPress={() => {
+            if (isSocialAuthUser) {
+              Alert.alert(
+                "Already Verified",
+                `This account signs in with ${socialProviderLabel}, so password verification is already handled by ${socialProviderLabel}.`
+              );
+            } else {
+              Alert.alert("Password Account", "Password verification is handled when you sign in.");
+            }
+          }}
+          activeOpacity={0.75}
+        >
+          <BadgeCheck size={18} color={isSocialAuthUser ? "#6b7280" : "#10b981"} />
+          <Text style={[styles.oauthVerifiedButtonText, !isSocialAuthUser && styles.passwordVerifyButtonText]}>
+            {isSocialAuthUser ? `Verified by ${socialProviderLabel}` : "Verified by password sign-in"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.field}>
         <Text style={styles.fieldLabel}>Phone</Text>
-        <View style={styles.phoneFieldRow}>
-          <TextInput
-            style={[styles.input, styles.countryCodeInput]}
-            value={String(formData.country_code ?? "")}
-            onChangeText={(text) => setFormData({ ...formData, country_code: text })}
-            placeholder="+1"
-            keyboardType="phone-pad"
-          />
-          <TextInput
-            style={[styles.input, styles.phoneNumberInput]}
-            value={String(formData.phone ?? "")}
-            onChangeText={(text) => setFormData({ ...formData, phone: text })}
-            placeholder="Phone number"
-            keyboardType="phone-pad"
-          />
+        <TextInput
+          style={styles.input}
+          value={String(formData.phone ?? "")}
+          onChangeText={(text) => setFormData({ ...formData, phone: text, country_code: undefined })}
+          placeholder="Example: +256 772 345 685"
+          keyboardType="phone-pad"
+        />
+        <Text style={styles.goalHelpText}>Enter the full number, including country code, in one field.</Text>
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Sex</Text>
+        <View style={styles.pickerContainer}>
+          <Picker
+            selectedValue={String(formData.sex ?? "")}
+            onValueChange={(value: string) => setFormData({ ...formData, sex: value })}
+            style={styles.picker}
+          >
+            <Picker.Item label="Select sex" value="" />
+            <Picker.Item label="Male" value="M" />
+            <Picker.Item label="Female" value="F" />
+          </Picker>
         </View>
       </View>
 
-      {([
-        { label: "Sex", key: "sex" as const, keyboard: "default" as const },
-        { label: "City/Town/District", key: "city_town_district" as const, keyboard: "default" as const },
-        { label: "Country", key: "country" as const, keyboard: "default" as const },
-      ] as const).map((field) => (
-        <View key={field.key} style={styles.field}>
-          <Text style={styles.fieldLabel}>{field.label}</Text>
-          <TextInput
-            style={styles.input}
-            value={String(formData[field.key] ?? "")}
-            onChangeText={(text) => setFormData({ ...formData, [field.key]: text })}
-            placeholder={`Enter ${field.label.toLowerCase()}`}
-            keyboardType={field.keyboard}
-          />
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Date of Birth</Text>
+        <TextInput
+          style={styles.input}
+          value={String(formData.dob ?? "")}
+          onChangeText={(text) => setFormData({ ...formData, dob: text })}
+          placeholder="YYYY-MM-DD"
+          keyboardType="numbers-and-punctuation"
+        />
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>City/Town/District</Text>
+        <TextInput
+          style={styles.input}
+          value={String(formData.city_town_district ?? "")}
+          onChangeText={(text) => setFormData({ ...formData, city_town_district: text })}
+          placeholder="Enter city/town/district"
+        />
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Country</Text>
+        <View style={styles.pickerContainer}>
+          <Picker
+            selectedValue={String(formData.country ?? "")}
+            onValueChange={(value: string) => setFormData({ ...formData, country: value })}
+            style={styles.picker}
+          >
+            <Picker.Item label="Select country" value="" />
+            {countryOptions.map((country) => (
+              <Picker.Item key={country.iso_alpha2} label={country.name} value={country.name} />
+            ))}
+          </Picker>
         </View>
-      ))}
+      </View>
 
       <View style={styles.actionButtons}>
         <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
@@ -981,7 +963,8 @@ export default function ProfileScreen() {
     const options: { key: ClubChoice; label: string; icon: React.ReactNode; desc: string }[] = [
       { key: "join", label: "Want to join a club", icon: <UserPlus size={20} color="#fff" />, desc: "Browse and join an existing club" },
       { key: "existing", label: "I already have a club", icon: <UserCheck size={20} color="#fff" />, desc: "Select your current club" },
-      { key: "start", label: "Want to start a club", icon: <PlusCircle size={20} color="#fff" />, desc: "Download the application form" },
+      { key: "start", label: "Want to start a club", icon: <PlusCircle size={20} color="#fff" />, desc: "Send a structured request for admin approval" },
+      { key: "organizer", label: "Event Organiser", icon: <Calendar size={20} color="#fff" />, desc: "Request organiser approval for posting events" },
       { key: "none", label: "No thanks", icon: <X size={20} color="#fff" />, desc: "Remove club membership" },
     ];
 
@@ -1071,27 +1054,91 @@ export default function ProfileScreen() {
 
   const renderStartNewClub = () => (
     <View style={styles.startClubCard}>
-      <FileText size={36} color="#3b82f6" />
+      <PlusCircle size={36} color="#3b82f6" />
       <Text style={styles.startClubTitle}>Start a New Club</Text>
       <Text style={styles.startClubDesc}>
-        Download the New Club Application Form below. Fill it out and send it to the admin email
-        included in the form.
+        Send a structured request inside the app. Admins can review and approve it here without paperwork.
       </Text>
       <TouchableOpacity
         style={styles.downloadButton}
         onPress={() => {
-          Alert.alert(
-            "Download Form",
-            "The New Club Application Form will be available for download. Please send the completed form to admin@maunrunner.com",
-            [{ text: "OK" }]
-          );
+          setClubStartRequest((prev) => ({
+            clubName: prev.clubName,
+            country: prev.country || profile?.country || "",
+            description: prev.description,
+          }));
         }}
         activeOpacity={0.7}
       >
-        <Download size={18} color="#fff" />
-        <Text style={styles.downloadButtonText}>Download Application Form</Text>
+        <PlusCircle size={18} color="#fff" />
+        <Text style={styles.downloadButtonText}>Fill Club Request</Text>
       </TouchableOpacity>
-      <Text style={styles.adminEmailNote}>Send completed form to: admin@maunrunner.com</Text>
+      <View style={{ width: "100%", gap: 12 }}>
+        <TextInput
+          style={styles.input}
+          placeholder="Proposed club name"
+          value={clubStartRequest.clubName}
+          onChangeText={(text) => setClubStartRequest((prev) => ({ ...prev, clubName: text }))}
+        />
+        <View style={styles.pickerContainer}>
+          <Picker
+            selectedValue={clubStartRequest.country}
+            onValueChange={(value: string) => setClubStartRequest((prev) => ({ ...prev, country: value }))}
+            style={styles.picker}
+          >
+            <Picker.Item label="Select country" value="" />
+            {countryOptions.map((country) => (
+              <Picker.Item key={`profile-start-${country.iso_alpha2}`} label={country.name} value={country.name} />
+            ))}
+          </Picker>
+        </View>
+        <TextInput
+          style={[styles.input, { minHeight: 100, textAlignVertical: "top" }]}
+          placeholder="Describe the club purpose, who it serves, and what makes it ready to launch."
+          multiline
+          value={clubStartRequest.description}
+          onChangeText={(text) => setClubStartRequest((prev) => ({ ...prev, description: text }))}
+        />
+      </View>
+      <Text style={styles.adminEmailNote}>Your request will be sent to admins for review inside the app.</Text>
+    </View>
+  );
+
+  const renderEventOrganizerRequest = () => (
+    <View style={styles.startClubCard}>
+      <Calendar size={36} color="#3b82f6" />
+      <Text style={styles.startClubTitle}>Event Organiser Request</Text>
+      <Text style={styles.startClubDesc}>
+        Share the organiser details here, then contact your country admin because organiser approvals require screening before event access is granted.
+      </Text>
+      <View style={{ width: "100%", gap: 12 }}>
+        <TextInput
+          style={styles.input}
+          placeholder="Organizer name"
+          value={organizerRequest.organizerName}
+          onChangeText={(text) => setOrganizerRequest((prev) => ({ ...prev, organizerName: text }))}
+        />
+        <View style={styles.pickerContainer}>
+          <Picker
+            selectedValue={organizerRequest.country}
+            onValueChange={(value: string) => setOrganizerRequest((prev) => ({ ...prev, country: value }))}
+            style={styles.picker}
+          >
+            <Picker.Item label="Select country" value="" />
+            {countryOptions.map((country) => (
+              <Picker.Item key={`profile-organizer-${country.iso_alpha2}`} label={country.name} value={country.name} />
+            ))}
+          </Picker>
+        </View>
+        <TextInput
+          style={[styles.input, { minHeight: 100, textAlignVertical: "top" }]}
+          placeholder="Describe the organiser and the events they intend to manage."
+          multiline
+          value={organizerRequest.description}
+          onChangeText={(text) => setOrganizerRequest((prev) => ({ ...prev, description: text }))}
+        />
+      </View>
+      <Text style={styles.adminEmailNote}>This request goes into the admin queue and should be followed up with your country admin for screening.</Text>
     </View>
   );
 
@@ -1099,16 +1146,17 @@ export default function ProfileScreen() {
     const showSaveButton =
       clubChoice === "none" ||
       clubChoice === "start" ||
+      clubChoice === "organizer" ||
       (clubChoice === "join" && selectedClubId) ||
       (clubChoice === "existing" && selectedClubId);
 
     return (
       <View style={styles.infoContainer}>
-        <Text style={styles.editSectionTitle}>Edit Club Membership</Text>
+        <Text style={styles.editSectionTitle}>Edit Club & Organiser</Text>
         <Text style={styles.editSectionSubtitle}>
           {clubMembership?.club
             ? `Current club: ${clubMembership.club}`
-            : "No club membership set"}
+            : "No club or organiser request set"}
         </Text>
 
         {renderClubChoiceOptions()}
@@ -1116,6 +1164,7 @@ export default function ProfileScreen() {
         {clubChoice === "join" && renderClubList("Choose a club to join")}
         {clubChoice === "existing" && renderClubList("Select your current club")}
         {clubChoice === "start" && renderStartNewClub()}
+        {clubChoice === "organizer" && renderEventOrganizerRequest()}
         {clubChoice === "none" && (
           <View style={styles.noClubCard}>
             <Text style={styles.noClubText}>
@@ -1224,6 +1273,54 @@ export default function ProfileScreen() {
     return null;
   };
 
+  const renderAdminPortalBanner = () => {
+    if (!roleSession.hasAdminAccess) return null;
+
+    const subtitle = roleSession.isSuperAdmin
+      ? "Global platform access enabled"
+      : roleSession.isCountryAdmin
+        ? "Country management tools available"
+        : roleSession.isCountryCoordinator
+          ? "Country coordinator tools available"
+          : roleSession.isEventOrganizer
+            ? "Event organizer tools available"
+        : "Coordinator tools available";
+
+    const badgeLabel = roleSession.isSuperAdmin
+                      ? "GLOBAL ADMIN"
+      : roleSession.isCountryAdmin
+        ? "COUNTRY ADMIN"
+        : roleSession.isCountryCoordinator
+          ? "COUNTRY COORDINATOR"
+          : roleSession.isEventOrganizer
+            ? "EVENT ORGANIZER"
+        : "COORDINATOR";
+
+    return (
+      <TouchableOpacity
+        style={[styles.subBanner, styles.adminBanner]}
+        onPress={() => {
+          void handleAdminPortalPress();
+        }}
+        activeOpacity={0.7}
+      >
+        <View style={[styles.subBannerIconWrap, styles.adminBannerIconWrap]}>
+          <BadgeCheck size={18} color="#7C2D12" />
+        </View>
+        <View style={styles.subBannerContent}>
+          <View style={styles.subBannerRow}>
+            <View style={styles.adminBadgeChip}>
+              <Text style={styles.adminBadgeChipText}>{badgeLabel}</Text>
+            </View>
+          </View>
+          <Text style={styles.adminBannerTitle}>Admin Portal</Text>
+          <Text style={styles.adminBannerSubtitle}>{subtitle}</Text>
+        </View>
+        <ChevronRight size={18} color="#9A3412" />
+      </TouchableOpacity>
+    );
+  };
+
   const renderBadgeItem = (badge: Badge) => (
     <View
       key={badge.id}
@@ -1312,9 +1409,7 @@ export default function ProfileScreen() {
           <View style={styles.emailViewRow}>
             <Phone size={16} color="#666" style={{ marginLeft: 4 }} />
             <Text style={[styles.fieldValue, styles.emailViewValue]}>
-              {profile.country_code && profile.phone
-                ? `${profile.country_code} ${profile.phone}`
-                : profile.phone || "Not set"}
+              {profile.phone || "Not set"}
             </Text>
           </View>
         </View>
@@ -1414,11 +1509,7 @@ export default function ProfileScreen() {
         {!editSection && (
           <TouchableOpacity
             style={styles.editButton}
-            onPress={() => {
-              setPinInput("");
-              setPinError("");
-              setShowPinModal(true);
-            }}
+            onPress={() => setShowEditMenu(true)}
           >
             <Edit2 size={20} color="#10b981" />
             <Text style={styles.editButtonText}>Edit</Text>
@@ -1427,6 +1518,7 @@ export default function ProfileScreen() {
       </View>
 
       {renderSubscriptionBanner()}
+      {renderAdminPortalBanner()}
 
       {editSection === "profile" && renderProfileEdit()}
       {editSection === "goals" && renderGoalsEdit()}
@@ -1504,121 +1596,6 @@ export default function ProfileScreen() {
               ))}
             </View>
           </View>
-        </TouchableOpacity>
-      </Modal>
-
-      <Modal
-        visible={showPinModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowPinModal(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowPinModal(false)}
-        >
-          <TouchableWithoutFeedback
-            onPress={() => {
-              // Tapping inside the modal should not dismiss it.
-              // Instead, ensure the hidden input is focused so the keyboard appears.
-              pinInputRef.current?.focus();
-            }}
-          >
-            <View style={styles.pinModalContainer}>
-              <View style={styles.pinModalIconWrap}>
-                <Lock size={32} color="#10b981" />
-              </View>
-              <Text style={styles.pinModalTitle}>Enter Your PIN</Text>
-              <Text style={styles.pinModalDesc}>
-                Enter your 4-digit PIN to access editing
-              </Text>
-              <View style={styles.pinDotsRow}>
-                {[0, 1, 2, 3].map((i) => (
-                  <View
-                    key={i}
-                    style={[
-                      styles.pinDot,
-                      pinInput.length > i && styles.pinDotFilled,
-                      pinError ? styles.pinDotError : null,
-                    ]}
-                  />
-                ))}
-              </View>
-              <TextInput
-                ref={(r) => {
-                  pinInputRef.current = r;
-                }}
-                style={styles.pinHiddenInput}
-                value={pinInput}
-                onChangeText={(text) => {
-                  const digits = text.replace(/[^0-9]/g, "").slice(0, 4);
-                  setPinInput(digits);
-                  setPinError("");
-                }}
-                keyboardType="number-pad"
-                maxLength={4}
-                autoFocus
-                secureTextEntry
-                caretHidden
-              />
-              {pinError ? (
-                <Text style={styles.pinErrorText}>{pinError}</Text>
-              ) : null}
-              <View style={styles.pinModalActions}>
-                <TouchableOpacity
-                  style={styles.pinModalCancel}
-                  onPress={() => {
-                    setShowPinModal(false);
-                    setPinInput("");
-                    setPinError("");
-                  }}
-                >
-                  <Text style={styles.pinModalCancelText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.pinModalSubmit,
-                    pinInput.length !== 4 && styles.pinModalSubmitDisabled,
-                  ]}
-                  onPress={async () => {
-                    if (!user) return;
-                    try {
-                      const { data, error } = await supabase
-                        .from("registrations")
-                        .select("pin_hash")
-                        .eq("registration_id", user.id)
-                        .maybeSingle();
-                      if (error) {
-                        console.error("[PIN] Fetch error:", error);
-                        setPinError("Something went wrong. Try again.");
-                        return;
-                      }
-                      if (!data?.pin_hash) {
-                        setPinError("No PIN set. Please contact support.");
-                        return;
-                      }
-                      if (pinInput === data.pin_hash) {
-                        setShowPinModal(false);
-                        setPinInput("");
-                        setPinError("");
-                        setShowEditMenu(true);
-                      } else {
-                        setPinError("Incorrect PIN. Please try again.");
-                        setPinInput("");
-                      }
-                    } catch (err) {
-                      console.error("[PIN] Validation error:", err);
-                      setPinError("Something went wrong. Try again.");
-                    }
-                  }}
-                  disabled={pinInput.length !== 4}
-                >
-                  <Text style={styles.pinModalSubmitText}>Confirm</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </TouchableWithoutFeedback>
         </TouchableOpacity>
       </Modal>
 
@@ -1794,6 +1771,12 @@ const styles = StyleSheet.create({
     color: "#666",
     textTransform: "uppercase",
   },
+  goalHelpText: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: 6,
+    lineHeight: 16,
+  },
   fieldValue: {
     fontSize: 17,
     color: "#000",
@@ -1809,6 +1792,17 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 2,
     borderColor: "#10b981",
+  },
+  pickerContainer: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: "#10b981",
+    overflow: "hidden" as const,
+  },
+  picker: {
+    backgroundColor: "#fff",
+    color: "#000",
   },
   bioSection: {
     gap: 12,
@@ -2298,6 +2292,30 @@ const styles = StyleSheet.create({
     fontWeight: "700" as const,
     color: "#1d9bf0",
   },
+  oauthVerifiedButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#f3f4f6",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "#d1d5db",
+  },
+  oauthVerifiedButtonText: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+    color: "#6b7280",
+  },
+  passwordVerifyButton: {
+    backgroundColor: "#ecfdf5",
+    borderColor: "#10b981",
+  },
+  passwordVerifyButtonText: {
+    color: "#047857",
+  },
   verifiedBadge: {
     paddingHorizontal: 6,
     paddingVertical: 8,
@@ -2438,6 +2456,18 @@ const styles = StyleSheet.create({
     textAlign: "center" as const,
     lineHeight: 20,
   },
+  passwordVerifyInput: {
+    width: "100%",
+    backgroundColor: "#f5f5f5",
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: "#111",
+    borderWidth: 1.5,
+    borderColor: "#10b981",
+    marginTop: 8,
+  },
   pinDotsRow: {
     flexDirection: "row" as const,
     gap: 16,
@@ -2524,6 +2554,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#FEF2F2",
     borderColor: "#FECACA",
   },
+  adminBanner: {
+    backgroundColor: "#FFF7ED",
+    borderColor: "#FED7AA",
+  },
   subBannerIconWrap: {
     width: 36,
     height: 36,
@@ -2537,6 +2571,9 @@ const styles = StyleSheet.create({
   },
   subBannerIconExpired: {
     backgroundColor: "#FEE2E2",
+  },
+  adminBannerIconWrap: {
+    backgroundColor: "#FFEDD5",
   },
   subBannerContent: {
     flex: 1,
@@ -2599,6 +2636,31 @@ const styles = StyleSheet.create({
   subBannerDateExpired: {
     fontSize: 12,
     color: "#B91C1C",
+  },
+  adminBannerTitle: {
+    fontSize: 15,
+    fontWeight: "800" as const,
+    color: "#7C2D12",
+  },
+  adminBannerSubtitle: {
+    fontSize: 12,
+    color: "#9A3412",
+    fontWeight: "500" as const,
+  },
+  adminBadgeChip: {
+    backgroundColor: "#FFEDD5",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#FDBA74",
+    alignSelf: "flex-start",
+  },
+  adminBadgeChipText: {
+    fontSize: 10,
+    fontWeight: "800" as const,
+    color: "#9A3412",
+    letterSpacing: 0.4,
   },
   completionPill: {
     flexDirection: "row",

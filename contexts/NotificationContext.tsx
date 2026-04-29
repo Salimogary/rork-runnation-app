@@ -71,6 +71,13 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
           hasAtLeastOneBadge: false,
         };
       }
+      const { data: authUserData } = await supabase.auth.getUser();
+      const authProvider =
+        authUserData.user?.app_metadata?.provider ||
+        authUserData.user?.identities?.[0]?.provider ||
+        null;
+      const socialAuthVerified = authProvider === "google" || authProvider === "apple";
+
       const [
         profileRes, photoRes, goalsRes, clubRes, activitiesRes,
         subscriptionRes, fitnessGoalRes, weightTargetRes, enrollmentRes,
@@ -113,7 +120,7 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
       }
       const hasTargets = (fitnessGoalRes.data?.length ?? 0) > 0 || (weightTargetRes.data?.length ?? 0) > 0;
       const hasEventEnrollment = (enrollmentRes.data?.length ?? 0) > 0;
-      const hasVerifiedEmail = p?.email_verified === true;
+      const hasVerifiedEmail = p?.email_verified === true || socialAuthVerified;
 
       return {
         allFieldsFilled, hasProfilePhoto, hasGoal, hasClub, hasFiveActivities,

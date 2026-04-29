@@ -1,10 +1,11 @@
-import { StyleSheet, View, Text, ScrollView, RefreshControl } from "react-native";
-import { Stack } from "expo-router";
+import { StyleSheet, View, Text, ScrollView, RefreshControl, TouchableOpacity } from "react-native";
+import { Stack, useLocalSearchParams } from "expo-router";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/contexts/AuthContext";
-import { Award, TrendingUp } from "lucide-react-native";
+import { Award } from "lucide-react-native";
 import colors from "@/constants/colors";
-import { LinearGradient } from "expo-linear-gradient";
+import { useMemo, useState } from "react";
+import { formatCountryName } from "@/constants/country-utils";
 
 interface MedalParticipant {
   participantId: string;
@@ -13,7 +14,7 @@ interface MedalParticipant {
   firstName: string;
   otherNames: string;
   country: string;
-  residence: string;
+  club: string;
   eventName: string;
   qualifiedDays: number;
   totalDistance: number;
@@ -21,6 +22,12 @@ interface MedalParticipant {
 
 export default function MedalListScreen() {
   const { user, privateMode } = useAuth();
+  const params = useLocalSearchParams<{ eventMode?: string }>();
+  const [selectedEvent, setSelectedEvent] = useState<string>("all");
+  const eventMode = params.eventMode === "multiday" ? "multiday" : "multiday";
+
+  const formatCountryClub = (country?: string, club?: string) =>
+    [formatCountryName(country), club].filter(Boolean).join(",");
 
   const { data: medalList, isLoading, refetch } = trpc.admin.getMedalList.useQuery(
     {},
@@ -30,139 +37,217 @@ export default function MedalListScreen() {
     }
   ) as { data: MedalParticipant[] | undefined; isLoading: boolean; refetch: () => void };
 
-  const sortedList = medalList
-    ? [...medalList]
-        .filter((p) => {
-          if (privateMode && user?.id && p.registrationId === user.id) return false;
-          return true;
-        })
-        .sort((a, b) => {
-          if (b.totalDistance !== a.totalDistance) {
-            return b.totalDistance - a.totalDistance;
-          }
-          if (b.qualifiedDays !== a.qualifiedDays) {
-            return b.qualifiedDays - a.qualifiedDays;
-          }
-          return 0;
-        })
-    : [];
+  const { data: events = [] } = trpc.events.getEvents.useQuery();
 
-  const groupedByEvent = sortedList.reduce((acc, participant) => {
-    if (!acc[participant.eventName]) {
-      acc[participant.eventName] = [];
-    }
-    acc[participant.eventName].push(participant);
-    return acc;
-  }, {} as Record<string, MedalParticipant[]>);
+  const multidayEvents = useMemo(() => {
+    return (events || []).filter((event: any) => {
+      const startsAt = event?.starts_at;
+      const endsAt = event?.ends_at;
+      return eventMode === "multiday" && !!startsAt && !!endsAt && startsAt.slice(0, 10) !== endsAt.slice(0, 10);
+    });
+  }, [eventMode, events]);
+
+  const multidayEventIds = useMemo(
+    () => new Set(multidayEvents.map((event: any) => event.event_id)),
+    [multidayEvents]
+  );
+
+  const eventMetaMap = useMemo(() => {
+    return new Map(
+      multidayEvents.map((event: any) => [
+        event.event_id,
+        {
+          organizerLabel: event.organizer_name || event.organizer || "",
+          eventName: event.event_name || "Unknown Event",
+        },
+      ])
+    );
+  }, [multidayEvents]);
+
+  const filteredList = useMemo(() => {
+    if (!medalList) return [];
+
+    return [...medalList]
+      .filter((participant) => {
+        if (!multidayEventIds.has(participant.eventId)) return false;
+        if (privateMode && user?.id && participant.registrationId === user.id) return false;
+        if (selectedEvent !== "all" && participant.eventId !== selectedEvent) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        if (b.totalDistance !== a.totalDistance) {
+          return b.totalDistance - a.totalDistance;
+        }
+        if (b.qualifiedDays !== a.qualifiedDays) {
+          return b.qualifiedDays - a.qualifiedDays;
+        }
+        return `${a.firstName} ${a.otherNames}`.localeCompare(`${b.firstName} ${b.otherNames}`);
+      });
+  }, [medalList, multidayEventIds, privateMode, selectedEvent, user?.id]);
+
+  const groupedByEvent = useMemo(() => {
+    return filteredList.reduce((acc, participant) => {
+      if (!acc[participant.eventId]) {
+        acc[participant.eventId] = [];
+      }
+      acc[participant.eventId].push(participant);
+      return acc;
+    }, {} as Record<string, MedalParticipant[]>);
+  }, [filteredList]);
+
+  const eventOptions = useMemo(() => {
+    return multidayEvents
+      .map((event: any) => ({
+        eventId: event.event_id,
+        eventName: event.event_name || "Unknown Event",
+      }))
+      .sort((a, b) => a.eventName.localeCompare(b.eventName));
+  }, [multidayEvents]);
 
   return (
-    <View style={styles.container}>
-      <Stack.Screen options={{ title: "Medal List" }} />
-      
-      <ScrollView
-        style={styles.scrollView}
-        refreshControl={
-          <RefreshControl 
-            refreshing={isLoading} 
-            onRefresh={refetch}
-            tintColor={colors.primary}
-            colors={[colors.primary]}
-          />
-        }
-      >
-        {isLoading && sortedList.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>Loading medal list...</Text>
-          </View>
-        ) : sortedList.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Award size={64} color={colors.lightGray} />
-            <Text style={styles.emptyText}>No qualified participants yet</Text>
-            <Text style={styles.emptySubtext}>Complete event requirements to appear on the medal list</Text>
-          </View>
-        ) : (
-          <View style={styles.eventsContainer}>
-            {Object.entries(groupedByEvent).map(([eventName, participants]) => (
-              <View key={eventName} style={styles.eventSection}>
-                <View style={styles.eventHeader}>
-                  <Award size={20} color={colors.primary} />
-                  <Text style={styles.eventTitle}>{eventName}</Text>
-                  <View style={styles.countBadge}>
-                    <Text style={styles.countText}>{participants.length}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.participantsList}>
-                  {participants.map((participant, index) => {
-                    const location = participant.country && participant.residence
-                      ? `${participant.country}, ${participant.residence}`
-                      : participant.residence || participant.country || "Unknown";
-                    
-                    return (
-                      <LinearGradient
-                        key={participant.participantId}
-                        colors={index === 0 ? colors.gradient.gold : index === 1 ? colors.gradient.silver : index === 2 ? colors.gradient.bronze : [colors.white, colors.extraLightGray]}
-                        style={styles.participantCard}
-                      >
-                        <View style={styles.rankContainer}>
-                          <Text style={[
-                            styles.rankNumber,
-                            index === 0 && styles.goldRank,
-                            index === 1 && styles.silverRank,
-                            index === 2 && styles.bronzeRank,
-                          ]}>
-                            {index + 1}
-                          </Text>
-                        </View>
-
-                        <View style={styles.participantInfo}>
-                          <View style={styles.nameRow}>
-                            <Text style={styles.locationText} numberOfLines={1}>
-                              {location}
-                            </Text>
-                            <View style={styles.nameBox}>
-                              <Text style={styles.nameText} numberOfLines={1}>
-                                {`${participant.firstName} ${participant.otherNames || ""}`.trim()}
-                              </Text>
-                            </View>
-                          </View>
-
-                          <View style={styles.statsRow}>
-                            <View style={styles.statItem}>
-                              <Text style={styles.statLabel}>Days</Text>
-                              <Text style={styles.statValue}>{participant.qualifiedDays}</Text>
-                            </View>
-                            <View style={styles.statItem}>
-                              <Text style={styles.statLabel}>Total km</Text>
-                              <Text style={styles.statValue}>{participant.totalDistance.toFixed(1)}</Text>
-                            </View>
-                            <View style={styles.statItem}>
-                              <Text style={styles.statLabel}>Avg km/day</Text>
-                              <Text style={styles.statValue}>
-                                {participant.qualifiedDays > 0 
-                                  ? (participant.totalDistance / participant.qualifiedDays).toFixed(1)
-                                  : "0.0"}
-                              </Text>
-                            </View>
-                          </View>
-                        </View>
-                      </LinearGradient>
-                    );
-                  })}
-                </View>
-              </View>
-            ))}
+    <>
+      <Stack.Screen options={{ title: "Multiday Events" }} />
+      <View style={styles.container}>
+        {eventOptions.length > 0 && (
+          <View style={styles.filterHeader}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterScrollContent}
+            >
+              <TouchableOpacity
+                style={[styles.filterButton, selectedEvent === "all" && styles.filterButtonActive]}
+                onPress={() => setSelectedEvent("all")}
+              >
+                <Text style={[styles.filterText, selectedEvent === "all" && styles.filterTextActive]}>
+                  All Events
+                </Text>
+              </TouchableOpacity>
+              {eventOptions.map((event) => (
+                <TouchableOpacity
+                  key={event.eventId}
+                  style={[styles.filterButton, selectedEvent === event.eventId && styles.filterButtonActive]}
+                  onPress={() => setSelectedEvent(event.eventId)}
+                >
+                  <Text style={[styles.filterText, selectedEvent === event.eventId && styles.filterTextActive]}>
+                    {event.eventName}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </View>
         )}
-      </ScrollView>
-    </View>
+
+        <ScrollView
+          style={styles.scrollView}
+          refreshControl={
+            <RefreshControl
+              refreshing={isLoading}
+              onRefresh={refetch}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+            />
+          }
+        >
+          {isLoading && filteredList.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Loading multiday events...</Text>
+            </View>
+          ) : filteredList.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Award size={64} color={colors.lightGray} />
+              <Text style={styles.emptyText}>No multiday standings yet</Text>
+              <Text style={styles.emptySubtext}>
+                Multiday event standings will appear here once runners begin qualifying.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.participantsContainer}>
+              {Object.entries(groupedByEvent).map(([eventId, participants]) => {
+                const eventMeta = eventMetaMap.get(eventId);
+                const organizerLabel = eventMeta?.organizerLabel || "";
+                const eventName = eventMeta?.eventName || participants[0]?.eventName || "Unknown Event";
+
+                return (
+                  <View key={eventId} style={styles.eventBlock}>
+                    <View style={styles.eventHeader}>
+                      <Text style={styles.eventName}>{eventName}</Text>
+                      <Text style={styles.eventOrganizer} numberOfLines={1}>
+                        {organizerLabel || " "}
+                      </Text>
+                    </View>
+
+                    <View style={styles.tableContainer}>
+                      <View style={styles.tableHeader}>
+                        <View style={styles.numberColumn}>
+                          <Text style={styles.tableHeaderText}>#</Text>
+                        </View>
+                        <View style={styles.nameColumn}>
+                          <Text style={styles.tableHeaderText}>Name</Text>
+                        </View>
+                        <View style={styles.residenceColumn}>
+                          <Text style={styles.tableHeaderTextCenter}>Country,Club</Text>
+                        </View>
+                        <View style={styles.daysColumn}>
+                          <Text style={styles.tableHeaderTextCenter}>Days</Text>
+                        </View>
+                        <View style={styles.totalColumn}>
+                          <Text style={styles.tableHeaderTextCenter}>Total</Text>
+                        </View>
+                        <View style={styles.averageColumn}>
+                          <Text style={styles.tableHeaderTextCenter}>Avg/Day</Text>
+                        </View>
+                      </View>
+
+                      {participants.map((participant, index) => (
+                        <View
+                          key={participant.participantId || `${participant.registrationId}-${index}`}
+                          style={[styles.tableRow, index % 2 === 1 && styles.tableRowAlt]}
+                        >
+                          <Text style={[styles.tableCellSmall, styles.numberColumn]}>{index + 1}</Text>
+                          <Text style={[styles.tableCellSmall, styles.nameColumn]} numberOfLines={1}>
+                            {`${participant.firstName} ${participant.otherNames || ""}`.trim()}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.tableCellSmall,
+                              styles.residenceColumn,
+                              styles.tableCellCenter,
+                              styles.residenceCellText,
+                            ]}
+                            numberOfLines={2}
+                          >
+                            {formatCountryClub(participant.country, participant.club) || "-"}
+                          </Text>
+                          <Text style={[styles.tableCellSmall, styles.daysColumn, styles.tableCellCenter]}>
+                            {participant.qualifiedDays}
+                          </Text>
+                          <Text style={[styles.tableCellSmall, styles.totalColumn, styles.tableCellCenter]}>
+                            {participant.totalDistance.toFixed(1)}
+                          </Text>
+                          <Text style={[styles.tableCellSmall, styles.averageColumn, styles.tableCellCenter]}>
+                            {participant.qualifiedDays > 0
+                              ? (participant.totalDistance / participant.qualifiedDays).toFixed(1)
+                              : "0.0"}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: "#f5f5f5",
   },
   scrollView: {
     flex: 1,
@@ -177,138 +262,137 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 18,
     fontWeight: "600" as const,
-    color: colors.textSecondary,
+    color: "#666",
     marginBottom: 8,
     marginTop: 16,
   },
   emptySubtext: {
     fontSize: 14,
-    color: colors.textLight,
-    textAlign: "center",
+    color: "#999",
+    textAlign: "center" as const,
   },
-  eventsContainer: {
-    padding: 16,
-    gap: 24,
+  filterHeader: {
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e0e0e0",
   },
-  eventSection: {
-    gap: 12,
+  filterScrollContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  filterButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: "#f5f5f5",
+    marginRight: 8,
+  },
+  filterButtonActive: {
+    backgroundColor: "#10b981",
+  },
+  filterText: {
+    fontSize: 14,
+    fontWeight: "600" as const,
+    color: "#666",
+  },
+  filterTextActive: {
+    color: "#fff",
+  },
+  participantsContainer: {
+    padding: 12,
+    paddingBottom: 24,
+  },
+  eventBlock: {
+    marginBottom: 12,
   },
   eventHeader: {
+    backgroundColor: "#10b981",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    gap: 10,
-    paddingBottom: 12,
-    borderBottomWidth: 2,
-    borderBottomColor: colors.primary,
-  },
-  eventTitle: {
-    fontSize: 18,
-    fontWeight: "800" as const,
-    color: colors.text,
-    flex: 1,
-  },
-  countBadge: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    minWidth: 28,
-    alignItems: "center",
-  },
-  countText: {
-    fontSize: 14,
-    fontWeight: "700" as const,
-    color: colors.white,
-  },
-  participantsList: {
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
     gap: 10,
   },
-  participantCard: {
-    flexDirection: "row",
-    borderRadius: 14,
-    padding: 12,
-    gap: 12,
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  rankContainer: {
-    width: 40,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  rankNumber: {
-    fontSize: 24,
-    fontWeight: "900" as const,
-    color: colors.textSecondary,
-  },
-  goldRank: {
-    color: "#FFD700",
-    textShadowColor: "#B8860B",
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  silverRank: {
-    color: "#C0C0C0",
-    textShadowColor: "#808080",
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  bronzeRank: {
-    color: "#CD7F32",
-    textShadowColor: "#8B4513",
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  participantInfo: {
-    flex: 1,
-    gap: 8,
-  },
-  nameRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  locationText: {
-    fontSize: 13,
-    fontWeight: "500" as const,
-    color: colors.textSecondary,
-    flex: 1,
-  },
-  nameBox: {
-    backgroundColor: "rgba(255, 255, 255, 0.7)",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    maxWidth: "45%",
-  },
-  nameText: {
-    fontSize: 15,
+  eventName: {
+    fontSize: 16,
     fontWeight: "700" as const,
-    color: colors.text,
-  },
-  statsRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  statItem: {
+    color: "#fff",
     flex: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.6)",
-    borderRadius: 8,
-    padding: 8,
-    alignItems: "center",
   },
-  statLabel: {
-    fontSize: 10,
+  eventOrganizer: {
+    fontSize: 11,
     fontWeight: "600" as const,
-    color: colors.textSecondary,
-    marginBottom: 2,
+    color: "rgba(255, 255, 255, 0.9)",
+    maxWidth: "40%",
+    textAlign: "right" as const,
   },
-  statValue: {
-    fontSize: 14,
-    fontWeight: "800" as const,
-    color: colors.text,
+  tableContainer: {
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: "#f2f4f7",
+  },
+  tableHeader: {
+    flexDirection: "row",
+    backgroundColor: "#10b981",
+    paddingVertical: 6,
+    paddingHorizontal: 6,
+  },
+  tableHeaderText: {
+    fontSize: 9,
+    fontWeight: "700" as const,
+    color: "#fff",
+  },
+  tableHeaderTextCenter: {
+    fontSize: 9,
+    fontWeight: "700" as const,
+    color: "#fff",
+    textAlign: "left" as const,
+  },
+  tableRow: {
+    flexDirection: "row",
+    paddingVertical: 5,
+    paddingHorizontal: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+  },
+  tableRowAlt: {
+    backgroundColor: "#fafafa",
+  },
+  tableCellSmall: {
+    fontSize: 9,
+    color: "#333",
+    lineHeight: 12,
+  },
+  tableCellCenter: {
+    textAlign: "left" as const,
+  },
+  residenceCellText: {
+    flexWrap: "wrap" as const,
+  },
+  numberColumn: {
+    flex: 0.4,
+  },
+  nameColumn: {
+    flex: 2.1,
+  },
+  residenceColumn: {
+    flex: 2.5,
+    textAlign: "left" as const,
+  },
+  daysColumn: {
+    flex: 0.8,
+    textAlign: "left" as const,
+  },
+  totalColumn: {
+    flex: 0.9,
+    textAlign: "left" as const,
+  },
+  averageColumn: {
+    flex: 1.1,
+    textAlign: "left" as const,
   },
 });

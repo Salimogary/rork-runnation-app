@@ -12,7 +12,8 @@ app.use(
   "/trpc/*",
   trpcServer({
     router: appRouter,
-    createContext,
+    createContext: async (_opts, c) =>
+      createContext({ req: c.req.raw as any } as any),
   })
 );
 

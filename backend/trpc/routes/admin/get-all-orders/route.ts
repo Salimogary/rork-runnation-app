@@ -1,6 +1,12 @@
 import { publicProcedure } from "../../../create-context";
+import { requireAdminPermission } from "../../../rbac";
 
 export default publicProcedure.query(async ({ ctx }) => {
+  await requireAdminPermission(ctx, {
+    allowSuperAdmin: true,
+    allowCountryAdmin: true,
+  });
+
   const { data, error } = await ctx.supabase
     .from("orders")
     .select(`

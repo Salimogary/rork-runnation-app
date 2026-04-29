@@ -2,13 +2,30 @@ import React, { useEffect, useState } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { CountryNamesProvider } from "@/contexts/CountryNamesContext";
 import { SubscriptionProvider, useSubscription } from "@/contexts/SubscriptionContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
-import { TRPCProvider } from "@/lib/trpc";
+import { TRPCProvider } from "../lib/trpc";
 import * as SplashScreen from "expo-splash-screen";
 import * as Linking from "expo-linking";
 import { Platform, View, Text } from "react-native";
+
+function getAuthParamsFromUrl(url: string) {
+  const queryString = url.includes("?") ? url.split("?")[1]?.split("#")[0] ?? "" : "";
+  const fragmentString = url.includes("#") ? url.split("#")[1] ?? "" : "";
+  const queryParams = new URLSearchParams(queryString);
+  const fragmentParams = new URLSearchParams(fragmentString);
+
+  const readParam = (key: string) => queryParams.get(key) ?? fragmentParams.get(key);
+
+  return {
+    accessToken: readParam("access_token"),
+    refreshToken: readParam("refresh_token"),
+    code: readParam("code"),
+    error: readParam("error_description") ?? readParam("error"),
+  };
+}
 
 function useOnboardingCheck() {
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState<boolean | null>(null);
@@ -43,13 +60,37 @@ function useDeepLinkHandler() {
 
     const handleDeepLink = async (event: { url: string }) => {
       try {
-        const { queryParams } = Linking.parse(event.url);
-        if (queryParams?.access_token && queryParams?.refresh_token) {
-          const { supabase } = await import("@/lib/supabase");
-          await supabase.auth.setSession({
-            access_token: queryParams.access_token as string,
-            refresh_token: queryParams.refresh_token as string,
+        const authParams = getAuthParamsFromUrl(event.url);
+        console.log("[Layout] Deep link received:", {
+          hasAccessToken: Boolean(authParams.accessToken),
+          hasRefreshToken: Boolean(authParams.refreshToken),
+          hasCode: Boolean(authParams.code),
+          hasError: Boolean(authParams.error),
+        });
+
+        if (authParams.error) {
+          console.error("[Layout] Deep link auth error:", authParams.error);
+          return;
+        }
+
+        const { supabase } = await import("@/lib/supabase");
+
+        if (authParams.code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(authParams.code);
+          if (error) {
+            console.error("[Layout] Deep link code exchange error:", error.message);
+          }
+          return;
+        }
+
+        if (authParams.accessToken && authParams.refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: authParams.accessToken,
+            refresh_token: authParams.refreshToken,
           });
+          if (error) {
+            console.error("[Layout] Deep link session error:", error.message);
+          }
         }
       } catch (error) {
         console.error("[Layout] Deep link error:", error);
@@ -81,7 +122,7 @@ function NavigationGuard() {
 
     const currentSegment = segments[0] as string;
     const inOnboarding = currentSegment === "onboarding";
-    const inRegister = currentSegment === "register";
+    const inRegister = currentSegment === "register" || currentSegment === "profleSetup";
     const inTabs = currentSegment === "(tabs)";
     const inAdminLogin = currentSegment === "admin-login";
     const inAdmin = currentSegment === "admin";
@@ -94,6 +135,7 @@ function NavigationGuard() {
       currentSegment === "profile" ||
       currentSegment === "cart" ||
       currentSegment === "checkout" ||
+      currentSegment === "magazine" ||
       currentSegment === "participants" ||
       currentSegment === "medal-list" ||
       currentSegment === "policy" ||
@@ -113,7 +155,7 @@ function NavigationGuard() {
           router.replace("/onboarding" as never);
         }
       } else {
-        if (!inRegister) {
+        if (!inRegister && !inOnboarding) {
           router.replace("/register" as never);
         }
       }
@@ -137,6 +179,7 @@ function RootLayoutNav() {
       }}>
         <Stack.Screen name="onboarding" options={{ headerShown: false }} />
         <Stack.Screen name="register" options={{ headerShown: false }} />
+        <Stack.Screen name="profleSetup" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: "modal", title: "Modal" }} />
         <Stack.Screen name="profile" options={{ presentation: "modal", title: "Profile" }} />
@@ -145,6 +188,10 @@ function RootLayoutNav() {
         <Stack.Screen name="admin" options={{ title: "Admin" }} />
         <Stack.Screen name="cart" options={{ title: "Cart" }} />
         <Stack.Screen name="checkout" options={{ title: "Checkout" }} />
+        <Stack.Screen name="magazine/[issueSlug]" options={{ title: "Magazine" }} />
+        <Stack.Screen name="magazine/article/[articleSlug]" options={{ title: "Article" }} />
+        <Stack.Screen name="magazine/submit" options={{ presentation: "modal", title: "Submit Story" }} />
+        <Stack.Screen name="magazine/pictorial-submit" options={{ presentation: "modal", title: "Submit Pictorial" }} />
         <Stack.Screen name="participants" options={{ title: "Participants" }} />
         <Stack.Screen name="medal-list" options={{ title: "Medal List" }} />
         <Stack.Screen name="policy" options={{ presentation: "modal", title: "Policy & Terms" }} />
@@ -200,15 +247,17 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <TRPCProvider>
-        <ThemeProvider>
-          <AuthProvider>
-            <SubscriptionProvider>
-              <NotificationProvider>
-                <RootLayoutNav />
-              </NotificationProvider>
-            </SubscriptionProvider>
-          </AuthProvider>
-        </ThemeProvider>
+        <CountryNamesProvider>
+          <ThemeProvider>
+            <AuthProvider>
+              <SubscriptionProvider>
+                <NotificationProvider>
+                  <RootLayoutNav />
+                </NotificationProvider>
+              </SubscriptionProvider>
+            </AuthProvider>
+          </ThemeProvider>
+        </CountryNamesProvider>
       </TRPCProvider>
     </ErrorBoundary>
   );

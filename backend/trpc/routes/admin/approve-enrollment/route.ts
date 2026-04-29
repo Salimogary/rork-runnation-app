@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import { logAdminAction, requireAdminPermission } from "../../../rbac";
+import { randomUUID } from "crypto";
 
 export default publicProcedure
   .input(
@@ -8,6 +10,14 @@ export default publicProcedure
     })
   )
   .mutation(async ({ ctx, input }) => {
+    const actor = await requireAdminPermission(ctx, {
+      allowSuperAdmin: true,
+      allowCountryAdmin: true,
+      allowCountryCoordinator: true,
+      allowClubCoordinator: true,
+      allowEventOrganizer: true,
+    });
+
     console.log('[approveEnrollment] Approving enrollment:', input.enrollmentId);
 
     const { data: enrollment, error: fetchError } = await ctx.supabase
@@ -27,9 +37,36 @@ export default publicProcedure
       throw new Error('Enrollment not found or already processed');
     }
 
+    const organizerScopes = actor.roles
+      .filter((role) => role.roleName === "event_organizer" && role.organizerId)
+      .map((role) => role.organizerId as string);
+    const isOrganizerOnly =
+      actor.isEventOrganizer &&
+      !actor.isSuperAdmin &&
+      !actor.isCountryAdmin &&
+      !actor.isCountryCoordinator &&
+      !actor.isClubCoordinator;
+
+    if (isOrganizerOnly) {
+      const { data: event, error: eventError } = await ctx.supabase
+        .from("events")
+        .select("event_id, organizer")
+        .eq("event_id", enrollment.event_id)
+        .maybeSingle();
+
+      if (eventError || !event) {
+        throw new Error(eventError?.message || "Could not load the event for this enrollment.");
+      }
+
+      if (!event.organizer || !organizerScopes.includes(event.organizer)) {
+        throw new Error("You can only approve enrollments for your organizer-owned events.");
+      }
+    }
+
     const { data: participant, error: insertError } = await ctx.supabase
       .from("events_participants")
       .insert({
+        event_participant_id: randomUUID(),
         event_id: enrollment.event_id,
         registration_id: enrollment.registration_id,
         registration_date: new Date().toISOString().split('T')[0],
@@ -51,6 +88,18 @@ export default publicProcedure
       console.error('[approveEnrollment] Error deleting enrollment:', deleteError);
     }
 
+    await logAdminAction(ctx, {
+      actorUserId: actor.authUserId,
+      actionType: "approve_enrollment",
+      metadata: {
+        enrollmentId: input.enrollmentId,
+        eventId: enrollment.event_id,
+        registrationId: enrollment.registration_id,
+        participantId: participant?.event_participant_id ?? null,
+      },
+    });
+
     console.log('[approveEnrollment] Enrollment approved successfully:', participant);
     return { success: true, participant };
   });
+

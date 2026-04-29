@@ -1,0 +1,1 @@
+export const ADMIN_TERMS_VERSION = "2026-04-29";
