@@ -32,14 +32,25 @@ yarn-error.*
 *.pem
 
 # local env files
-.env*.local
+.env
+.env.*
+backend/.env
+backend/.env.*
+!.env.example
+!backend/.env.example
+
+# Supabase local/dev state
+supabase/.temp/
+supabase/.branches/
+supabase/.cache/
+supabase/.env
+supabase/.env.*
 
 # typescript
 *.tsbuildinfo
 .vercel
 
 .rork
-.env
 rork-eslint.config.js
 core
 node_modules
