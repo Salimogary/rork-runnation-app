@@ -50,14 +50,17 @@ export default publicProcedure.query(async ({ ctx }) => {
       .eq("profile_id", ctx.authUserId)
       .maybeSingle();
 
-    if (profile?.registration_id) {
+    const profileRow = profile as { registration_id?: string | null } | null;
+
+    if (profileRow?.registration_id) {
       const { data: registration } = await ctx.supabase
         .from("registrations")
         .select("country")
-        .eq("registration_id", profile.registration_id)
+        .eq("registration_id", profileRow.registration_id)
         .maybeSingle();
 
-      actorCountryCode = normalizeCountryCode(registration?.country);
+      const registrationRow = registration as { country?: string | null } | null;
+      actorCountryCode = normalizeCountryCode(registrationRow?.country);
     }
   }
 
@@ -105,8 +108,28 @@ export default publicProcedure.query(async ({ ctx }) => {
     throw new Error(profilesError.message || "Could not load admin profiles.");
   }
 
-  const profileById = new Map((profiles ?? []).map((profile: any) => [profile.profile_id, profile]));
-  const registrationIds = [...new Set((profiles ?? []).map((profile: any) => profile.registration_id).filter(Boolean))];
+  type AdminProfileRow = {
+    profile_id?: string | null;
+    registration_id?: string | null;
+    display_name?: string | null;
+    username?: string | null;
+  };
+  type AdminRegistrationRow = {
+    registration_id?: string | null;
+    first_name?: string | null;
+    other_names?: string | null;
+    country?: string | null;
+  };
+  type AdminContactRow = {
+    registration_id?: string | null;
+    phone?: string | null;
+    full_phone?: string | null;
+    email?: string | null;
+  };
+
+  const profileRows = (profiles ?? []) as AdminProfileRow[];
+  const profileById = new Map(profileRows.map((profile) => [profile.profile_id, profile]));
+  const registrationIds = [...new Set(profileRows.map((profile) => profile.registration_id).filter(Boolean))] as string[];
 
   const [{ data: registrations, error: registrationsError }, { data: contacts, error: contactsError }] =
     await Promise.all([
@@ -132,8 +155,10 @@ export default publicProcedure.query(async ({ ctx }) => {
     throw new Error(contactsError.message || "Could not load admin contact details.");
   }
 
-  const registrationById = new Map((registrations ?? []).map((registration: any) => [registration.registration_id, registration]));
-  const contactByRegistrationId = new Map((contacts ?? []).map((contact: any) => [contact.registration_id, contact]));
+  const registrationRows = (registrations ?? []) as AdminRegistrationRow[];
+  const contactRows = (contacts ?? []) as AdminContactRow[];
+  const registrationById = new Map(registrationRows.map((registration) => [registration.registration_id, registration]));
+  const contactByRegistrationId = new Map(contactRows.map((contact) => [contact.registration_id, contact]));
 
   const contactsResult = filteredAssignments
     .map((assignment) => {
