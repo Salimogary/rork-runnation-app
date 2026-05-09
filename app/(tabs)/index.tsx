@@ -60,6 +60,13 @@ interface RunnerProfile {
   photoUrl: string | null;
 }
 
+interface WorkoutLocationDetails {
+  locality: string;
+  country: string;
+  countryCode: string;
+  countryFlag: string;
+}
+
 type ImportanceLevel = "VERY HIGH" | "HIGH" | "MEDIUM" | "LOW";
 
 interface SmartWatchField {
@@ -155,6 +162,7 @@ export default function ExerciseScreen() {
   const [showRunDetailsModal, setShowRunDetailsModal] = useState(false);
   const [activitySaved, setActivitySaved] = useState(false);
   const [runnerProfile, setRunnerProfile] = useState<RunnerProfile | null>(null);
+  const [workoutLocation, setWorkoutLocation] = useState<WorkoutLocationDetails | null>(null);
   const [runCardTheme, setRunCardTheme] = useState<"light" | "dark">("dark");
   const [showTreadmillModal, setShowTreadmillModal] = useState(false);
   const [treadmillDistance, setTreadmillDistance] = useState("");
@@ -268,6 +276,55 @@ export default function ExerciseScreen() {
 
     void refetchRegisteredEvents();
   }, [effectiveRegistrationId, refetchRegisteredEvents]);
+
+  const resolveWorkoutStartLocation = useCallback(async (coord: Coordinates) => {
+    if (Platform.OS === "web") {
+      return;
+    }
+
+    try {
+      const [address] = await Location.reverseGeocodeAsync({
+        latitude: coord.latitude,
+        longitude: coord.longitude,
+      });
+
+      if (!address) {
+        return;
+      }
+
+      const countryCode = String(address.isoCountryCode || "").trim().toUpperCase();
+      const country = formatCountryName(countryCode || address.country || "") || address.country || "";
+      const locality = [
+        address.city,
+        address.district,
+        address.subregion,
+        address.region,
+      ]
+        .map((part) => String(part || "").trim())
+        .filter(Boolean)
+        .filter((part, index, list) => list.findIndex((item) => item.toLowerCase() === part.toLowerCase()) === index)
+        .slice(0, 2)
+        .join(", ");
+
+      setWorkoutLocation({
+        locality,
+        country,
+        countryCode,
+        countryFlag: countryFlagFromCountry(countryCode || country),
+      });
+    } catch (error) {
+      console.warn("[Workout Location] Could not reverse geocode start point:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    const startCoord = coords[0];
+    if (!startCoord || workoutLocation) {
+      return;
+    }
+
+    void resolveWorkoutStartLocation(startCoord);
+  }, [coords, resolveWorkoutStartLocation, workoutLocation]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -825,6 +882,7 @@ export default function ExerciseScreen() {
     setStartTime(null);
     setExerciseType(null);
     setSelectedEventRun(null);
+    setWorkoutLocation(null);
     setShowRunDetailsModal(false);
     setActivitySaved(false);
     elapsedBeforePause.current = 0;
@@ -872,10 +930,14 @@ export default function ExerciseScreen() {
   };
 
   const getRunDetailsMeta = () => {
+    const locationLabel = [
+      workoutLocation?.locality,
+      workoutLocation?.country,
+    ].filter(Boolean).join(", ");
+
     return [
-      runnerProfile?.countryFlag,
-      runnerProfile?.club,
-      selectedEventRun?.eventName,
+      workoutLocation?.countryFlag,
+      locationLabel,
     ].filter(Boolean).join("  ");
   };
 
@@ -1755,7 +1817,7 @@ export default function ExerciseScreen() {
                         {runnerProfile?.name || user?.username || "RunNation Runner"}
                       </Text>
                       <Text style={[styles.shareRunnerMeta, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]} numberOfLines={2}>
-                        {getRunDetailsMeta() || [runnerProfile?.countryFlag, runnerProfile?.country].filter(Boolean).join("  ")}
+                        {getRunDetailsMeta() || "Workout location"}
                       </Text>
                     </View>
                     <View style={styles.shareDistanceBlock}>
@@ -1779,8 +1841,8 @@ export default function ExerciseScreen() {
                       <Text style={styles.shareMetricLabel}>Workout Duration</Text>
                     </View>
                     <View style={[styles.shareMetric, styles.shareMetricWide]}>
-                      <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{`${formatPaceMinPerKm()} /km`}</Text>
-                      <Text style={styles.shareMetricLabel}>Avg pace</Text>
+                      <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{formatPaceMinPerKm()}</Text>
+                      <Text style={styles.shareMetricLabel}>Avg pace/km</Text>
                     </View>
                     <View style={styles.shareMetric}>
                       <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{formatTime(pauseDurationSeconds)}</Text>
@@ -1789,10 +1851,6 @@ export default function ExerciseScreen() {
                     <View style={styles.shareMetric}>
                       <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{exerciseType || "Run"}</Text>
                       <Text style={styles.shareMetricLabel}>Activity type</Text>
-                    </View>
-                    <View style={styles.shareMetric}>
-                      <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{runnerProfile?.town || "-"}</Text>
-                      <Text style={styles.shareMetricLabel}>Town</Text>
                     </View>
                     <View style={styles.shareMetric}>
                       <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{getWeatherDisplay()}</Text>
@@ -2578,8 +2636,8 @@ const styles = StyleSheet.create({
     marginTop: -34,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    padding: 22,
-    paddingTop: 14,
+    padding: 20,
+    paddingTop: 12,
     minHeight: 330,
     overflow: "hidden" as const,
   },
@@ -2598,36 +2656,36 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: "#CBD5E1",
     alignSelf: "center" as const,
-    marginBottom: 14,
+    marginBottom: 10,
   },
   shareTopRow: {
     flexDirection: "row" as const,
     justifyContent: "space-between" as const,
-    gap: 12,
+    gap: 10,
   },
   shareRunnerBlock: {
     flex: 1,
   },
   shareAvatar: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     borderWidth: 2,
     borderColor: "#FFFFFF",
     marginTop: 0,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   shareAvatarFallback: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     alignItems: "center" as const,
     justifyContent: "center" as const,
     backgroundColor: "#F97316",
     borderWidth: 2,
     borderColor: "#FFFFFF",
     marginTop: 0,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   shareAvatarInitial: {
     color: colors.white,
@@ -2638,14 +2696,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   shareRunnerName: {
-    fontSize: 25,
+    fontSize: 23,
     fontWeight: "500" as const,
   },
   shareRunnerMeta: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "500" as const,
-    marginTop: 5,
-    lineHeight: 18,
+    marginTop: 3,
+    lineHeight: 15,
   },
   shareTextLight: {
     color: colors.white,
@@ -2662,7 +2720,7 @@ const styles = StyleSheet.create({
   shareDistanceBlock: {
     alignItems: "flex-end" as const,
     justifyContent: "flex-start" as const,
-    minWidth: 138,
+    minWidth: 132,
   },
   shareMedalSymbol: {
     fontSize: 24,
@@ -2674,20 +2732,20 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   shareDistanceValue: {
-    fontSize: 58,
+    fontSize: 54,
     fontWeight: "400" as const,
-    lineHeight: 64,
+    lineHeight: 58,
   },
   shareDistanceUnit: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "500" as const,
-    marginBottom: 9,
+    marginBottom: 7,
   },
   shareMetricsGrid: {
     flexDirection: "row" as const,
     flexWrap: "wrap" as const,
-    rowGap: 24,
-    marginTop: 28,
+    rowGap: 18,
+    marginTop: 20,
   },
   shareMetric: {
     width: "33.33%",
@@ -2699,20 +2757,20 @@ const styles = StyleSheet.create({
   },
   shareMetricLabel: {
     color: "#6B7280",
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "500" as const,
     textAlign: "center" as const,
-    marginTop: 6,
+    marginTop: 4,
   },
   shareMetricValue: {
-    fontSize: 23,
+    fontSize: 22,
     fontWeight: "500" as const,
     textAlign: "center" as const,
   },
   shareDateText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "500" as const,
-    marginTop: 6,
+    marginTop: 4,
   },
   shareMap: {
     flex: 1,
