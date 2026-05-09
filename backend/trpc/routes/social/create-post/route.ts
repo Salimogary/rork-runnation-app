@@ -11,7 +11,7 @@ const activityDataSchema = z.object({
   exercise_type: z.string(),
   distance_km: z.number(),
   Time: z.string(),
-  pace_km_h: z.number(),
+  pace_min_per_km: z.number(),
 });
 
 const pollSchema = z.object({
@@ -32,6 +32,19 @@ export default publicProcedure
   )
   .mutation(async ({ input, ctx }) => {
     await requireRegistrationOwner(ctx, input.registrationId);
+    const { data: moderationFlag, error: moderationFlagError } = await ctx.supabase
+      .from("user_moderation_flags")
+      .select("is_banned")
+      .eq("registration_id", input.registrationId)
+      .maybeSingle();
+
+    if (moderationFlagError) {
+      throw new Error(moderationFlagError.message || "Could not check chat access.");
+    }
+    if (moderationFlag?.is_banned) {
+      throw new Error("Your chat access is currently restricted after moderation review.");
+    }
+
     await ensureActionCooldown(ctx, {
       table: "social_posts",
       filters: [{ column: "registration_id", value: input.registrationId }],

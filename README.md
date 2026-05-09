@@ -1,6 +1,6 @@
 # RunNation
 
-RunNation is a cross-platform running community app built with Expo Router, React Native, Supabase, and tRPC. It supports activity tracking, event runs, club and community leaderboards, goals, chat, shop orders, magazine content, subscriptions, and admin workflows.
+RunNation is a cross-platform running community app built with Expo Router, React Native, Supabase, and tRPC. It supports workout tracking, event runs, recurring and multiday events, club and community reports, goals, chat, shop orders, magazine content, subscriptions, service-team roles, moderation, and admin workflows.
 
 ## Documentation
 
@@ -53,7 +53,7 @@ Current known state: TypeScript passes. Lint has existing failures in `app/admin
 
 ```text
 app/                 Expo Router screens
-app/(tabs)/          Main tab screens: Exercise, Activity, Events, Goals, Chat, Shop, Magazine
+app/(tabs)/          Main tab screens: Workout, Reports, Events, Goals, Chat, Shop, Magazine
 backend/             tRPC/Hono/Express backend code
 components/          Shared UI components
 constants/           Colors, countries, and app constants
@@ -83,15 +83,19 @@ Backend environment:
 
 Do not commit real `.env` files. Use the `.env.example` files as templates.
 
-## Current Exercise Testing Settings
+## Current Workout Recording Settings
 
 For limited Wi-Fi range testing:
 
-- Minimum saved activity distance: `0.1 km`
-- Minimum saved activity time: `3 minutes`
+- Minimum saved GPS workout distance: `0.5 km`
+- Minimum saved GPS workout time: `5 minutes`
+- Shorter attempts can offer pause/resume instead of immediate save
+- Paused time is stored on activities as cumulative paused seconds
 - Start countdown: `3, 2, 1, START`
 - Optional Activity Voice Assistant toggle in Settings
 - Finish flow opens a RunNation share card with Save, Share, and Close options
+
+Treadmill records count for workouts, reports, and goals, but not for event credit. Smart watch and other sports app imports can count for event credit after club or organizer approval with evidence where required.
 
 ## GitHub Handoff
 

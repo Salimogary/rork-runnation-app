@@ -1,6 +1,19 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
 
+function resolveDob(value: string): string | null {
+  const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return match ? `${match[3]}-${match[2]}-${match[1]}` : value;
+}
+
+function isAtLeastEightYearsOld(value: string): boolean {
+  const dob = new Date(value);
+  if (Number.isNaN(dob.getTime())) return false;
+  const minimumDate = new Date();
+  minimumDate.setFullYear(minimumDate.getFullYear() - 8);
+  return dob <= minimumDate;
+}
+
 export default publicProcedure
   .input(
     z.object({
@@ -8,9 +21,9 @@ export default publicProcedure
       otherNames: z.string().min(1),
       username: z.string().min(1),
       sex: z.string().min(1),
-      dob: z.string().min(1),
+      dob: z.string().trim().min(1),
       residence: z.string().min(1),
-      country: z.string().min(1),
+      country: z.string().trim().min(1),
     })
   )
   .mutation(async ({ input, ctx }) => {
@@ -26,10 +39,11 @@ export default publicProcedure
       throw new Error("Username already exists");
     }
 
-    const formattedDob = (() => {
-      const match = input.dob.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-      return match ? `${match[3]}-${match[2]}-${match[1]}` : input.dob;
-    })();
+    const formattedDob = resolveDob(input.dob);
+
+    if (!formattedDob || !isAtLeastEightYearsOld(formattedDob)) {
+      throw new Error("RunNation registration is available for users aged 8 years and above.");
+    }
 
     const { data, error } = await ctx.supabase
       .from("registrations")

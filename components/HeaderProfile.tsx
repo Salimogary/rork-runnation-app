@@ -66,13 +66,23 @@ export default function HeaderProfile() {
     queryKey: ["headerProfilePhoto", user?.id, user],
     queryFn: async () => {
       if (!user) return null;
-      const { data } = await supabase
-        .from("user_photos")
-        .select("file_path")
-        .eq("registration_id", user.id)
-        .eq("is_profile_photo", true)
-        .maybeSingle();
-      return data?.file_path || null;
+      const [{ data: profilePhoto }, { data: latestPhoto }] = await Promise.all([
+        supabase
+          .from("user_photos")
+          .select("file_path")
+          .eq("registration_id", user.id)
+          .eq("is_profile_photo", true)
+          .maybeSingle(),
+        supabase
+          .from("user_photos")
+          .select("file_path")
+          .eq("registration_id", user.id)
+          .order("is_profile_photo", { ascending: false })
+          .order("file_name", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+      return profilePhoto?.file_path || latestPhoto?.file_path || null;
     },
     enabled: !!user,
   });

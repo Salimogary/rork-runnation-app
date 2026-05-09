@@ -2,6 +2,19 @@ import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
 import { requireRegistrationOwner } from "../../../rbac";
 
+function normalizeDob(value: string): string {
+  const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return match ? `${match[3]}-${match[2]}-${match[1]}` : value;
+}
+
+function isAtLeastEightYearsOld(value: string): boolean {
+  const dob = new Date(value);
+  if (Number.isNaN(dob.getTime())) return false;
+  const minimumDate = new Date();
+  minimumDate.setFullYear(minimumDate.getFullYear() - 8);
+  return dob <= minimumDate;
+}
+
 export default publicProcedure
   .input(
     z.object({
@@ -14,6 +27,10 @@ export default publicProcedure
         dob: z.string().nullable().optional(),
         city_town_district: z.string().nullable().optional(),
         country: z.string().nullable().optional(),
+        travel_country: z.string().nullable().optional(),
+        travel_country_code: z.string().nullable().optional(),
+        travel_start_date: z.string().nullable().optional(),
+        travel_end_date: z.string().nullable().optional(),
       }),
       contact: z.object({
         email: z.string().nullable().optional(),
@@ -25,13 +42,52 @@ export default publicProcedure
   .mutation(async ({ input, ctx }) => {
     await requireRegistrationOwner(ctx, input.registrationId);
 
-    const { error: regError } = await ctx.supabase
-      .from("registrations")
-      .update(input.registration)
-      .eq("registration_id", input.registrationId);
+    const registration = { ...input.registration };
+    if (Object.keys(registration).length === 0 && Object.keys(input.contact).length === 0) {
+      return { success: true };
+    }
 
-    if (regError) {
-      throw new Error(regError.message || "Failed to update profile");
+    if (registration.dob !== undefined && !String(registration.dob || "").trim()) {
+      throw new Error("Date of birth is required.");
+    }
+    if (registration.dob) {
+      registration.dob = normalizeDob(registration.dob);
+      if (!isAtLeastEightYearsOld(registration.dob)) {
+        throw new Error("RunNation registration is available for users aged 8 years and above.");
+      }
+    }
+    if (registration.country !== undefined && !String(registration.country || "").trim()) {
+      throw new Error("Nationality is required.");
+    }
+
+    if (registration.travel_start_date || registration.travel_end_date) {
+      const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+      if (
+        !registration.travel_start_date ||
+        !registration.travel_end_date ||
+        !isoDatePattern.test(registration.travel_start_date) ||
+        !isoDatePattern.test(registration.travel_end_date)
+      ) {
+        throw new Error("Travel dates must be in YYYY-MM-DD format.");
+      }
+      if (registration.travel_end_date < registration.travel_start_date) {
+        throw new Error("Travel end date cannot be before travel start date.");
+      }
+    }
+
+    if (Object.keys(registration).length > 0) {
+      const { error: regError } = await ctx.supabase
+        .from("registrations")
+        .update(registration)
+        .eq("registration_id", input.registrationId);
+
+      if (regError) {
+        throw new Error(regError.message || "Failed to update profile");
+      }
+    }
+
+    if (Object.keys(input.contact).length === 0) {
+      return { success: true };
     }
 
     const fullPhone = input.contact.phone?.trim() || null;

@@ -74,18 +74,20 @@ export default function TabLayout() {
           fontSize: 20,
           marginLeft: 8,
         },
-        headerLeft: () => (
-          <TouchableOpacity onPress={() => router.push("/settings" as any)} style={{ marginLeft: 16 }}>
-            <Settings size={24} color={colors.headerText} />
-          </TouchableOpacity>
+        headerRight: () => (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginRight: 8 }}>
+            <TouchableOpacity onPress={() => router.push("/settings" as any)} style={{ padding: 6 }}>
+              <Settings size={24} color={colors.headerText} />
+            </TouchableOpacity>
+            <HeaderProfile />
+          </View>
         ),
-        headerRight: () => <HeaderProfile />,
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: "Exercise",
+          title: "Workout",
           tabBarIcon: ({ color }) => <Footprints color={color} size={24} />,
         }}
       />
@@ -110,7 +112,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="activity"
         options={{
-          title: "Activity",
+          title: "Reports",
           tabBarIcon: ({ color }) => <Users color={color} size={24} />,
         }}
       />

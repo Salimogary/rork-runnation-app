@@ -79,6 +79,7 @@ export default publicProcedure
         organizer_id: organizerId,
         assigned_by: actor.authUserId,
         is_active: true,
+        is_exclusive_admin_role: true,
       })
       .eq("assignment_id", input.assignmentId);
 

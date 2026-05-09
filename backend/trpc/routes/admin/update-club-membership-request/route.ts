@@ -47,6 +47,10 @@ export default publicProcedure
       throw new Error("Membership request was not found.");
     }
 
+    if ((request.status ?? "pending") !== "pending") {
+      throw new Error("This request has already been reviewed.");
+    }
+
     const coordinatorClubIds = actor.roles
       .filter((role) => role.roleName === "club_coordinator" && role.clubId)
       .map((role) => role.clubId as string);
@@ -110,6 +114,20 @@ export default publicProcedure
     let approvedOrganizerProfileId: string | null = null;
 
     if (request.request_type === "event_organizer" && input.status === "approved") {
+      const { data: existingOrganizer, error: existingOrganizerError } = await ctx.supabase
+        .from("event_organizers")
+        .select("organizer_id")
+        .eq("registration_id", input.registrationId)
+        .eq("is_active", true)
+        .limit(1);
+
+      if (existingOrganizerError) {
+        throw new Error(existingOrganizerError.message || "Could not check existing organizer profile.");
+      }
+      if ((existingOrganizer ?? []).length > 0) {
+        throw new Error("This user already has an active event organizer profile.");
+      }
+
       const organizerName = (request.proposed_club_name ?? request.club ?? "").trim();
       if (!organizerName) {
         throw new Error("Organizer name is missing from this request.");
@@ -157,6 +175,21 @@ export default publicProcedure
       approvedOrganizerProfileId = profile?.profile_id ?? null;
 
       if (approvedOrganizerProfileId && eventOrganizerRole?.role_id) {
+        const { data: activeRoles, error: activeRolesError } = await ctx.supabase
+          .from("user_role_assignments")
+          .select("assignment_id")
+          .eq("user_id", approvedOrganizerProfileId)
+          .eq("is_active", true)
+          .eq("is_exclusive_admin_role", true)
+          .limit(1);
+
+        if (activeRolesError) {
+          throw new Error(activeRolesError.message || "Could not check existing role assignments.");
+        }
+        if ((activeRoles ?? []).length > 0) {
+          throw new Error("This user already has an active role. Each user can hold only one role at a time.");
+        }
+
         const { error: assignmentError } = await ctx.supabase
           .from("user_role_assignments")
           .upsert(
@@ -168,6 +201,7 @@ export default publicProcedure
               organizer_id: approvedOrganizerId,
               assigned_by: actor.authUserId,
               is_active: true,
+              is_exclusive_admin_role: true,
             },
             {
               onConflict: "user_id,role_id,country_code,club_id,organizer_id",
@@ -194,7 +228,8 @@ export default publicProcedure
         reviewed_by: actor.authUserId,
         reviewed_at: new Date().toISOString(),
       })
-      .eq("registration_id", input.registrationId);
+      .eq("registration_id", input.registrationId)
+      .eq("status", "pending");
 
     if (updateError) {
       throw new Error(updateError.message || "Could not update membership request.");

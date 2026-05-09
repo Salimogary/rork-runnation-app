@@ -1,14 +1,14 @@
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Platform, Modal, TextInput, Alert, Image, AppState, AppStateStatus, AccessibilityInfo, Share } from "react-native";
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge, Watch, Smartphone, ChevronRight, Heart, Activity, Droplets, Flame, Stethoscope } from "lucide-react-native";
 import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
 import * as Speech from "expo-speech";
-import MapView, { Polyline } from "react-native-maps";
+import MapView, { Circle, Polyline } from "react-native-maps";
 import { LinearGradient } from "expo-linear-gradient";
-import { Stack } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -39,9 +39,14 @@ interface LocationPoint {
 
 interface RegisteredEventRun {
   eventId: string;
+  eventIds?: string[];
   eventName: string;
   startsAt: string | null;
   endsAt: string | null;
+  eventType?: string | null;
+  recurrenceFrequency?: string | null;
+  recurrenceWeekday?: number | null;
+  sharedCountMessage?: string | null;
   distanceKm?: number | null;
   timeSeconds?: number | null;
 }
@@ -51,6 +56,7 @@ interface RunnerProfile {
   town: string;
   country: string;
   countryFlag: string;
+  club: string;
   photoUrl: string | null;
 }
 
@@ -87,10 +93,10 @@ const GPS_ACCURACY_THRESHOLD = 25;
 const MAX_SPEED_KMH_RUN = 45;
 const MAX_SPEED_KMH_WALK = 15;
 const MIN_DISTANCE_BETWEEN_POINTS = 0.002;
-const MIN_DISTANCE_ACTIVITY = 0.1;
+const MIN_DISTANCE_ACTIVITY = 0.5;
 const MIN_DISTANCE_WALK = MIN_DISTANCE_ACTIVITY;
 const MIN_DISTANCE_RUN = MIN_DISTANCE_ACTIVITY;
-const MIN_ACTIVITY_DURATION_MINUTES = 3;
+const MIN_ACTIVITY_DURATION_MINUTES = 5;
 const MAX_DAILY_ACTIVITIES = 5;
 
 const countryFlagFromCountry = (country: string | null | undefined): string => {
@@ -127,6 +133,7 @@ const SMART_WATCH_FIELDS: SmartWatchField[] = [
 ];
 
 export default function ExerciseScreen() {
+  const router = useRouter();
   const { user, registrationId } = useAuth();
   const trpcUtils = trpc.useUtils();
   const effectiveRegistrationId = registrationId || user?.id || "";
@@ -136,6 +143,7 @@ export default function ExerciseScreen() {
   const [runState, setRunState] = useState<RunState>("idle");
   const [distance, setDistance] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [pauseDurationSeconds, setPauseDurationSeconds] = useState(0);
   const [pace, setPace] = useState(0);
   const [coords, setCoords] = useState<Coordinates[]>([]);
   const [currentLocation, setCurrentLocation] = useState<Coordinates | null>(null);
@@ -148,7 +156,6 @@ export default function ExerciseScreen() {
   const [activitySaved, setActivitySaved] = useState(false);
   const [runnerProfile, setRunnerProfile] = useState<RunnerProfile | null>(null);
   const [runCardTheme, setRunCardTheme] = useState<"light" | "dark">("dark");
-  const [runCardBackgroundImage, setRunCardBackgroundImage] = useState<string | null>(null);
   const [showTreadmillModal, setShowTreadmillModal] = useState(false);
   const [treadmillDistance, setTreadmillDistance] = useState("");
   const [treadmillTime, setTreadmillTime] = useState("");
@@ -164,6 +171,12 @@ export default function ExerciseScreen() {
     calories: "",
     blood_pressure: "",
   });
+  const [smartWatchActivityForm, setSmartWatchActivityForm] = useState({
+    activityDate: "",
+    startTime: "",
+    duration: "",
+  });
+  const [smartWatchEvidenceImage, setSmartWatchEvidenceImage] = useState<string | null>(null);
   const [isSubmittingSmartWatch, setIsSubmittingSmartWatch] = useState(false);
 
   const [showOtherSportsModal, setShowOtherSportsModal] = useState(false);
@@ -177,6 +190,7 @@ export default function ExerciseScreen() {
     duration: "",
     distanceKm: "",
   });
+  const [otherSportsEvidenceImage, setOtherSportsEvidenceImage] = useState<string | null>(null);
   const [isSubmittingOtherSports, setIsSubmittingOtherSports] = useState(false);
   const completeEventRunMutation = trpc.activities.completeEventRun.useMutation();
   const { data: registeredEvents = [], refetch: refetchRegisteredEvents } = trpc.events.getRegisteredEvents.useQuery(
@@ -263,7 +277,7 @@ export default function ExerciseScreen() {
 
     const loadRunnerProfile = async () => {
       try {
-        const [{ data: registration }, { data: photo }] = await Promise.all([
+        const [{ data: registration }, { data: profilePhoto }, { data: latestPhoto }, { data: membership }] = await Promise.all([
           supabase
             .from("registrations")
             .select("first_name, other_names, username, city_town_district, country")
@@ -275,6 +289,19 @@ export default function ExerciseScreen() {
             .eq("registration_id", user.id)
             .eq("is_profile_photo", true)
             .maybeSingle(),
+          supabase
+            .from("user_photos")
+            .select("file_path")
+            .eq("registration_id", user.id)
+            .order("is_profile_photo", { ascending: false })
+            .order("file_name", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          supabase
+            .from("club_members")
+            .select("coordinator_id")
+            .eq("registration_id", user.id)
+            .maybeSingle(),
         ]);
 
         const name =
@@ -283,13 +310,24 @@ export default function ExerciseScreen() {
           user.username ||
           "RunNation Runner";
         const country = formatCountryName(registration?.country) || registration?.country || "";
+        let club = "";
+
+        if (membership?.coordinator_id) {
+          const { data: clubData } = await supabase
+            .from("clubs")
+            .select("club_name")
+            .eq("coordinator_id", membership.coordinator_id)
+            .maybeSingle();
+          club = clubData?.club_name || "";
+        }
 
         setRunnerProfile({
           name,
           town: registration?.city_town_district || "",
           country,
           countryFlag: countryFlagFromCountry(registration?.country || country),
-          photoUrl: photo?.file_path || null,
+          club,
+          photoUrl: profilePhoto?.file_path || latestPhoto?.file_path || null,
         });
       } catch (error) {
         console.error("[Run Details] Failed to load runner profile:", error);
@@ -298,6 +336,7 @@ export default function ExerciseScreen() {
           town: "",
           country: "",
           countryFlag: "",
+          club: "",
           photoUrl: null,
         });
       }
@@ -590,14 +629,10 @@ export default function ExerciseScreen() {
       runningStartTimestamp.current = null;
     }
     const finalDuration = elapsedBeforePause.current;
+    const activePauseMs = pauseStartTimestamp.current !== null ? Date.now() - pauseStartTimestamp.current : 0;
+    const finalPauseDurationSeconds = Math.floor((totalPauseDuration.current + activePauseMs) / 1000);
     setDuration(finalDuration);
-    setRunState("finished");
-    if (timerInterval.current) {
-      clearInterval(timerInterval.current);
-    }
-    if (locationSubscription.current) {
-      locationSubscription.current.remove();
-    }
+    setPauseDurationSeconds(finalPauseDurationSeconds);
 
     console.log('[Tracking] Stopped. Final distance:', distance.toFixed(3), 'km, duration:', finalDuration, 's, filtered points:', filteredPointCount.current);
 
@@ -607,19 +642,43 @@ export default function ExerciseScreen() {
     }
 
     const durationMinutes = finalDuration / 60;
-    if (exerciseType === "Walk" && distance < MIN_DISTANCE_WALK) {
-      Alert.alert("Activity Not Saved", `A Walk must be at least ${MIN_DISTANCE_WALK} km to be saved. You covered ${distance.toFixed(2)} km.`);
-      return;
-    }
-    if (exerciseType === "Run" && distance < MIN_DISTANCE_RUN) {
-      Alert.alert("Activity Not Saved", `A Run must be at least ${MIN_DISTANCE_RUN} km to be saved. You covered ${distance.toFixed(2)} km.`);
-      return;
-    }
-    if ((exerciseType === "Walk" || exerciseType === "Run") && durationMinutes < MIN_ACTIVITY_DURATION_MINUTES) {
-      Alert.alert("Activity Not Saved", `A ${exerciseType} must be at least ${MIN_ACTIVITY_DURATION_MINUTES} minutes. Your activity was ${Math.floor(durationMinutes)} minutes.`);
+    const requiredDistance = exerciseType === "Walk" ? MIN_DISTANCE_WALK : MIN_DISTANCE_RUN;
+    const needsDistance = (exerciseType === "Walk" || exerciseType === "Run") && distance < requiredDistance;
+    const needsTime = (exerciseType === "Walk" || exerciseType === "Run") && durationMinutes < MIN_ACTIVITY_DURATION_MINUTES;
+    if (needsDistance || needsTime) {
+      if (pauseStartTimestamp.current === null) {
+        pauseStartTimestamp.current = Date.now();
+      }
+      setRunState("paused");
+      if (timerInterval.current) {
+        clearInterval(timerInterval.current);
+      }
+      if (locationSubscription.current) {
+        locationSubscription.current.remove();
+      }
+      Alert.alert(
+        "Pause and Resume Later",
+        `Recordable workouts need at least ${requiredDistance} km and ${MIN_ACTIVITY_DURATION_MINUTES} minutes. You have ${distance.toFixed(2)} km and ${Math.floor(durationMinutes)} minutes so far.`,
+        [
+          { text: "Resume Later", style: "cancel" },
+          { text: "Discard", style: "destructive", onPress: resetTracking },
+        ]
+      );
       return;
     }
 
+    if (pauseStartTimestamp.current !== null) {
+      totalPauseDuration.current += activePauseMs;
+      pauseStartTimestamp.current = null;
+    }
+    setPauseDurationSeconds(Math.floor(totalPauseDuration.current / 1000));
+    setRunState("finished");
+    if (timerInterval.current) {
+      clearInterval(timerInterval.current);
+    }
+    if (locationSubscription.current) {
+      locationSubscription.current.remove();
+    }
     setActivitySaved(false);
     setShowRunDetailsModal(true);
   };
@@ -667,9 +726,9 @@ export default function ExerciseScreen() {
       }
 
       if (!error) {
-        const calculatedPace = finalDuration > 0 ? (distance / (finalDuration / 3600)) : 0;
+        const calculatedPace = finalDuration > 0 && distance > 0 ? (finalDuration / 60) / distance : 0;
 
-        const actualEndTime = new Date(startTime.getTime() + (finalDuration * 1000));
+        const actualEndTime = new Date(startTime.getTime() + ((finalDuration + pauseDurationSeconds) * 1000));
 
         const startTimeStr = startTime.toISOString().split('T')[1].split('.')[0];
         const endTimeStr = actualEndTime.toISOString().split('T')[1].split('.')[0];
@@ -692,9 +751,10 @@ export default function ExerciseScreen() {
           activity_date: today,
           exercise_type: exerciseType || "Run",
           distance_km: parseFloat(distance.toFixed(2)),
+          pause_duration_seconds: pauseDurationSeconds,
           start_time: startTimeStr,
           end_time: endTimeStr,
-          pace_km_h: parseFloat(calculatedPace.toFixed(2)),
+          pace_min_per_km: parseFloat(calculatedPace.toFixed(2)),
         });
 
         error = insertResult.error;
@@ -711,12 +771,17 @@ export default function ExerciseScreen() {
 
       if (selectedEventRun && effectiveRegistrationId) {
         try {
-          await completeEventRunMutation.mutateAsync({
-            eventId: selectedEventRun.eventId,
-            registrationId: effectiveRegistrationId,
-            distanceKm: parseFloat(distance.toFixed(2)),
-            timeSeconds: finalDuration,
-          });
+          const eventIds = selectedEventRun.eventIds?.length ? selectedEventRun.eventIds : [selectedEventRun.eventId];
+          await Promise.all(
+            eventIds.map((eventId) =>
+              completeEventRunMutation.mutateAsync({
+                eventId,
+                registrationId: effectiveRegistrationId,
+                distanceKm: parseFloat(distance.toFixed(2)),
+                timeSeconds: finalDuration,
+              })
+            )
+          );
           eventResultSaved = true;
         } catch (eventError: any) {
           eventResultError = eventError?.message || "Failed to save your event result.";
@@ -754,6 +819,7 @@ export default function ExerciseScreen() {
     setRunState("idle");
     setDistance(0);
     setDuration(0);
+    setPauseDurationSeconds(0);
     setPace(0);
     setCoords([]);
     setStartTime(null);
@@ -761,7 +827,6 @@ export default function ExerciseScreen() {
     setSelectedEventRun(null);
     setShowRunDetailsModal(false);
     setActivitySaved(false);
-    setRunCardBackgroundImage(null);
     elapsedBeforePause.current = 0;
     runningStartTimestamp.current = null;
     lastValidPoint.current = null;
@@ -776,21 +841,9 @@ export default function ExerciseScreen() {
     Speech.stop();
   };
 
-  const pickRunCardBackground = async () => {
-    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permissionResult.granted) {
-      Alert.alert("Permission Required", "Permission to access your photos is required.");
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-    });
-
-    if (!result.canceled && result.assets[0]) {
-      setRunCardBackgroundImage(result.assets[0].uri);
-    }
+  const closeFinishedActivity = () => {
+    resetTracking();
+    router.replace("/(tabs)/activity" as any);
   };
 
   const getRunShareMessage = () => {
@@ -803,11 +856,71 @@ export default function ExerciseScreen() {
       `${runnerName} completed a ${exerciseType || "Run"} on RunNation.`,
       `Distance: ${distance.toFixed(2)} km`,
       `Time: ${formatTime(duration)}`,
-      `Pace: ${pace.toFixed(1)} km/h`,
+      `Pace: ${formatPaceMinPerKm()} /km`,
       `Date: ${dateLine}`,
       `Start: ${startLine}${eventLine}`,
       "RunNation - Where runners belong",
     ].join("\n");
+  };
+
+  const formatPaceMinPerKm = () => {
+    if (!distance || duration <= 0) return "-";
+    const totalSecondsPerKm = Math.round(duration / distance);
+    const minutes = Math.floor(totalSecondsPerKm / 60);
+    const seconds = totalSecondsPerKm % 60;
+    return `${minutes.toString().padStart(2, "0")}'${seconds.toString().padStart(2, "0")}"`;
+  };
+
+  const getRunDetailsMeta = () => {
+    return [
+      runnerProfile?.countryFlag,
+      runnerProfile?.club,
+      selectedEventRun?.eventName,
+    ].filter(Boolean).join("  ");
+  };
+
+  const getRouteRegion = () => {
+    if (coords.length === 0) {
+      return currentLocation
+        ? {
+            latitude: currentLocation.latitude,
+            longitude: currentLocation.longitude,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          }
+        : {
+            latitude: 0,
+            longitude: 0,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          };
+    }
+
+    const latitudes = coords.map((coord) => coord.latitude);
+    const longitudes = coords.map((coord) => coord.longitude);
+    const minLat = Math.min(...latitudes);
+    const maxLat = Math.max(...latitudes);
+    const minLon = Math.min(...longitudes);
+    const maxLon = Math.max(...longitudes);
+    const latitudeDelta = Math.max((maxLat - minLat) * 2.2, 0.0035);
+    const longitudeDelta = Math.max((maxLon - minLon) * 2.2, 0.0035);
+
+    return {
+      latitude: (minLat + maxLat) / 2,
+      longitude: (minLon + maxLon) / 2,
+      latitudeDelta,
+      longitudeDelta,
+    };
+  };
+
+  const getWeatherDisplay = () => {
+    const month = startTime?.getMonth() ?? new Date().getMonth();
+    const hour = startTime?.getHours() ?? new Date().getHours();
+
+    if (month === 11 || month === 0 || month === 1) return "❄️ Snow";
+    if (month >= 2 && month <= 4) return "🌦️ Rainy";
+    if (hour >= 18 || hour < 6) return "🌙 Cool";
+    return "☀️ Sunny";
   };
 
   const shareRunDetails = async () => {
@@ -832,6 +945,60 @@ export default function ExerciseScreen() {
     if (!result.canceled) {
       setTreadmillImage(result.assets[0].uri);
     }
+  };
+
+  const pickEvidenceImage = async (setImage: (uri: string) => void) => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]?.uri) {
+      setImage(result.assets[0].uri);
+    }
+  };
+
+  const getEvidenceImagePayload = async (uri: string) => {
+    const imageBase64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: "base64",
+    });
+    const lowerUri = uri.toLowerCase();
+    const mimeType = lowerUri.includes(".png")
+      ? "image/png"
+      : lowerUri.includes(".webp")
+      ? "image/webp"
+      : lowerUri.includes(".avif")
+      ? "image/avif"
+      : "image/jpeg";
+    return { evidenceImageBase64: imageBase64, evidenceMimeType: mimeType };
+  };
+
+  const isExternalActivityInRegisteredEvent = (activityDate: string) => {
+    if (!activityDate || !/^\d{4}-\d{2}-\d{2}$/.test(activityDate)) return false;
+    const activityWeekday = getUtcWeekday(activityDate);
+
+    return (registeredEvents || []).some((eventItem) => {
+      const event = eventItem as RegisteredEventRun;
+      const eventType = getRegisteredEventType(event);
+      const startDate = getDateOnly(event.startsAt);
+      const endDate = getDateOnly(event.endsAt);
+
+      if (startDate && activityDate < startDate) return false;
+      if (endDate && activityDate > endDate) return false;
+
+      if (eventType === "recurring") {
+        return event.recurrenceWeekday === null ||
+          event.recurrenceWeekday === undefined ||
+          Number(event.recurrenceWeekday) === activityWeekday;
+      }
+
+      if (eventType === "multiday") {
+        return Boolean(startDate && endDate && activityDate >= startDate && activityDate <= endDate);
+      }
+
+      return startDate === activityDate;
+    });
   };
 
   const submitTreadmill = async () => {
@@ -887,10 +1054,13 @@ export default function ExerciseScreen() {
 
     const heartRate = smartWatchValues.heart_rate.trim() ? parseInt(smartWatchValues.heart_rate, 10) : null;
     const steps = smartWatchValues.steps.trim() ? parseInt(smartWatchValues.steps, 10) : null;
+    const distanceKm = smartWatchValues.distance_km.trim() ? parseFloat(smartWatchValues.distance_km) : null;
     const spo2 = smartWatchValues.spo2.trim() ? parseFloat(smartWatchValues.spo2) : null;
+    const hasHealthMetrics = heartRate !== null || steps !== null || spo2 !== null;
+    const hasActivitySubmission = distanceKm !== null;
 
-    if (heartRate === null && steps === null && spo2 === null && !smartWatchValues.blood_pressure.trim()) {
-      Alert.alert("Error", "Please fill in at least one metric");
+    if (!hasHealthMetrics && !hasActivitySubmission) {
+      Alert.alert("Error", "Enter health readings for Goals, or add distance details for activity approval.");
       return;
     }
 
@@ -902,9 +1072,35 @@ export default function ExerciseScreen() {
       Alert.alert("Error", "Please enter valid steps");
       return;
     }
+    if (distanceKm !== null && (isNaN(distanceKm) || distanceKm <= 0)) {
+      Alert.alert("Error", "Please enter a valid smart watch distance");
+      return;
+    }
     if (spo2 !== null && (isNaN(spo2) || spo2 < 50 || spo2 > 100)) {
       Alert.alert("Error", "Please enter valid SpO2 (50-100%)");
       return;
+    }
+    if (hasActivitySubmission) {
+      if (!smartWatchActivityForm.activityDate || !smartWatchActivityForm.startTime || !smartWatchActivityForm.duration) {
+        Alert.alert("Missing Activity Details", "Add date, start time, and duration so the smart watch activity can be reviewed.");
+        return;
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(smartWatchActivityForm.activityDate)) {
+        Alert.alert("Invalid Date", "Use YYYY-MM-DD for smart watch activity date.");
+        return;
+      }
+      if (!/^\d{2}:\d{2}$/.test(smartWatchActivityForm.startTime)) {
+        Alert.alert("Invalid Start Time", "Use HH:MM for smart watch start time.");
+        return;
+      }
+      if (!/^\d{2}:\d{2}$/.test(smartWatchActivityForm.duration)) {
+        Alert.alert("Invalid Duration", "Use HH:MM for smart watch duration.");
+        return;
+      }
+      if (isExternalActivityInRegisteredEvent(smartWatchActivityForm.activityDate) && !smartWatchEvidenceImage) {
+        Alert.alert("Missing Event Evidence", "This date matches a registered event. Upload a smart watch screenshot for event credit, or use a non-event date.");
+        return;
+      }
     }
 
     setIsSubmittingSmartWatch(true);
@@ -912,38 +1108,63 @@ export default function ExerciseScreen() {
       const today = new Date().toISOString().split("T")[0];
       console.log("[SmartWatch] Saving data for date:", today);
 
-      const { data: existing } = await supabase
-        .from("health_goal")
-        .select("health_id")
-        .eq("registration_id", user.id)
-        .eq("record_date", today)
-        .maybeSingle();
-
-      const insertData: Record<string, any> = {
-        steps: steps || 0,
-        heart_rate_bpm: heartRate,
-        blood_oxygen_spo2: spo2,
-      };
-
-      if (existing) {
-        const { error } = await supabase
+      if (hasHealthMetrics) {
+        const { data: existing } = await supabase
           .from("health_goal")
-          .update(insertData)
-          .eq("health_id", existing.health_id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from("health_goal")
-          .insert({
-            registration_id: user.id,
-            record_date: today,
-            ...insertData,
-          });
-        if (error) throw error;
+          .select("health_id")
+          .eq("registration_id", user.id)
+          .eq("record_date", today)
+          .maybeSingle();
+
+        const healthUpdateData: Record<string, any> = {};
+        if (steps !== null) healthUpdateData.steps = steps;
+        if (heartRate !== null) healthUpdateData.heart_rate_bpm = heartRate;
+        if (spo2 !== null) healthUpdateData.blood_oxygen_spo2 = spo2;
+
+        if (existing) {
+          const { error } = await supabase
+            .from("health_goal")
+            .update(healthUpdateData)
+            .eq("health_id", existing.health_id);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase
+            .from("health_goal")
+            .insert({
+              registration_id: user.id,
+              record_date: today,
+              steps: steps ?? 0,
+              heart_rate_bpm: heartRate,
+              blood_oxygen_spo2: spo2,
+            });
+          if (error) throw error;
+        }
+      }
+
+      if (hasActivitySubmission) {
+        const evidencePayload = smartWatchEvidenceImage
+          ? await getEvidenceImagePayload(smartWatchEvidenceImage)
+          : {};
+        await getServerClient().activities.submitExternalActivity.mutate({
+          registrationId: user.id,
+          activityDate: smartWatchActivityForm.activityDate,
+          exerciseType: "Run",
+          startTime: `${smartWatchActivityForm.startTime}:00`,
+          duration: `${smartWatchActivityForm.duration}:00`,
+          distanceKm,
+          sourceType: "smart_watch",
+          sourceLabel: "Smart Watch",
+          ...evidencePayload,
+        });
       }
 
       console.log("[SmartWatch] Data saved successfully");
-      Alert.alert("Success", "Smart watch data saved!");
+      const successMessage = hasHealthMetrics && hasActivitySubmission
+        ? "Health readings saved. Smart watch activity submitted for approval."
+        : hasActivitySubmission
+        ? "Smart watch activity submitted for approval."
+        : "Smart watch health readings saved to Goals.";
+      Alert.alert("Success", successMessage);
       setShowSmartWatchModal(false);
       setSmartWatchValues({
         heart_rate: "",
@@ -953,6 +1174,12 @@ export default function ExerciseScreen() {
         calories: "",
         blood_pressure: "",
       });
+      setSmartWatchActivityForm({
+        activityDate: "",
+        startTime: "",
+        duration: "",
+      });
+      setSmartWatchEvidenceImage(null);
     } catch (error: any) {
       console.error("[SmartWatch] Error saving:", error);
       Alert.alert("Error", error?.message || "Failed to save smart watch data");
@@ -980,6 +1207,11 @@ export default function ExerciseScreen() {
     const durationRegex = /^\d{2}:\d{2}:\d{2}$/;
     if (!durationRegex.test(otherSportsForm.duration)) {
       Alert.alert("Error", "Duration must be in HH:MM:SS format (e.g., 00:45:30)");
+      return;
+    }
+
+    if (isExternalActivityInRegisteredEvent(otherSportsForm.activityDate) && !otherSportsEvidenceImage) {
+      Alert.alert("Missing Event Evidence", "This date matches a registered event. Upload a sports app screenshot for event credit, or use a non-event date.");
       return;
     }
 
@@ -1015,6 +1247,9 @@ export default function ExerciseScreen() {
     setIsSubmittingOtherSports(true);
 
     try {
+      const evidencePayload = otherSportsEvidenceImage
+        ? await getEvidenceImagePayload(otherSportsEvidenceImage)
+        : {};
       await getServerClient().activities.submitExternalActivity.mutate({
         registrationId: user.id,
         activityDate: otherSportsForm.activityDate,
@@ -1022,6 +1257,9 @@ export default function ExerciseScreen() {
         startTime: `${otherSportsForm.startTime}:00`,
         duration: otherSportsForm.duration,
         distanceKm: distanceNum,
+        sourceType: "other_sports_app",
+        sourceLabel: otherSportsForm.sportsApp.trim(),
+        ...evidencePayload,
       });
       Alert.alert("Success", "Your activity has been submitted successfully!");
 
@@ -1034,6 +1272,7 @@ export default function ExerciseScreen() {
         duration: "",
         distanceKm: "",
       });
+      setOtherSportsEvidenceImage(null);
     } catch (error: any) {
       console.error("[Submit Other Sports] Error:", error);
       Alert.alert("Error", "Something went wrong. Please try again.");
@@ -1049,18 +1288,107 @@ export default function ExerciseScreen() {
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const getEventWindow = (startsAt?: string | null, endsAt?: string | null) => {
+  const getDateOnly = (value?: string | null) => String(value || "").slice(0, 10);
+  const getLocalDayWindow = (dateOnly: string) => {
+    const [year, month, day] = dateOnly.split("-").map(Number);
+    if (!year || !month || !day) return null;
+    const start = new Date(year, month - 1, day, 0, 0, 0, 0).getTime();
+    const end = new Date(year, month - 1, day, 23, 59, 59, 999).getTime();
+    return { start, end };
+  };
+  const getUtcWeekday = (dateOnly: string) => {
+    const [year, month, day] = dateOnly.split("-").map(Number);
+    if (!year || !month || !day) return null;
+    return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  };
+  const getTodayDateOnly = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+  const getRegisteredEventType = (eventItem: RegisteredEventRun) => {
+    if (eventItem.eventType === "recurring") return "recurring";
+    if (eventItem.eventType === "multiday") return "multiday";
+    return getDateOnly(eventItem.startsAt) && getDateOnly(eventItem.startsAt) === getDateOnly(eventItem.endsAt)
+      ? "same_day"
+      : "multiday";
+  };
+  const formatRunEventDate = (dateOnly?: string | null) => {
+    if (!dateOnly) return "";
+    const [year, month, day] = dateOnly.split("-");
+    return `${Number(day)}/${Number(month)}/${String(year).slice(-2)}`;
+  };
+  const getEventWindow = (eventItem: RegisteredEventRun) => {
     const now = Date.now();
-    const startMs = startsAt ? new Date(startsAt).getTime() : 0;
-    const endMs = endsAt ? new Date(endsAt).getTime() : 0;
-    const msToStart = startMs - now;
+    const fourHours = 4 * 60 * 60 * 1000;
+    const eventType = getRegisteredEventType(eventItem);
+    const todayDateOnly = getTodayDateOnly();
+    const occurrenceDate =
+      eventType === "recurring"
+        ? todayDateOnly
+        : getDateOnly(eventItem.startsAt);
+    const dayWindow = occurrenceDate ? getLocalDayWindow(occurrenceDate) : null;
+    const startMs = dayWindow ? dayWindow.start - fourHours : 0;
+    const endMs = dayWindow ? dayWindow.end + fourHours : 0;
+    const isRecurringDay =
+      eventType !== "recurring" ||
+      eventItem.recurrenceWeekday === null ||
+      eventItem.recurrenceWeekday === undefined ||
+      getUtcWeekday(todayDateOnly) === Number(eventItem.recurrenceWeekday);
+    const startsBoundary = getDateOnly(eventItem.startsAt);
+    const endsBoundary = getDateOnly(eventItem.endsAt);
+    const withinRecurringDateRange =
+      eventType !== "recurring" ||
+      ((!startsBoundary || todayDateOnly >= startsBoundary) && (!endsBoundary || todayDateOnly <= endsBoundary));
+    const active = Boolean(dayWindow && isRecurringDay && withinRecurringDateRange && now >= startMs && now <= endMs);
+    const daysTo = dayWindow ? Math.max(0, Math.ceil((dayWindow.start - now) / (24 * 60 * 60 * 1000))) : null;
 
     return {
-      isEnded: !!endMs && now > endMs,
-      isSoon: !!startMs && msToStart <= 24 * 60 * 60 * 1000,
-      daysTo: startMs ? Math.max(0, Math.ceil(msToStart / (24 * 60 * 60 * 1000))) : null,
+      isEnded: Boolean(dayWindow && now > endMs),
+      isActive: active,
+      isSoon: active,
+      daysTo,
+      occurrenceDate,
+      activeWindowLabel: dayWindow ? `Active ${formatRunEventDate(occurrenceDate)} (+/- 4 hrs)` : "Date pending",
     };
   };
+
+  const timedEventRunOptions = useMemo(() => {
+    const timedEvents = (registeredEvents || [])
+      .filter(Boolean)
+      .map((eventItem) => eventItem as RegisteredEventRun)
+      .filter((eventItem) => {
+        const eventType = getRegisteredEventType(eventItem);
+        return eventType === "same_day" || eventType === "recurring";
+      });
+
+    const grouped = new Map<string, RegisteredEventRun[]>();
+    timedEvents.forEach((eventItem) => {
+      const eventType = getRegisteredEventType(eventItem);
+      const key = eventType === "recurring"
+        ? `recurring-${eventItem.eventId}`
+        : `same-${getDateOnly(eventItem.startsAt)}`;
+      grouped.set(key, [...(grouped.get(key) || []), eventItem]);
+    });
+
+    return Array.from(grouped.values()).map((group) => {
+      const primary = group[0];
+      if (group.length <= 1 || getRegisteredEventType(primary) !== "same_day") return primary;
+      return {
+        ...primary,
+        eventIds: group.map((item) => item.eventId),
+        eventName: `${primary.eventName} + ${group.length - 1} more`,
+        sharedCountMessage: `This run counts for ${group.map((item) => item.eventName).join(", ")}.`,
+      };
+    });
+  }, [registeredEvents]);
+
+  const multidayRegisteredCount = useMemo(
+    () => (registeredEvents || []).filter((eventItem) => eventItem && getRegisteredEventType(eventItem as RegisteredEventRun) === "multiday").length,
+    [registeredEvents]
+  );
 
   useEffect(() => {
     if (duration > 0 && distance > 0) {
@@ -1071,7 +1399,7 @@ export default function ExerciseScreen() {
 
   if (!isSubscribed) {
     return (
-      <SubscriptionGate featureName="Exercise">
+      <SubscriptionGate featureName="Workout">
         <></>
       </SubscriptionGate>
     );
@@ -1088,7 +1416,7 @@ export default function ExerciseScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
-      <Stack.Screen options={{ title: "Exercise" }} />
+      <Stack.Screen options={{ title: "Workout" }} />
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {Platform.OS !== 'web' && currentLocation && runState !== 'idle' && (
           <View style={styles.mapContainer}>
@@ -1116,7 +1444,7 @@ export default function ExerciseScreen() {
 
         {selectedEventRun && runState !== 'idle' && (
           <View style={[styles.eventRunBanner, { backgroundColor: themeColors.cardBackground }]}>
-            <Text style={[styles.eventRunBannerLabel, { color: themeColors.textSecondary }]}>Exercise Event</Text>
+            <Text style={[styles.eventRunBannerLabel, { color: themeColors.textSecondary }]}>Workout Event</Text>
             <Text style={[styles.eventRunBannerTitle, { color: themeColors.text }]}>{selectedEventRun.eventName}</Text>
           </View>
         )}
@@ -1136,8 +1464,8 @@ export default function ExerciseScreen() {
             <LinearGradient colors={colors.gradient.blue} style={styles.statCardSmall}>
               <Gauge size={18} color={colors.white} style={styles.statIcon} />
               <Text style={styles.statLabel}>Pace</Text>
-              <Text style={styles.statValue}>{pace.toFixed(1)}</Text>
-              <Text style={styles.statUnit}>km/h</Text>
+              <Text style={styles.statValue}>{formatPaceMinPerKm()}</Text>
+              <Text style={styles.statUnit}>/km</Text>
             </LinearGradient>
           </View>
         )}
@@ -1148,9 +1476,11 @@ export default function ExerciseScreen() {
               <View style={styles.categorySection}>
                 <View style={styles.categoryHeaderRow}>
                   <View style={[styles.categoryDot, { backgroundColor: colors.primary }]} />
-                  <Text style={[styles.categoryTitle, { color: themeColors.text }]}>Record Exercise</Text>
+                  <Text style={[styles.categoryTitle, { color: themeColors.text }]}>Record Workout</Text>
                 </View>
-                <Text style={[styles.categorySubtitle, { color: themeColors.textSecondary }]}>GPS-tracked outdoor activities</Text>
+                <Text style={[styles.categorySubtitle, { color: themeColors.textSecondary }]}>
+                  Records multiday events plus non event activity
+                </Text>
 
                 <View style={styles.exerciseRow}>
                   <TouchableOpacity
@@ -1194,8 +1524,6 @@ export default function ExerciseScreen() {
                   <View style={[styles.categoryDot, { backgroundColor: "#2563EB" }]} />
                   <Text style={[styles.categoryTitle, { color: themeColors.text }]}>Event Run</Text>
                 </View>
-                <Text style={[styles.categorySubtitle, { color: themeColors.textSecondary }]}>Run an event you are already registered for</Text>
-
                 <TouchableOpacity
                   style={[styles.addActivityCard, { backgroundColor: themeColors.cardBackground }]}
                   onPress={async () => {
@@ -1216,9 +1544,11 @@ export default function ExerciseScreen() {
                   <View style={styles.addActivityInfo}>
                     <Text style={[styles.addActivityTitle, { color: themeColors.text }]}>Run Event</Text>
                     <Text style={[styles.addActivitySub, { color: themeColors.textSecondary }]}>
-                      {registeredEvents.length > 0
-                        ? `${registeredEvents.length} registered event${registeredEvents.length === 1 ? "" : "s"} ready`
-                        : "Choose from your registered events"}
+                      {timedEventRunOptions.length > 0
+                        ? `${timedEventRunOptions.length} timed event${timedEventRunOptions.length === 1 ? "" : "s"} listed`
+                        : multidayRegisteredCount > 0
+                        ? "Find here your same day events"
+                        : "Find here your same day events"}
                     </Text>
                   </View>
                   <ChevronRight size={18} color={themeColors.textLight} />
@@ -1230,10 +1560,8 @@ export default function ExerciseScreen() {
               <View style={styles.categorySection}>
                 <View style={styles.categoryHeaderRow}>
                   <View style={[styles.categoryDot, { backgroundColor: colors.secondary }]} />
-                  <Text style={[styles.categoryTitle, { color: themeColors.text }]}>Add Exercise Recordings from Other Source</Text>
+                  <Text style={[styles.categoryTitle, { color: themeColors.text }]}>Add Workout Recordings from Other Source</Text>
                 </View>
-                <Text style={[styles.categorySubtitle, { color: themeColors.textSecondary }]}>Import from other sources</Text>
-
                 <TouchableOpacity
                   style={[styles.addActivityCard, { backgroundColor: themeColors.cardBackground }]}
                   onPress={() => setShowTreadmillModal(true)}
@@ -1245,7 +1573,7 @@ export default function ExerciseScreen() {
                   </LinearGradient>
                   <View style={styles.addActivityInfo}>
                     <Text style={[styles.addActivityTitle, { color: themeColors.text }]}>Treadmill</Text>
-                    <Text style={[styles.addActivitySub, { color: themeColors.textSecondary }]}>Indoor training with photo proof</Text>
+                    <Text style={[styles.addActivitySub, { color: themeColors.textSecondary }]}>Record your treadmill activity here (doesn't count for events)</Text>
                   </View>
                   <ChevronRight size={18} color={themeColors.textLight} />
                 </TouchableOpacity>
@@ -1261,7 +1589,7 @@ export default function ExerciseScreen() {
                   </LinearGradient>
                   <View style={styles.addActivityInfo}>
                     <Text style={[styles.addActivityTitle, { color: themeColors.text }]}>Smart Watch</Text>
-                    <Text style={[styles.addActivitySub, { color: themeColors.textSecondary }]}>Import health metrics from your watch</Text>
+                    <Text style={[styles.addActivitySub, { color: themeColors.textSecondary }]}>Record your smart watch activity here (counts for events)</Text>
                   </View>
                   <ChevronRight size={18} color={themeColors.textLight} />
                 </TouchableOpacity>
@@ -1277,7 +1605,7 @@ export default function ExerciseScreen() {
                   </LinearGradient>
                   <View style={styles.addActivityInfo}>
                     <Text style={[styles.addActivityTitle, { color: themeColors.text }]}>Other Sports App</Text>
-                    <Text style={[styles.addActivitySub, { color: themeColors.textSecondary }]}>Import from running & fitness apps</Text>
+                    <Text style={[styles.addActivitySub, { color: themeColors.textSecondary }]}>Record here your activity from other sports apps (counts for events)</Text>
                   </View>
                   <ChevronRight size={18} color={themeColors.textLight} />
                 </TouchableOpacity>
@@ -1325,7 +1653,7 @@ export default function ExerciseScreen() {
             <View style={styles.finishedContainer}>
               <LinearGradient colors={colors.gradient.sunset} style={styles.finishedCard}>
                 <Text style={styles.finishedEmoji}>🎉</Text>
-                <Text style={styles.finishedTitle}>{selectedEventRun ? "Exercise Event Complete!" : `${exerciseType} Complete!`}</Text>
+                <Text style={styles.finishedTitle}>{selectedEventRun ? "Workout Event Complete!" : `${exerciseType} Complete!`}</Text>
                 {selectedEventRun ? (
                   <Text style={styles.finishedSubtitle}>{selectedEventRun.eventName}</Text>
                 ) : null}
@@ -1342,7 +1670,7 @@ export default function ExerciseScreen() {
                   <View style={styles.summaryDivider} />
                   <View style={styles.summaryItem}>
                     <Text style={styles.summaryLabel}>Pace</Text>
-                    <Text style={styles.summaryValue}>{pace.toFixed(1)} km/h</Text>
+                    <Text style={styles.summaryValue}>{formatPaceMinPerKm()} /km</Text>
                   </View>
                 </View>
               </LinearGradient>
@@ -1358,6 +1686,12 @@ export default function ExerciseScreen() {
                   <Text style={styles.resetButtonText}>Start New Activity</Text>
                 </LinearGradient>
               </TouchableOpacity>
+
+              <TouchableOpacity style={styles.resetButton} onPress={closeFinishedActivity} activeOpacity={0.8}>
+                <View style={[styles.resetButtonGradient, styles.finishedCloseButton]}>
+                  <Text style={styles.finishedCloseButtonText}>Close</Text>
+                </View>
+              </TouchableOpacity>
             </View>
           )}
         </View>
@@ -1372,102 +1706,105 @@ export default function ExerciseScreen() {
         <View style={[styles.runDetailsOverlay, { backgroundColor: themeColors.modalOverlay }]}>
           <View style={[styles.runDetailsShell, { backgroundColor: themeColors.surface }]}>
             <ScrollView contentContainerStyle={styles.runDetailsScroll}>
-              <View style={[
-                styles.shareCard,
-                runCardTheme === "dark" ? styles.shareCardDark : styles.shareCardLight,
-              ]}>
-                {runCardBackgroundImage ? (
-                  <Image source={{ uri: runCardBackgroundImage }} style={styles.shareCardBackground} resizeMode="cover" />
-                ) : null}
-                <View style={[
-                  styles.shareCardTint,
-                  runCardTheme === "dark" ? styles.shareCardTintDark : styles.shareCardTintLight,
-                ]} />
-
-                <View style={styles.shareBrandRow}>
-                  <Text style={styles.shareBrand}>RunNation</Text>
-                  <Text style={styles.shareTagline}>Where runners belong</Text>
-                </View>
-
-                <View style={styles.shareRunnerRow}>
-                  {runnerProfile?.photoUrl ? (
-                    <Image source={{ uri: runnerProfile.photoUrl }} style={styles.shareAvatar} resizeMode="cover" />
-                  ) : (
-                    <View style={styles.shareAvatarFallback}>
-                      <Text style={styles.shareAvatarInitial}>
-                        {(runnerProfile?.name || user?.username || "R").charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
-                  )}
-                  <View style={styles.shareRunnerInfo}>
-                    <Text style={[styles.shareRunnerName, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]} numberOfLines={1}>
-                      {runnerProfile?.name || user?.username || "RunNation Runner"}
-                    </Text>
-                    <Text style={[styles.shareRunnerMeta, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]} numberOfLines={1}>
-                      {[runnerProfile?.town, runnerProfile?.countryFlag, runnerProfile?.country].filter(Boolean).join("  ")}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.shareTitleRow}>
-                  <Text style={[styles.shareActivityType, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>
-                    {exerciseType || "Run"}
-                  </Text>
-                  <Text style={styles.shareMedalBadge}>{selectedEventRun ? "Medal eligible" : "No medal"}</Text>
-                </View>
-
-                {selectedEventRun ? (
-                  <Text style={[styles.shareEventName, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]} numberOfLines={2}>
-                    {selectedEventRun.eventName}
-                  </Text>
-                ) : null}
-
-                <View style={styles.shareMetricsGrid}>
-                  <View style={styles.shareMetric}>
-                    <Text style={styles.shareMetricLabel}>Distance</Text>
-                    <Text style={styles.shareMetricValue}>{distance.toFixed(2)} km</Text>
-                  </View>
-                  <View style={styles.shareMetric}>
-                    <Text style={styles.shareMetricLabel}>Time</Text>
-                    <Text style={styles.shareMetricValue}>{formatTime(duration)}</Text>
-                  </View>
-                  <View style={styles.shareMetric}>
-                    <Text style={styles.shareMetricLabel}>Pace</Text>
-                    <Text style={styles.shareMetricValue}>{pace.toFixed(1)} km/h</Text>
-                  </View>
-                </View>
-
-                <View style={styles.shareDateRow}>
-                  <Text style={styles.shareDateText}>{startTime ? startTime.toLocaleDateString() : "-"}</Text>
-                  <Text style={styles.shareDateText}>
-                    {startTime ? startTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-"}
-                  </Text>
-                </View>
-
-                <View style={styles.shareMapBox}>
+              <View style={styles.shareCard}>
+                <View style={styles.shareMapHero}>
                   {Platform.OS !== "web" && coords.length > 0 ? (
                     <MapView
+                      key={`run-share-map-${coords.length}-${startTime?.getTime() ?? 0}`}
                       style={styles.shareMap}
                       pointerEvents="none"
-                      initialRegion={{
-                        latitude: coords[0].latitude,
-                        longitude: coords[0].longitude,
-                        latitudeDelta: 0.01,
-                        longitudeDelta: 0.01,
-                      }}
+                      region={getRouteRegion()}
                     >
-                      <Polyline coordinates={coords} strokeColor="#F97316" strokeWidth={5} />
+                      <Polyline coordinates={coords} strokeColor="#F97316" strokeWidth={7} />
+                      <Circle center={coords[0]} radius={8} fillColor="#10B981" strokeColor="#FFFFFF" strokeWidth={2} />
+                      <Circle center={coords[coords.length - 1]} radius={8} fillColor="#EF4444" strokeColor="#FFFFFF" strokeWidth={2} />
                     </MapView>
                   ) : (
                     <View style={styles.shareMapPlaceholder}>
                       <Text style={styles.shareMapPlaceholderText}>Route map</Text>
                     </View>
                   )}
+                  <View style={styles.shareMapShade} />
+                  <View style={styles.shareBrandPill}>
+                    <Image source={require("../../assets/images/icon.png")} style={styles.shareBrandLogo} resizeMode="cover" />
+                    <View>
+                      <Text style={styles.shareBrand}>RunNation</Text>
+                      <Text style={styles.shareTagline}>Where runners belong</Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={[
+                  styles.shareDetailsSheet,
+                  runCardTheme === "dark" ? styles.shareDetailsSheetDark : styles.shareDetailsSheetLight,
+                ]}>
+                  <View style={styles.shareDetailsContent}>
+                  <View style={styles.shareSheetHandle} />
+                  <View style={styles.shareTopRow}>
+                    <View style={styles.shareRunnerBlock}>
+                      {runnerProfile?.photoUrl ? (
+                        <Image source={{ uri: runnerProfile.photoUrl }} style={styles.shareAvatar} resizeMode="cover" />
+                      ) : (
+                        <View style={styles.shareAvatarFallback}>
+                          <Text style={styles.shareAvatarInitial}>
+                            {(runnerProfile?.name || user?.username || "R").charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
+                      <Text style={[styles.shareRunnerName, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]} numberOfLines={1}>
+                        {runnerProfile?.name || user?.username || "RunNation Runner"}
+                      </Text>
+                      <Text style={[styles.shareRunnerMeta, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]} numberOfLines={2}>
+                        {getRunDetailsMeta() || [runnerProfile?.countryFlag, runnerProfile?.country].filter(Boolean).join("  ")}
+                      </Text>
+                    </View>
+                    <View style={styles.shareDistanceBlock}>
+                      {selectedEventRun ? <Text style={styles.shareMedalSymbol}>🏅</Text> : null}
+                      <View style={styles.shareDistanceRow}>
+                        <Text style={[styles.shareDistanceValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{distance.toFixed(2)}</Text>
+                        <Text style={[styles.shareDistanceUnit, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]}>km</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <Text style={[styles.shareDateText, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]}>
+                    {startTime
+                      ? `${startTime.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}, ${startTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                      : "-"}
+                  </Text>
+
+                    <View style={styles.shareMetricsGrid}>
+                    <View style={[styles.shareMetric, styles.shareMetricWide]}>
+                      <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{formatTime(duration)}</Text>
+                      <Text style={styles.shareMetricLabel}>Workout Duration</Text>
+                    </View>
+                    <View style={[styles.shareMetric, styles.shareMetricWide]}>
+                      <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{`${formatPaceMinPerKm()} /km`}</Text>
+                      <Text style={styles.shareMetricLabel}>Avg pace</Text>
+                    </View>
+                    <View style={styles.shareMetric}>
+                      <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{formatTime(pauseDurationSeconds)}</Text>
+                      <Text style={styles.shareMetricLabel}>Pause Time</Text>
+                    </View>
+                    <View style={styles.shareMetric}>
+                      <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{exerciseType || "Run"}</Text>
+                      <Text style={styles.shareMetricLabel}>Activity type</Text>
+                    </View>
+                    <View style={styles.shareMetric}>
+                      <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{runnerProfile?.town || "-"}</Text>
+                      <Text style={styles.shareMetricLabel}>Town</Text>
+                    </View>
+                    <View style={styles.shareMetric}>
+                      <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{getWeatherDisplay()}</Text>
+                      <Text style={styles.shareMetricLabel}>Weather</Text>
+                    </View>
+                  </View>
+                  </View>
                 </View>
               </View>
 
               <View style={styles.runDetailsOptions}>
-                <Text style={[styles.runDetailsOptionTitle, { color: themeColors.text }]}>Card options</Text>
+                <Text style={[styles.runDetailsOptionTitle, { color: themeColors.text }]}>Colour Theme</Text>
                 <View style={styles.runDetailsOptionRow}>
                   {(["dark", "light"] as const).map((mode) => (
                     <TouchableOpacity
@@ -1480,9 +1817,6 @@ export default function ExerciseScreen() {
                       </Text>
                     </TouchableOpacity>
                   ))}
-                  <TouchableOpacity style={styles.runDetailsChip} onPress={pickRunCardBackground}>
-                    <Text style={styles.runDetailsChipText}>Background image</Text>
-                  </TouchableOpacity>
                 </View>
               </View>
             </ScrollView>
@@ -1542,60 +1876,63 @@ export default function ExerciseScreen() {
                 Choose an event you are already registered for.
               </Text>
 
-              {registeredEvents.length === 0 ? (
+              {timedEventRunOptions.length === 0 ? (
                 <View style={styles.eventRunEmptyState}>
-                  <Text style={[styles.eventRunEmptyTitle, { color: themeColors.text }]}>No registered events yet</Text>
+                  <Text style={[styles.eventRunEmptyTitle, { color: themeColors.text }]}>No timed event runs</Text>
                   <Text style={[styles.eventRunEmptyText, { color: themeColors.textSecondary }]}>
-                    Join an event first, then come back here to record your official event run.
+                    Same-day and recurring events appear here. Multiday events are recorded through the normal Run button.
                   </Text>
                 </View>
               ) : (
-                registeredEvents.map((eventItem) => {
+                timedEventRunOptions.map((eventItem: RegisteredEventRun) => {
                   if (!eventItem) {
                     return null;
                   }
 
-                  const eventWindow = getEventWindow(eventItem.startsAt, eventItem.endsAt);
+                  const eventWindow = getEventWindow(eventItem);
+                  const canStartEventRun = eventWindow.isActive && !isCountdownActive;
                   return (
                     <View key={eventItem.eventId} style={[styles.eventRunCard, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.border }]}>
                       <View style={styles.eventRunCardHeader}>
                         <Text style={[styles.eventRunCardTitle, { color: themeColors.text }]}>{eventItem.eventName}</Text>
-                        {eventWindow.isSoon && !eventWindow.isEnded ? (
+                        {eventWindow.isActive ? (
                           <View style={styles.eventRunReadyBadge}>
                             <Footprints size={14} color={colors.white} />
                           </View>
                         ) : null}
                       </View>
                       <Text style={[styles.eventRunMeta, { color: themeColors.textSecondary }]}>
-                        {eventItem.startsAt ? `Starts ${eventItem.startsAt}` : "Start date pending"}
+                        {eventWindow.activeWindowLabel}
                       </Text>
                       <Text style={[styles.eventRunCountdown, { color: themeColors.text }]}>
-                        {eventWindow.isEnded
-                          ? "Event closed"
-                          : eventWindow.isSoon
-                          ? "Run symbol active"
-                          : `${eventWindow.daysTo ?? 0} day${eventWindow.daysTo === 1 ? "" : "s"} to go`}
+                        {eventWindow.isActive
+                          ? "Start active now"
+                          : eventWindow.isEnded
+                          ? "Event window closed"
+                          : `${eventWindow.daysTo ?? 0} day${eventWindow.daysTo === 1 ? "" : "s"} to event window`}
                       </Text>
-                      {eventWindow.isSoon && !eventWindow.isEnded ? (
+                      {eventItem.sharedCountMessage ? (
+                        <Text style={styles.eventRunCaution}>{eventItem.sharedCountMessage}</Text>
+                      ) : eventWindow.isActive ? (
                         <Text style={styles.eventRunCaution}>
-                          Only start your event when the official event has been flagged off.
+                          Record only when you are taking part in this event.
                         </Text>
                       ) : null}
                       <TouchableOpacity
-                        style={[styles.eventRunStartButton, eventWindow.isEnded && styles.eventRunStartButtonDisabled]}
+                        style={[styles.eventRunStartButton, !canStartEventRun && styles.eventRunStartButtonDisabled]}
                         onPress={() => {
                           setShowEventRunModal(false);
                           void startTrackingWithCountdown("Run", eventItem);
                         }}
-                        disabled={eventWindow.isEnded || isCountdownActive}
+                        disabled={!canStartEventRun}
                         activeOpacity={0.8}
                       >
                         <LinearGradient
-                          colors={eventWindow.isEnded ? ["#9CA3AF", "#9CA3AF"] : colors.gradient.orange}
+                          colors={!canStartEventRun ? ["#9CA3AF", "#9CA3AF"] : colors.gradient.orange}
                           style={styles.eventRunStartGradient}
                         >
                           <Play size={18} color={colors.white} />
-                          <Text style={styles.eventRunStartText}>{eventWindow.isEnded ? "Ended" : "Start"}</Text>
+                          <Text style={styles.eventRunStartText}>{canStartEventRun ? "Start" : "Inactive"}</Text>
                         </LinearGradient>
                       </TouchableOpacity>
                     </View>
@@ -1623,6 +1960,9 @@ export default function ExerciseScreen() {
             </LinearGradient>
 
             <ScrollView style={styles.modalBody}>
+              <Text style={[styles.modalSubtitle, { color: themeColors.textSecondary }]}>
+                Treadmill submissions are approved as workout records only and do not count for events.
+              </Text>
               <View style={styles.inputGroup}>
                 <Text style={[styles.inputLabel, { color: themeColors.text }]}>Distance (km)</Text>
                 <TextInput
@@ -1694,7 +2034,11 @@ export default function ExerciseScreen() {
 
             <ScrollView style={styles.modalBody}>
               <Text style={[styles.modalSubtitle, { color: themeColors.textSecondary }]}>
-                ⌚ Enter your smart watch readings
+                Health readings update Goals. Distance with date, start time, and duration is submitted separately for approval.
+              </Text>
+
+              <Text style={[styles.sourceFootnote, { color: themeColors.textSecondary }]}>
+                Goals health readings
               </Text>
 
               {SMART_WATCH_FIELDS.map((field) => (
@@ -1714,6 +2058,60 @@ export default function ExerciseScreen() {
                   />
                 </View>
               ))}
+
+              <Text style={[styles.sourceFootnote, { color: themeColors.textSecondary }]}>
+                Activity approval details. Screenshot is required only if this date matches a registered event.
+              </Text>
+
+              <View style={styles.inputGroup}>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Activity Date</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                  value={smartWatchActivityForm.activityDate}
+                  onChangeText={(text) => setSmartWatchActivityForm((prev) => ({ ...prev, activityDate: text }))}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={themeColors.textLight}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Start Time</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                  value={smartWatchActivityForm.startTime}
+                  onChangeText={(text) => setSmartWatchActivityForm((prev) => ({ ...prev, startTime: text }))}
+                  placeholder="HH:MM"
+                  placeholderTextColor={themeColors.textLight}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Duration</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                  value={smartWatchActivityForm.duration}
+                  onChangeText={(text) => setSmartWatchActivityForm((prev) => ({ ...prev, duration: text }))}
+                  placeholder="HH:MM"
+                  placeholderTextColor={themeColors.textLight}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Smart Watch Screenshot</Text>
+                <TouchableOpacity
+                  style={styles.imageUploadButton}
+                  onPress={() => pickEvidenceImage(setSmartWatchEvidenceImage)}
+                >
+                  {smartWatchEvidenceImage ? (
+                    <Image source={{ uri: smartWatchEvidenceImage }} style={styles.uploadedImage} />
+                  ) : (
+                    <View style={styles.uploadPlaceholder}>
+                      <Upload size={40} color={colors.primary} />
+                      <Text style={styles.uploadButtonText}>Tap to Upload Screenshot</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </View>
             </ScrollView>
 
             <View style={[styles.modalFooterRow, { borderTopColor: themeColors.border }]}>
@@ -1758,7 +2156,7 @@ export default function ExerciseScreen() {
 
             <ScrollView style={styles.modalBody}>
               <Text style={[styles.modalSubtitle, { color: themeColors.textSecondary }]}>
-                📱 Import from other running apps
+                Import from other running apps. Event credit is applied only after club/organizer approval.
               </Text>
 
               <View style={styles.inputGroup}>
@@ -1841,6 +2239,23 @@ export default function ExerciseScreen() {
                   onChangeText={(text) => setOtherSportsForm((prev) => ({ ...prev, distanceKm: text }))}
                   placeholderTextColor={themeColors.textLight}
                 />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Activity Screenshot *</Text>
+                <TouchableOpacity
+                  style={styles.imageUploadButton}
+                  onPress={() => pickEvidenceImage(setOtherSportsEvidenceImage)}
+                >
+                  {otherSportsEvidenceImage ? (
+                    <Image source={{ uri: otherSportsEvidenceImage }} style={styles.uploadedImage} />
+                  ) : (
+                    <View style={styles.uploadPlaceholder}>
+                      <Upload size={40} color={colors.primary} />
+                      <Text style={styles.uploadButtonText}>Tap to Upload Screenshot</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
               </View>
             </ScrollView>
 
@@ -1986,11 +2401,13 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   categorySubtitle: {
-    fontSize: 13,
+    fontSize: 11,
     color: colors.textSecondary,
     marginTop: -6,
     marginLeft: 16,
     marginBottom: 2,
+    fontStyle: "italic" as const,
+    opacity: 0.72,
   },
   exerciseRow: {
     flexDirection: "row" as const,
@@ -2063,6 +2480,12 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
   },
+  sourceFootnote: {
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 6,
+    marginLeft: 4,
+  },
   buttonRow: {
     flexDirection: "row",
     gap: 16,
@@ -2099,70 +2522,112 @@ const styles = StyleSheet.create({
     overflow: "hidden" as const,
   },
   runDetailsScroll: {
-    padding: 16,
+    padding: 0,
     gap: 14,
   },
   shareCard: {
-    borderRadius: 18,
     overflow: "hidden" as const,
-    padding: 18,
-    gap: 14,
-    minHeight: 620,
+    minHeight: 670,
+    backgroundColor: "#E5E7EB",
   },
-  shareCardDark: {
-    backgroundColor: "#111827",
+  shareMapHero: {
+    height: 360,
+    backgroundColor: "#9CA3AF",
   },
-  shareCardLight: {
-    backgroundColor: "#F8FAFC",
-  },
-  shareCardBackground: {
+  shareMapShade: {
     ...StyleSheet.absoluteFillObject,
-    width: "100%",
-    height: "100%",
+    backgroundColor: "rgba(255,255,255,0.18)",
   },
-  shareCardTint: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  shareCardTintDark: {
-    backgroundColor: "rgba(17,24,39,0.72)",
-  },
-  shareCardTintLight: {
-    backgroundColor: "rgba(248,250,252,0.82)",
-  },
-  shareBrandRow: {
-    alignItems: "center" as const,
-    gap: 2,
-  },
-  shareBrand: {
-    color: "#F97316",
-    fontSize: 24,
-    fontWeight: "900" as const,
-  },
-  shareTagline: {
-    color: "#10B981",
-    fontSize: 13,
-    fontWeight: "700" as const,
-  },
-  shareRunnerRow: {
+  shareBrandPill: {
+    position: "absolute" as const,
+    top: 18,
+    left: 18,
+    right: 18,
     flexDirection: "row" as const,
     alignItems: "center" as const,
+    alignSelf: "center" as const,
+    gap: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "transparent",
+    borderWidth: 0,
+  },
+  shareBrandLogo: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+  },
+  shareBrand: {
+    color: "#111827",
+    fontSize: 22,
+    fontWeight: "900" as const,
+    textShadowColor: "rgba(255,255,255,0.68)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  shareTagline: {
+    color: "#1F2937",
+    fontSize: 13,
+    fontWeight: "700" as const,
+    textShadowColor: "rgba(255,255,255,0.72)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  shareDetailsSheet: {
+    marginTop: -34,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 22,
+    paddingTop: 14,
+    minHeight: 330,
+    overflow: "hidden" as const,
+  },
+  shareDetailsSheetLight: {
+    backgroundColor: "#FFFFFF",
+  },
+  shareDetailsSheetDark: {
+    backgroundColor: "#111827",
+  },
+  shareDetailsContent: {
+    position: "relative" as const,
+  },
+  shareSheetHandle: {
+    width: 42,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#CBD5E1",
+    alignSelf: "center" as const,
+    marginBottom: 14,
+  },
+  shareTopRow: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
     gap: 12,
-    zIndex: 1,
+  },
+  shareRunnerBlock: {
+    flex: 1,
   },
   shareAvatar: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 62,
+    height: 62,
+    borderRadius: 31,
     borderWidth: 2,
-    borderColor: "#F97316",
+    borderColor: "#FFFFFF",
+    marginTop: 0,
+    marginBottom: 8,
   },
   shareAvatarFallback: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 62,
+    height: 62,
+    borderRadius: 31,
     alignItems: "center" as const,
     justifyContent: "center" as const,
     backgroundColor: "#F97316",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+    marginTop: 0,
+    marginBottom: 8,
   },
   shareAvatarInitial: {
     color: colors.white,
@@ -2173,13 +2638,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   shareRunnerName: {
-    fontSize: 22,
-    fontWeight: "900" as const,
+    fontSize: 25,
+    fontWeight: "500" as const,
   },
   shareRunnerMeta: {
     fontSize: 13,
-    fontWeight: "600" as const,
-    marginTop: 2,
+    fontWeight: "500" as const,
+    marginTop: 5,
+    lineHeight: 18,
   },
   shareTextLight: {
     color: colors.white,
@@ -2193,70 +2659,60 @@ const styles = StyleSheet.create({
   shareTextMutedLight: {
     color: "#475569",
   },
-  shareTitleRow: {
+  shareDistanceBlock: {
+    alignItems: "flex-end" as const,
+    justifyContent: "flex-start" as const,
+    minWidth: 138,
+  },
+  shareMedalSymbol: {
+    fontSize: 24,
+    marginBottom: -4,
+  },
+  shareDistanceRow: {
     flexDirection: "row" as const,
-    justifyContent: "space-between" as const,
-    alignItems: "center" as const,
-    gap: 10,
-    zIndex: 1,
+    alignItems: "flex-end" as const,
+    gap: 8,
   },
-  shareActivityType: {
-    fontSize: 30,
-    fontWeight: "900" as const,
+  shareDistanceValue: {
+    fontSize: 58,
+    fontWeight: "400" as const,
+    lineHeight: 64,
   },
-  shareMedalBadge: {
-    color: colors.white,
-    backgroundColor: "#10B981",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    fontSize: 12,
-    fontWeight: "800" as const,
-    overflow: "hidden" as const,
-  },
-  shareEventName: {
-    fontSize: 15,
-    fontWeight: "700" as const,
-    zIndex: 1,
+  shareDistanceUnit: {
+    fontSize: 22,
+    fontWeight: "500" as const,
+    marginBottom: 9,
   },
   shareMetricsGrid: {
     flexDirection: "row" as const,
-    gap: 8,
-    zIndex: 1,
+    flexWrap: "wrap" as const,
+    rowGap: 24,
+    marginTop: 28,
   },
   shareMetric: {
-    flex: 1,
-    borderRadius: 12,
-    padding: 10,
-    backgroundColor: "rgba(249,115,22,0.92)",
+    width: "33.33%",
+    alignItems: "center" as const,
+    paddingHorizontal: 4,
+  },
+  shareMetricWide: {
+    width: "50%",
   },
   shareMetricLabel: {
-    color: "rgba(255,255,255,0.82)",
-    fontSize: 11,
-    fontWeight: "700" as const,
+    color: "#6B7280",
+    fontSize: 13,
+    fontWeight: "500" as const,
+    textAlign: "center" as const,
+    marginTop: 6,
   },
   shareMetricValue: {
-    color: colors.white,
-    fontSize: 15,
-    fontWeight: "900" as const,
-    marginTop: 4,
-  },
-  shareDateRow: {
-    flexDirection: "row" as const,
-    justifyContent: "space-between" as const,
-    zIndex: 1,
+    fontSize: 23,
+    fontWeight: "500" as const,
+    textAlign: "center" as const,
   },
   shareDateText: {
-    color: "#10B981",
-    fontSize: 13,
-    fontWeight: "800" as const,
-  },
-  shareMapBox: {
-    height: 230,
-    borderRadius: 16,
-    overflow: "hidden" as const,
-    backgroundColor: "#E5E7EB",
-    zIndex: 1,
+    fontSize: 15,
+    fontWeight: "500" as const,
+    marginTop: 6,
   },
   shareMap: {
     flex: 1,
@@ -2430,6 +2886,16 @@ const styles = StyleSheet.create({
   },
   resetButtonText: {
     color: colors.white,
+    fontSize: 18,
+    fontWeight: "700" as const,
+  },
+  finishedCloseButton: {
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+  },
+  finishedCloseButtonText: {
+    color: "#111827",
     fontSize: 18,
     fontWeight: "700" as const,
   },

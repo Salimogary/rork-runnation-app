@@ -29,7 +29,8 @@ export default publicProcedure
         status: "revoked",
         accepted_by: actor.authUserId,
       })
-      .eq("invite_id", input.inviteId);
+      .eq("invite_id", input.inviteId)
+      .eq("status", "pending");
 
     if (error) {
       throw new Error(error.message || "Could not reject the role request.");

@@ -21,6 +21,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import * as DocumentPicker from "expo-document-picker";
 import { decode as decodeBase64 } from "base64-arraybuffer";
 import { formatCountryList, formatCountryName } from "@/constants/country-utils";
 
@@ -40,6 +41,7 @@ type AdminTab =
   | "roles"
   | "dataHealth"
   | "auditLog"
+  | "moderation"
   | "archive";
 
 type AuditLogUserType = "all" | "country_admin" | "country_coordinator" | "club_coordinator";
@@ -66,9 +68,43 @@ type ManageableRoleName =
   | "country_admin"
   | "country_coordinator"
   | "club_coordinator"
-  | "event_organizer";
+  | "event_organizer"
+  | "shop_manager"
+  | "junior_runners_club_coordinator"
+  | "golden_age_runners_club_coordinator"
+  | "treadmill_runners_club_coordinator"
+  | "para_runners_club_coordinator"
+  | "magazine_columnist_fitness_coach"
+  | "magazine_columnist_sports_journalist"
+  | "magazine_columnist_motivation_speaker";
+type AssignableRoleName = "country_admin" | "country_coordinator" | "club_coordinator" | "event_organizer";
 type EventEntryMode = "free" | "club_approved" | "paid";
+type EventTypeMode = "same_day" | "recurring" | "multiday";
+type EventRecurrenceFrequency = "weekly" | "monthly";
+type EventMonthlyMode = "day_of_month" | "weekend";
 type AdminMenuScopeGroup = "global" | "country" | "club";
+
+const RUN_DAY_OPTIONS = [
+  { value: 1, label: "Mon" },
+  { value: 2, label: "Tue" },
+  { value: 3, label: "Wed" },
+  { value: 4, label: "Thu" },
+  { value: 5, label: "Fri" },
+  { value: 6, label: "Sat" },
+  { value: 0, label: "Sun" },
+] as const;
+
+const MONTH_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => {
+  const day = index + 1;
+  const suffix = day === 1 || day === 21 || day === 31 ? "st" : day === 2 || day === 22 ? "nd" : day === 3 || day === 23 ? "rd" : "th";
+  return { value: day, label: `${day}${suffix}` };
+});
+
+const MONTH_WEEKEND_OPTIONS = Array.from({ length: 5 }, (_, index) => {
+  const week = index + 1;
+  const suffix = week === 1 ? "st" : week === 2 ? "nd" : week === 3 ? "rd" : "th";
+  return { value: week, label: `${week}${suffix}` };
+});
 
 interface PendingRoleRequest {
   inviteId: string;
@@ -80,6 +116,9 @@ interface PendingRoleRequest {
   clubName: string | null;
   organizerId: string | null;
   organizerName: string | null;
+  websiteUrl: string | null;
+  linkedinUrl: string | null;
+  socialUrl: string | null;
   status: string;
   createdAt: string;
   expiresAt: string | null;
@@ -196,6 +235,121 @@ function getDefaultAuditStartDate(): string {
   const date = new Date();
   date.setDate(date.getDate() - 30);
   return toDateInputValue(date);
+}
+
+interface ChatModerationReport {
+  reportId: string;
+  reporterRegistrationId: string;
+  reportedRegistrationId: string | null;
+  postId: string | null;
+  commentId: string | null;
+  reasonCategory: string;
+  description: string;
+  screenshotUrl: string | null;
+  status: string;
+  adminNotes: string | null;
+  createdAt: string;
+  reporterName: string | null;
+  reportedName: string | null;
+  reportedUsername: string | null;
+  reportedCountry: string | null;
+  offenderFlags: {
+    confirmed_flags: number;
+    dismissed_reports: number;
+    is_banned: boolean;
+    ban_reason: string | null;
+  } | null;
+}
+
+function formatDisplayDateInput(value: string): string {
+  const digits = value.replace(/\D/g, "").slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4)}`;
+}
+
+function isValidDisplayDate(value: string): boolean {
+  const match = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (!match) return false;
+  const [, dayText, monthText, yearText] = match;
+  const day = Number(dayText);
+  const month = Number(monthText);
+  const year = Number(yearText);
+  const date = new Date(year, month - 1, day);
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day
+  );
+}
+
+function toApiDate(value: string): string {
+  const [day, month, year] = value.split("-");
+  return `${year}-${month}-${day}`;
+}
+
+function fromApiDate(value: string | null | undefined): string {
+  const normalized = String(value || "").slice(0, 10);
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  return `${match[3]}-${match[2]}-${match[1]}`;
+}
+
+function countWords(value: string): number {
+  return value.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function stripRtfToPlainText(value: string): string {
+  return value
+    .replace(/\\par[d]?/g, "\n")
+    .replace(/\\'[0-9a-fA-F]{2}/g, "")
+    .replace(/\\[a-zA-Z]+-?\d* ?/g, "")
+    .replace(/[{}]/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function normalizeArticleText(value: string): string {
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function isSupportedArticleTextFile(name?: string | null, mimeType?: string | null): boolean {
+  const lowerName = String(name || "").toLowerCase();
+  const lowerMime = String(mimeType || "").toLowerCase();
+  return (
+    [".txt", ".text", ".md", ".markdown", ".csv", ".log", ".rtf"].some((ext) =>
+      lowerName.endsWith(ext)
+    ) ||
+    [
+      "text/plain",
+      "text/markdown",
+      "text/csv",
+      "text/rtf",
+      "application/rtf",
+    ].includes(lowerMime)
+  );
+}
+
+async function readArticleFileText(asset: DocumentPicker.DocumentPickerAsset): Promise<string> {
+  if (Platform.OS === "web") {
+    const webFile = (asset as any).file;
+    if (webFile && typeof webFile.text === "function") {
+      return webFile.text();
+    }
+
+    const response = await fetch(asset.uri);
+    if (!response.ok) {
+      throw new Error("Could not read the selected article text file.");
+    }
+    return response.text();
+  }
+
+  return FileSystem.readAsStringAsync(asset.uri, { encoding: "utf8" });
 }
 
 interface PendingActivity {
@@ -423,13 +577,27 @@ export default function AdminScreen() {
   const [eventName, setEventName] = useState<string>("");
   const [startsAt, setStartsAt] = useState<string>("");
   const [endsAt, setEndsAt] = useState<string>("");
+  const [registrationClosesAt, setRegistrationClosesAt] = useState<string>("");
   const [eventCountry, setEventCountry] = useState<string>("");
   const [eventOrganizerId, setEventOrganizerId] = useState<string>("");
+  const [eventTypeMode, setEventTypeMode] = useState<EventTypeMode>("same_day");
+  const [eventRecurrenceWeekday, setEventRecurrenceWeekday] = useState<number>(3);
+  const [eventRecurrenceFrequency, setEventRecurrenceFrequency] = useState<EventRecurrenceFrequency>("weekly");
+  const [eventRecurrenceWeekdays, setEventRecurrenceWeekdays] = useState<number[]>([3]);
+  const [eventMonthlyMode, setEventMonthlyMode] = useState<EventMonthlyMode>("day_of_month");
+  const [eventRecurrenceMonthDay, setEventRecurrenceMonthDay] = useState<number>(1);
+  const [eventRecurrenceWeekOfMonth, setEventRecurrenceWeekOfMonth] = useState<number>(1);
   const [eventIsVirtual, setEventIsVirtual] = useState<boolean>(false);
   const [eventEntry, setEventEntry] = useState<EventEntryMode>("free");
   const [eventHasMedal, setEventHasMedal] = useState<boolean>(false);
   const [eventEntryFee, setEventEntryFee] = useState<string>("");
   const [eventPaymentDetails, setEventPaymentDetails] = useState<string>("");
+  const [eventOrganizerPaymentLink, setEventOrganizerPaymentLink] = useState<string>("");
+  const [eventRunNationPaymentLinkEnabled, setEventRunNationPaymentLinkEnabled] = useState<boolean>(false);
+  const [eventMagazineArticleTitle, setEventMagazineArticleTitle] = useState<string>("");
+  const [eventMagazineArticleBody, setEventMagazineArticleBody] = useState<string>("");
+  const [eventMagazineWriterName, setEventMagazineWriterName] = useState<string>("");
+  const [eventMagazineArticleFileName, setEventMagazineArticleFileName] = useState<string | null>(null);
   const [organizerNameInput, setOrganizerNameInput] = useState<string>("");
   const [organizerDescriptionInput, setOrganizerDescriptionInput] = useState<string>("");
   const [organizerCountryInput, setOrganizerCountryInput] = useState<string>("");
@@ -439,6 +607,12 @@ export default function AdminScreen() {
   } | null>(null);
   const [eventPosterPreview, setEventPosterPreview] = useState<string | null>(null);
   const [eventPosterMarkedForRemoval, setEventPosterMarkedForRemoval] = useState<boolean>(false);
+  const [eventMagazinePhotoAsset, setEventMagazinePhotoAsset] = useState<{
+    uri: string;
+    mimeType?: string | null;
+  } | null>(null);
+  const [eventMagazinePhotoPreview, setEventMagazinePhotoPreview] = useState<string | null>(null);
+  const [eventMinimumDistanceEnabled, setEventMinimumDistanceEnabled] = useState<boolean>(false);
   const [medalMinDailyDistance, setMedalMinDailyDistance] = useState<string>("");
   const [medalMinCumulativeDistance, setMedalMinCumulativeDistance] = useState<string>("");
   const [medalDateStart, setMedalDateStart] = useState<string>("");
@@ -451,9 +625,10 @@ export default function AdminScreen() {
   const [isDownloadingAuditLog, setIsDownloadingAuditLog] = useState<boolean>(false);
   const [adminTermsAcceptedChecked, setAdminTermsAcceptedChecked] = useState<boolean>(false);
   const [showRoleModal, setShowRoleModal] = useState<boolean>(false);
+  const [selectedMagazinePreview, setSelectedMagazinePreview] = useState<any | null>(null);
   const [editingRoleAssignment, setEditingRoleAssignment] = useState<ActiveRoleAssignment | null>(null);
   const [roleRequestEmail, setRoleRequestEmail] = useState<string>("");
-  const [selectedRoleName, setSelectedRoleName] = useState<ManageableRoleName>("country_admin");
+  const [selectedRoleName, setSelectedRoleName] = useState<AssignableRoleName>("country_admin");
   const [selectedRoleCountryCode, setSelectedRoleCountryCode] = useState<string>("");
   const [selectedRoleClubId, setSelectedRoleClubId] = useState<string>("");
 
@@ -468,20 +643,20 @@ export default function AdminScreen() {
   const isChecking = false;
   const { data: countryList = [] } = trpc.auth.getCountries.useQuery();
   const canUseProtectedAdminRoutes = hasRoleBasedAccess;
-  const protectedTabs: AdminTab[] = ["orders", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "adminTerms", "roles", "dataHealth", "auditLog"];
+  const protectedTabs: AdminTab[] = ["orders", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "moderation", "adminTerms", "roles", "dataHealth", "auditLog"];
 
   const allowedTabs = useMemo<AdminTab[]>(() => {
     if (isSuperAdmin) {
-      return ["orders", "stock", "approvals", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "ratings", "suggestions", "magazine", "adminTerms", "roles", "dataHealth", "auditLog", "archive"];
+      return ["orders", "stock", "approvals", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "ratings", "suggestions", "magazine", "moderation", "adminTerms", "roles", "dataHealth", "auditLog", "archive"];
     }
     if (isCountryAdmin) {
-      return ["orders", "stock", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "magazine", "adminTerms"];
+      return ["orders", "stock", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "magazine", "moderation", "adminTerms"];
     }
     if (isCountryCoordinator) {
-      return ["approvals", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "magazine", "adminTerms"];
+      return ["approvals", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "magazine", "moderation", "adminTerms"];
     }
     if (isClubCoordinator) {
-      return ["approvals", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "magazine", "adminTerms"];
+      return ["approvals", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "magazine", "moderation", "adminTerms"];
     }
     if (isEventOrganizer) {
       return ["events", "enrollments", "adminTerms"];
@@ -829,13 +1004,33 @@ export default function AdminScreen() {
       : 0,
   }));
 
-  const { data: externalSubmissions, isLoading: externalSubmissionsLoading } = trpc.activities.getExternalSubmissions.useQuery(
+  const { data: externalSubmissions, isLoading: externalSubmissionsLoading, refetch: refetchExternalSubmissions } = trpc.activities.getExternalSubmissions.useQuery(
     undefined,
     { 
       enabled: canUseProtectedAdminRoutes && activeTab === "externalActivities",
       refetchOnMount: true,
     }
   );
+
+  const approveExternalSubmissionMutation = trpc.activities.approveExternalSubmission.useMutation({
+    onSuccess: () => {
+      void refetchExternalSubmissions();
+      Alert.alert("Approved", "External activity approved and added to the runner's records.");
+    },
+    onError: (error) => {
+      Alert.alert("Approval Error", error.message || "Could not approve this external activity.");
+    },
+  });
+
+  const rejectExternalSubmissionMutation = trpc.activities.rejectExternalSubmission.useMutation({
+    onSuccess: () => {
+      void refetchExternalSubmissions();
+      Alert.alert("Rejected", "External activity submission removed.");
+    },
+    onError: (error) => {
+      Alert.alert("Reject Error", error.message || "Could not reject this external activity.");
+    },
+  });
 
   const { data: magazineSubmissions = [], isLoading: magazineSubmissionsLoading } = trpc.admin.getMagazineSubmissions.useQuery(
     undefined,
@@ -852,6 +1047,25 @@ export default function AdminScreen() {
       refetchOnMount: true,
     }
   );
+
+  const {
+    data: chatReports = [],
+    isLoading: chatReportsLoading,
+    refetch: refetchChatReports,
+  } = trpc.admin.getChatReports.useQuery(undefined, {
+    enabled: canUseProtectedAdminRoutes && activeTab === "moderation",
+    refetchOnMount: true,
+  });
+
+  const reviewChatReportMutation = trpc.admin.reviewChatReport.useMutation({
+    onSuccess: () => {
+      void refetchChatReports();
+      Alert.alert("Updated", "Chat report reviewed.");
+    },
+    onError: (error: any) => {
+      Alert.alert("Moderation Error", error.message || "Could not review this report.");
+    },
+  });
 
   const {
     data: clubMembershipRequests = [],
@@ -990,6 +1204,7 @@ export default function AdminScreen() {
   });
 
   const pendingRoleRequests = (roleManagementData?.pendingRequests ?? []) as PendingRoleRequest[];
+  const pendingRoleRequestCount = pendingRoleRequests.filter((request) => request.status === "pending").length;
   const activeRoleAssignments = (roleManagementData?.activeAssignments ?? []) as ActiveRoleAssignment[];
   const roleCountries = (roleManagementData?.countries ?? []) as RoleLookupCountry[];
   const roleClubs = (roleManagementData?.clubs ?? []) as RoleLookupClub[];
@@ -1017,6 +1232,22 @@ export default function AdminScreen() {
         return "Club Coordinator";
       case "event_organizer":
         return "Event Organizer";
+      case "shop_manager":
+        return "Shop Manager";
+      case "junior_runners_club_coordinator":
+        return "Junior Runners Club Coordinator";
+      case "golden_age_runners_club_coordinator":
+        return "Golden Age Runners Club Coordinator";
+      case "treadmill_runners_club_coordinator":
+        return "Treadmill Runners Club Coordinator";
+      case "para_runners_club_coordinator":
+        return "Para Runners Club Coordinator";
+      case "magazine_columnist_fitness_coach":
+        return "Magazine Columnist (Fitness Coach)";
+      case "magazine_columnist_sports_journalist":
+        return "Magazine Columnist (Sports Journalist)";
+      case "magazine_columnist_motivation_speaker":
+        return "Magazine Columnist (Motivation Speaker)";
       default:
         return roleName;
     }
@@ -1077,6 +1308,15 @@ export default function AdminScreen() {
   }
 
   function openEditRoleModal(assignment: ActiveRoleAssignment) {
+    if (
+      assignment.roleName !== "country_admin" &&
+      assignment.roleName !== "country_coordinator" &&
+      assignment.roleName !== "club_coordinator" &&
+      assignment.roleName !== "event_organizer"
+    ) {
+      Alert.alert("Role Managed by Approval", "This global role can be approved or removed, but it is not editable from this form.");
+      return;
+    }
     setEditingRoleAssignment(assignment);
     setRoleRequestEmail(assignment.username ?? assignment.userName);
     setSelectedRoleName(assignment.roleName);
@@ -1167,6 +1407,7 @@ export default function AdminScreen() {
   const updateMagazineSubmissionStatusMutation = trpc.admin.updateMagazineSubmissionStatus.useMutation({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [["admin", "getMagazineSubmissions"]] });
+      void queryClient.invalidateQueries({ queryKey: [["admin", "getEvents"]] });
       Alert.alert("Updated", "Magazine submission updated.");
     },
     onError: (error: any) => {
@@ -1251,6 +1492,34 @@ export default function AdminScreen() {
       Alert.alert("Error", error.message || "Could not update the event approval status.");
     },
   });
+
+  const deleteEventMutation = trpc.admin.deleteEvent.useMutation({
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [["admin", "getEvents"]] });
+      void queryClient.invalidateQueries({ queryKey: [["admin", "getMagazineSubmissions"]] });
+      Alert.alert("Deleted", "Rejected event removed from the dashboard.");
+    },
+    onError: (error: any) => {
+      Alert.alert("Delete Event", error.message || "Could not delete this event.");
+    },
+  });
+
+  const handleDeleteRejectedEvent = (event: any) => {
+    const eventId = event.event_id || event.eventId;
+    const eventName = event.event_name || event.eventName || "this event";
+    Alert.alert(
+      "Delete rejected event?",
+      `This will remove "${eventName}" from the dashboard and hide its linked magazine submission. The organizer can then recreate and submit again.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => deleteEventMutation.mutate({ eventId }),
+        },
+      ]
+    );
+  };
 
 
 
@@ -1522,16 +1791,33 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     setEventName("");
     setStartsAt("");
     setEndsAt("");
+    setRegistrationClosesAt("");
     setEventCountry("");
     setEventOrganizerId(isEventOrganizer ? roleSession.eventOrganizerScopes[0] ?? "" : "");
+    setEventTypeMode("same_day");
+    setEventRecurrenceWeekday(3);
+    setEventRecurrenceFrequency("weekly");
+    setEventRecurrenceWeekdays([3]);
+    setEventMonthlyMode("day_of_month");
+    setEventRecurrenceMonthDay(1);
+    setEventRecurrenceWeekOfMonth(1);
     setEventIsVirtual(false);
     setEventEntry("free");
     setEventHasMedal(false);
     setEventEntryFee("");
     setEventPaymentDetails("");
+    setEventOrganizerPaymentLink("");
+    setEventRunNationPaymentLinkEnabled(false);
+    setEventMagazineArticleTitle("");
+    setEventMagazineArticleBody("");
+    setEventMagazineWriterName("");
+    setEventMagazineArticleFileName(null);
     setEventPosterAsset(null);
     setEventPosterPreview(null);
     setEventPosterMarkedForRemoval(false);
+    setEventMagazinePhotoAsset(null);
+    setEventMagazinePhotoPreview(null);
+    setEventMinimumDistanceEnabled(false);
     setMedalMinDailyDistance("");
     setMedalMinCumulativeDistance("");
     setMedalDateStart("");
@@ -1543,8 +1829,14 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     setShowEventModal(true);
   };
 
+  const selectedEventOrganizer = useMemo(() => {
+    return (eventOrganizers as EventOrganizerRecord[]).find(
+      (organizer) => organizer.organizer_id === eventOrganizerId
+    );
+  }, [eventOrganizers, eventOrganizerId]);
+
   const resolvedEventCurrencyCode = useMemo(() => {
-    const rawCountry = eventCountry.trim().toLowerCase();
+    const rawCountry = String(eventCountry || selectedEventOrganizer?.country || "").trim().toLowerCase();
     if (!rawCountry) return "";
     const matchedCountry = (countryList as Array<any>).find((country) => {
       return (
@@ -1553,11 +1845,21 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
       );
     });
     return String(matchedCountry?.currency_code || "").trim().toUpperCase();
-  }, [countryList, eventCountry]);
+  }, [countryList, eventCountry, selectedEventOrganizer?.country]);
 
   const handleAddEvent = async () => {
-    if (!eventName.trim() || !startsAt.trim() || !endsAt.trim()) {
-      Alert.alert("Missing Details", "Please enter the event name, start date, and end date.");
+    const requiresEndDate = eventTypeMode !== "recurring";
+    if (!eventName.trim() || !startsAt.trim() || !registrationClosesAt.trim() || (requiresEndDate && !endsAt.trim())) {
+      Alert.alert(
+        "Missing Details",
+        requiresEndDate
+          ? "Please enter the event name, start date, end date, and registration close date."
+          : "Please enter the event name, date, and registration close date."
+      );
+      return;
+    }
+    if (!isValidDisplayDate(startsAt) || (requiresEndDate && !isValidDisplayDate(endsAt)) || !isValidDisplayDate(registrationClosesAt)) {
+      Alert.alert("Invalid Date", "Please enter dates in DD-MM-YYYY format.");
       return;
     }
     if (!eventOrganizerId) {
@@ -1570,6 +1872,35 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     }
     if (eventEntry === "paid" && !eventEntryFee.trim()) {
       Alert.alert("Missing Entry Fee", "Please enter the paid event fee.");
+      return;
+    }
+    if (
+      eventEntry === "paid" &&
+      eventOrganizerPaymentLink.trim() &&
+      !/^https?:\/\/\S+\.\S+/i.test(eventOrganizerPaymentLink.trim())
+    ) {
+      Alert.alert("Invalid Payment Link", "Please enter a valid organizer payment link beginning with http:// or https://.");
+      return;
+    }
+    if (!eventPosterPreview && !eventPosterAsset?.uri) {
+      Alert.alert("Missing Event Photo", "Please add the event photo for the event listing.");
+      return;
+    }
+    if (!eventMagazinePhotoPreview && !eventMagazinePhotoAsset?.uri) {
+      Alert.alert("Missing Magazine Photo", "Please add a separate magazine photo for the event story.");
+      return;
+    }
+    if (!eventMagazineArticleTitle.trim()) {
+      Alert.alert("Missing Magazine Article", "Please add a magazine article title for this event.");
+      return;
+    }
+    if (!eventMagazineWriterName.trim()) {
+      Alert.alert("Missing Writer Name", "Please add the writer's name for the magazine article.");
+      return;
+    }
+    const articleWordCount = countWords(eventMagazineArticleBody);
+    if (articleWordCount < 200 || articleWordCount > 300) {
+      Alert.alert("Magazine Article Length", "Please upload a magazine article body between 200 and 300 words.");
       return;
     }
 
@@ -1610,25 +1941,96 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
       directPosterLink = null;
     }
 
+    let magazinePhotoBase64: string | null = null;
+    let magazinePhotoMimeType: string | null = null;
+    if (eventMagazinePhotoAsset?.uri) {
+      try {
+        const magazinePhotoPayload = await encodeEventPosterForUpload(
+          eventMagazinePhotoAsset.uri,
+          eventMagazinePhotoAsset.mimeType
+        );
+        magazinePhotoBase64 = magazinePhotoPayload.base64;
+        magazinePhotoMimeType = magazinePhotoPayload.mimeType;
+      } catch (error: any) {
+        Alert.alert("Magazine Photo Error", error?.message || "Could not prepare the selected magazine photo.");
+        return;
+      }
+    }
+
+    const recurrenceFrequency = eventTypeMode === "recurring" ? eventRecurrenceFrequency : null;
+    const normalizedStartsAt = toApiDate(startsAt);
+    const normalizedEndsAt = eventTypeMode === "recurring" ? normalizedStartsAt : toApiDate(endsAt);
+    const normalizedRegistrationClosesAt = toApiDate(registrationClosesAt);
+    const numericMinDailyDistance = eventMinimumDistanceEnabled
+      ? Number.parseFloat(medalMinDailyDistance.replace(/,/g, "").trim())
+      : undefined;
+    const numericMinCumulativeDistance =
+      eventMinimumDistanceEnabled && eventTypeMode === "multiday"
+        ? Number.parseFloat(medalMinCumulativeDistance.replace(/,/g, "").trim())
+        : undefined;
+    if (
+      eventMinimumDistanceEnabled &&
+      (!Number.isFinite(numericMinDailyDistance) || Number(numericMinDailyDistance) <= 0)
+    ) {
+      Alert.alert("Minimum Distance", "Please enter a valid minimum daily distance in km.");
+      return;
+    }
+    if (
+      eventMinimumDistanceEnabled &&
+      eventTypeMode === "multiday" &&
+      (!Number.isFinite(numericMinCumulativeDistance) || Number(numericMinCumulativeDistance) <= 0)
+    ) {
+      Alert.alert("Minimum Distance", "Please enter a valid minimum cumulative distance in km.");
+      return;
+    }
     const payload = {
       eventName: eventName.trim(),
-      startsAt,
-      endsAt,
-      country: eventCountry.trim() || undefined,
+      startsAt: normalizedStartsAt,
+      endsAt: normalizedEndsAt,
+      registrationClosesAt: normalizedRegistrationClosesAt,
+      eventType: eventTypeMode,
+      recurrenceFrequency,
+      recurrenceWeekday:
+        eventTypeMode === "recurring" && eventRecurrenceFrequency === "weekly"
+          ? eventRecurrenceWeekdays[0] ?? eventRecurrenceWeekday
+          : null,
+      recurrenceWeekdays:
+        eventTypeMode === "recurring" && eventRecurrenceFrequency === "weekly"
+          ? eventRecurrenceWeekdays
+          : null,
+      recurrenceMonthlyMode:
+        eventTypeMode === "recurring" && eventRecurrenceFrequency === "monthly"
+          ? eventMonthlyMode
+          : null,
+      recurrenceMonthDay:
+        eventTypeMode === "recurring" && eventRecurrenceFrequency === "monthly" && eventMonthlyMode === "day_of_month"
+          ? eventRecurrenceMonthDay
+          : null,
+      recurrenceWeekOfMonth:
+        eventTypeMode === "recurring" && eventRecurrenceFrequency === "monthly" && eventMonthlyMode === "weekend"
+          ? eventRecurrenceWeekOfMonth
+          : null,
       organizerId: eventOrganizerId || null,
       isVirtual: eventIsVirtual,
       entry: eventEntry,
       entryFee: eventEntry === "paid" ? numericEntryFee : undefined,
-      hasMedal: eventHasMedal,
+      hasMedal: false,
       paymentDetails: eventEntry === "paid" ? eventPaymentDetails.trim() || undefined : undefined,
-      medalMinDailyDistance: eventHasMedal && medalMinDailyDistance ? parseFloat(medalMinDailyDistance) : undefined,
-      medalMinCumulativeDistance: eventHasMedal && medalMinCumulativeDistance ? parseFloat(medalMinCumulativeDistance) : undefined,
-      medalDateStart: eventHasMedal ? medalDateStart || undefined : undefined,
-      medalDateEnd: eventHasMedal ? medalDateEnd || undefined : undefined,
+      organizerPaymentLink: eventEntry === "paid" ? eventOrganizerPaymentLink.trim() || undefined : undefined,
+      runnationPaymentLinkEnabled: eventEntry === "paid" && eventRunNationPaymentLinkEnabled,
       posterLink: directPosterLink ?? (shouldNormalizeExistingPoster ? eventPosterPreview : undefined),
       clearPoster: eventPosterMarkedForRemoval && !eventPosterAsset,
       posterBase64: null,
       posterMimeType: null,
+      magazineArticleTitle: eventMagazineArticleTitle.trim(),
+      magazineArticleBody: eventMagazineArticleBody.trim(),
+      magazineWriterName: eventMagazineWriterName.trim(),
+      magazinePhotoLink: eventMagazinePhotoAsset ? undefined : eventMagazinePhotoPreview ?? undefined,
+      magazinePhotoBase64,
+      magazinePhotoMimeType,
+      medalMinDailyDistance: eventMinimumDistanceEnabled ? numericMinDailyDistance : undefined,
+      medalMinCumulativeDistance:
+        eventMinimumDistanceEnabled && eventTypeMode === "multiday" ? numericMinCumulativeDistance : undefined,
     };
 
     if (editingEventId) {
@@ -1645,13 +2047,25 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
   const handleEditEvent = (event: any) => {
     setEditingEventId(event.event_id || event.eventId);
     setEventName(event.event_name || event.eventName || "");
-    setStartsAt(String(event.starts_at || event.startsAt || "").slice(0, 10));
-    setEndsAt(String(event.ends_at || event.endsAt || "").slice(0, 10));
+    setStartsAt(fromApiDate(event.starts_at || event.startsAt));
+    setEndsAt(fromApiDate(event.ends_at || event.endsAt));
+    setRegistrationClosesAt(fromApiDate(event.registration_closes_at || event.registrationClosesAt));
     setEventCountry(event.country || "");
     setEventOrganizerId(event.organizer || "");
+    setEventTypeMode((event.event_type || event.eventType || (String(event.starts_at || event.startsAt).slice(0, 10) === String(event.ends_at || event.endsAt).slice(0, 10) ? "same_day" : "multiday")) as EventTypeMode);
+    setEventRecurrenceWeekday(Number(event.recurrence_weekday ?? event.recurrenceWeekday ?? 3));
+    setEventRecurrenceFrequency((event.recurrence_frequency || event.recurrenceFrequency || "weekly") as EventRecurrenceFrequency);
+    setEventRecurrenceWeekdays(
+      Array.isArray(event.recurrence_weekdays)
+        ? event.recurrence_weekdays.map((value: any) => Number(value)).filter((value: number) => value >= 0 && value <= 6)
+        : [Number(event.recurrence_weekday ?? event.recurrenceWeekday ?? 3)]
+    );
+    setEventMonthlyMode((event.recurrence_monthly_mode || event.recurrenceMonthlyMode || "day_of_month") as EventMonthlyMode);
+    setEventRecurrenceMonthDay(Number(event.recurrence_month_day ?? event.recurrenceMonthDay ?? 1));
+    setEventRecurrenceWeekOfMonth(Number(event.recurrence_week_of_month ?? event.recurrenceWeekOfMonth ?? 1));
     setEventIsVirtual(Boolean(event.is_virtual ?? event.isVirtual));
     setEventEntry((event.entry as EventEntryMode) || "free");
-    setEventHasMedal(Boolean(event.has_medal ?? event.hasMedal));
+    setEventHasMedal(false);
     setEventEntryFee(
       event.entry_fee !== null && event.entry_fee !== undefined
         ? String(event.entry_fee)
@@ -1660,9 +2074,23 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
         : ""
     );
     setEventPaymentDetails(event.payment_details || event.paymentDetails || "");
+    setEventOrganizerPaymentLink(event.organizer_payment_link || event.organizerPaymentLink || "");
+    setEventRunNationPaymentLinkEnabled(Boolean(event.runnation_payment_link_enabled ?? event.runnationPaymentLinkEnabled));
+    setEventMagazineArticleTitle(event.magazine_article_title || event.magazineArticleTitle || `Join ${event.event_name || event.eventName || "this RunNation event"}`);
+    setEventMagazineArticleBody(event.magazine_article_body || event.magazineArticleBody || "");
+    setEventMagazineWriterName(event.magazine_writer_name || event.magazineWriterName || "");
+    setEventMagazineArticleFileName(event.magazine_article_body || event.magazineArticleBody ? "Existing article text" : null);
     setEventPosterAsset(null);
     setEventPosterPreview(event.poster_link || event.posterLink || null);
     setEventPosterMarkedForRemoval(false);
+    setEventMagazinePhotoAsset(null);
+    setEventMagazinePhotoPreview(event.magazine_photo_link || event.magazinePhotoLink || null);
+    setEventMinimumDistanceEnabled(
+      Boolean(
+        (event.medal_min_daily_distance !== null && event.medal_min_daily_distance !== undefined) ||
+          (event.medal_min_cumulative_distance !== null && event.medal_min_cumulative_distance !== undefined)
+      )
+    );
     setMedalMinDailyDistance(
       event.medal_min_daily_distance !== null && event.medal_min_daily_distance !== undefined
         ? String(event.medal_min_daily_distance)
@@ -1706,6 +2134,86 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     } catch (error: any) {
       Alert.alert("Poster Error", error?.message || "Could not prepare the selected poster.");
       return;
+    }
+  };
+
+  const handlePickMagazinePhoto = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: "images" as any,
+      allowsEditing: false,
+      quality: 1,
+      base64: Platform.OS === "web",
+    });
+
+    if (result.canceled || !result.assets?.[0]) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    try {
+      const resolvedMimeType = resolveEventPosterMimeType(asset.uri, asset.mimeType);
+      if (!resolvedMimeType) {
+        Alert.alert("Unsupported Magazine Photo", "Please choose a JPG, PNG, WEBP, or AVIF image.");
+        return;
+      }
+      setEventMagazinePhotoAsset({
+        uri: asset.uri,
+        mimeType: resolvedMimeType,
+      });
+      setEventMagazinePhotoPreview(asset.uri);
+    } catch (error: any) {
+      Alert.alert("Magazine Photo Error", error?.message || "Could not prepare the selected magazine photo.");
+      return;
+    }
+  };
+
+  const handleRemoveMagazinePhoto = () => {
+    setEventMagazinePhotoAsset(null);
+    setEventMagazinePhotoPreview(null);
+  };
+
+  const handlePickMagazineArticleFile = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: [
+          "text/plain",
+          "text/markdown",
+          "text/csv",
+          "text/rtf",
+          "application/rtf",
+        ],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+      if (result.canceled || !result.assets?.[0]) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      if (!isSupportedArticleTextFile(asset.name, asset.mimeType)) {
+        Alert.alert("Unsupported Article File", "Please save or export the article as a plain text file first, then upload TXT, MD, CSV, LOG, or RTF.");
+        return;
+      }
+
+      const rawText = await readArticleFileText(asset);
+      const plainText =
+        asset.name?.toLowerCase().endsWith(".rtf") || asset.mimeType?.toLowerCase().includes("rtf")
+          ? stripRtfToPlainText(rawText)
+          : rawText;
+      const articleText = normalizeArticleText(plainText);
+
+      const wordCount = countWords(articleText);
+
+      if (wordCount < 200 || wordCount > 300) {
+        Alert.alert("Article Length", `This article has ${wordCount} words. Please upload a 200-300 word article body.`);
+        return;
+      }
+
+      setEventMagazineArticleBody(articleText);
+      setEventMagazineArticleFileName(asset.name || "Article text file");
+    } catch (error: any) {
+      Alert.alert("Article File Error", error?.message || "Could not read the selected article text file.");
     }
   };
 
@@ -2044,6 +2552,7 @@ const getStatusLabel = (status: string) => {
       case "roles": return "Role Access";
       case "dataHealth": return "Data Health";
       case "auditLog": return "Audit Log";
+      case "moderation": return "Chat Moderation";
       case "archive": return "Archive";
       default: return "Admin Dashboard";
     }
@@ -2066,8 +2575,9 @@ const getStatusLabel = (status: string) => {
     { key: "ratings", label: "Ratings", icon: <Star size={24} color="#10b981" />, badgeCount: appRatings.length },
     { key: "suggestions", label: "Suggestions", icon: <MessageSquare size={24} color="#10b981" />, badgeCount: suggestions.length },
     { key: "magazine", label: "Magazine", icon: <BookOpen size={24} color="#10b981" />, badgeCount: magazineSubmissions.length + magazinePictorials.length },
+    { key: "moderation", label: "Chat Reports", icon: <ShieldAlert size={24} color="#10b981" />, badgeCount: (chatReports as ChatModerationReport[]).filter((report) => report.status === "pending").length },
     { key: "adminTerms", label: "Admin Terms", icon: <ClipboardCheck size={24} color="#10b981" /> },
-    { key: "roles", label: "Roles", icon: <UserPlus size={24} color="#10b981" />, badgeCount: pendingRoleRequests.length },
+    { key: "roles", label: "Roles", icon: <UserPlus size={24} color="#10b981" />, badgeCount: pendingRoleRequestCount },
     { key: "dataHealth", label: "Data Health", icon: <ShieldAlert size={24} color="#10b981" />, badgeCount: accountLinkHealthSummary?.issueCount ?? 0 },
     { key: "auditLog", label: "Audit Log", icon: <FileText size={24} color="#10b981" />, badgeCount: (auditLogs as AuditLogEntry[]).length },
     { key: "archive", label: "Archive", icon: <Archive size={24} color="#10b981" /> },
@@ -2088,6 +2598,7 @@ const getStatusLabel = (status: string) => {
         "activityUploads",
         "externalActivities",
         "magazine",
+        "moderation",
         "suggestions",
         "ratings",
         "adminTerms",
@@ -2102,6 +2613,7 @@ const getStatusLabel = (status: string) => {
         "activityUploads",
         "externalActivities",
         "magazine",
+        "moderation",
         "adminTerms",
       ],
       country_coordinator: [
@@ -2112,6 +2624,7 @@ const getStatusLabel = (status: string) => {
         "activityUploads",
         "externalActivities",
         "magazine",
+        "moderation",
         "adminTerms",
       ],
       club_coordinator: [
@@ -2122,6 +2635,7 @@ const getStatusLabel = (status: string) => {
         "activityUploads",
         "externalActivities",
         "magazine",
+        "moderation",
         "adminTerms",
       ],
       event_organizer: [
@@ -2164,7 +2678,7 @@ const getStatusLabel = (status: string) => {
   ]);
 
   const getMenuScopeGroup = (tab: AdminTab): AdminMenuScopeGroup => {
-    if (["roles", "dataHealth", "auditLog", "ratings", "suggestions", "archive"].includes(tab)) {
+    if (["roles", "dataHealth", "auditLog", "ratings", "suggestions", "moderation", "archive"].includes(tab)) {
       return "global";
     }
     if (["orders", "stock"].includes(tab)) {
@@ -2472,7 +2986,7 @@ const getStatusLabel = (status: string) => {
           </View>
 
           <View style={styles.sectionDivider}>
-            <Text style={styles.sectionTitle}>Pending Requests</Text>
+            <Text style={styles.sectionTitle}>Role Requests</Text>
           </View>
 
           {roleManagementLoading ? (
@@ -2503,7 +3017,7 @@ const getStatusLabel = (status: string) => {
                     <Text style={styles.auditLogDate}>{getRoleDisplayName(request.roleName)} • {formatDate(request.createdAt)}</Text>
                   </View>
                   <View style={styles.auditTypeBadge}>
-                    <Text style={styles.auditTypeText}>PENDING</Text>
+                    <Text style={styles.auditTypeText}>{request.status === "pending" ? "PENDING" : "REJECTED"}</Text>
                   </View>
                 </View>
                 <View style={styles.auditLogDetails}>
@@ -2514,31 +3028,59 @@ const getStatusLabel = (status: string) => {
                         ? request.clubName || request.clubId || "No club"
                         : request.roleName === "event_organizer"
                         ? request.organizerName || "Organizer profile will be created on approval"
+                        : request.roleName.startsWith("magazine_columnist_") || request.roleName.endsWith("_runners_club_coordinator")
+                        ? "Global"
                         : request.countryName || formatCountryName(request.countryCode) || request.countryCode || "No country"}
                     </Text>
                   </View>
+                  {request.websiteUrl || request.linkedinUrl || request.socialUrl ? (
+                    <View style={styles.orderDetails}>
+                      <Text style={styles.orderLabel}>Links:</Text>
+                      <View style={{ flex: 1, gap: 4 }}>
+                        {request.websiteUrl ? (
+                          <TouchableOpacity onPress={() => Linking.openURL(request.websiteUrl!)}>
+                            <Text style={styles.orderValue}>{request.websiteUrl}</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                        {request.linkedinUrl ? (
+                          <TouchableOpacity onPress={() => Linking.openURL(request.linkedinUrl!)}>
+                            <Text style={styles.orderValue}>{request.linkedinUrl}</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                        {request.socialUrl ? (
+                          <TouchableOpacity onPress={() => Linking.openURL(request.socialUrl!)}>
+                            <Text style={styles.orderValue}>{request.socialUrl}</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                    </View>
+                  ) : null}
                   <View style={styles.orderDetails}>
                     <Text style={styles.orderLabel}>Requested by:</Text>
                         <Text style={styles.orderValue}>{request.invitedByName || "Global Admin"}</Text>
                   </View>
-                  <View style={styles.submissionActions}>
-                    <TouchableOpacity
-                      style={styles.approveButton}
-                      onPress={() => approveRoleRequestMutation.mutate({ inviteId: request.inviteId })}
-                      disabled={approveRoleRequestMutation.isPending}
-                    >
-                      <CheckCircle size={18} color="#fff" />
-                      <Text style={styles.actionButtonText}>Accept</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.rejectButton}
-                      onPress={() => rejectRoleRequestMutation.mutate({ inviteId: request.inviteId })}
-                      disabled={rejectRoleRequestMutation.isPending}
-                    >
-                      <XCircle size={18} color="#fff" />
-                      <Text style={styles.actionButtonText}>Reject</Text>
-                    </TouchableOpacity>
-                  </View>
+                  {request.status === "pending" ? (
+                    <View style={styles.submissionActions}>
+                      <TouchableOpacity
+                        style={styles.approveButton}
+                        onPress={() => approveRoleRequestMutation.mutate({ inviteId: request.inviteId })}
+                        disabled={approveRoleRequestMutation.isPending}
+                      >
+                        <CheckCircle size={18} color="#fff" />
+                        <Text style={styles.actionButtonText}>Accept</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.rejectButton}
+                        onPress={() => rejectRoleRequestMutation.mutate({ inviteId: request.inviteId })}
+                        disabled={rejectRoleRequestMutation.isPending}
+                      >
+                        <XCircle size={18} color="#fff" />
+                        <Text style={styles.actionButtonText}>Reject</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <Text style={styles.errorHint}>Reviewed request. No further action is available.</Text>
+                  )}
                 </View>
               </View>
             ))
@@ -2576,6 +3118,8 @@ const getStatusLabel = (status: string) => {
                         ? assignment.clubName || assignment.clubId || "No club"
                         : assignment.roleName === "event_organizer"
                         ? assignment.organizerName || assignment.organizerId || "No organizer"
+                        : assignment.roleName.startsWith("magazine_columnist_") || assignment.roleName.endsWith("_runners_club_coordinator")
+                        ? "Global"
                         : assignment.countryName || formatCountryName(assignment.countryCode) || assignment.countryCode || "No country"}
                     </Text>
                   </View>
@@ -2897,20 +3441,21 @@ const getStatusLabel = (status: string) => {
                 <Text style={styles.retryButtonText}>Retry</Text>
               </TouchableOpacity>
             </View>
-          ) : pendingClubMembershipRequests.length === 0 ? (
+          ) : (clubMembershipRequests as ClubMembershipRequest[]).length === 0 ? (
             <View style={styles.emptyContainer}>
               <Users size={64} color="#d1d5db" />
-              <Text style={styles.emptyText}>No pending club or organiser requests</Text>
+              <Text style={styles.emptyText}>No club or organiser requests</Text>
               <Text style={styles.emptySubtext}>
                 New club memberships, club start requests, and organiser requests will appear here.
               </Text>
             </View>
           ) : (
-            pendingClubMembershipRequests.map((request) => {
+            (clubMembershipRequests as ClubMembershipRequest[]).map((request) => {
               const memberName = [
                 request.member?.first_name,
                 request.member?.other_names,
               ].filter(Boolean).join(" ") || request.member?.username || "Unknown member";
+              const requestStatus = request.status ?? "pending";
 
               return (
                 <View key={request.registration_id} style={styles.orderCard}>
@@ -2921,8 +3466,10 @@ const getStatusLabel = (status: string) => {
                         <Text style={styles.errorHint}>@{request.member.username}</Text>
                       ) : null}
                     </View>
-                    <View style={[styles.statusBadge, { backgroundColor: "#f59e0b20" }]}>
-                      <Text style={[styles.statusText, { color: "#f59e0b" }]}>Pending</Text>
+                    <View style={[styles.statusBadge, { backgroundColor: requestStatus === "approved" ? "#10b98120" : requestStatus === "rejected" ? "#ef444420" : "#f59e0b20" }]}>
+                      <Text style={[styles.statusText, { color: requestStatus === "approved" ? "#10b981" : requestStatus === "rejected" ? "#ef4444" : "#f59e0b" }]}>
+                        {requestStatus === "approved" ? "Approved" : requestStatus === "rejected" ? "Rejected" : "Pending"}
+                      </Text>
                     </View>
                   </View>
 
@@ -2990,34 +3537,38 @@ const getStatusLabel = (status: string) => {
                     </Text>
                   </View>
 
-                  <View style={styles.activityActions}>
-                    <TouchableOpacity
-                      style={styles.rejectBtn}
-                      disabled={updateClubMembershipRequestMutation.isPending}
-                      onPress={() =>
-                        updateClubMembershipRequestMutation.mutate({
-                          registrationId: request.registration_id,
-                          status: "rejected",
-                        })
-                      }
-                    >
-                      <XCircle size={20} color="#fff" />
-                      <Text style={styles.actionBtnText}>Reject</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.approveBtn}
-                      disabled={updateClubMembershipRequestMutation.isPending}
-                      onPress={() =>
-                        updateClubMembershipRequestMutation.mutate({
-                          registrationId: request.registration_id,
-                          status: "approved",
-                        })
-                      }
-                    >
-                      <CheckCircle size={20} color="#fff" />
-                      <Text style={styles.actionBtnText}>Approve</Text>
-                    </TouchableOpacity>
-                  </View>
+                  {requestStatus === "pending" ? (
+                    <View style={styles.activityActions}>
+                      <TouchableOpacity
+                        style={styles.rejectBtn}
+                        disabled={updateClubMembershipRequestMutation.isPending}
+                        onPress={() =>
+                          updateClubMembershipRequestMutation.mutate({
+                            registrationId: request.registration_id,
+                            status: "rejected",
+                          })
+                        }
+                      >
+                        <XCircle size={20} color="#fff" />
+                        <Text style={styles.actionBtnText}>Reject</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.approveBtn}
+                        disabled={updateClubMembershipRequestMutation.isPending}
+                        onPress={() =>
+                          updateClubMembershipRequestMutation.mutate({
+                            registrationId: request.registration_id,
+                            status: "approved",
+                          })
+                        }
+                      >
+                        <CheckCircle size={20} color="#fff" />
+                        <Text style={styles.actionBtnText}>Approve</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <Text style={styles.errorHint}>Reviewed request. No further action is available.</Text>
+                  )}
                 </View>
               );
             })
@@ -3336,6 +3887,7 @@ const getStatusLabel = (status: string) => {
                 ) : (
                   filteredAdminEvents.map((event: any) => {
                     const approvalStatus = event.approval_status || "approved";
+                    const magazineStatus = event.magazine_submission_status || "missing";
                     const isOrganizerOwned = Boolean(event.organizer);
                     const canReviewOrganizerEvent =
                       isOrganizerOwned &&
@@ -3343,6 +3895,12 @@ const getStatusLabel = (status: string) => {
                         (isCountryAdmin &&
                           (!event.country_code ||
                             roleSession.countryAdminScopes.includes(event.country_code))));
+                    const canDeleteRejectedEvent =
+                      approvalStatus === "rejected" &&
+                      isOrganizerOwned &&
+                      (canReviewOrganizerEvent ||
+                        (isEventOrganizer &&
+                          roleSession.eventOrganizerScopes.includes(event.organizer)));
 
                     return (
                     <View key={event.event_id || event.eventId} style={styles.eventCard}>
@@ -3396,6 +3954,18 @@ const getStatusLabel = (status: string) => {
                             >
                               {getEventApprovalLabel(approvalStatus)}
                             </Text>
+                            <Text
+                              style={[
+                                styles.eventConfigChip,
+                                {
+                                  color: magazineStatus === "accepted" ? "#059669" : "#f59e0b",
+                                  borderColor: magazineStatus === "accepted" ? "#05966940" : "#f59e0b40",
+                                  backgroundColor: magazineStatus === "accepted" ? "#05966912" : "#f59e0b12",
+                                },
+                              ]}
+                            >
+                              Magazine: {magazineStatus === "accepted" ? "Accepted" : magazineStatus === "missing" ? "Missing" : "Review needed"}
+                            </Text>
                           </View>
                         </View>
                         <TouchableOpacity style={styles.editButton} onPress={() => handleEditEvent(event)}>
@@ -3425,13 +3995,20 @@ const getStatusLabel = (status: string) => {
                           Payment details: {event.payment_details || event.paymentDetails}
                         </Text>
                       ) : null}
+                      {((event.entry || event.entryType) === "paid") && (event.organizer_payment_link || event.organizerPaymentLink) ? (
+                        <Text style={styles.eventPosterHint}>
+                          Payment link: {event.organizer_payment_link || event.organizerPaymentLink}
+                        </Text>
+                      ) : null}
                       {isOrganizerOwned ? (
                         <Text style={styles.eventPosterHint}>
                           {approvalStatus === "approved"
                             ? "Organizer event is approved and visible to users."
                             : approvalStatus === "rejected"
                               ? "Organizer event is rejected and hidden from the public event list until resubmitted."
-                              : "Organizer event is awaiting Country or Global Admin approval before it goes live."}
+                              : magazineStatus === "accepted"
+                                ? "Magazine article accepted. This event is ready for Country or Global Admin approval."
+                                : "Review and accept the linked magazine article in the Magazine tile before approving this event."}
                         </Text>
                       ) : null}
                       <Text style={styles.eventPosterHint}>
@@ -3462,11 +4039,15 @@ const getStatusLabel = (status: string) => {
                                 status: "approved",
                               })
                             }
-                            disabled={updateEventApprovalMutation.isPending}
+                            disabled={updateEventApprovalMutation.isPending || magazineStatus !== "accepted"}
                           >
                             <CheckCircle size={16} color="#fff" />
                             <Text style={styles.downloadButtonText}>
-                              {updateEventApprovalMutation.isPending ? "Saving..." : "Approve Event"}
+                              {updateEventApprovalMutation.isPending
+                                ? "Saving..."
+                                : magazineStatus !== "accepted"
+                                  ? "Approve Magazine First"
+                                  : "Approve Event"}
                             </Text>
                           </TouchableOpacity>
                           <TouchableOpacity
@@ -3485,6 +4066,18 @@ const getStatusLabel = (status: string) => {
                             </Text>
                           </TouchableOpacity>
                         </View>
+                      ) : null}
+                      {canDeleteRejectedEvent ? (
+                        <TouchableOpacity
+                          style={[styles.archiveActionBtn, { marginTop: 10 }]}
+                          onPress={() => handleDeleteRejectedEvent(event)}
+                          disabled={deleteEventMutation.isPending}
+                        >
+                          <Trash2 size={18} color="#fff" />
+                          <Text style={styles.archiveActionBtnText}>
+                            {deleteEventMutation.isPending ? "Deleting..." : "Delete Rejected Event"}
+                          </Text>
+                        </TouchableOpacity>
                       ) : null}
                     </View>
                     );
@@ -3878,6 +4471,13 @@ const getStatusLabel = (status: string) => {
                       {[item.club, formatCountryName(item.country) || item.country, item.event_date].filter(Boolean).join(" / ")} / Status: {item.status}
                       {item.is_picture_of_week ? " / Picture of the Week" : ""}
                   </Text>
+                  <TouchableOpacity
+                    style={[styles.downloadButton, styles.magazinePreviewButton]}
+                    onPress={() => setSelectedMagazinePreview({ type: "pictorial", ...item })}
+                  >
+                    <BookOpen size={18} color="#fff" />
+                    <Text style={styles.downloadButtonText}>Preview</Text>
+                  </TouchableOpacity>
                   <View style={styles.submissionActions}>
                     <TouchableOpacity
                       style={styles.approveBtn}
@@ -3927,15 +4527,27 @@ const getStatusLabel = (status: string) => {
               {magazineSubmissions.map((item: any) => (
                 <View key={item.submission_id} style={styles.suggestionCard}>
                   <View style={styles.suggestionHeader}>
-                    <Text style={styles.suggestionUser} numberOfLines={1}>{item.author_name} / {item.category}</Text>
+                    <Text style={styles.suggestionUser} numberOfLines={1}>
+                      {item.article_writer_name || item.author_name} / {item.category}
+                    </Text>
                     <Text style={styles.suggestionDate}>{formatDate(item.created_at)}</Text>
                   </View>
                   <Text style={styles.magazineSubmissionTitle}>{item.title}</Text>
                   <Text style={styles.suggestionText}>{item.pitch}</Text>
+                  {!!item.event_id && (
+                    <Text style={styles.errorHint}>Linked event: {item.event_id}</Text>
+                  )}
                   {!!item.attachment_name && (
                     <Text style={styles.errorHint}>Attachment: {item.attachment_name}</Text>
                   )}
                   <Text style={styles.errorHint}>Status: {item.status} / {item.email}</Text>
+                  <TouchableOpacity
+                    style={[styles.downloadButton, styles.magazinePreviewButton]}
+                    onPress={() => setSelectedMagazinePreview({ type: "article", ...item })}
+                  >
+                    <BookOpen size={18} color="#fff" />
+                    <Text style={styles.downloadButtonText}>Preview</Text>
+                  </TouchableOpacity>
                   <View style={styles.submissionActions}>
                     <TouchableOpacity
                       style={styles.approveBtn}
@@ -3973,6 +4585,92 @@ const getStatusLabel = (status: string) => {
                 </View>
               ))}
             </>
+          )}
+        </ScrollView>
+      ) : activeTab === "moderation" ? (
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          {chatReportsLoading ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Loading chat reports...</Text>
+            </View>
+          ) : (chatReports as ChatModerationReport[]).length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <ShieldAlert size={64} color="#d1d5db" />
+              <Text style={styles.emptyText}>No chat reports</Text>
+              <Text style={styles.emptySubtext}>Reports for abusive or unsafe chat content will appear here.</Text>
+            </View>
+          ) : (
+            (chatReports as ChatModerationReport[]).map((report) => (
+              <View key={report.reportId} style={styles.suggestionCard}>
+                <View style={styles.suggestionHeader}>
+                  <Text style={styles.suggestionUser} numberOfLines={1}>
+                    {report.reasonCategory.toUpperCase()} / {report.status}
+                  </Text>
+                  <Text style={styles.suggestionDate}>{formatDate(report.createdAt)}</Text>
+                </View>
+                <Text style={styles.magazineSubmissionTitle}>
+                  Reported: {report.reportedName || report.reportedUsername || report.reportedRegistrationId || "Unknown user"}
+                </Text>
+                <Text style={styles.errorHint}>
+                  Reporter: {report.reporterName || report.reporterRegistrationId}
+                </Text>
+                <Text style={styles.errorHint}>
+                  {[report.postId ? `Post: ${report.postId}` : null, report.commentId ? `Comment: ${report.commentId}` : null, report.reportedCountry ? formatCountryName(report.reportedCountry) || report.reportedCountry : null].filter(Boolean).join(" / ")}
+                </Text>
+                <Text style={styles.suggestionText}>{report.description}</Text>
+                {report.offenderFlags ? (
+                  <Text style={styles.errorHint}>
+                    Flags: {report.offenderFlags.confirmed_flags} confirmed / {report.offenderFlags.dismissed_reports} dismissed
+                    {report.offenderFlags.is_banned ? " / BANNED" : ""}
+                  </Text>
+                ) : null}
+                {report.screenshotUrl ? (
+                  <>
+                    <Image source={{ uri: report.screenshotUrl }} style={styles.magazinePictorialAdminImage} resizeMode="cover" />
+                    <TouchableOpacity style={[styles.downloadButton, styles.magazinePreviewButton]} onPress={() => Linking.openURL(report.screenshotUrl!)}>
+                      <FileText size={18} color="#fff" />
+                      <Text style={styles.downloadButtonText}>Open Screenshot</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : null}
+                {report.status === "pending" ? (
+                  <>
+                    <View style={styles.submissionActions}>
+                      <TouchableOpacity
+                        style={styles.approveBtn}
+                        onPress={() => reviewChatReportMutation.mutate({ reportId: report.reportId, action: "remove_content", adminNotes: "Content removed after moderation review." })}
+                      >
+                        <Trash2 size={18} color="#fff" />
+                        <Text style={styles.actionBtnText}>Remove Content</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.rejectBtn}
+                        onPress={() => reviewChatReportMutation.mutate({ reportId: report.reportId, action: "dismiss", adminNotes: "Report dismissed after review." })}
+                      >
+                        <XCircle size={18} color="#fff" />
+                        <Text style={styles.actionBtnText}>Dismiss</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.archiveActionBtn}
+                      onPress={() =>
+                        Alert.alert("Ban user?", "This removes the reported content and blocks the user from posting or commenting in chat.", [
+                          { text: "Cancel", style: "cancel" },
+                          {
+                            text: "Ban User",
+                            style: "destructive",
+                            onPress: () => reviewChatReportMutation.mutate({ reportId: report.reportId, action: "ban_user", adminNotes: "User banned after chat moderation review." }),
+                          },
+                        ])
+                      }
+                    >
+                      <ShieldAlert size={18} color="#fff" />
+                      <Text style={styles.archiveActionBtnText}>Ban User</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : null}
+              </View>
+            ))
           )}
         </ScrollView>
       ) : activeTab === "archive" ? (
@@ -4108,14 +4806,64 @@ const getStatusLabel = (status: string) => {
                 
                 <View style={styles.usersList}>
                   {dateGroup.users.map((user: any, userIndex: number) => (
-                    <View key={`${user.registrationId}-${userIndex}`} style={styles.userRow}>
-                      <View style={styles.userInfo}>
-                        <Text style={styles.userRowId}>{user.registrationId}</Text>
-                        <Text style={styles.userRowName}>{user.userName}</Text>
+                    <View key={`${user.registrationId}-${userIndex}`} style={styles.externalUserCard}>
+                      <View style={styles.userRow}>
+                        <View style={styles.userInfo}>
+                          <Text style={styles.userRowId}>{user.registrationId}</Text>
+                          <Text style={styles.userRowName}>{user.userName}</Text>
+                        </View>
+                        <View style={styles.userCountBadge}>
+                          <Text style={styles.userCountText}>{user.activityCount}</Text>
+                        </View>
                       </View>
-                      <View style={styles.userCountBadge}>
-                        <Text style={styles.userCountText}>{user.activityCount}</Text>
-                      </View>
+                      {(user.submissions || []).map((submission: any) => (
+                        <View key={submission.submissionId} style={styles.externalSubmissionCard}>
+                          <View style={styles.externalSubmissionHeader}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.externalSubmissionTitle}>
+                                {submission.sourceLabel || (submission.sourceType === "smart_watch" ? "Smart Watch" : "Sports App")}
+                              </Text>
+                              <Text style={styles.externalSubmissionMeta}>
+                                {submission.exerciseType} • {Number(submission.distanceKm || 0).toFixed(2)} km • {submission.duration}
+                              </Text>
+                            </View>
+                            {submission.evidenceUrl ? (
+                              <TouchableOpacity
+                                style={styles.externalEvidenceButton}
+                                onPress={() => Linking.openURL(submission.evidenceUrl)}
+                                activeOpacity={0.75}
+                              >
+                                <Text style={styles.externalEvidenceButtonText}>Evidence</Text>
+                              </TouchableOpacity>
+                            ) : (
+                              <Text style={styles.externalNoEvidenceText}>No evidence</Text>
+                            )}
+                          </View>
+                          {submission.evidenceUrl ? (
+                            <TouchableOpacity onPress={() => Linking.openURL(submission.evidenceUrl)} activeOpacity={0.8}>
+                              <Image source={{ uri: submission.evidenceUrl }} style={styles.externalEvidenceThumb} />
+                            </TouchableOpacity>
+                          ) : null}
+                          <View style={styles.externalActionRow}>
+                            <TouchableOpacity
+                              style={[styles.externalActionButton, styles.externalApproveButton]}
+                              onPress={() => approveExternalSubmissionMutation.mutate({ submissionId: submission.submissionId })}
+                              disabled={approveExternalSubmissionMutation.isPending || rejectExternalSubmissionMutation.isPending}
+                            >
+                              <CheckCircle size={16} color="#fff" />
+                              <Text style={styles.externalActionButtonText}>Approve</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.externalActionButton, styles.externalRejectButton]}
+                              onPress={() => rejectExternalSubmissionMutation.mutate({ submissionId: submission.submissionId })}
+                              disabled={approveExternalSubmissionMutation.isPending || rejectExternalSubmissionMutation.isPending}
+                            >
+                              <XCircle size={16} color="#fff" />
+                              <Text style={styles.externalActionButtonText}>Reject</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ))}
                     </View>
                   ))}
                 </View>
@@ -4535,47 +5283,181 @@ const getStatusLabel = (status: string) => {
               </View>
 
               <View style={styles.formGroup}>
-                <Text style={styles.label}>Start Date</Text>
+                <Text style={styles.label}>{eventTypeMode === "recurring" ? "Date" : "Start Date"}</Text>
                 <TextInput
                   style={styles.input}
                   value={startsAt}
-                  onChangeText={setStartsAt}
-                  placeholder="YYYY-MM-DD"
+                  onChangeText={(value) => setStartsAt(formatDisplayDateInput(value))}
+                  placeholder="DD-MM-YYYY"
+                  keyboardType="number-pad"
                   placeholderTextColor="#9ca3af"
                 />
               </View>
 
               <View style={styles.formGroup}>
-                <Text style={styles.label}>End Date</Text>
+                <Text style={styles.label}>Registration Close Date</Text>
                 <TextInput
                   style={styles.input}
-                  value={endsAt}
-                  onChangeText={setEndsAt}
-                  placeholder="YYYY-MM-DD"
+                  value={registrationClosesAt}
+                  onChangeText={(value) => setRegistrationClosesAt(formatDisplayDateInput(value))}
+                  placeholder="DD-MM-YYYY"
+                  keyboardType="number-pad"
                   placeholderTextColor="#9ca3af"
                 />
+                <Text style={styles.eventPosterHint}>
+                  After this date, users will see the Participate button greyed out.
+                </Text>
               </View>
 
-              <View style={styles.formRow}>
-                <View style={styles.formGroupHalf}>
-                  <Text style={styles.label}>Country</Text>
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Event Type</Text>
+                <View style={styles.segmentRow}>
+                  {([
+                    ["same_day", "Same Day"],
+                    ["recurring", "Recurring"],
+                    ["multiday", "Multiday"],
+                  ] as Array<[EventTypeMode, string]>).map(([value, label]) => (
+                    <TouchableOpacity
+                      key={value}
+                      style={[styles.segmentChip, eventTypeMode === value && styles.segmentChipActive]}
+                      onPress={() => setEventTypeMode(value)}
+                    >
+                      <Text
+                        style={[styles.segmentChipText, eventTypeMode === value && styles.segmentChipTextActive]}
+                      >
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {eventTypeMode === "recurring" ? (
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Repeats</Text>
+                  <View style={styles.segmentRow}>
+                    {([
+                      ["weekly", "Weekly"],
+                      ["monthly", "Monthly"],
+                    ] as Array<[EventRecurrenceFrequency, string]>).map(([value, label]) => (
+                      <TouchableOpacity
+                        key={value}
+                        style={[styles.segmentChip, eventRecurrenceFrequency === value && styles.segmentChipActive]}
+                        onPress={() => setEventRecurrenceFrequency(value)}
+                      >
+                        <Text
+                          style={[
+                            styles.segmentChipText,
+                            eventRecurrenceFrequency === value && styles.segmentChipTextActive,
+                          ]}
+                        >
+                          {label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  {eventRecurrenceFrequency === "weekly" ? (
+                    <>
+                      <Text style={[styles.label, styles.recurringSubLabel]}>Run days</Text>
+                      <View style={styles.compactChipRow}>
+                        {RUN_DAY_OPTIONS.map((day) => {
+                          const selected = eventRecurrenceWeekdays.includes(day.value);
+                          return (
+                            <TouchableOpacity
+                              key={day.value}
+                              style={[styles.compactChip, selected && styles.roleChipActive]}
+                              onPress={() => {
+                                setEventRecurrenceWeekdays((current) => {
+                                  const next = selected
+                                    ? current.filter((value) => value !== day.value)
+                                    : [...current, day.value];
+                                  return next.length ? next : [day.value];
+                                });
+                                setEventRecurrenceWeekday(day.value);
+                              }}
+                            >
+                              <Text style={[styles.compactChipText, selected && styles.roleChipTextActive]}>
+                                {day.label}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      <View style={[styles.segmentRow, styles.recurringSubSection]}>
+                        {([
+                          ["day_of_month", "Day of month"],
+                          ["weekend", "Weekend"],
+                        ] as Array<[EventMonthlyMode, string]>).map(([value, label]) => (
+                          <TouchableOpacity
+                            key={value}
+                            style={[styles.segmentChip, eventMonthlyMode === value && styles.segmentChipActive]}
+                            onPress={() => setEventMonthlyMode(value)}
+                          >
+                            <Text
+                              style={[
+                                styles.segmentChipText,
+                                eventMonthlyMode === value && styles.segmentChipTextActive,
+                              ]}
+                            >
+                              {label}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.horizontalPickerContent}
+                      >
+                        {(eventMonthlyMode === "day_of_month" ? MONTH_DAY_OPTIONS : MONTH_WEEKEND_OPTIONS).map((option) => {
+                          const selected =
+                            eventMonthlyMode === "day_of_month"
+                              ? eventRecurrenceMonthDay === option.value
+                              : eventRecurrenceWeekOfMonth === option.value;
+                          return (
+                            <TouchableOpacity
+                              key={option.value}
+                              style={[styles.pickerChip, selected && styles.roleChipActive]}
+                              onPress={() => {
+                                if (eventMonthlyMode === "day_of_month") {
+                                  setEventRecurrenceMonthDay(option.value);
+                                } else {
+                                  setEventRecurrenceWeekOfMonth(option.value);
+                                }
+                              }}
+                            >
+                              <Text style={[styles.pickerChipText, selected && styles.roleChipTextActive]}>
+                                {option.label}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
+                    </>
+                  )}
+
+                  <Text style={styles.eventPosterHint}>
+                    Recurring events use one event upload. No date range is needed.
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>End Date</Text>
                   <TextInput
                     style={styles.input}
-                    value={eventCountry}
-                    onChangeText={setEventCountry}
-                    placeholder="UG / Kenya"
+                    value={endsAt}
+                    onChangeText={(value) => setEndsAt(formatDisplayDateInput(value))}
+                    placeholder="DD-MM-YYYY"
+                    keyboardType="number-pad"
                     placeholderTextColor="#9ca3af"
                   />
                 </View>
-                <View style={styles.formGroupHalf}>
-                  <Text style={styles.label}>Owner Model</Text>
-                  <View style={styles.segmentRow}>
-                    <View style={[styles.segmentChip, styles.segmentChipActive]}>
-                      <Text style={[styles.segmentChipText, styles.segmentChipTextActive]}>Organizer</Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
+              )}
 
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Event Organizer</Text>
@@ -4618,7 +5500,7 @@ const getStatusLabel = (status: string) => {
                 <View style={styles.segmentRow}>
                   {([
                     ["free", "Free"],
-                    ["club_approved", "Club Approved"],
+                    ["club_approved", "Approved"],
                     ["paid", "Paid"],
                   ] as Array<[EventEntryMode, string]>).map(([value, label]) => (
                     <TouchableOpacity
@@ -4654,7 +5536,7 @@ const getStatusLabel = (status: string) => {
                       <Text style={styles.label}>Currency</Text>
                       <View style={styles.readOnlyField}>
                         <Text style={styles.readOnlyFieldText}>
-                          {resolvedEventCurrencyCode || "Set country first"}
+                          {resolvedEventCurrencyCode || "From organizer country"}
                         </Text>
                       </View>
                     </View>
@@ -4670,127 +5552,223 @@ const getStatusLabel = (status: string) => {
                       multiline
                     />
                   </View>
+                  <View style={styles.formGroup}>
+                    <Text style={styles.label}>Organizer/Club Payment Link</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={eventOrganizerPaymentLink}
+                      onChangeText={setEventOrganizerPaymentLink}
+                      placeholder="https://payment-provider.com/event"
+                      placeholderTextColor="#9ca3af"
+                      keyboardType="url"
+                      autoCapitalize="none"
+                    />
+                    <Text style={styles.eventPosterHint}>
+                      Optional. Use this when the organizer or club already has a payment platform.
+                    </Text>
+                  </View>
+                  <View style={styles.formGroup}>
+                    <Text style={styles.label}>RunNation Payment Link</Text>
+                    <TouchableOpacity
+                      style={[styles.statusOption, eventRunNationPaymentLinkEnabled && styles.statusOptionSelected]}
+                      onPress={() => setEventRunNationPaymentLinkEnabled((prev) => !prev)}
+                    >
+                      <Text
+                        style={[
+                          styles.statusOptionText,
+                          eventRunNationPaymentLinkEnabled && styles.statusOptionTextSelected,
+                        ]}
+                      >
+                        {eventRunNationPaymentLinkEnabled
+                          ? "RunNation Collection: Coming Soon"
+                          : "RunNation Collection: Off"}
+                      </Text>
+                    </TouchableOpacity>
+                    <Text style={styles.eventPosterHint}>
+                      Coming soon: RunNation can collect on behalf of organizers without their own payment platform.
+                    </Text>
+                  </View>
                 </>
               ) : null}
 
               <View style={styles.formGroup}>
-                <Text style={styles.label}>Completion Medal</Text>
-                <View style={styles.segmentRow}>
-                  <TouchableOpacity
-                    style={[styles.segmentChip, eventHasMedal && styles.segmentChipActive]}
-                    onPress={() => setEventHasMedal(true)}
+                <Text style={styles.label}>Minimum Distance Rule</Text>
+                <TouchableOpacity
+                  style={[styles.statusOption, eventMinimumDistanceEnabled && styles.statusOptionSelected]}
+                  onPress={() => setEventMinimumDistanceEnabled((prev) => !prev)}
+                >
+                  <Text
+                    style={[
+                      styles.statusOptionText,
+                      eventMinimumDistanceEnabled && styles.statusOptionTextSelected,
+                    ]}
                   >
-                    <Text style={[styles.segmentChipText, eventHasMedal && styles.segmentChipTextActive]}>Yes</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.segmentChip, !eventHasMedal && styles.segmentChipActive]}
-                    onPress={() => setEventHasMedal(false)}
-                  >
-                    <Text style={[styles.segmentChipText, !eventHasMedal && styles.segmentChipTextActive]}>No</Text>
-                  </TouchableOpacity>
-                </View>
+                    {eventMinimumDistanceEnabled ? "Minimum Distance: On" : "Minimum Distance: Off"}
+                  </Text>
+                </TouchableOpacity>
+                {eventMinimumDistanceEnabled ? (
+                  <View style={styles.formRow}>
+                    <View style={styles.formGroupHalf}>
+                      <Text style={styles.label}>
+                        {eventTypeMode === "multiday" ? "Min Daily Distance (km)" : "Min Distance (km)"}
+                      </Text>
+                      <TextInput
+                        style={styles.input}
+                        value={medalMinDailyDistance}
+                        onChangeText={setMedalMinDailyDistance}
+                        placeholder="5"
+                        placeholderTextColor="#9ca3af"
+                        keyboardType="numeric"
+                      />
+                    </View>
+                    {eventTypeMode === "multiday" ? (
+                      <View style={styles.formGroupHalf}>
+                        <Text style={styles.label}>Min Total Distance (km)</Text>
+                        <TextInput
+                          style={styles.input}
+                          value={medalMinCumulativeDistance}
+                          onChangeText={setMedalMinCumulativeDistance}
+                          placeholder="100"
+                          placeholderTextColor="#9ca3af"
+                          keyboardType="numeric"
+                        />
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
+                <Text style={styles.eventPosterHint}>
+                  When on, only runners who meet the distance requirement appear under Finishers.
+                </Text>
               </View>
 
               <View style={styles.formGroup}>
-                <Text style={styles.label}>Poster</Text>
+                <Text style={styles.label}>Event Photo</Text>
                 <TouchableOpacity style={styles.posterPickerButton} onPress={handlePickEventPoster}>
                   <Camera size={18} color="#10b981" />
                   <Text style={styles.posterPickerButtonText}>
-                    {eventPosterPreview ? "Change Poster" : "Choose Poster"}
+                    {eventPosterPreview ? "Change Event Photo" : "Add Event Photo"}
                   </Text>
                 </TouchableOpacity>
                 {eventPosterPreview ? (
                   <Image source={{ uri: eventPosterPreview }} style={styles.eventPosterPreview} />
                 ) : (
                   <View style={styles.posterPlaceholder}>
-                    <Text style={styles.posterPlaceholderText}>No poster selected</Text>
+                    <Text style={styles.posterPlaceholderText}>No event photo selected</Text>
                   </View>
                 )}
-                <Text style={styles.posterMetaHint}>
-                  Poster folder: {(editingEventId || getNextEventId(events as any[] | undefined))}
-                </Text>
-                <Text style={styles.posterMetaHint}>
-                  Current file: {eventPosterPreview ? extractPosterStoragePath(eventPosterPreview) || "Selected local file" : "No poster"}
+                <Text style={styles.eventPosterHint}>
+                  This photo appears on the event listing and event details.
                 </Text>
                 {eventPosterMarkedForRemoval ? (
                   <Text style={styles.posterPendingHint}>
-                    Poster removal pending. Save changes to clear it from this event.
+                    Event photo removal pending. Save changes to clear it from this event.
                   </Text>
                 ) : null}
                 {!eventPosterAsset && eventPosterPreview?.startsWith("http") && !isStandardPosterStoragePath(extractPosterStoragePath(eventPosterPreview)) ? (
                   <Text style={styles.posterPendingHint}>
-                    Saving this event will rename the current poster to the standard poster file name.
+                    Saving this event will rename the current event photo to the standard event photo file name.
                   </Text>
                 ) : null}
                 {eventPosterPreview ? (
                   <TouchableOpacity style={styles.posterLinkButton} onPress={() => handleOpenPosterUrl(eventPosterPreview)}>
                     <FileText size={14} color="#0369a1" />
-                    <Text style={styles.posterLinkButtonText}>Open Poster URL</Text>
+                    <Text style={styles.posterLinkButtonText}>Open Event Photo URL</Text>
                   </TouchableOpacity>
                 ) : null}
                 {(eventPosterPreview || eventPosterMarkedForRemoval) && (
                   <TouchableOpacity style={styles.posterRemoveButton} onPress={handleRemoveEventPoster}>
                     <Trash2 size={16} color="#b91c1c" />
                     <Text style={styles.posterRemoveButtonText}>
-                      {eventPosterMarkedForRemoval ? "Poster will be removed on save" : "Remove Poster"}
+                      {eventPosterMarkedForRemoval ? "Event photo will be removed on save" : "Remove Event Photo"}
                     </Text>
                   </TouchableOpacity>
                 )}
               </View>
 
-              {eventHasMedal ? (
-                <>
-                  <View style={styles.sectionDivider}>
-                    <Text style={styles.sectionTitle}>Medal Criteria (Optional)</Text>
-                  </View>
+              <View style={styles.sectionDivider}>
+                <Text style={styles.sectionTitle}>Magazine Event Story</Text>
+              </View>
 
-                  <View style={styles.formGroup}>
-                    <Text style={styles.label}>Min Daily Distance (km)</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={medalMinDailyDistance}
-                      onChangeText={setMedalMinDailyDistance}
-                      placeholder="e.g., 5"
-                      placeholderTextColor="#9ca3af"
-                      keyboardType="decimal-pad"
-                    />
-                  </View>
+              <Text style={styles.eventPosterHint}>
+                Every event needs a short article and picture so RunNation Magazine readers can understand the event and be inspired to join.
+              </Text>
 
-                  <View style={styles.formGroup}>
-                    <Text style={styles.label}>Min Cumulative Distance (km)</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={medalMinCumulativeDistance}
-                      onChangeText={setMedalMinCumulativeDistance}
-                      placeholder="e.g., 100"
-                      placeholderTextColor="#9ca3af"
-                      keyboardType="decimal-pad"
-                    />
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Magazine Photo</Text>
+                <TouchableOpacity style={styles.posterPickerButton} onPress={handlePickMagazinePhoto}>
+                  <Camera size={18} color="#10b981" />
+                  <Text style={styles.posterPickerButtonText}>
+                    {eventMagazinePhotoPreview ? "Change Magazine Photo" : "Add Magazine Photo"}
+                  </Text>
+                </TouchableOpacity>
+                {eventMagazinePhotoPreview ? (
+                  <Image source={{ uri: eventMagazinePhotoPreview }} style={styles.eventPosterPreview} />
+                ) : (
+                  <View style={styles.posterPlaceholder}>
+                    <Text style={styles.posterPlaceholderText}>No magazine photo selected</Text>
                   </View>
+                )}
+                <Text style={styles.eventPosterHint}>
+                  This photo is attached to the magazine article so the story is image rich.
+                </Text>
+                {eventMagazinePhotoPreview ? (
+                  <TouchableOpacity style={styles.posterLinkButton} onPress={() => handleOpenPosterUrl(eventMagazinePhotoPreview)}>
+                    <FileText size={14} color="#0369a1" />
+                    <Text style={styles.posterLinkButtonText}>Open Magazine Photo URL</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {eventMagazinePhotoPreview ? (
+                  <TouchableOpacity style={styles.posterRemoveButton} onPress={handleRemoveMagazinePhoto}>
+                    <Trash2 size={16} color="#b91c1c" />
+                    <Text style={styles.posterRemoveButtonText}>Remove Magazine Photo</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
 
-                  <View style={styles.formGroup}>
-                    <Text style={styles.label}>Medal Tracking Start Date</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={medalDateStart}
-                      onChangeText={setMedalDateStart}
-                      placeholder="YYYY-MM-DD"
-                      placeholderTextColor="#9ca3af"
-                    />
-                  </View>
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Article Title</Text>
+                <TextInput
+                  style={styles.input}
+                  value={eventMagazineArticleTitle}
+                  onChangeText={setEventMagazineArticleTitle}
+                  placeholder="e.g., Why runners should join the Kampala Sunrise Run"
+                  placeholderTextColor="#9ca3af"
+                />
+              </View>
 
-                  <View style={styles.formGroup}>
-                    <Text style={styles.label}>Medal Tracking End Date</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={medalDateEnd}
-                      onChangeText={setMedalDateEnd}
-                      placeholder="YYYY-MM-DD"
-                      placeholderTextColor="#9ca3af"
-                    />
-                  </View>
-                </>
-              ) : null}
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Writer's Name</Text>
+                <TextInput
+                  style={styles.input}
+                  value={eventMagazineWriterName}
+                  onChangeText={setEventMagazineWriterName}
+                  placeholder="Name of the article writer"
+                  placeholderTextColor="#9ca3af"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Article Body File</Text>
+                <TouchableOpacity style={styles.posterPickerButton} onPress={handlePickMagazineArticleFile}>
+                  <Upload size={18} color="#10b981" />
+                  <Text style={styles.posterPickerButtonText}>
+                    {eventMagazineArticleFileName ? "Change Text File" : "Upload Text File"}
+                  </Text>
+                </TouchableOpacity>
+                <Text style={styles.eventPosterHint}>
+                  {eventMagazineArticleFileName
+                    ? `${eventMagazineArticleFileName} / ${countWords(eventMagazineArticleBody)} words`
+                    : "Write 200-300 words. Save or export the article as plain text first, then upload TXT, MD, CSV, LOG, or RTF. The app saves the extracted text only."}
+                </Text>
+                <TextInput
+                  style={[styles.input, styles.inputMultiline]}
+                  value={eventMagazineArticleBody}
+                  editable={false}
+                  placeholder="Uploaded article text preview will appear here."
+                  placeholderTextColor="#9ca3af"
+                  multiline
+                />
+              </View>
 
               <TouchableOpacity
                 style={styles.confirmButton}
@@ -4808,6 +5786,87 @@ const getStatusLabel = (status: string) => {
                 </Text>
               </TouchableOpacity>
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!selectedMagazinePreview}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedMagazinePreview(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.activityModalContent, styles.magazinePreviewModalContent]}>
+            {selectedMagazinePreview ? (
+              <>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Magazine Preview</Text>
+                  <TouchableOpacity onPress={() => setSelectedMagazinePreview(null)}>
+                    <X size={24} color="#6b7280" />
+                  </TouchableOpacity>
+                </View>
+                <ScrollView style={styles.activityModalBody}>
+                  {selectedMagazinePreview.type === "pictorial" ? (
+                    <>
+                      {selectedMagazinePreview.photo_url ? (
+                        <Image
+                          source={{ uri: selectedMagazinePreview.photo_url }}
+                          style={styles.magazinePreviewImage}
+                          resizeMode="cover"
+                        />
+                      ) : null}
+                      <Text style={styles.magazinePreviewMeta}>
+                        {[selectedMagazinePreview.submitter_name, selectedMagazinePreview.club, formatCountryName(selectedMagazinePreview.country) || selectedMagazinePreview.country]
+                          .filter(Boolean)
+                          .join(" / ")}
+                      </Text>
+                      <Text style={styles.magazinePreviewTitle}>
+                        {selectedMagazinePreview.event_name || "Gallery submission"}
+                      </Text>
+                      <Text style={styles.magazinePreviewBody}>
+                        {selectedMagazinePreview.caption || "No caption submitted."}
+                      </Text>
+                      <Text style={styles.magazinePreviewMeta}>
+                        {[selectedMagazinePreview.event_date, `Status: ${selectedMagazinePreview.status}`].filter(Boolean).join(" / ")}
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      {(selectedMagazinePreview.magazine_photo_url || selectedMagazinePreview.attachment_url) ? (
+                        <Image
+                          source={{ uri: selectedMagazinePreview.magazine_photo_url || selectedMagazinePreview.attachment_url }}
+                          style={styles.magazinePreviewImage}
+                          resizeMode="cover"
+                        />
+                      ) : null}
+                      <Text style={styles.magazinePreviewMeta}>
+                        {[selectedMagazinePreview.article_writer_name || selectedMagazinePreview.author_name, selectedMagazinePreview.category, formatDate(selectedMagazinePreview.created_at)]
+                          .filter(Boolean)
+                          .join(" / ")}
+                      </Text>
+                      <Text style={styles.magazinePreviewTitle}>
+                        {selectedMagazinePreview.title || "Untitled submission"}
+                      </Text>
+                      {selectedMagazinePreview.pitch ? (
+                        <Text style={styles.magazinePreviewPitch}>{selectedMagazinePreview.pitch}</Text>
+                      ) : null}
+                      <Text style={styles.magazinePreviewBody}>
+                        {selectedMagazinePreview.body || selectedMagazinePreview.pitch || "No article body submitted."}
+                      </Text>
+                      <Text style={styles.magazinePreviewMeta}>
+                        {[
+                          selectedMagazinePreview.event_id ? `Linked event: ${selectedMagazinePreview.event_id}` : null,
+                          selectedMagazinePreview.external_link ? `External link: ${selectedMagazinePreview.external_link}` : null,
+                          `Status: ${selectedMagazinePreview.status}`,
+                          selectedMagazinePreview.email,
+                        ].filter(Boolean).join(" / ")}
+                      </Text>
+                    </>
+                  )}
+                </ScrollView>
+              </>
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -5410,6 +6469,56 @@ const styles = StyleSheet.create({
   },
   segmentChipTextActive: {
     color: "#fff",
+  },
+  recurringSubLabel: {
+    marginTop: 14,
+    marginBottom: 8,
+  },
+  recurringSubSection: {
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  compactChipRow: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 6,
+  },
+  compactChip: {
+    minWidth: 42,
+    minHeight: 36,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: "#f3f4f6",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  compactChipText: {
+    fontSize: 12,
+    fontWeight: "700" as const,
+    color: "#4b5563",
+  },
+  horizontalPickerContent: {
+    gap: 8,
+    paddingVertical: 4,
+    paddingRight: 12,
+  },
+  pickerChip: {
+    minWidth: 54,
+    minHeight: 38,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: "#f3f4f6",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  pickerChipText: {
+    fontSize: 12,
+    fontWeight: "700" as const,
+    color: "#4b5563",
   },
   textInput: {
     backgroundColor: "#f9fafb",
@@ -6449,6 +7558,13 @@ const styles = StyleSheet.create({
   usersList: {
     gap: 8,
   },
+  externalUserCard: {
+    backgroundColor: "#f9fafb",
+    borderRadius: 12,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+  },
   userRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -6485,6 +7601,77 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700" as const,
     color: "#fff",
+  },
+  externalSubmissionCard: {
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#e5e7eb",
+    gap: 8,
+  },
+  externalSubmissionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  externalSubmissionTitle: {
+    fontSize: 13,
+    color: "#111827",
+    fontWeight: "700" as const,
+  },
+  externalSubmissionMeta: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: 2,
+  },
+  externalEvidenceButton: {
+    backgroundColor: "#eff6ff",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+  },
+  externalEvidenceButtonText: {
+    color: "#2563eb",
+    fontSize: 12,
+    fontWeight: "700" as const,
+  },
+  externalNoEvidenceText: {
+    color: "#ef4444",
+    fontSize: 12,
+    fontWeight: "700" as const,
+  },
+  externalEvidenceThumb: {
+    width: "100%",
+    height: 160,
+    borderRadius: 10,
+    backgroundColor: "#f3f4f6",
+  },
+  externalActionRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  externalActionButton: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  externalApproveButton: {
+    backgroundColor: "#10b981",
+  },
+  externalRejectButton: {
+    backgroundColor: "#ef4444",
+  },
+  externalActionButtonText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700" as const,
   },
   sectionDivider: {
     paddingTop: 8,
@@ -6707,6 +7894,46 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginBottom: 12,
     backgroundColor: "#e5e7eb",
+  },
+  magazinePreviewButton: {
+    backgroundColor: "#2563eb",
+    marginTop: 8,
+  },
+  magazinePreviewModalContent: {
+    maxHeight: "88%",
+  },
+  magazinePreviewImage: {
+    width: "100%",
+    height: 220,
+    borderRadius: 14,
+    marginBottom: 14,
+    backgroundColor: "#e5e7eb",
+  },
+  magazinePreviewMeta: {
+    fontSize: 12,
+    color: "#6b7280",
+    fontWeight: "600" as const,
+    marginBottom: 8,
+  },
+  magazinePreviewTitle: {
+    fontSize: 20,
+    color: "#111827",
+    fontWeight: "800" as const,
+    lineHeight: 26,
+    marginBottom: 10,
+  },
+  magazinePreviewPitch: {
+    fontSize: 14,
+    color: "#4b5563",
+    fontWeight: "700" as const,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  magazinePreviewBody: {
+    fontSize: 15,
+    color: "#111827",
+    lineHeight: 23,
+    marginBottom: 16,
   },
   archiveHeaderBar: {
     flexDirection: "row" as const,

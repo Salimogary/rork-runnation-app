@@ -8,7 +8,7 @@ export default publicProcedure
 
     const { data, error } = await ctx.supabase
       .from("activities")
-      .select("activity_date, exercise_type, distance_km, start_time, end_time, pace_km_h")
+      .select("activity_date, exercise_type, distance_km, start_time, end_time, pace_min_per_km")
       .eq("registration_id", input.registrationId)
       .eq("activity_date", today)
       .order("end_time", { ascending: false })
@@ -30,6 +30,6 @@ export default publicProcedure
       exercise_type: activity.exercise_type,
       distance_km: activity.distance_km,
       Time: `${minutes}:${seconds.toString().padStart(2, "0")}`,
-      pace_km_h: activity.pace_km_h,
+      pace_min_per_km: activity.pace_min_per_km,
     };
   });

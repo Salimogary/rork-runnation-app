@@ -55,7 +55,7 @@ export default publicProcedure
       ctx.supabase.from("activities").select("distance_km, exercise_type").eq("registration_id", input.registrationId),
       ctx.supabase.from("goals").select("goal_id, goal").order("goal_id", { ascending: true }),
       ctx.supabase.from("user_goals").select("*").eq("registration_id", input.registrationId),
-      ctx.supabase.from("clubs").select("club_id, club_name, country, location, description").order("club_name", { ascending: true }),
+      ctx.supabase.from("clubs").select("club_id, club_name, country, location, description, is_special_club, special_club_code, age_min, age_max").order("club_name", { ascending: true }),
       ctx.supabase.from("club_membership_request").select("*").eq("registration_id", input.registrationId).maybeSingle(),
       ctx.supabase.from("subscriptions").select("status, expires_at").eq("registration_id", input.registrationId).maybeSingle(),
       ctx.supabase.from("fitness_goal").select("fitness_goal_id").eq("registration_id", input.registrationId).limit(1),

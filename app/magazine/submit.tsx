@@ -3,11 +3,12 @@ import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View 
 import { Stack, useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
-import { FileText, Paperclip, Send, X } from "lucide-react-native";
-import { magazineCategories } from "@/lib/magazine-data";
+import { FileText, Link as LinkIcon, Paperclip, Send, X } from "lucide-react-native";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { getServerClient } from "@/lib/server-client";
+
+const countWords = (value: string) => value.trim().split(/\s+/).filter(Boolean).length;
 
 export default function MagazineSubmitScreen() {
   const router = useRouter();
@@ -16,11 +17,15 @@ export default function MagazineSubmitScreen() {
   const [authorName, setAuthorName] = useState(user?.username ?? "");
   const [email, setEmail] = useState("");
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState(magazineCategories[0]?.name ?? "Community Story");
+  const [category, setCategory] = useState("Community");
   const [pitch, setPitch] = useState("");
   const [body, setBody] = useState("");
+  const [externalLink, setExternalLink] = useState("");
   const [attachment, setAttachment] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const bodyWordCount = useMemo(() => countWords(body), [body]);
+  const bodyWordTarget = category === "Columns" ? { min: 250, max: 300 } : { min: 150, max: 250 };
+  const isBodyWordCountValid = bodyWordCount >= bodyWordTarget.min && bodyWordCount <= bodyWordTarget.max;
 
   const canSubmit = useMemo(
     () =>
@@ -29,13 +34,18 @@ export default function MagazineSubmitScreen() {
       email.includes("@") &&
       title.trim().length >= 6 &&
       pitch.trim().length >= 20 &&
-      body.trim().length >= 80,
-    [authorName, body, email, pitch, registrationId, title]
+      isBodyWordCountValid,
+    [authorName, email, isBodyWordCountValid, pitch, registrationId, title]
   );
 
   const handleSubmit = async () => {
     if (!canSubmit) {
-      Alert.alert("Almost there", "Please complete all fields. Story body should be at least 80 characters.");
+      Alert.alert(
+        "Almost there",
+        category === "Columns"
+          ? "Please complete all fields. Column body should be between 250 and 300 words."
+          : "Please complete all fields. Article body should be between 150 and 250 words."
+      );
       return;
     }
 
@@ -53,6 +63,7 @@ export default function MagazineSubmitScreen() {
         category,
         pitch,
         body,
+        externalLink: externalLink.trim() || null,
         attachmentBase64,
         attachmentName: attachment?.name ?? null,
         attachmentType: attachment?.mimeType ?? null,
@@ -72,7 +83,7 @@ export default function MagazineSubmitScreen() {
 
   const pickAttachment = async () => {
     const result = await DocumentPicker.getDocumentAsync({
-      type: ["application/pdf", "text/plain", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/*"],
+      type: ["text/plain"],
       copyToCacheDirectory: true,
       multiple: false,
     });
@@ -103,17 +114,17 @@ export default function MagazineSubmitScreen() {
         <TextInput style={[styles.input, { backgroundColor: colors.cardBackground, color: colors.text, borderColor: colors.border }]} value={title} onChangeText={setTitle} placeholder="A clear, inviting headline" placeholderTextColor={colors.textLight} />
       </View>
 
-      <Text style={[styles.label, { color: colors.text }]}>Category</Text>
+      <Text style={[styles.label, { color: colors.text }]}>Magazine page</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
-        {magazineCategories.map((item) => {
-          const active = category === item.name;
+        {["Community", "Columns"].map((item) => {
+          const active = category === item;
           return (
             <TouchableOpacity
-              key={item.categoryId}
-              style={[styles.categoryChip, { backgroundColor: active ? item.color : colors.cardBackground, borderColor: active ? item.color : colors.border }]}
-              onPress={() => setCategory(item.name)}
+              key={item}
+              style={[styles.categoryChip, { backgroundColor: active ? colors.primary : colors.cardBackground, borderColor: active ? colors.primary : colors.border }]}
+              onPress={() => setCategory(item)}
             >
-              <Text style={[styles.categoryChipText, { color: active ? "#fff" : colors.text }]}>{item.name}</Text>
+              <Text style={[styles.categoryChipText, { color: active ? "#fff" : colors.text }]}>{item}</Text>
             </TouchableOpacity>
           );
         })}
@@ -141,17 +152,39 @@ export default function MagazineSubmitScreen() {
           multiline
           textAlignVertical="top"
         />
+        <Text style={[styles.helperText, { color: isBodyWordCountValid ? colors.success : colors.textSecondary }]}>
+          {bodyWordCount}/{bodyWordTarget.max} words. {category === "Columns" ? "Column body should be 250-300 words." : "Article body should be 150-250 words."}
+        </Text>
       </View>
 
       <View style={styles.field}>
-        <Text style={[styles.label, { color: colors.text }]}>Optional attachment</Text>
+        <Text style={[styles.label, { color: colors.text }]}>External link</Text>
+        <View style={[styles.linkInputWrap, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+          <LinkIcon size={18} color={colors.primary} />
+          <TextInput
+            style={[styles.linkInput, { color: colors.text }]}
+            value={externalLink}
+            onChangeText={setExternalLink}
+            placeholder="Writer website or social link, optional"
+            placeholderTextColor={colors.textLight}
+            autoCapitalize="none"
+            keyboardType="url"
+          />
+        </View>
+      </View>
+
+      <View style={styles.field}>
+        <Text style={[styles.label, { color: colors.text }]}>Optional plain text file</Text>
+        <Text style={[styles.helperText, { color: colors.textSecondary }]}>
+          Save your notes as a plain text .txt file before upload. PDF, DOC, DOCX, Pages, and images are not accepted here.
+        </Text>
         {attachment ? (
           <View style={[styles.attachmentCard, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
             <FileText size={20} color={colors.primary} />
             <View style={{ flex: 1 }}>
               <Text style={[styles.attachmentName, { color: colors.text }]} numberOfLines={1}>{attachment.name}</Text>
               <Text style={[styles.attachmentHint, { color: colors.textSecondary }]}>
-                Uploaded privately for admin review
+                Plain text file uploaded privately for admin review
               </Text>
             </View>
             <TouchableOpacity onPress={() => setAttachment(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -161,7 +194,7 @@ export default function MagazineSubmitScreen() {
         ) : (
           <TouchableOpacity style={[styles.attachButton, { backgroundColor: colors.cardBackground, borderColor: colors.border }]} onPress={pickAttachment}>
             <Paperclip size={18} color={colors.primary} />
-            <Text style={[styles.attachButtonText, { color: colors.text }]}>Add PDF, document, notes, or image</Text>
+            <Text style={[styles.attachButtonText, { color: colors.text }]}>Add plain text .txt file</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -215,6 +248,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     paddingVertical: 13,
     fontSize: 15,
+  },
+  helperText: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  linkInputWrap: {
+    alignItems: "center",
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 9,
+    paddingHorizontal: 15,
+  },
+  linkInput: {
+    flex: 1,
+    fontSize: 15,
+    minHeight: 48,
   },
   textAreaSmall: {
     minHeight: 94,

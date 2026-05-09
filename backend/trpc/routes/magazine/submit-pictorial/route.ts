@@ -9,10 +9,6 @@ export default publicProcedure
   .input(
     z.object({
       registrationId: z.string().min(1),
-      submitterName: z.string().trim().min(2).max(80),
-      email: z.string().trim().email(),
-      club: z.string().trim().max(100).nullable(),
-      country: z.string().trim().min(2).max(80),
       eventName: z.string().trim().min(2).max(120),
       eventDate: z.string().trim().nullable(),
       caption: z.string().trim().min(8).max(500),
@@ -40,6 +36,45 @@ export default publicProcedure
       errorMessage: "That pictorial caption looks like a recent duplicate submission.",
     });
 
+    const [registrationRes, contactRes, clubMembershipRes, profileByRegistrationRes, profileByAuthRes] = await Promise.all([
+      ctx.supabase
+        .from("registrations")
+        .select("registration_id, first_name, other_names, username, country")
+        .eq("registration_id", input.registrationId)
+        .maybeSingle(),
+      ctx.supabase.from("contacts").select("email").eq("registration_id", input.registrationId).maybeSingle(),
+      ctx.supabase
+        .from("club_membership_request")
+        .select("club")
+        .eq("registration_id", input.registrationId)
+        .maybeSingle(),
+      ctx.supabase
+        .from("profiles")
+        .select("profile_id, display_name, username, country")
+        .eq("registration_id", input.registrationId)
+        .maybeSingle(),
+      ctx.supabase
+        .from("profiles")
+        .select("profile_id, display_name, username, country")
+        .eq("profile_id", ctx.authUserId)
+        .maybeSingle(),
+    ]);
+
+    const registration = registrationRes.data as any;
+    const contact = contactRes.data as any;
+    const clubMembership = clubMembershipRes.data as any;
+    const profile = (profileByRegistrationRes.data || profileByAuthRes.data) as any;
+    const fullName = [registration?.first_name, registration?.other_names].filter(Boolean).join(" ").trim();
+    const submitterName =
+      profile?.display_name?.trim?.() ||
+      fullName ||
+      registration?.username?.trim?.() ||
+      profile?.username?.trim?.() ||
+      "RunNation Runner";
+    const email = contact?.email?.trim?.().toLowerCase() || "magazine@runnation.app";
+    const country = registration?.country?.trim?.() || profile?.country?.trim?.() || "Unspecified";
+    const club = clubMembership?.club?.trim?.() || null;
+
     const ext = input.mimeType.includes("png") ? "png" : input.mimeType.includes("webp") ? "webp" : "jpg";
     const fileName = `pictorials/${input.registrationId}/${Date.now()}.${ext}`;
 
@@ -58,21 +93,15 @@ export default publicProcedure
       .from(MAGAZINE_BUCKET)
       .getPublicUrl(uploadData.path);
 
-    const { data: profile } = await ctx.supabase
-      .from("profiles")
-      .select("profile_id")
-      .eq("profile_id", ctx.authUserId)
-      .maybeSingle();
-
     const { data, error } = await ctx.supabase
       .from("magazine_pictorial_submissions")
       .insert({
         registration_id: input.registrationId,
         profile_id: profile?.profile_id ?? ctx.authUserId,
-        submitter_name: input.submitterName.trim(),
-        email: input.email.trim().toLowerCase(),
-        club: input.club?.trim() || null,
-        country: input.country.trim(),
+        submitter_name: submitterName,
+        email,
+        club,
+        country,
         event_name: input.eventName.trim(),
         event_date: input.eventDate || null,
         caption: input.caption.trim(),

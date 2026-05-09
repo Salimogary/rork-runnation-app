@@ -113,31 +113,71 @@ const DEFAULT_FAQS = [
       "Start with Settings > Help for admin contacts, then use Suggestions if you want to report a bug, ask for a feature, or explain a support issue in more detail.",
     display_order: 160,
   },
+  {
+    faq_id: "default-17",
+    question: "Can I hold more than one role at a time?",
+    answer: "No.",
+    display_order: 170,
+  },
 ];
 
 function isMissingSchemaError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" && error !== null && "message" in error
+        ? String((error as { message?: unknown }).message ?? "")
+        : String(error);
   return message.includes("does not exist") || message.includes("schema cache");
+}
+
+function normalizeFaqRows(rows: any[] | null | undefined) {
+  return (rows ?? [])
+    .filter((row) => row?.question && row?.answer && row?.is_active !== false)
+    .map((row) => ({
+      faq_id: row.faq_id,
+      question: String(row.question),
+      answer: String(row.answer),
+      display_order: Number(row.display_order ?? 0),
+    }))
+    .sort((a, b) => {
+      if (a.display_order !== b.display_order) {
+        return a.display_order - b.display_order;
+      }
+      return String(a.faq_id).localeCompare(String(b.faq_id));
+    });
 }
 
 export default publicProcedure.query(async ({ ctx }) => {
   const { data, error } = await ctx.supabase
     .from("faq_entries")
-    .select("faq_id, question, answer, display_order")
-    .eq("is_active", true)
+    .select("faq_id, question, answer, display_order, is_active")
     .order("display_order", { ascending: true })
     .order("faq_id", { ascending: true });
 
   if (error) {
-    if (isMissingSchemaError(error)) {
+    if (!isMissingSchemaError(error)) {
+      throw new Error(error.message || "Could not load FAQ entries.");
+    }
+
+    const { data: fallbackData, error: fallbackError } = await ctx.supabase
+      .from("faq_entries")
+      .select("faq_id, question, answer, display_order")
+      .order("display_order", { ascending: true })
+      .order("faq_id", { ascending: true });
+
+    if (fallbackError) {
       return DEFAULT_FAQS;
     }
-    throw new Error(error.message || "Could not load FAQ entries.");
+
+    const fallbackRows = normalizeFaqRows(fallbackData);
+    return fallbackRows.length ? fallbackRows : DEFAULT_FAQS;
   }
 
-  if (!data || data.length === 0) {
+  const rows = normalizeFaqRows(data);
+  if (rows.length === 0) {
     return DEFAULT_FAQS;
   }
 
-  return data;
+  return rows;
 });

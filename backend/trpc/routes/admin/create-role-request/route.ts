@@ -46,6 +46,42 @@ export default publicProcedure
       throw new Error(roleError?.message || "Could not resolve the selected role.");
     }
 
+    const { data: pendingInvite, error: pendingInviteError } = await ctx.supabase
+      .from("admin_invites")
+      .select("invite_id")
+      .eq("email", email)
+      .eq("status", "pending")
+      .limit(1);
+
+    if (pendingInviteError) {
+      throw new Error(pendingInviteError.message || "Could not check pending role requests.");
+    }
+    if ((pendingInvite ?? []).length > 0) {
+      throw new Error("This user already has a pending role request.");
+    }
+
+    const { data: resolvedUserId } = await ctx.supabase.rpc(
+      "resolve_profile_id_for_role_assignment",
+      { p_email: email }
+    );
+
+    if (resolvedUserId) {
+      const { data: activeRoles, error: activeRolesError } = await ctx.supabase
+        .from("user_role_assignments")
+        .select("assignment_id")
+        .eq("user_id", resolvedUserId)
+        .eq("is_active", true)
+        .eq("is_exclusive_admin_role", true)
+        .limit(1);
+
+      if (activeRolesError) {
+        throw new Error(activeRolesError.message || "Could not check active role assignments.");
+      }
+      if ((activeRoles ?? []).length > 0) {
+        throw new Error("This user already has an active role. Each user can hold only one role at a time.");
+      }
+    }
+
     const { data, error } = await ctx.supabase
       .from("admin_invites")
       .insert({

@@ -21,7 +21,7 @@ interface PolicySection {
   content: string[];
 }
 
-const LAST_UPDATED = '27 April 2026';
+const LAST_UPDATED = '9 May 2026';
 
 const SECTIONS: PolicySection[] = [
   {
@@ -30,9 +30,9 @@ const SECTIONS: PolicySection[] = [
     icon: <Eye size={20} color="#3b82f6" />,
     accentColor: '#3b82f6',
     content: [
-      'RunNation ("the App") is a fitness, community, events, shopping, chat, and magazine platform for runners and walkers. It helps users track activity, join clubs, participate in events, share social content, discover country-specific shop items, and read or submit RunNation Magazine stories.',
+      'RunNation ("the App") is a fitness, community, events, shopping, chat, goals, reports, and magazine platform for runners and walkers. It helps users track workouts, join clubs, participate in same-day, recurring, and multiday events, share social content, discover country-specific shop items, and read or submit magazine stories.',
       'This document explains how we collect, use, store, protect, moderate, and display your information. By creating an account, signing in with email or a supported social provider, or using the App, you agree to these practices and terms.',
-      'Some features are country-specific or role-specific. For example, shopping and event access may depend on your profile country, while admin tools are available only to users with approved roles.',
+      'Some features are country-specific, travel-specific, age-specific, club-specific, or role-specific. For example, shopping and event access may depend on your profile or travel country, special clubs may depend on age or preference, while admin tools are available only to users with approved roles.',
     ],
   },
   {
@@ -41,13 +41,16 @@ const SECTIONS: PolicySection[] = [
     icon: <Database size={20} color="#10b981" />,
     accentColor: '#10b981',
     content: [
-      'Account Information: When you register or complete your profile, we may collect your name, username, email address, phone number, sex, date of birth, country, residence, occupation, club, profile photo, and other profile details you choose to provide.',
+      'Account Information: When you register or complete your profile, we collect or may collect your name, username, email address, phone number, sex, date of birth, nationality, country, residence, occupation, club, profile photo, travel destination/date range, and other profile details you choose to provide. Minimum age rules apply to registration and some clubs.',
       'Authentication Information: Accounts are created through Supabase Auth using email/password or supported social sign-in providers such as Google. Apple sign-in may be shown as a future or coming-soon option until fully enabled.',
-      'Activity Data: We record exercise type (Walk, Run, Treadmill), distance covered, start/end times, pace, activity date, GPS route coordinates for outdoor activities, and any supporting evidence required for activity verification.',
-      'Treadmill Submissions: For treadmill activities, we collect distance, duration, and a photo of the treadmill screen for admin verification.',
-      'Events and Clubs: We store event enrollment details, country and club information, registration status, medal or completion progress, event entry type (such as free, club-approved, or paid), and whether an event is local, virtual, or available to all users.',
-      'Chat and Social Content: We store posts, photos, captions, comments, reactions, mentions, polls, and activity summaries that you choose to share in the community areas of the App.',
-      'Magazine Submissions: If you submit a story, attachment, event pictorial, or photo for Picture of the Week, we collect the submitted text, images, files, country, club, event date, and related details for admin review and possible publication.',
+      'Activity Data: We record workout type (Run, Walk, Treadmill, smart watch import, or other sports app import), distance covered, start/end times, pause duration, pace in minutes per kilometre by default, activity date, GPS route coordinates for outdoor activities, and any supporting evidence required for verification.',
+      'Treadmill Submissions: Treadmill activities count for workouts, goals, and normal activity records, but not for event credit. We may collect distance, duration, date, and proof photo where verification is required.',
+      'External Activity Imports: Smart watch and other sports app imports may include screenshots or supporting evidence. These can count for event credit only through the relevant club or organizer approval process; screenshots are not required for ordinary non-event workout records unless the app says otherwise.',
+      'Goals and Health Metrics: We may store goal preferences, target dates, activity days, weight, distance, duration, and progress calculations such as effectiveness per kilometre or per hour of activity.',
+      'Events and Clubs: We store event enrollment details, country and club information, registration status, recurring event rules, minimum distance requirements, medal or completion progress, event entry type (such as free, approved, or paid), and whether an event is local, virtual, recurring, multiday, or available to all users.',
+      'Service Team Roles: If you apply for a role such as club coordinator, country coordinator, event organizer, shop manager, special club coordinator, or magazine columnist, we store your request, country or global scope, approval status, and optional website, LinkedIn, or social links where relevant.',
+      'Chat and Social Content: We store posts, photos, captions, comments, reactions, mentions, polls, reports, screenshots submitted with reports, moderation decisions, and activity summaries that you choose to share in the community areas of the App.',
+      'Magazine Submissions: If you submit a story, event-linked article, pictorial, gallery photo, author name, photo, or external link, we collect the submitted text, images, files, country, club, event date, and related details for admin review and possible publication.',
       'Shop and Orders: We collect delivery information, order details, currency, country, and purchase history when you use the merchandise shop. Shop availability may vary by country.',
       'Device and Session Information: We may collect device identifiers, platform information, app logs, and session data needed for app functionality, troubleshooting, security, and abuse prevention.',
     ],
@@ -74,8 +77,8 @@ const SECTIONS: PolicySection[] = [
       'Authentication credentials are handled by Supabase Auth and are never stored by RunNation as plain-text passwords. Passwords and recovery flows should use the secure authentication provider process.',
       'Sensitive session data is stored on your device using encrypted secure storage (Expo SecureStore) and is not transmitted to external servers.',
       'Images, attachments, social uploads, magazine submissions, and pictorial photos may be stored in Supabase Storage or an equivalent app storage service so they can be displayed in the App.',
-      'Activity records, account data, social content, order records, event records, role assignments, and magazine submissions are retained for as long as needed to operate the App, maintain records, resolve disputes, or comply with lawful requirements.',
-      'Rejected treadmill submissions and rejected event enrollments are deleted from our systems upon rejection.',
+      'Activity records, account data, social content, report records, order records, event records, role assignments, travel settings, goals, and magazine submissions are retained for as long as needed to operate the App, maintain records, resolve disputes, or comply with lawful requirements.',
+      'Rejected submissions may remain visible to admins for audit and abuse-prevention purposes even where they no longer appear to ordinary users. This helps prevent repeated action on the same rejected request.',
       'Deleted posts, submissions, images, or account data may not disappear immediately from backups or logs, but they will no longer be actively displayed once removed from the live App.',
     ],
   },
@@ -86,10 +89,10 @@ const SECTIONS: PolicySection[] = [
     accentColor: '#ec4899',
     content: [
       'Community Feed and Chat: Posts, photos, comments, reactions, mentions, polls, and activity summaries you share may be visible to other App users. You are responsible for the content you choose to publish.',
-      'Magazine and Pictorials: Stories, attachments, event pictorial photos, and Picture of the Week submissions may be reviewed by admins and, if selected, displayed in RunNation Magazine or on magazine front-page areas.',
-      'Activity Leaderboards: Your username, profile details, country or club, and activity statistics may appear on event leaderboards, medal lists, and community views visible to other participants.',
+      'Magazine and Pictorials: Stories, event-linked articles, author names, external links, event pictorial photos, gallery photos, and Picture of the Week submissions may be reviewed by admins and, if selected, displayed in The Running Post or related RunNation magazine areas.',
+      'Activity Leaderboards: Your username, profile details, flag, country or club, sex, distance, time, pace, days participated, medal or finisher status, and activity statistics may appear on event leaderboards, reports, medal lists, and community views visible to other participants.',
       'Private Mode: You can enable Private Mode in Settings to hide your data from public leaderboards and community views.',
-      'Admin Access: Approved admins can view relevant records such as activities, pending submissions, event enrollments, shop orders, social reports, magazine submissions, pictorials, and role assignments for operational, moderation, and verification purposes.',
+      'Admin Access: Approved admins can view relevant records such as activities, pending submissions, event enrollments, shop orders, social reports, screenshots, magazine submissions, pictorials, role requests, role assignments, special club records, and moderation flags for operational, moderation, and verification purposes.',
       'Role-Based Access: Global admins, country admins, and club coordinators may see different information depending on their role and scope. Admin actions may be logged for accountability.',
       'We do not share your personal data with third-party advertisers. We do not sell your data to any external entity.',
       'We may disclose data if required by law or to protect the safety and rights of our users.',
@@ -105,7 +108,7 @@ const SECTIONS: PolicySection[] = [
       'Biometric authentication (Face ID / Fingerprint) may be supported for convenient access on supported devices where enabled.',
       'All network communications between the App and our servers use HTTPS encryption.',
       'The App uses backend checks, database permissions, and role-based access controls to restrict sensitive operations.',
-      'Admin access uses the same main authentication system and is restricted by assigned roles such as super_admin, country_admin, and club_coordinator.',
+      'Admin access uses the same main authentication system and is restricted by assigned roles such as super_admin, country_admin, country_coordinator, club_coordinator, event_organizer, shop_manager, special club coordinator, and approved magazine columnist roles where applicable.',
       'Country and club scope may limit what admins can view or manage. For example, country-specific shop and event operations may be restricted to the relevant country.',
       'No system is perfectly secure, but we take reasonable technical and operational steps to protect user data and reduce unauthorized access.',
     ],
@@ -131,12 +134,16 @@ const SECTIONS: PolicySection[] = [
     icon: <Scale size={20} color="#0ea5e9" />,
     accentColor: '#0ea5e9',
     content: [
-      'Eligibility: You must provide accurate registration information to use the App. Falsifying activity data (e.g. fraudulent treadmill submissions) may result in account suspension.',
+      'Eligibility: You must meet the minimum age requirement and provide accurate registration information, including required age and nationality details, to use the App. Falsifying activity data, age, identity, country, screenshots, or evidence may result in rejection, suspension, or removal.',
       'Acceptable Use: The App is intended for personal fitness tracking, community engagement, events, shopping, and editorial participation. You agree not to misuse the platform, harass users, impersonate others, post harmful content, spam, or upload illegal or inappropriate material.',
-      'Country and Event Rules: Some events and shop items are country-specific. You may be prevented from enrolling in non-virtual events outside your registered country unless the App operators allow it.',
+      'Country, Travel, Club, and Event Rules: Some events and shop items are country-specific. Travel settings may allow temporary event access in another country during the travel date range. Special clubs may have age or participation rules, including Junior Runners for ages 8 to 15 and Golden Age Runners for ages 60 and above.',
+      'Workout Rules: GPS workouts must meet the app minimum distance and time requirements to be saved as completed records. Shorter attempts may be paused and resumed later where the app supports it. Treadmill records count for workouts and goals but not for event credit.',
+      'Event Result Rules: Event results may be separated into Finishers and Participants. Finishers must submit qualifying activity and meet any minimum daily or cumulative distance requirements set for the event. Smart watch and sports app imports require approval for event credit.',
       'Event Fees and Payment Handling: Some events may be free, may require club approval, or may require payment before confirmation. Where event fees apply, payment instructions should be communicated clearly through the app or the relevant RunNation-administered process. Bulk-collected event funds may be remitted to the relevant club or independent event organiser through the approved RunNation payment handling workflow.',
       'Admin Decisions: Administrators may approve, reject, edit visibility, remove, or moderate treadmill submissions, event enrollments, shop orders, social posts, comments, reactions, magazine submissions, pictorials, and reported content.',
-      'Magazine Rights: You keep ownership of stories, photos, and attachments you submit, but you grant RunNation permission to review, store, edit for formatting, display, promote, and publish accepted submissions inside the App and related RunNation channels.',
+      'Community Safety: Users must not post abusive, hateful, pornographic, divisive, sectarian, threatening, harassing, disrespectful, illegal, misleading, or unsafe content. Reports may include screenshots and descriptions, and repeat offenders may be flagged, restricted, or banned.',
+      'Magazine Rights: You keep ownership of stories, photos, attachments, and external links you submit, but you grant RunNation permission to review, store, edit for formatting, display, promote, and publish accepted submissions inside the App and related RunNation channels.',
+      'Service Team Roles: Users may apply for service roles through Join Service Team. Most users may hold only one active admin/service role at a time. Super Admins may hold additional roles for operational setup. Rejected role requests must be resubmitted only through the approved process.',
       'Picture of the Week: By submitting an event pictorial or photo, you agree that selected images may be used as a magazine cover, front-page background, highlight, or promotional community feature with appropriate contextual details where practical.',
       'Shop Purchases: All merchandise purchases are subject to availability, supported country, local currency, delivery limits, and admin processing. Refund and return policies are handled on a case-by-case basis unless a specific policy is published.',
       'Admin Roles: Users with admin roles must use their access only for legitimate RunNation operations. Global admins may have broader rights, including deletion and role management, while country admins and club coordinators may be limited by assigned scope.',

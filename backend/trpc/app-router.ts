@@ -15,6 +15,7 @@ import updateStockRoute from "./routes/admin/update-stock/route";
 import getEventsRoute from "./routes/admin/get-events/route";
 import addEventRoute from "./routes/admin/add-event/route";
 import updateEventRoute from "./routes/admin/update-event/route";
+import deleteEventRoute from "./routes/admin/delete-event/route";
 import updateEventApprovalRoute from "./routes/admin/update-event-approval/route";
 import getParticipantsRoute from "./routes/admin/get-participants/route";
 import enrollEventRoute from "./routes/admin/enroll-event/route";
@@ -60,6 +61,8 @@ import approveRoleRequestRoute from "./routes/admin/approve-role-request/route";
 import rejectRoleRequestRoute from "./routes/admin/reject-role-request/route";
 import updateRoleAssignmentRoute from "./routes/admin/update-role-assignment/route";
 import deleteRoleAssignmentRoute from "./routes/admin/delete-role-assignment/route";
+import getChatReportsRoute from "./routes/admin/get-chat-reports/route";
+import reviewChatReportRoute from "./routes/admin/review-chat-report/route";
 import requestAdminPasswordResetRoute from "./routes/admin/request-password-reset/route";
 import resetAdminPasswordRoute from "./routes/admin/reset-password/route";
 import registerRoute from "./routes/auth/register/route";
@@ -87,6 +90,7 @@ import getMentionCountRoute from "./routes/social/get-mention-count/route";
 import markMentionsReadRoute from "./routes/social/mark-mentions-read/route";
 import togglePostReactionRoute from "./routes/social/toggle-post-reaction/route";
 import toggleCommentReactionRoute from "./routes/social/toggle-comment-reaction/route";
+import reportContentRoute from "./routes/social/report-content/route";
 import getProfileBundleRoute from "./routes/profile/get-bundle/route";
 import updateProfileRoute from "./routes/profile/update-profile/route";
 import saveProfileGoalsRoute from "./routes/profile/save-goals/route";
@@ -100,8 +104,12 @@ import getRegisteredEventsRoute from "./routes/events/get-registered-events/rout
 import submitMagazineArticleRoute from "./routes/magazine/submit-article/route";
 import submitMagazinePictorialRoute from "./routes/magazine/submit-pictorial/route";
 import getMagazinePictorialsPublicRoute from "./routes/magazine/get-pictorials/route";
+import getMagazineArticlesRoute from "./routes/magazine/get-articles/route";
 import getAdminContactsRoute from "./routes/support/get-admin-contacts/route";
 import getFaqEntriesRoute from "./routes/support/get-faq-entries/route";
+import getAboutStatsRoute from "./routes/support/get-about-stats/route";
+import getServiceTeamRolesRoute from "./routes/service-team/get-service-roles/route";
+import requestServiceTeamRoleRoute from "./routes/service-team/request-role/route";
 
 export const appRouter = createTRPCRouter({
   example: createTRPCRouter({
@@ -125,6 +133,7 @@ export const appRouter = createTRPCRouter({
     getEvents: getEventsRoute,
     addEvent: addEventRoute,
     updateEvent: updateEventRoute,
+    deleteEvent: deleteEventRoute,
     updateEventApproval: updateEventApprovalRoute,
     getParticipants: getParticipantsRoute,
     enrollEvent: enrollEventRoute,
@@ -164,6 +173,8 @@ export const appRouter = createTRPCRouter({
     rejectRoleRequest: rejectRoleRequestRoute,
     updateRoleAssignment: updateRoleAssignmentRoute,
     deleteRoleAssignment: deleteRoleAssignmentRoute,
+    getChatReports: getChatReportsRoute,
+    reviewChatReport: reviewChatReportRoute,
     requestPasswordReset: requestAdminPasswordResetRoute,
     resetPassword: resetAdminPasswordRoute,
   }),
@@ -203,6 +214,7 @@ export const appRouter = createTRPCRouter({
     markMentionsRead: markMentionsReadRoute,
     togglePostReaction: togglePostReactionRoute,
     toggleCommentReaction: toggleCommentReactionRoute,
+    reportContent: reportContentRoute,
     deletePost: deleteSocialPostRoute,
     getCurrentActivity: getCurrentActivityRoute,
   }),
@@ -223,6 +235,7 @@ export const appRouter = createTRPCRouter({
     getRegisteredEvents: getRegisteredEventsRoute,
   }),
   magazine: createTRPCRouter({
+    getArticles: getMagazineArticlesRoute,
     submitArticle: submitMagazineArticleRoute,
     submitPictorial: submitMagazinePictorialRoute,
     getPictorials: getMagazinePictorialsPublicRoute,
@@ -230,6 +243,11 @@ export const appRouter = createTRPCRouter({
   support: createTRPCRouter({
     getAdminContacts: getAdminContactsRoute,
     getFaqEntries: getFaqEntriesRoute,
+    getAboutStats: getAboutStatsRoute,
+  }),
+  serviceTeam: createTRPCRouter({
+    getRoles: getServiceTeamRolesRoute,
+    requestRole: requestServiceTeamRoleRoute,
   }),
 });
 

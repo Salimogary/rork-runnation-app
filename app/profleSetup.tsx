@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Share,
   Image,
   Animated,
 } from 'react-native';
@@ -28,6 +29,7 @@ import { Picker } from '@react-native-picker/picker';
 import { getServerClient } from '@/lib/server-client';
 import { supabase } from '@/lib/supabase';
 import { WORLD_COUNTRIES } from '@/constants/countries';
+import { filterVisibleClubsForAge, getAgeFromDob, isAtLeastRunNationAge } from '@/utils/specialClubs';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -79,6 +81,10 @@ interface ClubItem {
   country: string | null;
   location: string | null;
   description: string | null;
+  is_special_club?: boolean | null;
+  special_club_code?: string | null;
+  age_min?: number | null;
+  age_max?: number | null;
 }
 
 interface ProfileBundleResponse {
@@ -88,6 +94,17 @@ interface ProfileBundleResponse {
 }
 
 type ClubChoice = 'join' | 'existing' | 'start' | 'organizer' | 'none' | null;
+const RUNNATION_APP_LINK = '';
+
+const normalizeCountryLabel = (value?: string | null) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const upper = raw.toUpperCase();
+  const country = FALLBACK_COUNTRIES.find(
+    (item) => item.iso_alpha2.toUpperCase() === upper || item.name.toLowerCase() === raw.toLowerCase()
+  );
+  return (country?.name || raw).trim().toLowerCase();
+};
 
 const getOAuthRedirectUrl = () => {
   if (Platform.OS === 'web') {
@@ -223,6 +240,15 @@ export default function RegisterScreen() {
   const [showRegistrationConfirmPassword, setShowRegistrationConfirmPassword] = useState(false);
 
   const stepAnim = useRef(new Animated.Value(0)).current;
+  const countryClubs = useMemo(() => {
+    const userCountry = normalizeCountryLabel(registrationData.country);
+    if (!userCountry) return [];
+    return clubs.filter((club) => normalizeCountryLabel(club.country) === userCountry);
+  }, [clubs, registrationData.country]);
+  const visibleClubs = useMemo(
+    () => filterVisibleClubsForAge(clubs, countryClubs, getAgeFromDob(registrationData.dob)),
+    [clubs, countryClubs, registrationData.dob]
+  );
 
   useEffect(() => {
     void checkBiometricAvailability();
@@ -341,6 +367,29 @@ export default function RegisterScreen() {
     if (year < 1900 || year > new Date().getFullYear()) return false;
     const date = new Date(year, month - 1, day);
     return date.getDate() === day && date.getMonth() === month - 1 && date.getFullYear() === year;
+  };
+
+  const shareMissingClubInvite = async () => {
+    const link = RUNNATION_APP_LINK || 'RunNation app download link coming soon';
+    const message = [
+      'Hello Coach/Club Coordinator, I am joining RunNation and could not find our club on the club list.',
+      `Please join RunNation and create our club profile so members can connect, register, and appear under the right club.`,
+      `App link: ${link}`,
+      'If you permit me to create it, I can create the club profile from Settings > Join Service Team after completing registration.',
+      'RunNation - Where runners belong',
+    ].join('\n\n');
+
+    if (Platform.OS === 'web') {
+      if (navigator?.clipboard) {
+        await navigator.clipboard.writeText(message);
+        alert('Club invitation message copied.');
+        return;
+      }
+      alert(message);
+      return;
+    }
+
+    await Share.share({ message });
   };
 
   const checkBiometricAvailability = async () => {
@@ -631,6 +680,11 @@ export default function RegisterScreen() {
       return;
     }
 
+    if (!isAtLeastRunNationAge(registrationData.dob)) {
+      Alert.alert('Minimum Age Required', 'RunNation registration is available for users aged 8 years and above.');
+      return;
+    }
+
     if (registrationData.pin.trim().length < 8) {
       Alert.alert('Error', 'Password must be at least 8 characters');
       return;
@@ -795,11 +849,11 @@ export default function RegisterScreen() {
       let newMemberValue: string = 'No';
 
       if (clubChoice === 'join') {
-        const selectedClub = clubs.find(c => c.club_id === selectedClubId);
+        const selectedClub = visibleClubs.find(c => c.club_id === selectedClubId);
         clubValue = selectedClub?.club_name || null;
         newMemberValue = 'Yes';
       } else if (clubChoice === 'existing') {
-        const selectedClub = clubs.find(c => c.club_id === selectedClubId);
+        const selectedClub = visibleClubs.find(c => c.club_id === selectedClubId);
         clubValue = selectedClub?.club_name || null;
         newMemberValue = 'No';
       } else if (clubChoice === 'start') {
@@ -1441,8 +1495,6 @@ export default function RegisterScreen() {
     const options: { key: ClubChoice; label: string; icon: React.ReactNode; desc: string }[] = [
       { key: 'join', label: 'Want to join a club', icon: <UserPlus size={22} color="#fff" />, desc: 'Browse and join an existing club' },
       { key: 'existing', label: 'I already have a club', icon: <UserCheck size={22} color="#fff" />, desc: 'Select your current club' },
-      { key: 'start', label: 'Want to start a club', icon: <PlusCircle size={22} color="#fff" />, desc: 'Send a structured request for admin approval' },
-      { key: 'organizer', label: 'Event Organiser', icon: <Calendar size={22} color="#fff" />, desc: 'Request organiser approval for posting events' },
       { key: 'none', label: 'No thanks', icon: <X size={22} color="#fff" />, desc: 'Continue without a club' },
     ];
 
@@ -1481,19 +1533,20 @@ export default function RegisterScreen() {
         <ChevronLeft size={18} color="#fff" />
         <Text style={styles.clubBackText}>Back to options</Text>
       </TouchableOpacity>
-      <Text style={styles.clubSubTitle}>Choose a club to join</Text>
+      <Text style={styles.clubSubTitle}>List of clubs in your country</Text>
       {clubsLoading ? (
         <View style={styles.loadingRow}>
           <ActivityIndicator color="#fff" />
           <Text style={styles.loadingText}>Loading clubs...</Text>
         </View>
-      ) : clubs.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyStateText}>No clubs available at the moment.</Text>
-        </View>
       ) : (
         <View style={styles.clubsList}>
-          {clubs.map((club) => {
+          {visibleClubs.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateText}>No clubs available in {registrationData.country || 'your country'} yet.</Text>
+            </View>
+          ) : null}
+          {visibleClubs.map((club) => {
             const isSelected = selectedClubId === club.club_id;
             return (
               <TouchableOpacity
@@ -1533,6 +1586,12 @@ export default function RegisterScreen() {
               </TouchableOpacity>
             );
           })}
+          <TouchableOpacity style={styles.missingClubCard} onPress={() => void shareMissingClubInvite()} activeOpacity={0.75}>
+            <Text style={styles.missingClubTitle}>My club is not on this list</Text>
+            <Text style={styles.missingClubText}>
+              Share RunNation with your club coordinator, or get permission to create the club profile from Settings &gt; Join Service Team after completing registration.
+            </Text>
+          </TouchableOpacity>
         </View>
       )}
     </View>
@@ -1544,19 +1603,20 @@ export default function RegisterScreen() {
         <ChevronLeft size={18} color="#fff" />
         <Text style={styles.clubBackText}>Back to options</Text>
       </TouchableOpacity>
-      <Text style={styles.clubSubTitle}>Select your current club</Text>
+      <Text style={styles.clubSubTitle}>List of clubs in your country</Text>
       {clubsLoading ? (
         <View style={styles.loadingRow}>
           <ActivityIndicator color="#fff" />
           <Text style={styles.loadingText}>Loading clubs...</Text>
         </View>
-      ) : clubs.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyStateText}>No clubs available at the moment.</Text>
-        </View>
       ) : (
         <View style={styles.clubsList}>
-          {clubs.map((club) => {
+          {visibleClubs.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateText}>No clubs available in {registrationData.country || 'your country'} yet.</Text>
+            </View>
+          ) : null}
+          {visibleClubs.map((club) => {
             const isSelected = selectedClubId === club.club_id;
             return (
               <TouchableOpacity
@@ -1575,6 +1635,12 @@ export default function RegisterScreen() {
               </TouchableOpacity>
             );
           })}
+          <TouchableOpacity style={styles.missingClubCard} onPress={() => void shareMissingClubInvite()} activeOpacity={0.75}>
+            <Text style={styles.missingClubTitle}>My club is not on this list</Text>
+            <Text style={styles.missingClubText}>
+              Share RunNation with your club coordinator, or get permission to create the club profile from Settings &gt; Join Service Team after completing registration.
+            </Text>
+          </TouchableOpacity>
         </View>
       )}
     </View>
@@ -1704,7 +1770,11 @@ export default function RegisterScreen() {
         <View style={styles.stepHeader}>
           <Users size={32} color="#fff" />
           <Text style={styles.formTitle}>Club & Organiser</Text>
-          <Text style={styles.stepSubtitle}>Join a club, start one, or request event organiser access.</Text>
+          <Text style={styles.stepSubtitle}>
+            {clubChoice === 'join' || clubChoice === 'existing'
+              ? 'List of clubs in your country'
+              : 'Choose your club preference.'}
+          </Text>
         </View>
 
         {clubChoice === null && renderClubChoiceOptions()}
@@ -2565,6 +2635,25 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginLeft: 36,
     lineHeight: 18,
+  },
+  missingClubCard: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    borderStyle: 'dashed',
+    borderRadius: 14,
+    padding: 14,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    gap: 5,
+  },
+  missingClubTitle: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700' as const,
+  },
+  missingClubText: {
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: 12,
+    lineHeight: 17,
   },
   clubRadio: {
     width: 24,

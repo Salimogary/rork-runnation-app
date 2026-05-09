@@ -10,10 +10,11 @@ import {
   Alert,
   Modal,
   Share,
+  Linking,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { Calendar, Clock3, Globe2, MapPin, Users, Award, CheckCircle2 } from "lucide-react-native";
+import { Award, Calendar, ChevronDown, Clock3, Globe2, List, MapPin, CheckCircle2 } from "lucide-react-native";
 import { Image } from "expo-image";
 import * as FileSystem from "expo-file-system/legacy";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
@@ -26,6 +27,9 @@ import { getServerClient } from "@/lib/server-client";
 
 type EventScope = "local" | "all";
 type EventEntryMode = "free" | "club_approved" | "paid";
+type EventTypeFilter = "all" | "same_day" | "recurring" | "multiday";
+type EventViewMode = "list" | "calendar";
+type SelectorMode = "location" | "eventType" | null;
 
 function normalizeCountryCode(country?: string | null) {
   const value = String(country || "").trim().toLowerCase();
@@ -48,12 +52,59 @@ function isOneDayEvent(startsAt?: string | null, endsAt?: string | null) {
   return startsAt.slice(0, 10) === endsAt.slice(0, 10);
 }
 
+function formatShortEventDate(dateString?: string | null) {
+  const dateOnly = String(dateString || "").slice(0, 10);
+  if (!dateOnly) return "";
+  const [year, month, day] = dateOnly.split("-");
+  if (!year || !month || !day) return "";
+  return `${Number(day)}/${Number(month)}/${String(year).slice(-2)}`;
+}
+
+function formatEventMetaDate(startsAt?: string | null, endsAt?: string | null) {
+  const start = formatShortEventDate(startsAt);
+  const end = formatShortEventDate(endsAt);
+  if (!start) return end;
+  if (!end || isOneDayEvent(startsAt, endsAt)) return start;
+  return `${start}-${end}`;
+}
+
+function getEventRegistrationCloseDate(item: any): string {
+  return String(item?.registration_closes_at || item?.registrationClosesAt || "").slice(0, 10);
+}
+
+function isEventRegistrationClosed(item: any): boolean {
+  const closeDate = getEventRegistrationCloseDate(item);
+  if (!closeDate) return false;
+  return new Date().toISOString().slice(0, 10) > closeDate;
+}
+
+function getEventType(item: any): "same_day" | "recurring" | "multiday" {
+  if (item?.event_type === "recurring" || item?.eventType === "recurring") return "recurring";
+  if (item?.event_type === "multiday" || item?.eventType === "multiday") return "multiday";
+  return isOneDayEvent(item?.starts_at, item?.ends_at) ? "same_day" : "multiday";
+}
+
+function getEventModeParam(item: any) {
+  const eventType = getEventType(item);
+  if (eventType === "recurring") return "recurring";
+  return eventType === "same_day" ? "same-day" : "multiday";
+}
+
+function getEventTypeLabel(item: any) {
+  const eventType = getEventType(item);
+  if (eventType === "recurring") return "Recurring";
+  return eventType === "same_day" ? "Same Day" : "Multiday";
+}
+
 export default function EventsScreen() {
   const router = useRouter();
   const { registrationId, user } = useAuth();
   const trpcUtils = trpc.useUtils();
   const effectiveRegistrationId = registrationId || user?.id || "";
   const [eventScope, setEventScope] = useState<EventScope>("local");
+  const [eventTypeFilter, setEventTypeFilter] = useState<EventTypeFilter>("all");
+  const [eventViewMode, setEventViewMode] = useState<EventViewMode>("list");
+  const [selectorMode, setSelectorMode] = useState<SelectorMode>(null);
   const [submittedEventIds, setSubmittedEventIds] = useState<string[]>([]);
   const [selectedResultEvent, setSelectedResultEvent] = useState<{
     eventName: string;
@@ -93,13 +144,13 @@ export default function EventsScreen() {
 
       if (result.mode === "participant") {
         const event = (events || []).find((item: any) => item.event_id === variables.eventId);
-        const eventMode = isOneDayEvent(event?.starts_at, event?.ends_at) ? "same-day" : "multiday";
+        const eventMode = getEventModeParam(event);
         Alert.alert("Joined Event", result.message || "You have been added to the participant list.", [
           {
             text: "OK",
             onPress: () =>
               router.push({
-                pathname: eventMode === "same-day" ? ("/participants" as any) : ("/medal-list" as any),
+                pathname: "/participants" as any,
                 params: { eventMode },
               }),
           },
@@ -123,17 +174,54 @@ export default function EventsScreen() {
   });
   const profileCountry = String(profileBundle?.profile?.country || "").trim();
   const profileCountryCode = normalizeCountryCode(profileCountry);
+  const travelCountry = String(profileBundle?.profile?.travel_country || "").trim();
+  const travelCountryCode = normalizeCountryCode(profileBundle?.profile?.travel_country_code || travelCountry);
+  const travelStartDate = String(profileBundle?.profile?.travel_start_date || "").slice(0, 10);
+  const travelEndDate = String(profileBundle?.profile?.travel_end_date || "").slice(0, 10);
+  const todayDate = new Date().toISOString().slice(0, 10);
+  const hasActiveTravelCountry = Boolean(
+    travelCountry &&
+      travelCountryCode &&
+      travelStartDate &&
+      travelEndDate &&
+      todayDate >= travelStartDate &&
+      todayDate <= travelEndDate
+  );
+  const localCountryCodes = useMemo(() => {
+    return new Set([profileCountryCode, hasActiveTravelCountry ? travelCountryCode : ""].filter(Boolean));
+  }, [hasActiveTravelCountry, profileCountryCode, travelCountryCode]);
   const hasCountry = profileCountry.length > 0;
-  const compactCountryLabel = formatCountryName(profileCountryCode || profileCountry) || "Global";
+  const compactCountryLabel = [
+    formatCountryName(profileCountryCode || profileCountry) || "Global",
+    hasActiveTravelCountry ? formatCountryName(travelCountryCode || travelCountry) || travelCountry : "",
+  ].filter(Boolean).join(" + ");
 
   const visibleEvents = useMemo(() => {
     const list = events ?? [];
-    if (eventScope === "all") return list;
-    return list.filter((item: any) => {
+    const scopedList = eventScope === "all" ? list : list.filter((item: any) => {
       const eventCountryCode = normalizeCountryCode(item.country_code || item.country);
-      return item.is_virtual === true || !eventCountryCode || eventCountryCode === profileCountryCode;
+      return item.is_virtual === true || !eventCountryCode || localCountryCodes.has(eventCountryCode);
     });
-  }, [eventScope, events, profileCountryCode]);
+    if (eventTypeFilter === "all") return scopedList;
+    return scopedList.filter((item: any) => getEventType(item) === eventTypeFilter);
+  }, [eventScope, eventTypeFilter, events, localCountryCodes]);
+
+  const calendarEvents = useMemo(() => {
+    return [...visibleEvents].sort((a: any, b: any) => {
+      const aDate = String(a.starts_at || a.ends_at || "");
+      const bDate = String(b.starts_at || b.ends_at || "");
+      return aDate.localeCompare(bDate);
+    });
+  }, [visibleEvents]);
+
+  const eventTypeFilterLabel = {
+    all: "All Types",
+    same_day: "Same Day",
+    recurring: "Recurring",
+    multiday: "Multiday",
+  }[eventTypeFilter];
+
+  const locationFilterLabel = eventScope === "local" ? compactCountryLabel : "All Events";
 
   const registeredEventMap = useMemo(() => {
     return new Map(
@@ -330,6 +418,10 @@ export default function EventsScreen() {
       Alert.alert("Sign In Required", "Please sign in before joining an event.");
       return;
     }
+    if (isEventRegistrationClosed(eventItem)) {
+      Alert.alert("Registration Closed", "Registration for this event is closed.");
+      return;
+    }
 
     const entryMode: EventEntryMode = eventItem.entry === "paid"
       ? "paid"
@@ -344,17 +436,52 @@ export default function EventsScreen() {
       });
 
     if (entryMode === "paid") {
+      const feeLabel =
+        (eventItem.entry_fee ?? eventItem.entryFee) !== null &&
+        (eventItem.entry_fee ?? eventItem.entryFee) !== undefined
+          ? `${eventItem.currency_code || ""} ${formatMoneyAmount(Number(eventItem.entry_fee ?? eventItem.entryFee))}`.trim()
+          : "";
+      const organizerPaymentLink = String(eventItem.organizer_payment_link || eventItem.organizerPaymentLink || "").trim();
+      const paymentDetails = String(eventItem.payment_details || eventItem.paymentDetails || "").trim();
+
+      if (organizerPaymentLink) {
+        Alert.alert(
+          "Paid Event",
+          [
+            "This event uses the organizer or club payment link.",
+            feeLabel ? `Fee: ${feeLabel}` : "",
+            paymentDetails,
+            "After opening the link, your registration will be sent for payment review.",
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Open Link",
+              onPress: async () => {
+                try {
+                  await Linking.openURL(organizerPaymentLink);
+                  submit();
+                } catch {
+                  Alert.alert("Payment Link Error", "Could not open the organizer payment link.");
+                }
+              },
+            },
+          ]
+        );
+        return;
+      }
+
       Alert.alert(
-        "Event Payment",
+        "Payment Link Under Maintenance",
         [
           "This event requires payment before you can be confirmed.",
-          eventItem.payment_details || "Payment details will be communicated through the event administrators.",
-          "Tap Continue to submit your payment participation request.",
-        ].join("\n\n"),
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Continue", onPress: submit },
+          feeLabel ? `Fee: ${feeLabel}` : "",
+          "The RunNation payment link is coming soon. Please try again later or contact the event organizer.",
         ]
+          .filter(Boolean)
+          .join("\n\n")
       );
       return;
     }
@@ -405,54 +532,25 @@ export default function EventsScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.topActions}>
-        <View style={styles.filterRow}>
-          <View style={styles.compactCountryChip}>
+        <View style={styles.compactControlRow}>
+          <Pressable style={styles.compactDropdownButton} onPress={() => setSelectorMode("location")}>
             <MapPin size={14} color={appColors.primary} />
-            <Text style={styles.compactCountryChipText}>{compactCountryLabel}</Text>
-          </View>
-          <Pressable
-            style={[styles.filterChip, eventScope === "local" && styles.filterChipActive]}
-            onPress={() => setEventScope("local")}
-          >
-            <Text style={[styles.filterChipText, eventScope === "local" && styles.filterChipTextActive]}>Local</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.filterChip, eventScope === "all" && styles.filterChipActive]}
-            onPress={() => setEventScope("all")}
-          >
-            <Text style={[styles.filterChipText, eventScope === "all" && styles.filterChipTextActive]}>All Events</Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.quickActionsRow}>
-          <Pressable
-            style={styles.actionButtonSmall}
-            onPress={() =>
-              router.push({
-                pathname: "/participants" as any,
-                params: { eventMode: "same-day" },
-              })
-            }
-          >
-            <LinearGradient colors={appColors.gradient.teal} style={styles.actionGradientSmall}>
-              <Users size={14} color={appColors.white} />
-              <Text style={styles.actionTextSmall}>Same Day Events</Text>
-            </LinearGradient>
+            <Text style={styles.compactDropdownText} numberOfLines={1}>{locationFilterLabel}</Text>
+            <ChevronDown size={14} color={appColors.textSecondary} />
           </Pressable>
 
-          <Pressable
-            style={styles.actionButtonSmall}
-            onPress={() =>
-              router.push({
-                pathname: "/medal-list" as any,
-                params: { eventMode: "multiday" },
-              })
-            }
-          >
-            <LinearGradient colors={appColors.gradient.orange} style={styles.actionGradientSmall}>
-              <Award size={14} color={appColors.white} />
-              <Text style={styles.actionTextSmall}>Multiday Events</Text>
-            </LinearGradient>
+          <Pressable style={styles.compactDropdownButton} onPress={() => setSelectorMode("eventType")}>
+            <Text style={styles.compactDropdownText} numberOfLines={1}>{eventTypeFilterLabel}</Text>
+            <ChevronDown size={14} color={appColors.textSecondary} />
+          </Pressable>
+
+          <Pressable style={styles.calendarToggleButton} onPress={() => setEventViewMode(eventViewMode === "calendar" ? "list" : "calendar")}>
+            {eventViewMode === "calendar" ? (
+              <List size={15} color={appColors.primary} />
+            ) : (
+              <Calendar size={15} color={appColors.primary} />
+            )}
+            <Text style={styles.calendarToggleText}>{eventViewMode === "calendar" ? "List" : "Calendar"}</Text>
           </Pressable>
         </View>
       </View>
@@ -476,14 +574,51 @@ export default function EventsScreen() {
               {eventScope === "local" ? "No local or virtual events are available for your country yet." : "Check back soon for upcoming events."}
             </Text>
           </View>
+        ) : eventViewMode === "calendar" ? (
+          <View style={styles.calendarCard}>
+            <Text style={styles.calendarTitle}>Event Calendar</Text>
+            {calendarEvents.map((item: any) => {
+              const metaCountry = formatCountryName(item.country || item.country_code) || "Global";
+              const organizerLabel = item.organizer_name || item.club || "RunNation";
+              return (
+                <Pressable
+                  key={`calendar-${item.event_id}`}
+                  style={styles.calendarEventRow}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/participants" as any,
+                      params: { eventId: item.event_id, eventMode: getEventModeParam(item) },
+                    })
+                  }
+                >
+                  <View style={styles.calendarDateBox}>
+                    <Text style={styles.calendarDateText}>{formatEventMetaDate(item.starts_at, item.ends_at) || "TBA"}</Text>
+                  </View>
+                  <View style={styles.calendarEventInfo}>
+                    <Text style={styles.calendarEventName} numberOfLines={1}>{item.event_name}</Text>
+                    <Text style={styles.calendarEventMeta} numberOfLines={1}>
+                      {[getEventTypeLabel(item), metaCountry, organizerLabel].filter(Boolean).join(" | ")}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
         ) : (
           visibleEvents.map((item: any) => {
             const eventCountryCode = normalizeCountryCode(item.country_code || item.country);
-            const isLocal = item.is_virtual === true || !eventCountryCode || eventCountryCode === profileCountryCode;
+            const isLocal = item.is_virtual === true || !eventCountryCode || localCountryCodes.has(eventCountryCode);
             const metaCountry = formatCountryName(item.country || item.country_code) || "Global";
             const organizerLabel = item.organizer_name || item.club || "";
             const dateLabel = `${formatDate(item.starts_at)} - ${formatDate(item.ends_at)}`;
-            const eventTypeLabel = isOneDayEvent(item.starts_at, item.ends_at) ? "Same Day" : "Multiday";
+            const compactMetaLabel = [
+              formatEventMetaDate(item.starts_at, item.ends_at),
+              metaCountry,
+              organizerLabel || "RunNation",
+            ].filter(Boolean).join(" | ");
+            const registrationCloseLabel = formatShortEventDate(getEventRegistrationCloseDate(item));
+            const registrationClosed = isEventRegistrationClosed(item);
+            const eventTypeLabel = getEventTypeLabel(item);
             const registeredEvent = registeredEventMap.get(item.event_id);
             const hasRecordedResult =
               typeof registeredEvent?.distanceKm === "number" &&
@@ -501,13 +636,7 @@ export default function EventsScreen() {
                       </View>
                     ) : null}
                   </View>
-                  <Text style={styles.posterMetaText} numberOfLines={1}>{dateLabel}</Text>
-                  <Text style={styles.posterMetaText} numberOfLines={1}>
-                    {[metaCountry, organizerLabel].filter(Boolean).join(", ") || "Global"}
-                  </Text>
-                  <Text style={styles.posterMetaText} numberOfLines={1}>
-                    Organizer: {organizerLabel || "RunNation"}
-                  </Text>
+                  <Text style={styles.posterMetaText} numberOfLines={1}>{compactMetaLabel}</Text>
                 </View>
                 <Text style={[styles.eventScopeBadge, item.is_virtual ? styles.virtualBadge : isLocal ? styles.localBadge : styles.lockedBadge]}>
                   {item.is_virtual ? "Virtual" : isLocal ? "Local" : "View only"}
@@ -523,7 +652,7 @@ export default function EventsScreen() {
                 <View
                   style={[
                     styles.posterEventTypeBadge,
-                    eventTypeLabel === "Same Day" ? styles.posterSameDayBadge : styles.posterMultidayBadge,
+                    eventTypeLabel === "Same Day" ? styles.posterSameDayBadge : eventTypeLabel === "Recurring" ? styles.posterRecurringBadge : styles.posterMultidayBadge,
                   ]}
                 >
                   <Text style={styles.posterEventTypeBadgeText}>{eventTypeLabel}</Text>
@@ -553,14 +682,14 @@ export default function EventsScreen() {
                   <View
                     style={[
                       styles.eventTypeChipInline,
-                      eventTypeLabel === "Same Day" ? styles.eventTypeChipInlineSameDay : styles.eventTypeChipInlineMultiday,
+                      eventTypeLabel === "Same Day" ? styles.eventTypeChipInlineSameDay : eventTypeLabel === "Recurring" ? styles.eventTypeChipInlineRecurring : styles.eventTypeChipInlineMultiday,
                     ]}
                   >
                     <Text style={styles.eventTypeChipInlineText}>{eventTypeLabel}</Text>
                   </View>
                   <View style={[styles.entryChip, item.entry === "paid" ? styles.entryPaidChip : item.entry === "club_approved" ? styles.entryApprovedChip : styles.entryFreeChip]}>
                     <Text style={[styles.entryChipText, item.entry === "paid" ? styles.entryPaidText : item.entry === "club_approved" ? styles.entryApprovedText : styles.entryFreeText]}>
-                      {item.entry === "paid" ? "Paid" : item.entry === "club_approved" ? "Club Approved" : "Free"}
+                      {item.entry === "paid" ? "Paid" : item.entry === "club_approved" ? "Approved" : "Free"}
                     </Text>
                   </View>
                 </View>
@@ -572,13 +701,16 @@ export default function EventsScreen() {
                   <Pressable
                     style={[
                       styles.participateButton,
-                      (enrollEventMutation.isPending || submittedEventIds.includes(item.event_id)) && styles.participateButtonDisabled,
+                      (enrollEventMutation.isPending || submittedEventIds.includes(item.event_id) || registrationClosed) && styles.participateButtonDisabled,
+                      registrationClosed && styles.participateButtonClosed,
                     ]}
                     onPress={() => handleParticipate(item)}
-                    disabled={enrollEventMutation.isPending || submittedEventIds.includes(item.event_id)}
+                    disabled={enrollEventMutation.isPending || submittedEventIds.includes(item.event_id) || registrationClosed}
                   >
                     <Text style={styles.participateButtonText}>
-                      {submittedEventIds.includes(item.event_id)
+                      {registrationClosed
+                        ? "Closed"
+                        : submittedEventIds.includes(item.event_id)
                         ? "Submitted"
                         : enrollEventMutation.isPending
                         ? "Working..."
@@ -587,6 +719,12 @@ export default function EventsScreen() {
                   </Pressable>
                 ) : null}
               </View>
+
+              {registrationCloseLabel ? (
+                <Text style={[styles.registrationCloseText, registrationClosed && styles.registrationCloseTextClosed]}>
+                  Registration closes: {registrationCloseLabel}
+                </Text>
+              ) : null}
 
               {registeredEvent ? (
                 <Pressable
@@ -620,7 +758,7 @@ export default function EventsScreen() {
                     </>
                   ) : (
                     <Text style={styles.resultPendingText}>
-                      No recorded result yet. Use Exercise &gt; Run Event to record this event run.
+                      No recorded result yet. Use Workout &gt; Run Event to record this event run.
                     </Text>
                   )}
                 </Pressable>
@@ -630,13 +768,22 @@ export default function EventsScreen() {
               ((item.entry_fee ?? item.entryFee) !== null &&
               (item.entry_fee ?? item.entryFee) !== undefined
                 ? true
-                : Boolean(item.payment_details || item.paymentDetails)) ? (
+                : Boolean(
+                    item.payment_details ||
+                      item.paymentDetails ||
+                      item.organizer_payment_link ||
+                      item.organizerPaymentLink ||
+                      item.runnation_payment_link_enabled ||
+                      item.runnationPaymentLinkEnabled
+                  )) ? (
                 <Text style={styles.paymentHintText}>
                   {[
                     (item.entry_fee ?? item.entryFee) !== null && (item.entry_fee ?? item.entryFee) !== undefined
                       ? `${item.currency_code || ""} ${formatMoneyAmount(Number(item.entry_fee ?? item.entryFee))}`.trim()
                       : "",
                     item.payment_details || item.paymentDetails || "",
+                    item.organizer_payment_link || item.organizerPaymentLink ? "Organizer payment link available" : "",
+                    item.runnation_payment_link_enabled || item.runnationPaymentLinkEnabled ? "RunNation payment link coming soon" : "",
                   ]
                     .filter(Boolean)
                     .join(" • ")}
@@ -652,6 +799,61 @@ export default function EventsScreen() {
           );})
         )}
       </ScrollView>
+
+      <Modal
+        visible={selectorMode !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSelectorMode(null)}
+      >
+        <Pressable style={styles.selectorOverlay} onPress={() => setSelectorMode(null)}>
+          <Pressable style={styles.selectorCard} onPress={() => {}}>
+            <Text style={styles.selectorTitle}>
+              {selectorMode === "location" ? "Event Location" : "Event Type"}
+            </Text>
+            {selectorMode === "location" ? (
+              <>
+                <Pressable
+                  style={[styles.selectorOption, eventScope === "local" && styles.selectorOptionActive]}
+                  onPress={() => {
+                    setEventScope("local");
+                    setSelectorMode(null);
+                  }}
+                >
+                  <Text style={[styles.selectorOptionText, eventScope === "local" && styles.selectorOptionTextActive]}>{compactCountryLabel}</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.selectorOption, eventScope === "all" && styles.selectorOptionActive]}
+                  onPress={() => {
+                    setEventScope("all");
+                    setSelectorMode(null);
+                  }}
+                >
+                  <Text style={[styles.selectorOptionText, eventScope === "all" && styles.selectorOptionTextActive]}>All Events</Text>
+                </Pressable>
+              </>
+            ) : (
+              ([
+                ["all", "All Types"],
+                ["same_day", "Same Day"],
+                ["recurring", "Recurring"],
+                ["multiday", "Multiday"],
+              ] as const).map(([value, label]) => (
+                <Pressable
+                  key={value}
+                  style={[styles.selectorOption, eventTypeFilter === value && styles.selectorOptionActive]}
+                  onPress={() => {
+                    setEventTypeFilter(value);
+                    setSelectorMode(null);
+                  }}
+                >
+                  <Text style={[styles.selectorOptionText, eventTypeFilter === value && styles.selectorOptionTextActive]}>{label}</Text>
+                </Pressable>
+              ))
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal
         visible={!!selectedResultEvent}
@@ -789,9 +991,52 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   topActions: {
-    paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 6,
+  },
+  compactControlRow: {
+    flexDirection: "row",
     gap: 8,
+    alignItems: "center",
+  },
+  compactDropdownButton: {
+    flex: 1,
+    minWidth: 0,
+    height: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: appColors.cardBackground,
+    borderWidth: 1,
+    borderColor: appColors.border,
+  },
+  compactDropdownText: {
+    flexShrink: 1,
+    fontSize: 12,
+    fontWeight: "800",
+    color: appColors.text,
+  },
+  calendarToggleButton: {
+    width: 104,
+    height: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    backgroundColor: "#FFF7ED",
+    borderWidth: 1,
+    borderColor: "#FDBA74",
+  },
+  calendarToggleText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: appColors.primary,
   },
   filterRow: {
     flexDirection: "row",
@@ -860,6 +1105,58 @@ const styles = StyleSheet.create({
     color: appColors.white,
     fontWeight: "700",
     fontSize: 13,
+  },
+  calendarCard: {
+    backgroundColor: appColors.cardBackground,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: appColors.border,
+    padding: 12,
+    gap: 8,
+  },
+  calendarTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: appColors.text,
+    marginBottom: 2,
+  },
+  calendarEventRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: appColors.border,
+  },
+  calendarDateBox: {
+    width: 82,
+    minHeight: 38,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFF7ED",
+    paddingHorizontal: 6,
+  },
+  calendarDateText: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: appColors.primary,
+    textAlign: "center",
+  },
+  calendarEventInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  calendarEventName: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: appColors.text,
+  },
+  calendarEventMeta: {
+    marginTop: 3,
+    fontSize: 11,
+    fontWeight: "600",
+    color: appColors.textSecondary,
   },
   scrollView: {
     flex: 1,
@@ -1011,6 +1308,9 @@ const styles = StyleSheet.create({
   posterMultidayBadge: {
     backgroundColor: "rgba(180, 83, 9, 0.94)",
   },
+  posterRecurringBadge: {
+    backgroundColor: "rgba(8, 145, 178, 0.94)",
+  },
   posterEventTypeBadgeText: {
     color: "#fff",
     fontSize: 10,
@@ -1061,6 +1361,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff7ed",
     borderColor: "#fdba74",
   },
+  eventTypeChipInlineRecurring: {
+    backgroundColor: "#ecfeff",
+    borderColor: "#67e8f9",
+  },
   eventTypeChipInlineText: {
     fontSize: 11,
     fontWeight: "800",
@@ -1109,10 +1413,23 @@ const styles = StyleSheet.create({
   participateButtonDisabled: {
     opacity: 0.65,
   },
+  participateButtonClosed: {
+    backgroundColor: "#9CA3AF",
+  },
   participateButtonText: {
     color: appColors.white,
     fontSize: 12,
     fontWeight: "800",
+  },
+  registrationCloseText: {
+    marginTop: 6,
+    textAlign: "right",
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#6B7280",
+  },
+  registrationCloseTextClosed: {
+    color: "#991B1B",
   },
   registeredBadge: {
     minWidth: 116,
@@ -1184,6 +1501,46 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     padding: 24,
+  },
+  selectorOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.42)",
+    justifyContent: "flex-start",
+    paddingHorizontal: 18,
+    paddingTop: 118,
+  },
+  selectorCard: {
+    backgroundColor: appColors.cardBackground,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: appColors.border,
+    gap: 8,
+  },
+  selectorTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: appColors.text,
+    marginBottom: 4,
+  },
+  selectorOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: "#F8FAFC",
+  },
+  selectorOptionActive: {
+    backgroundColor: "#FFF7ED",
+    borderWidth: 1,
+    borderColor: "#FDBA74",
+  },
+  selectorOptionText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: appColors.text,
+  },
+  selectorOptionTextActive: {
+    color: appColors.primary,
   },
   resultModalCard: {
     width: "100%",

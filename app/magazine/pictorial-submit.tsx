@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Image } from "expo-image";
 import { Stack, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
@@ -9,14 +9,34 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { getServerClient } from "@/lib/server-client";
 
+async function readImageAsBase64(uri: string): Promise<string> {
+  if (Platform.OS === "web") {
+    const response = await fetch(uri);
+    if (!response.ok) {
+      throw new Error("Could not read the selected pictorial image.");
+    }
+
+    const blob = await response.blob();
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Could not prepare the selected pictorial image."));
+      reader.readAsDataURL(blob);
+    });
+    const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
+    if (!base64) {
+      throw new Error("Could not prepare the selected pictorial image.");
+    }
+    return base64;
+  }
+
+  return FileSystem.readAsStringAsync(uri, { encoding: "base64" });
+}
+
 export default function PictorialSubmitScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { registrationId, user } = useAuth();
-  const [submitterName, setSubmitterName] = useState(user?.username ?? "");
-  const [email, setEmail] = useState("");
-  const [club, setClub] = useState("");
-  const [country, setCountry] = useState("");
+  const { registrationId } = useAuth();
   const [eventName, setEventName] = useState("");
   const [eventDate, setEventDate] = useState("");
   const [caption, setCaption] = useState("");
@@ -27,13 +47,10 @@ export default function PictorialSubmitScreen() {
   const canSubmit = useMemo(
     () =>
       registrationId &&
-      submitterName.trim().length >= 2 &&
-      email.includes("@") &&
-      country.trim().length >= 2 &&
       eventName.trim().length >= 2 &&
       caption.trim().length >= 8 &&
       photoUri,
-    [caption, country, email, eventName, photoUri, registrationId, submitterName]
+    [caption, eventName, photoUri, registrationId]
   );
 
   const pickPhoto = async () => {
@@ -64,13 +81,9 @@ export default function PictorialSubmitScreen() {
 
     setIsSubmitting(true);
     try {
-      const imageBase64 = await FileSystem.readAsStringAsync(photoUri, { encoding: "base64" });
+      const imageBase64 = await readImageAsBase64(photoUri);
       await getServerClient().magazine.submitPictorial.mutate({
         registrationId,
-        submitterName,
-        email,
-        club: club.trim() || null,
-        country,
         eventName,
         eventDate: eventDate.trim() || null,
         caption,
@@ -95,7 +108,7 @@ export default function PictorialSubmitScreen() {
       <Stack.Screen options={{ title: "Event Pictorial" }} />
       <Text style={[styles.title, { color: colors.text }]}>Submit Event Pictorial</Text>
       <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-        Share a strong event photo with simple details. Admins can feature selected images on the Magazine front page.
+        Share a strong event photo with simple details. Your profile details are added automatically.
       </Text>
 
       <TouchableOpacity style={[styles.photoPicker, { backgroundColor: colors.cardBackground, borderColor: colors.border }]} onPress={pickPhoto}>
@@ -111,10 +124,6 @@ export default function PictorialSubmitScreen() {
       </TouchableOpacity>
 
       {[
-        ["Your name", submitterName, setSubmitterName],
-        ["Email", email, setEmail],
-        ["Club", club, setClub],
-        ["Country", country, setCountry],
         ["Event name", eventName, setEventName],
         ["Event date (YYYY-MM-DD)", eventDate, setEventDate],
       ].map(([label, value, setter]) => (
@@ -126,8 +135,8 @@ export default function PictorialSubmitScreen() {
             onChangeText={setter as (text: string) => void}
             placeholder={label as string}
             placeholderTextColor={colors.textLight}
-            autoCapitalize={label === "Email" ? "none" : "sentences"}
-            keyboardType={label === "Email" ? "email-address" : "default"}
+            autoCapitalize="sentences"
+            keyboardType="default"
           />
         </View>
       ))}

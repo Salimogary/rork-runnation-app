@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
-import { X, Calendar, MapPin, TrendingUp, Clock, Award, Users, Download, Filter } from "lucide-react-native";
+import { X, Calendar, TrendingUp, Clock, Award, Users, Download, Filter } from "lucide-react-native";
 
 import { Platform } from 'react-native';
 import colors from "@/constants/colors";
@@ -12,6 +12,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { useSubscription } from "@/contexts/SubscriptionContext";
 import { Lock } from "lucide-react-native";
 import { getServerClient } from "@/lib/server-client";
+import { WORLD_COUNTRIES } from "@/constants/countries";
 
 
 interface ActivityData {
@@ -22,7 +23,8 @@ interface ActivityData {
   distance_km: number;
   start_time: string;
   end_time: string;
-  pace_km_h: number;
+  pace_min_per_km: number;
+  pause_duration_seconds?: number | null;
   user?: {
     name?: string;
     username?: string;
@@ -68,7 +70,20 @@ const EMPTY_LEADERBOARD_FILTERS: LeaderboardFilters = {
   sex: "all",
   country: "all",
 };
-const MIN_ACTIVITY_DURATION_MINUTES = 3;
+const MIN_DISTANCE_ACTIVITY = 0.5;
+const MIN_ACTIVITY_DURATION_MINUTES = 5;
+
+const countryCodeByName = new Map(
+  WORLD_COUNTRIES.map((country) => [country.name.trim().toLowerCase(), country.iso_alpha2.toUpperCase()])
+);
+
+function getCountryFlag(country?: string | null) {
+  const trimmed = String(country || "").trim();
+  if (!trimmed || trimmed === "-") return "";
+  const code = trimmed.length === 2 ? trimmed.toUpperCase() : countryCodeByName.get(trimmed.toLowerCase());
+  if (!code || code.length !== 2) return "";
+  return String.fromCodePoint(...[...code].map((char) => 127397 + char.charCodeAt(0)));
+}
 
 export default function ActivityScreen() {
   const { user, privateMode } = useAuth();
@@ -240,10 +255,6 @@ export default function ActivityScreen() {
     return resolved;
   }, []);
 
-  const formatCountryClub = useCallback((country?: string, club?: string) => {
-    return [country, club].filter((value) => value && value !== "-").join(", ");
-  }, []);
-
   const handleSaveCSV = async () => {
     if (!isSubscribed) {
       Alert.alert(
@@ -261,14 +272,15 @@ export default function ActivityScreen() {
 
     setIsSaving(true);
     try {
-      const headers = ['Date', 'Type', 'Distance (km)', 'Start Time', 'End Time', 'Pace (km/h)'];
+      const headers = ['Date', 'Type', 'Distance (km)', 'Start Time', 'End Time', 'Pause Time', 'Pace (min/km)'];
       const rows = sortedActivities.map((a) => [
         a.activity_date,
         a.exercise_type,
         a.distance_km.toFixed(2),
         a.start_time,
         a.end_time,
-        a.pace_km_h.toFixed(2),
+        formatPauseDuration(a.pause_duration_seconds || 0),
+        formatPaceMinPerKm(a.pace_min_per_km),
       ]);
 
       const csvContent = [headers, ...rows].map((row) => row.join(',')).join('\n');
@@ -525,7 +537,7 @@ export default function ActivityScreen() {
       try {
         let activitiesQuery = supabase
           .from("activities")
-          .select("registration_id, activity_date, distance_km, start_time, end_time, pace_km_h")
+          .select("registration_id, activity_date, distance_km, start_time, end_time, pause_duration_seconds, pace_min_per_km")
           .in("registration_id", clubMemberIds);
 
         if (filterStartDate) {
@@ -576,13 +588,14 @@ export default function ActivityScreen() {
           const endMinutes = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
           let duration = endMinutes - startMinutes;
           if (duration < 0) duration += 24 * 60;
+          duration = Math.max(0, duration - Math.floor((activity.pause_duration_seconds || 0) / 60));
 
           const existing = userStats.get(regId) || {
             totalDistance: 0, totalTime: 0, paceSum: 0, activityCount: 0, activeDays: new Set<string>(),
           };
           existing.totalDistance += activity.distance_km || 0;
           existing.totalTime += duration;
-          existing.paceSum += activity.pace_km_h || 0;
+          existing.paceSum += activity.pace_min_per_km || 0;
           existing.activityCount += 1;
           if (activityDateKey) {
             existing.activeDays.add(activityDateKey);
@@ -643,7 +656,8 @@ export default function ActivityScreen() {
             distance_km,
             start_time,
             end_time,
-            pace_km_h
+            pause_duration_seconds,
+            pace_min_per_km
           `);
 
         if (filterStartDate) {
@@ -700,6 +714,7 @@ export default function ActivityScreen() {
         const endMinutes = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
         let duration = endMinutes - startMinutes;
         if (duration < 0) duration += 24 * 60;
+        duration = Math.max(0, duration - Math.floor((activity.pause_duration_seconds || 0) / 60));
 
         const existing = userStats.get(regId) || {
           totalDistance: 0,
@@ -711,7 +726,7 @@ export default function ActivityScreen() {
 
         existing.totalDistance += activity.distance_km || 0;
         existing.totalTime += duration;
-        existing.paceSum += activity.pace_km_h || 0;
+        existing.paceSum += activity.pace_min_per_km || 0;
         existing.activityCount += 1;
         if (activityDateKey) {
           existing.activeDays.add(activityDateKey);
@@ -795,6 +810,7 @@ export default function ActivityScreen() {
           const endMinutes = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
           let duration = endMinutes - startMinutes;
           if (duration < 0) duration += 24 * 60;
+          duration = Math.max(0, duration - Math.floor((activity.pause_duration_seconds || 0) / 60));
           return sum + duration;
         }, 0)
       : 0,
@@ -815,7 +831,18 @@ export default function ActivityScreen() {
     return "🏃";
   };
 
-  const calculateDuration = (start: string, end: string): string => {
+  const formatPauseDuration = (pauseSeconds: number): string => {
+    const safeSeconds = Math.max(0, Math.floor(pauseSeconds || 0));
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const seconds = safeSeconds % 60;
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+    }
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  };
+
+  const calculateDuration = (start: string, end: string, pauseSeconds = 0): string => {
     const startParts = start.split(':');
     const endParts = end.split(':');
     
@@ -826,6 +853,7 @@ export default function ActivityScreen() {
     if (totalMinutes < 0) {
       totalMinutes += 24 * 60;
     }
+    totalMinutes = Math.max(0, totalMinutes - Math.floor((pauseSeconds || 0) / 60));
     
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
@@ -836,12 +864,17 @@ export default function ActivityScreen() {
     return `${minutes}m`;
   };
 
-  const convertPaceToMinPerKm = (paceKmH: number): string => {
-    if (paceKmH === 0) return "--:--";
-    const minPerKm = 60 / paceKmH;
-    const minutes = Math.floor(minPerKm);
-    const seconds = Math.round((minPerKm - minutes) * 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  const formatPaceMinPerKm = (paceMinPerKm: number): string => {
+    if (paceMinPerKm === 0) return "--:--";
+    const totalSecondsPerKm = Math.round(paceMinPerKm * 60);
+    const minutes = Math.floor(totalSecondsPerKm / 60);
+    const seconds = totalSecondsPerKm % 60;
+    return `${minutes}'${seconds.toString().padStart(2, '0')}"`;
+  };
+
+  const convertPaceToMinPerKm = (paceMinPerKm: number): string => {
+    const paceText = formatPaceMinPerKm(paceMinPerKm);
+    return paceText === "--:--" ? paceText : `${paceText} /km`;
   };
 
   const availableCountries = useMemo(() => {
@@ -902,13 +935,72 @@ export default function ActivityScreen() {
     });
   }, [applyLeaderboardFilters, clubCommunityData, clubSortBy]);
 
+  const renderLeaderboardTable = (rows: CommunityData[]) => (
+    <View style={styles.leaderboardTableContainer}>
+      <View style={styles.leaderboardTableHeader}>
+        <View style={styles.leaderRankColumn}>
+          <Text style={styles.leaderTableHeaderText}>#</Text>
+        </View>
+        <View style={styles.leaderNameColumn}>
+          <Text style={styles.leaderTableHeaderText}>Name</Text>
+        </View>
+        <View style={styles.leaderClubColumn}>
+          <Text style={styles.leaderTableHeaderText}>Club</Text>
+        </View>
+        <View style={styles.leaderSexColumn}>
+          <Text style={styles.leaderTableHeaderText}>Sex</Text>
+        </View>
+        <View style={styles.leaderDaysColumn}>
+          <Text style={styles.leaderTableHeaderText}>Days</Text>
+        </View>
+        <View style={styles.leaderDistanceColumn}>
+          <Text style={styles.leaderTableHeaderText}>Av.km</Text>
+        </View>
+        <View style={styles.leaderTimeColumn}>
+          <Text style={styles.leaderTableHeaderText}>Av.Time</Text>
+        </View>
+        <View style={styles.leaderPaceColumn}>
+          <Text style={styles.leaderTableHeaderText}>Av.Pace</Text>
+        </View>
+      </View>
+      {rows.map((item, index) => (
+        <View key={item.registrationId} style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt]}>
+          <View style={[styles.leaderRankColumn, styles.leaderRankCell]}>
+            <Text style={styles.leaderFlagText}>{getCountryFlag(item.Country)}</Text>
+            <Text style={styles.leaderTableCellText}>{index + 1}</Text>
+          </View>
+          <View style={styles.leaderNameColumn}>
+            <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.Name}</Text>
+          </View>
+          <View style={styles.leaderClubColumn}>
+            <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.Club || "-"}</Text>
+          </View>
+          <View style={styles.leaderSexColumn}>
+            <Text style={styles.leaderTableCellText}>
+              {item.Sex === "Male" ? "M" : item.Sex === "Female" ? "F" : item.Sex || "-"}
+            </Text>
+          </View>
+          <View style={styles.leaderDaysColumn}>
+            <Text style={styles.leaderTableCellText}>{item.ActiveDays}</Text>
+          </View>
+          <View style={styles.leaderDistanceColumn}>
+            <Text style={styles.leaderTableCellText}>{item.AvgDistance.toFixed(1)}</Text>
+          </View>
+          <View style={styles.leaderTimeColumn}>
+            <Text style={styles.leaderTableCellText} numberOfLines={1}>{formatTime(item.AvgTime)}</Text>
+          </View>
+          <View style={styles.leaderPaceColumn}>
+            <Text style={styles.leaderTableCellText} numberOfLines={1}>{formatPaceMinPerKm(item.AveragePace)}</Text>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+
   const formatTime = (minutes: number): string => {
     const hours = Math.floor(minutes / 60);
     const mins = Math.round(minutes % 60);
-    if (hours > 0) {
-      return `${hours}h ${mins}m`;
-    }
-    return `${mins}m`;
+    return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}`;
   };
 
   const handleExternalActivitySubmit = async () => {
@@ -939,8 +1031,8 @@ export default function ActivityScreen() {
     const durationMinutes = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]) + parseInt(durationParts[2]) / 60;
 
     if (formData.exerciseType === "Walk") {
-      if (distanceNum < 0.1) {
-        Alert.alert("Activity Not Saved", "A Walk must be at least 0.1 km to be saved.");
+      if (distanceNum < MIN_DISTANCE_ACTIVITY) {
+        Alert.alert("Activity Not Saved", `A Walk must be at least ${MIN_DISTANCE_ACTIVITY} km to be saved.`);
         return;
       }
       if (durationMinutes < MIN_ACTIVITY_DURATION_MINUTES) {
@@ -948,8 +1040,8 @@ export default function ActivityScreen() {
         return;
       }
     } else if (formData.exerciseType === "Run") {
-      if (distanceNum < 0.1) {
-        Alert.alert("Activity Not Saved", "A Run must be at least 0.1 km to be saved.");
+      if (distanceNum < MIN_DISTANCE_ACTIVITY) {
+        Alert.alert("Activity Not Saved", `A Run must be at least ${MIN_DISTANCE_ACTIVITY} km to be saved.`);
         return;
       }
       if (durationMinutes < MIN_ACTIVITY_DURATION_MINUTES) {
@@ -1280,48 +1372,7 @@ export default function ActivityScreen() {
               <Text style={styles.emptySubtext}>Club members will appear here as soon as they join your club.</Text>
             </View>
           ) : (
-            <View style={styles.leaderboardContainer}>
-              {sortedClubData.map((item, index) => (
-                <View key={item.registrationId} style={[styles.leaderboardCard, { backgroundColor: themeColors.cardBackground }]}>
-                  <View style={styles.leaderboardHeader}>
-                    <View style={styles.nameBadge}>
-                      <Text style={styles.runnerName} numberOfLines={1}>{item.Name}</Text>
-                    </View>
-                    <View style={styles.locationBadge}>
-                      <MapPin size={10} color={colors.textSecondary} />
-                      <Text style={styles.locationText} numberOfLines={1}>
-                        {formatCountryClub(item.Country, item.Club)}
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.leaderboardStats}>
-                    <View style={styles.leaderStatItem}>
-                      <Text style={styles.leaderStatValue}>{index + 1}</Text>
-                    </View>
-                    <View style={styles.leaderStatDivider} />
-                    <View style={styles.leaderStatItem}>
-                      <Text style={styles.leaderStatValue}>{item.ActiveDays}</Text>
-                      <Text style={styles.leaderStatLabel}>Days</Text>
-                    </View>
-                    <View style={styles.leaderStatDivider} />
-                    <View style={styles.leaderStatItem}>
-                      <Text style={styles.leaderStatValue}>{item.AvgDistance.toFixed(1)}</Text>
-                      <Text style={styles.leaderStatLabel}>Av.km</Text>
-                    </View>
-                    <View style={styles.leaderStatDivider} />
-                    <View style={styles.leaderStatItem}>
-                      <Text style={styles.leaderStatValue}>{formatTime(item.AvgTime)}</Text>
-                      <Text style={styles.leaderStatLabel}>Av.Time</Text>
-                    </View>
-                    <View style={styles.leaderStatDivider} />
-                    <View style={styles.leaderStatItem}>
-                      <Text style={styles.leaderStatValue}>{convertPaceToMinPerKm(item.AveragePace)}</Text>
-                      <Text style={styles.leaderStatLabel}>Av.Pace</Text>
-                    </View>
-                  </View>
-                </View>
-              ))}
-            </View>
+            renderLeaderboardTable(sortedClubData)
           )
         ) : activeTab === "community" ? (
           communityError ? (
@@ -1347,48 +1398,7 @@ export default function ActivityScreen() {
               <Text style={styles.emptySubtext}>Runners will appear here even before they record their first run.</Text>
             </View>
           ) : (
-            <View style={styles.leaderboardContainer}>
-              {sortedCommunityData.map((item, index) => (
-                <View key={item.registrationId} style={[styles.leaderboardCard, { backgroundColor: themeColors.cardBackground }]}>
-                  <View style={styles.leaderboardHeader}>
-                    <View style={styles.nameBadge}>
-                      <Text style={styles.runnerName} numberOfLines={1}>{item.Name}</Text>
-                    </View>
-                    <View style={styles.locationBadge}>
-                      <MapPin size={10} color={colors.textSecondary} />
-                      <Text style={styles.locationText} numberOfLines={1}>
-                        {formatCountryClub(item.Country, item.Club)}
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.leaderboardStats}>
-                    <View style={styles.leaderStatItem}>
-                      <Text style={styles.leaderStatValue}>{index + 1}</Text>
-                    </View>
-                    <View style={styles.leaderStatDivider} />
-                    <View style={styles.leaderStatItem}>
-                      <Text style={styles.leaderStatValue}>{item.ActiveDays}</Text>
-                      <Text style={styles.leaderStatLabel}>Days</Text>
-                    </View>
-                    <View style={styles.leaderStatDivider} />
-                    <View style={styles.leaderStatItem}>
-                      <Text style={styles.leaderStatValue}>{item.AvgDistance.toFixed(1)}</Text>
-                      <Text style={styles.leaderStatLabel}>Av.km</Text>
-                    </View>
-                    <View style={styles.leaderStatDivider} />
-                    <View style={styles.leaderStatItem}>
-                      <Text style={styles.leaderStatValue}>{formatTime(item.AvgTime)}</Text>
-                      <Text style={styles.leaderStatLabel}>Av.Time</Text>
-                    </View>
-                    <View style={styles.leaderStatDivider} />
-                    <View style={styles.leaderStatItem}>
-                      <Text style={styles.leaderStatValue}>{convertPaceToMinPerKm(item.AveragePace)}</Text>
-                      <Text style={styles.leaderStatLabel}>Av.Pace</Text>
-                    </View>
-                  </View>
-                </View>
-              ))}
-            </View>
+            renderLeaderboardTable(sortedCommunityData)
           )
         ) : activeTab === "runs" ? (
           activitiesError ? (
@@ -1421,6 +1431,9 @@ export default function ActivityScreen() {
                     <View style={styles.activityMainInfo}>
                       <Text style={styles.activityType}>{activity.exercise_type}</Text>
                       <Text style={styles.activityDate}>{formatDate(activity.activity_date)}</Text>
+                      {(activity.pause_duration_seconds || 0) > 0 ? (
+                        <Text style={styles.activityPauseText}>Paused {formatPauseDuration(activity.pause_duration_seconds || 0)}</Text>
+                      ) : null}
                     </View>
                     <View style={styles.activityMetrics}>
                       <View style={styles.metricItem}>
@@ -1429,12 +1442,12 @@ export default function ActivityScreen() {
                       </View>
                       <View style={styles.metricDot} />
                       <View style={styles.metricItem}>
-                        <Text style={styles.metricValue}>{calculateDuration(activity.start_time, activity.end_time)}</Text>
+                        <Text style={styles.metricValue}>{calculateDuration(activity.start_time, activity.end_time, activity.pause_duration_seconds || 0)}</Text>
                         <Text style={styles.metricLabel}>time</Text>
                       </View>
                       <View style={styles.metricDot} />
                       <View style={styles.metricItem}>
-                        <Text style={styles.metricValue}>{convertPaceToMinPerKm(activity.pace_km_h)}</Text>
+                        <Text style={styles.metricValue}>{convertPaceToMinPerKm(activity.pace_min_per_km)}</Text>
                         <Text style={styles.metricLabel}>pace</Text>
                       </View>
                     </View>
@@ -1970,6 +1983,85 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: "600" as const,
   },
+  leaderboardTableContainer: {
+    margin: 12,
+    marginBottom: 16,
+    borderRadius: 12,
+    overflow: "hidden" as const,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.divider,
+  },
+  leaderboardTableHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+  },
+  leaderboardTableRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  leaderboardTableRowAlt: {
+    backgroundColor: "rgba(255, 107, 53, 0.04)",
+  },
+  leaderTableHeaderText: {
+    color: colors.white,
+    fontSize: 8,
+    fontWeight: "800" as const,
+  },
+  leaderTableCellText: {
+    color: colors.text,
+    fontSize: 8,
+    fontWeight: "600" as const,
+    lineHeight: 12,
+  },
+  leaderRankColumn: {
+    flex: 0.72,
+    minWidth: 32,
+  },
+  leaderNameColumn: {
+    flex: 1.85,
+    minWidth: 70,
+  },
+  leaderClubColumn: {
+    flex: 1.35,
+    minWidth: 52,
+  },
+  leaderSexColumn: {
+    flex: 0.52,
+    minWidth: 22,
+  },
+  leaderDaysColumn: {
+    flex: 0.65,
+    minWidth: 30,
+  },
+  leaderDistanceColumn: {
+    flex: 0.95,
+    minWidth: 42,
+  },
+  leaderTimeColumn: {
+    flex: 1.05,
+    minWidth: 48,
+  },
+  leaderPaceColumn: {
+    flex: 0.9,
+    minWidth: 42,
+  },
+  leaderRankCell: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 2,
+  },
+  leaderFlagText: {
+    fontSize: 9,
+    lineHeight: 12,
+  },
   activitiesContainer: {
     padding: 16,
     gap: 12,
@@ -2004,6 +2096,12 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: "500" as const,
     marginTop: 1,
+  },
+  activityPauseText: {
+    fontSize: 11,
+    color: colors.textLight,
+    fontWeight: "600" as const,
+    marginTop: 2,
   },
   activityMetrics: {
     flexDirection: "row" as const,

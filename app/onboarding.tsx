@@ -13,322 +13,165 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Circle, G, Path } from 'react-native-svg';
 import {
-  CalendarDays,
-  MessageCircle,
-  ShoppingBag,
-  Target,
-  UserCircle2,
-  Users,
-  Footprints,
   Activity,
+  Award,
+  CalendarDays,
   ChevronRight,
+  Dumbbell,
+  Footprints,
+  MessageCircle,
+  Target,
+  Trophy,
+  Users,
 } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-type SlideId = 'welcome' | 'vision' | 'benefits' | 'explore' | 'personalize';
+type SlideId = 'welcome' | 'inclusive' | 'goals' | 'clubs' | 'leaderboards' | 'social' | 'events';
 
-interface Slide {
+type Slide = {
   id: SlideId;
-  eyebrow: string;
-  eyebrow2?: string;
+  pillar: string;
   title: string;
-  title2?: string;
   description: string;
   gradient: readonly [string, string, ...string[]];
   cta?: string;
-}
+};
 
 const slides: Slide[] = [
   {
-    description:
-      'From the North Pole to the South Pole, runners and walkers everywhere, this is your community.',    
     id: 'welcome',
-    eyebrow: 'Welcome to the',
-    title: 'RunNation.',
-    title2: 'Where every runner belongs.',
-
-    gradient: ['#FF7A18', '#F24912', '#B9330B'] as const,
+    pillar: 'Welcome',
+    title: 'Runners from every nation belong here.',
+    description:
+      'RunNation warmly welcomes everyday runners, walkers, clubs, schools, institutions, charities, and event communities from all nations.',
+    gradient: ['#FF6B35', '#F97316', '#C2410C'] as const,
   },
   {
-    id: 'vision',
-    eyebrow: 'Our Vision',
-    title: 'One vibrant global running community.',
+    id: 'inclusive',
+    pillar: 'Inclusivity',
+    title: 'A running home for every kind of runner.',
     description:
-      'We connect individuals and clubs across countries, cities, and neighborhoods so belonging replaces solitude.',
-    gradient: ['#0F8B8D', '#136F63', '#114B5F'] as const,
+      'Beyond the usual road runners, RunNation makes space for juniors, golden age runners, para runners, indoor runners, beginners, and comeback stories.',
+    gradient: ['#0F766E', '#0891B2', '#1D4ED8'] as const,
   },
   {
-    id: 'benefits',
-    eyebrow: 'What You Will Achieve',
-    title: 'Build momentum that lasts.',
+    id: 'goals',
+    pillar: 'Goals',
+    title: 'Turn effort into visible progress.',
     description:
-      'Stay active, join a club, hit meaningful goals, share your journey, and discover events worth showing up for.',
-    gradient: ['#1D4ED8', '#0F766E', '#14532D'] as const,
+      'Set targets, build streaks, follow weight and wellness progress, and see how each workout moves you closer to the version of yourself you are building.',
+    gradient: ['#2563EB', '#7C3AED', '#C026D3'] as const,
   },
   {
-    id: 'explore',
-    eyebrow: 'Explore the App',
-    title: 'Everything you need in one place.',
+    id: 'clubs',
+    pillar: 'Clubs',
+    title: 'Find your people and run with them.',
     description:
-    'Set your goals, record every run and walk, relive your history, connect with fellow athletes, discover sports gear, and explore exciting events.',
-    gradient: ['#7C3AED', '#DB2777', '#EA580C'] as const,
+      'Join clubs in your country, help your club come onto RunNation, or take up a service role that grows your local running community.',
+    gradient: ['#059669', '#16A34A', '#65A30D'] as const,
   },
   {
-    id: 'personalize',
-    eyebrow: 'Make It Yours',
-    title: 'Shape the experience around your journey.',
+    id: 'leaderboards',
+    pillar: 'Leaderboards',
+    title: 'Compete, compare, and celebrate fairly.',
     description:
-      'Customize your profile, manage app preferences, RunNation adapts to you.',
-    gradient: ['#111827', '#1F2937', '#374151'] as const,
+      'Follow reports for your runs, club, community, and events with clear distance, time, pace, days, finishers, and participant progress.',
+    gradient: ['#B45309', '#EA580C', '#DC2626'] as const,
+  },
+  {
+    id: 'social',
+    pillar: 'Social',
+    title: 'Share the journey, not just the finish.',
+    description:
+      'Post activity moments, talk with other runners, discover people with similar goals, and help keep the community respectful and safe.',
+    gradient: ['#DB2777', '#9333EA', '#4F46E5'] as const,
+  },
+  {
+    id: 'events',
+    pillar: 'Events',
+    title: 'Show up for runs that matter.',
+    description:
+      'Discover same-day, recurring, and multiday events, join challenges, chase medals, support causes, and keep your results in one RunNation story.',
+    gradient: ['#111827', '#334155', '#0F766E'] as const,
     cta: 'Join RunNation',
   },
 ];
 
-const featureList = [
-  { icon: Footprints, label: 'Stay Active' },
-  { icon: Users, label: 'Join a Club' },
-  { icon: Target, label: 'Reach Goals' },
-  { icon: MessageCircle, label: 'Be Social' },
-  { icon: CalendarDays, label: 'Find Events' },
+const flagRows = [
+  ['🇺🇬', '🇰🇪', '🇹🇿', '🇷🇼', '🇳🇬', '🇿🇦'],
+  ['🇬🇧', '🇺🇸', '🇨🇦', '🇮🇳', '🇯🇵', '🇧🇷'],
+  ['🇫🇷', '🇩🇪', '🇦🇺', '🇪🇹', '🇬🇭', '🇲🇦'],
 ];
 
-const tabFeatures = [
-  { icon: Footprints, label: 'Exercise', tint: '#F97316' },
-  { icon: Target, label: 'Goals', tint: '#2563EB' },
-  { icon: Activity, label: 'Activity', tint: '#059669' },
-  { icon: MessageCircle, label: 'Chat', tint: '#EC4899' },
-  { icon: ShoppingBag, label: 'Shop', tint: '#7C3AED' },
-  { icon: CalendarDays, label: 'Events', tint: '#DC2626' },
+const inclusivityChips = [
+  { label: 'Juniors', detail: '8-15' },
+  { label: 'Golden Age', detail: '60+' },
+  { label: 'Para Runners', detail: 'Access' },
+  { label: 'Indoor', detail: 'Treadmill' },
 ];
 
-function WorldVisual() {
-  const spin = useRef(new Animated.Value(0)).current;
+const goalCards = [
+  { label: 'Run Days', value: '82%' },
+  { label: 'Distance', value: '125 km' },
+  { label: 'Weight', value: '-3.4 kg' },
+];
 
-  useEffect(() => {
-    const animation = Animated.loop(Animated.sequence([
-      Animated.timing(spin, {
-        toValue: 1,
-        duration: 3600,
-        useNativeDriver: true,
-      }),
-      Animated.timing(spin, {
-        toValue: 0,
-        duration: 3600,
-        useNativeDriver: true,
-      }),
-    ]));
+const clubCards = [
+  { name: 'City Striders', members: '128 runners' },
+  { name: 'Junior Runners', members: 'Global club' },
+  { name: 'Treadmill Club', members: 'Indoor miles' },
+];
 
-    animation.start();
+const leaderboardRows = [
+  { rank: '1', name: 'Amina', value: '42.5 km' },
+  { rank: '2', name: 'Brian', value: '39.1 km' },
+  { rank: '3', name: 'Gary', value: '37.8 km' },
+];
 
-    return () => {
-      animation.stop();
-      spin.stopAnimation();
-    };
-  }, [spin]);
+const eventCards = [
+  { type: 'Same Day', name: 'City 10K', date: '12 May' },
+  { type: 'Recurring', name: 'Wednesday Run', date: 'Weekly' },
+  { type: 'Multiday', name: '100 Day Challenge', date: 'Ongoing' },
+];
 
-  const rotateY = spin.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['-16deg', '16deg'],
-  });
-
-  const globeShift = spin.interpolate({
-    inputRange: [0, 0.5, 1],
-    outputRange: [-4, 4, -4],
-  });
-
+function FlagWelcomeVisual() {
   return (
-    <View style={styles.visualFrame}>
-      <View style={styles.worldScene}>
-        <Animated.View
-          style={[
-            styles.globeShell,
-            {
-              transform: [
-                { perspective: 700 },
-                { translateX: globeShift },
-                { rotateY },
-              ],
-            },
-          ]}
-        >
-          <Svg width={220} height={220} viewBox="0 0 220 220">
-            <Circle cx="110" cy="110" r="88" fill="#8EDBFF" stroke="#FFFFFF" strokeWidth="4" />
-            <G fill="#FF9D2A" stroke="#FFFFFF" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round">
-              <Path d="M89 49 C78 45, 67 48, 60 57 C53 66, 48 74, 49 87 C50 97, 58 102, 62 111 C66 118, 69 124, 74 129 C77 133, 79 139, 80 146 C82 159, 90 170, 99 177 C104 181, 112 180, 116 173 C119 168, 120 161, 122 155 C126 144, 132 136, 139 128 C145 121, 149 113, 151 104 C153 94, 154 85, 151 78 C148 71, 142 64, 136 61 C129 58, 121 55, 114 57 C108 59, 105 62, 101 61 C96 59, 94 52, 89 49 Z" />
-              <Path d="M92 40 C99 35, 109 34, 117 37 C123 39, 127 44, 126 49 C124 54, 117 56, 110 54 C103 52, 96 49, 92 40 Z" />
-              <Path d="M119 47 C127 41, 138 39, 149 40 C163 41, 175 47, 182 57 C187 64, 188 72, 184 78 C180 84, 171 87, 166 94 C161 101, 158 109, 153 111 C148 113, 142 107, 141 100 C140 94, 145 88, 143 83 C141 78, 132 80, 128 76 C123 72, 122 64, 119 47 Z" />
-              <Path d="M153 128 C159 129, 164 134, 165 140 C166 147, 161 154, 155 157 C151 159, 148 155, 149 149 C150 143, 148 136, 153 128 Z" />
-              <Path d="M73 98 C77 95, 83 95, 86 98 C88 101, 87 106, 83 108 C79 110, 73 109, 71 105 C70 102, 71 100, 73 98 Z" />
-              <Path d="M172 86 C176 84, 181 85, 183 89 C184 93, 182 98, 177 100 C173 101, 169 99, 168 95 C167 91, 169 88, 172 86 Z" />
-            </G>
-            <Path d="M57 57 C51 69, 48 83, 49 98" fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth="3" strokeLinecap="round" />
-            <Path d="M152 38 C134 30, 113 27, 94 31" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="3" strokeLinecap="round" />
-          </Svg>
-        </Animated.View>
+    <View style={styles.visualStage}>
+      <View style={styles.flagPanel}>
+        {flagRows.map((row, rowIndex) => (
+          <View key={`flag-row-${rowIndex}`} style={styles.flagRow}>
+            {row.map((flag) => (
+              <View key={`${rowIndex}-${flag}`} style={styles.flagChip}>
+                <Text style={styles.flagText}>{flag}</Text>
+              </View>
+            ))}
+          </View>
+        ))}
       </View>
-    </View>
-  );
-}
-
-function VisionVisual() {
-  const topNode = useRef(new Animated.Value(-20)).current;
-  const leftNode = useRef(new Animated.Value(-24)).current;
-  const rightNode = useRef(new Animated.Value(24)).current;
-  const bottomNode = useRef(new Animated.Value(20)).current;
-  const pulse = useRef(new Animated.Value(0.85)).current;
-
-  useEffect(() => {
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(topNode, {
-            toValue: -6,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(leftNode, {
-            toValue: -8,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(rightNode, {
-            toValue: 8,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(bottomNode, {
-            toValue: 6,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulse, {
-            toValue: 1,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.parallel([
-          Animated.timing(topNode, {
-            toValue: -20,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(leftNode, {
-            toValue: -24,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(rightNode, {
-            toValue: 24,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(bottomNode, {
-            toValue: 20,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulse, {
-            toValue: 0.85,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-        ]),
-      ])
-    );
-
-    animation.start();
-
-    return () => {
-      animation.stop();
-      topNode.stopAnimation();
-      leftNode.stopAnimation();
-      rightNode.stopAnimation();
-      bottomNode.stopAnimation();
-      pulse.stopAnimation();
-    };
-  }, [bottomNode, leftNode, pulse, rightNode, topNode]);
-
-  return (
-    <View style={styles.visualFrame}>
-      <View style={styles.communityFrame}>
-        <View style={styles.communityHaloOuter} />
-        <View style={styles.communityHaloInner} />
-        <View style={styles.communityLineVertical} />
-        <View style={styles.communityLineHorizontal} />
-        <View style={styles.communityLineDiagLeft} />
-        <View style={styles.communityLineDiagRight} />
-
-        <Animated.View
-          style={[
-            styles.communityCenter,
-            {
-              transform: [{ scale: pulse }],
-            },
-          ]}
-        >
-          <Users size={36} color="#FFFFFF" />
-          <Text style={styles.communityCenterText}>One Community</Text>
-        </Animated.View>
-
-        <Animated.View
-          style={[
-            styles.communityNode,
-            styles.communityNodeTop,
-            { transform: [{ translateY: topNode }] },
-          ]}
-        >
-          <Footprints size={18} color="#114B5F" />
-        </Animated.View>
-        <Animated.View
-          style={[
-            styles.communityNode,
-            styles.communityNodeLeft,
-            { transform: [{ translateX: leftNode }] },
-          ]}
-        >
-          <MessageCircle size={18} color="#114B5F" />
-        </Animated.View>
-        <Animated.View
-          style={[
-            styles.communityNode,
-            styles.communityNodeRight,
-            { transform: [{ translateX: rightNode }] },
-          ]}
-        >
-          <Target size={18} color="#114B5F" />
-        </Animated.View>
-        <Animated.View
-          style={[
-            styles.communityNode,
-            styles.communityNodeBottom,
-            { transform: [{ translateY: bottomNode }] },
-          ]}
-        >
-          <CalendarDays size={18} color="#114B5F" />
-        </Animated.View>
-
-        <View style={styles.communityCaption}>
-          <Text style={styles.communityCaptionText}>Connecting communities</Text>
+      <View style={styles.welcomeBadge}>
+        <Footprints size={28} color="#F97316" />
+        <View>
+          <Text style={styles.badgeTitle}>RunNation</Text>
+          <Text style={styles.badgeSubtitle}>Where runners belong</Text>
         </View>
       </View>
     </View>
   );
 }
 
-function BenefitsVisual() {
+function InclusivityVisual() {
   return (
-    <View style={styles.visualFrame}>
-      <View style={styles.benefitGrid}>
-        {featureList.map(({ icon: Icon, label }) => (
-          <View key={label} style={styles.benefitCard}>
-            <View style={styles.benefitIconWrap}>
-              <Icon size={22} color="#14532D" />
-            </View>
-            <Text style={styles.benefitLabel}>{label}</Text>
+    <View style={styles.visualStage}>
+      <View style={styles.peopleCircle}>
+        <Users size={56} color="#0F766E" />
+      </View>
+      <View style={styles.inclusiveGrid}>
+        {inclusivityChips.map((chip) => (
+          <View key={chip.label} style={styles.inclusiveCard}>
+            <Text style={styles.inclusiveLabel}>{chip.label}</Text>
+            <Text style={styles.inclusiveDetail}>{chip.detail}</Text>
           </View>
         ))}
       </View>
@@ -336,116 +179,105 @@ function BenefitsVisual() {
   );
 }
 
-function ExploreVisual() {
+function GoalsVisual() {
   return (
-    <View style={styles.visualFrame}>
-      <View style={styles.phoneMock}>
-        <LinearGradient colors={['#FFF7ED', '#FFFFFF']} style={styles.phoneScreen}>
-          <View style={styles.phoneHeader}>
-            <Text style={styles.phoneTitle}>RunNation</Text>
-            <View style={styles.phoneDots}>
-              <View style={styles.phoneDot} />
-              <View style={styles.phoneDot} />
-              <View style={styles.phoneDot} />
-            </View>
+    <View style={styles.visualStage}>
+      <View style={styles.targetWrap}>
+        <Target size={72} color="#2563EB" />
+      </View>
+      <View style={styles.goalCardRow}>
+        {goalCards.map((goal) => (
+          <View key={goal.label} style={styles.goalCard}>
+            <Text style={styles.goalValue}>{goal.value}</Text>
+            <Text style={styles.goalLabel}>{goal.label}</Text>
           </View>
-
-          <View style={styles.featurePreviewGrid}>
-            {tabFeatures.map(({ icon: Icon, label, tint }) => (
-              <View key={label} style={styles.featurePreviewCard}>
-                <View style={[styles.featurePreviewIcon, { backgroundColor: `${tint}18` }]}>
-                  <Icon size={20} color={tint} />
-                </View>
-                <Text style={styles.featurePreviewLabel}>{label}</Text>
-              </View>
-            ))}
-          </View>
-        </LinearGradient>
+        ))}
       </View>
     </View>
   );
 }
 
-function PersonalizeVisual() {
-  const leftShift = useRef(new Animated.Value(-10)).current;
-  const rightShift = useRef(new Animated.Value(10)).current;
-
-  useEffect(() => {
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(leftShift, {
-            toValue: -2,
-            duration: 950,
-            useNativeDriver: true,
-          }),
-          Animated.timing(rightShift, {
-            toValue: 2,
-            duration: 950,
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.parallel([
-          Animated.timing(leftShift, {
-            toValue: -10,
-            duration: 950,
-            useNativeDriver: true,
-          }),
-          Animated.timing(rightShift, {
-            toValue: 10,
-            duration: 950,
-            useNativeDriver: true,
-          }),
-        ]),
-      ])
-    );
-
-    animation.start();
-
-    return () => {
-      animation.stop();
-      leftShift.stopAnimation();
-      rightShift.stopAnimation();
-    };
-  }, [leftShift, rightShift]);
-
+function ClubsVisual() {
   return (
-    <View style={styles.visualFrame}>
-      <View style={styles.personalizePanel}>
-        <View style={styles.personalizeHero}>
-          <Animated.View
-            style={[
-              styles.motionIconWrap,
-              styles.motionIconLeft,
-              { transform: [{ translateX: leftShift }] },
-            ]}
-          >
-            <View style={styles.editIconCardLarge}>
-              <UserCircle2 size={56} color="#111827" />
+    <View style={styles.visualStage}>
+      <View style={styles.clubStack}>
+        {clubCards.map((club, index) => (
+          <View key={club.name} style={[styles.clubCard, index === 1 && styles.clubCardMiddle]}>
+            <View style={styles.clubIcon}>
+              {index === 2 ? <Dumbbell size={22} color="#059669" /> : <Users size={22} color="#059669" />}
             </View>
-          </Animated.View>
-
-          <View style={styles.personalizePlusBadge}>
-            <Text style={styles.editPlusText}>+</Text>
+            <View style={styles.clubTextWrap}>
+              <Text style={styles.clubName}>{club.name}</Text>
+              <Text style={styles.clubMembers}>{club.members}</Text>
+            </View>
           </View>
+        ))}
+      </View>
+    </View>
+  );
+}
 
-          <Animated.View
-            style={[
-              styles.motionIconWrap,
-              styles.motionIconRight,
-              { transform: [{ translateX: rightShift }] },
-            ]}
-          >
-            <View style={styles.editIconCardLarge}>
-              <Svg width={64} height={64} viewBox="0 0 64 64">
-                <G fill="none" stroke="#111827" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
-                  <Path d="M32 8 L37 8 L39 15 L45 17 L50 13 L54 17 L50 23 L52 29 L59 32 L59 37 L52 39 L50 45 L54 50 L50 54 L45 50 L39 52 L37 59 L32 59 L30 52 L24 50 L19 54 L15 50 L19 45 L17 39 L10 37 L10 32 L17 29 L19 23 L15 17 L19 13 L24 17 L30 15 Z" />
-                  <Circle cx="32" cy="34" r="10" />
-                </G>
-              </Svg>
-            </View>
-          </Animated.View>
+function LeaderboardsVisual() {
+  return (
+    <View style={styles.visualStage}>
+      <View style={styles.boardCard}>
+        <View style={styles.boardHeader}>
+          <Trophy size={24} color="#EA580C" />
+          <Text style={styles.boardTitle}>Community Leaders</Text>
         </View>
+        {leaderboardRows.map((row) => (
+          <View key={row.rank} style={styles.boardRow}>
+            <Text style={styles.boardRank}>#{row.rank}</Text>
+            <Text style={styles.boardName}>{row.name}</Text>
+            <Text style={styles.boardValue}>{row.value}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function SocialVisual() {
+  return (
+    <View style={styles.visualStage}>
+      <View style={styles.chatStack}>
+        <View style={[styles.chatBubble, styles.chatBubbleLeft]}>
+          <MessageCircle size={20} color="#9333EA" />
+          <Text style={styles.chatText}>Morning run done.</Text>
+        </View>
+        <View style={[styles.chatBubble, styles.chatBubbleRight]}>
+          <Activity size={20} color="#DB2777" />
+          <Text style={styles.chatText}>Great pace today.</Text>
+        </View>
+        <View style={[styles.chatBubble, styles.chatBubbleLeft]}>
+          <Users size={20} color="#4F46E5" />
+          <Text style={styles.chatText}>See you at club run.</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function EventsVisual() {
+  return (
+    <View style={styles.visualStage}>
+      <View style={styles.eventStack}>
+        {eventCards.map((event) => (
+          <View key={event.type} style={styles.eventCard}>
+            <View style={styles.eventIcon}>
+              {event.type === 'Multiday' ? (
+                <Award size={22} color="#111827" />
+              ) : (
+                <CalendarDays size={22} color="#111827" />
+              )}
+            </View>
+            <View style={styles.eventCopy}>
+              <Text style={styles.eventType}>{event.type}</Text>
+              <Text style={styles.eventName}>{event.name}</Text>
+            </View>
+            <Text style={styles.eventDate}>{event.date}</Text>
+          </View>
+        ))}
       </View>
     </View>
   );
@@ -454,41 +286,39 @@ function PersonalizeVisual() {
 function SlideVisual({ id }: { id: SlideId }) {
   switch (id) {
     case 'welcome':
-      return <WorldVisual />;
-    case 'vision':
-      return <VisionVisual />;
-    case 'benefits':
-      return <BenefitsVisual />;
-    case 'explore':
-      return <ExploreVisual />;
-    case 'personalize':
-      return <PersonalizeVisual />;
+      return <FlagWelcomeVisual />;
+    case 'inclusive':
+      return <InclusivityVisual />;
+    case 'goals':
+      return <GoalsVisual />;
+    case 'clubs':
+      return <ClubsVisual />;
+    case 'leaderboards':
+      return <LeaderboardsVisual />;
+    case 'social':
+      return <SocialVisual />;
+    case 'events':
+      return <EventsVisual />;
     default:
       return null;
   }
 }
 
-function OnboardingSlide({
-  slide,
-  isActive,
-}: {
-  slide: Slide;
-  isActive: boolean;
-}) {
-  const contentOpacity = useRef(new Animated.Value(isActive ? 1 : 0.7)).current;
-  const contentShift = useRef(new Animated.Value(isActive ? 0 : 18)).current;
+function OnboardingSlide({ slide, isActive }: { slide: Slide; isActive: boolean }) {
+  const contentOpacity = useRef(new Animated.Value(isActive ? 1 : 0.75)).current;
+  const contentShift = useRef(new Animated.Value(isActive ? 0 : 14)).current;
   const visualFloat = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.parallel([
       Animated.timing(contentOpacity, {
-        toValue: isActive ? 1 : 0.72,
-        duration: 280,
+        toValue: isActive ? 1 : 0.75,
+        duration: 260,
         useNativeDriver: true,
       }),
       Animated.timing(contentShift, {
-        toValue: isActive ? 0 : 18,
-        duration: 280,
+        toValue: isActive ? 0 : 14,
+        duration: 260,
         useNativeDriver: true,
       }),
     ]).start();
@@ -498,13 +328,13 @@ function OnboardingSlide({
     const animation = Animated.loop(
       Animated.sequence([
         Animated.timing(visualFloat, {
-          toValue: isActive ? -8 : -3,
-          duration: 2200,
+          toValue: isActive ? -6 : -2,
+          duration: 1800,
           useNativeDriver: true,
         }),
         Animated.timing(visualFloat, {
           toValue: 0,
-          duration: 2200,
+          duration: 1800,
           useNativeDriver: true,
         }),
       ])
@@ -521,36 +351,6 @@ function OnboardingSlide({
   return (
     <View style={styles.slide}>
       <LinearGradient colors={slide.gradient} style={styles.heroSection}>
-        <Animated.View
-          style={[
-            styles.ambientOrbOne,
-            {
-              transform: [
-                {
-                  translateY: visualFloat.interpolate({
-                    inputRange: [-8, 0],
-                    outputRange: [-10, 0],
-                  }),
-                },
-              ],
-            },
-          ]}
-        />
-        <Animated.View
-          style={[
-            styles.ambientOrbTwo,
-            {
-              transform: [
-                {
-                  translateY: visualFloat.interpolate({
-                    inputRange: [-8, 0],
-                    outputRange: [6, 0],
-                  }),
-                },
-              ],
-            },
-          ]}
-        />
         <Animated.View style={{ transform: [{ translateY: visualFloat }] }}>
           <SlideVisual id={slide.id} />
         </Animated.View>
@@ -566,29 +366,9 @@ function OnboardingSlide({
             },
           ]}
         >
-          {slide.id === 'welcome' ? (
-            <>
-              <Text style={styles.description}>{slide.description}</Text>
-              <Text style={styles.eyebrow}>{slide.eyebrow}</Text>
-              {slide.eyebrow2 ? <Text style={styles.eyebrowSecondary}>{slide.eyebrow2}</Text> : null}
-              <Text style={styles.title}>{slide.title}</Text>
-              {slide.title2 ? <Text style={styles.titleSecondary}>{slide.title2}</Text> : null}
-            </>
-          ) : (
-            <>
-              <Text style={styles.eyebrow}>{slide.eyebrow}</Text>
-              {slide.eyebrow2 ? <Text style={styles.eyebrowSecondary}>{slide.eyebrow2}</Text> : null}
-              <Text style={styles.title}>{slide.title}</Text>
-              {slide.title2 ? <Text style={styles.titleSecondary}>{slide.title2}</Text> : null}
-              <Text style={styles.description}>{slide.description}</Text>
-            </>
-          )}
-
-          {slide.id === 'personalize' && (
-            <View style={styles.finalPrompt}>
-              <Text style={styles.finalPromptText}>Let&apos;s get started.</Text>
-            </View>
-          )}
+          <Text style={styles.pillar}>{slide.pillar}</Text>
+          <Text style={styles.title}>{slide.title}</Text>
+          <Text style={styles.description}>{slide.description}</Text>
         </Animated.View>
       </View>
     </View>
@@ -643,21 +423,14 @@ export default function OnboardingScreen() {
         style={styles.scrollView}
       >
         {slides.map((slide, index) => (
-          <OnboardingSlide
-            key={slide.id}
-            slide={slide}
-            isActive={index === currentIndex}
-          />
+          <OnboardingSlide key={slide.id} slide={slide} isActive={index === currentIndex} />
         ))}
       </ScrollView>
 
       <View style={styles.footer}>
         <View style={styles.pagination}>
           {slides.map((slide, index) => (
-            <View
-              key={slide.id}
-              style={[styles.dot, index === currentIndex && styles.activeDot]}
-            />
+            <View key={slide.id} style={[styles.dot, index === currentIndex && styles.activeDot]} />
           ))}
         </View>
 
@@ -675,14 +448,14 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F7F4EE',
+    backgroundColor: '#FFFFFF',
   },
   skipButton: {
     position: 'absolute',
     top: 54,
     right: 20,
     zIndex: 20,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.2)',
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 999,
@@ -690,7 +463,7 @@ const styles = StyleSheet.create({
   skipText: {
     color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   scrollView: {
     flex: 1,
@@ -700,98 +473,53 @@ const styles = StyleSheet.create({
     minHeight: SCREEN_HEIGHT,
   },
   heroSection: {
-    height: SCREEN_HEIGHT * 0.53,
+    height: SCREEN_HEIGHT * 0.5,
     overflow: 'hidden',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  ambientOrbOne: {
-    position: 'absolute',
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    top: -40,
-    right: -30,
-  },
-  ambientOrbTwo: {
-    position: 'absolute',
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    bottom: -20,
-    left: -35,
-  },
   contentSection: {
     flex: 1,
-    marginTop: -24,
+    marginTop: -26,
     paddingHorizontal: 20,
-    paddingBottom: 120,
+    paddingBottom: 124,
   },
   contentCard: {
     flex: 1,
-    backgroundColor: '#F7F4EE',
+    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     paddingTop: 28,
     paddingHorizontal: 24,
     shadowColor: '#111827',
     shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.06,
+    shadowOpacity: 0.08,
     shadowRadius: 18,
     elevation: 6,
+  },
+  pillar: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFF7ED',
+    color: '#C2410C',
+    fontSize: 13,
+    fontWeight: '900',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 34,
+    lineHeight: 41,
+    fontWeight: '900',
+    color: '#111827',
+    letterSpacing: 0,
+    marginBottom: 16,
   },
   description: {
     fontSize: 17,
     lineHeight: 27,
     color: '#4B5563',
-    marginBottom: 18,
-  },
-  eyebrow: {
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1.8,
-    textTransform: 'uppercase',
-    color: '#C2410C',
-    marginBottom: 12,
-  },
-  eyebrowSecondary: {
-    fontSize: 15,
-    lineHeight: 22,
-    fontWeight: '700',
-    color: '#374151',
-    marginBottom: 12,
-  },
-  title: {
-    fontSize: 38,
-    lineHeight: 44,
-    fontWeight: '900',
-    color: '#B91C1C',
-    letterSpacing: -1.2,
-    marginBottom: 8,
-  },
-  titleSecondary: {
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: '800',
-    color: '#171717',
-    letterSpacing: -0.4,
-    marginBottom: 16,
-  },
-  finalPrompt: {
-    marginTop: 22,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  finalPromptText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#111827',
   },
   footer: {
     position: 'absolute',
@@ -805,16 +533,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 7,
   },
   dot: {
-    width: 9,
-    height: 9,
+    width: 8,
+    height: 8,
     borderRadius: 999,
-    backgroundColor: 'rgba(23,23,23,0.16)',
+    backgroundColor: 'rgba(17,24,39,0.18)',
   },
   activeDot: {
-    width: 30,
+    width: 28,
     backgroundColor: '#111827',
   },
   nextButton: {
@@ -830,278 +558,282 @@ const styles = StyleSheet.create({
   nextButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '900',
   },
-  visualFrame: {
+  visualStage: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT * 0.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 42,
+  },
+  flagPanel: {
     width: '100%',
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 26,
-    paddingTop: 48,
-    paddingBottom: 18,
-  },
-  worldScene: {
-    width: 300,
-    height: 250,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  globeShell: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 3,
-  },
-  communityFrame: {
-    width: 280,
-    height: 280,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  communityHaloOuter: {
-    position: 'absolute',
-    width: 232,
-    height: 232,
-    borderRadius: 116,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  communityHaloInner: {
-    position: 'absolute',
-    width: 184,
-    height: 184,
-    borderRadius: 92,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-  },
-  communityLineVertical: {
-    position: 'absolute',
-    width: 2,
-    height: 156,
-    backgroundColor: 'rgba(255,255,255,0.28)',
-  },
-  communityLineHorizontal: {
-    position: 'absolute',
-    width: 156,
-    height: 2,
-    backgroundColor: 'rgba(255,255,255,0.28)',
-  },
-  communityLineDiagLeft: {
-    position: 'absolute',
-    width: 132,
-    height: 2,
-    backgroundColor: 'rgba(255,255,255,0.24)',
-    transform: [{ rotate: '45deg' }],
-  },
-  communityLineDiagRight: {
-    position: 'absolute',
-    width: 132,
-    height: 2,
-    backgroundColor: 'rgba(255,255,255,0.24)',
-    transform: [{ rotate: '-45deg' }],
-  },
-  communityCenter: {
-    position: 'absolute',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(255,255,255,0.24)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  communityCenterText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  communityNode: {
-    position: 'absolute',
-    width: 52,
-    height: 52,
+    maxWidth: 330,
+    backgroundColor: 'rgba(255,255,255,0.18)',
     borderRadius: 26,
-    backgroundColor: '#ECFEFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 4,
-  },
-  communityNodeTop: {
-    top: 28,
-  },
-  communityNodeLeft: {
-    left: 24,
-  },
-  communityNodeRight: {
-    right: 24,
-  },
-  communityNodeBottom: {
-    bottom: 56,
-  },
-  communityCaption: {
-    position: 'absolute',
-    bottom: 12,
-    backgroundColor: 'rgba(255,255,255,0.88)',
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  communityCaptionText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#114B5F',
-  },
-  benefitGrid: {
-    width: '100%',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 12,
-  },
-  benefitCard: {
-    width: '46%',
-    backgroundColor: '#F0FDF4',
-    borderRadius: 24,
-    paddingVertical: 18,
-    paddingHorizontal: 14,
-    alignItems: 'center',
+    padding: 14,
     gap: 10,
   },
-  benefitIconWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+  flagRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  flagChip: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  flagText: {
+    fontSize: 24,
+  },
+  welcomeBadge: {
+    marginTop: 18,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    shadowColor: '#111827',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    elevation: 6,
+  },
+  badgeTitle: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#111827',
+  },
+  badgeSubtitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#6B7280',
+  },
+  peopleCircle: {
+    width: 128,
+    height: 128,
+    borderRadius: 64,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  inclusiveGrid: {
+    width: '100%',
+    maxWidth: 330,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'center',
+  },
+  inclusiveCard: {
+    width: '47%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+  },
+  inclusiveLabel: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#111827',
+  },
+  inclusiveDetail: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0F766E',
+  },
+  targetWrap: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  goalCardRow: {
+    width: '100%',
+    maxWidth: 340,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  goalCard: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+  },
+  goalValue: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#111827',
+  },
+  goalLabel: {
+    marginTop: 5,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#6B7280',
+    textAlign: 'center',
+  },
+  clubStack: {
+    width: '100%',
+    maxWidth: 330,
+    gap: 12,
+  },
+  clubCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  clubCardMiddle: {
+    marginLeft: 24,
+  },
+  clubIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: '#DCFCE7',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  benefitLabel: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#14532D',
-    textAlign: 'center',
-  },
-  phoneMock: {
-    width: 255,
-    height: 380,
-    borderRadius: 34,
-    backgroundColor: '#111827',
-    padding: 12,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.22,
-    shadowRadius: 22,
-    elevation: 12,
-  },
-  phoneScreen: {
+  clubTextWrap: {
     flex: 1,
-    borderRadius: 24,
-    padding: 18,
   },
-  phoneHeader: {
+  clubName: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: '#111827',
+  },
+  clubMembers: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#6B7280',
+  },
+  boardCard: {
+    width: '100%',
+    maxWidth: 330,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 16,
+    gap: 10,
+  },
+  boardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 18,
+    gap: 10,
+    marginBottom: 4,
   },
-  phoneTitle: {
+  boardTitle: {
     fontSize: 18,
     fontWeight: '900',
     color: '#111827',
   },
-  phoneDots: {
+  boardRow: {
     flexDirection: 'row',
-    gap: 4,
-  },
-  phoneDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#D1D5DB',
-  },
-  featurePreviewGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: 12,
-  },
-  featurePreviewCard: {
-    width: '47%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    paddingVertical: 15,
+    alignItems: 'center',
+    borderRadius: 16,
+    backgroundColor: '#FFF7ED',
+    paddingVertical: 12,
     paddingHorizontal: 12,
+  },
+  boardRank: {
+    width: 42,
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#EA580C',
+  },
+  boardName: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#111827',
+  },
+  boardValue: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#374151',
+  },
+  chatStack: {
+    width: '100%',
+    maxWidth: 330,
+    gap: 14,
+  },
+  chatBubble: {
+    maxWidth: '88%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
-  featurePreviewIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
+  chatBubbleLeft: {
+    alignSelf: 'flex-start',
   },
-  featurePreviewLabel: {
-    fontSize: 13,
+  chatBubbleRight: {
+    alignSelf: 'flex-end',
+  },
+  chatText: {
+    fontSize: 15,
     fontWeight: '800',
     color: '#111827',
   },
-  personalizePanel: {
+  eventStack: {
     width: '100%',
-    maxWidth: 320,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
+    maxWidth: 340,
+    gap: 12,
   },
-  personalizeHero: {
+  eventCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 15,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-    minHeight: 120,
+    gap: 12,
   },
-  motionIconWrap: {
-    width: 96,
-    alignItems: 'center',
-  },
-  motionIconLeft: {
-    marginRight: 10,
-  },
-  motionIconRight: {
-    marginLeft: 10,
-  },
-  editIconCardLarge: {
-    width: 104,
-    height: 104,
-    borderRadius: 52,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    shadowColor: '#111827',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    elevation: 4,
-  },
-  personalizePlusBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#111827',
+  eventIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#F3F4F6',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  editPlusText: {
-    color: '#FFFFFF',
-    fontSize: 18,
+  eventCopy: {
+    flex: 1,
+  },
+  eventType: {
+    fontSize: 12,
     fontWeight: '900',
-    lineHeight: 20,
+    color: '#0F766E',
+    textTransform: 'uppercase',
+  },
+  eventName: {
+    marginTop: 3,
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#111827',
+  },
+  eventDate: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#475569',
   },
 });

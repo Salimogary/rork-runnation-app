@@ -1,4 +1,4 @@
-﻿import {
+import {
   StyleSheet,
   View,
   Text,
@@ -38,7 +38,7 @@ interface Post {
     exercise_type: string;
     distance_km: number;
     Time: string;
-    pace_km_h: number;
+    pace_min_per_km: number;
   } | null;
   created_at: string;
   likes_count: number;
@@ -93,7 +93,7 @@ interface ActivityStats {
   exercise_type: string;
   distance_km: number;
   Time: string;
-  pace_km_h: number;
+  pace_min_per_km: number;
 }
 
 export default function ChatScreen() {
@@ -112,8 +112,16 @@ export default function ChatScreen() {
   const [pollQuestion, setPollQuestion] = useState("");
   const [pollOptionA, setPollOptionA] = useState("");
   const [pollOptionB, setPollOptionB] = useState("");
+
+  const formatPaceMinPerKm = (paceMinPerKm?: number | null) => {
+    if (!paceMinPerKm || paceMinPerKm <= 0) return "N/A";
+    const totalSecondsPerKm = Math.round(paceMinPerKm * 60);
+    const minutes = Math.floor(totalSecondsPerKm / 60);
+    const seconds = totalSecondsPerKm % 60;
+    return `${minutes}'${seconds.toString().padStart(2, "0")}" /km`;
+  };
   
-  const emojis = ["ðŸ˜€", "ðŸ˜‚", "â¤ï¸", "ðŸ”¥", "ðŸ‘", "ðŸ‘", "ðŸ’ª", "ðŸƒ", "âš¡", "ðŸŽ‰", "ðŸ˜Ž", "ðŸ¤©", "ðŸ˜", "ðŸ¥³", "ðŸ’¯"];
+  const emojis = ["ð", "ð", "â¤ï¸", "ð¥", "ð", "ð", "ðª", "ð", "â¡", "ð", "ð", "ð¤©", "ð", "ð¥³", "ð¯"];
 
   const { data: posts, isLoading, refetch } = useQuery<Post[]>({
     queryKey: ["posts", user?.id],
@@ -668,9 +676,7 @@ export default function ChatScreen() {
               <View style={styles.activityStat}>
                 <Text style={styles.activityLabel}>Pace</Text>
                 <Text style={styles.activityValue}>
-                  {currentActivity.pace_km_h != null && currentActivity.pace_km_h > 0 
-                    ? (60 / currentActivity.pace_km_h).toFixed(2) + ' min/km'
-                    : 'N/A'}
+                  {formatPaceMinPerKm(currentActivity.pace_min_per_km)}
                 </Text>
               </View>
             </View>
@@ -716,7 +722,7 @@ export default function ChatScreen() {
                       </Text>
                       {formatCountryName(post.user?.country) || post.user?.club_name ? (
                         <Text style={styles.userMeta} numberOfLines={1}>
-                          {[formatCountryName(post.user?.country), post.user?.club_name].filter(Boolean).join(" • ")}
+                          {[formatCountryName(post.user?.country), post.user?.club_name].filter(Boolean).join("  ")}
                         </Text>
                       ) : null}
                     </View>
@@ -759,9 +765,7 @@ export default function ChatScreen() {
                           {post.activity_data.distance_km != null ? post.activity_data.distance_km.toFixed(2) : '0.00'} km
                         </Text>
                         <Text style={styles.compactActivityValue}>
-                          {post.activity_data.pace_km_h != null && post.activity_data.pace_km_h > 0 
-                            ? (60 / post.activity_data.pace_km_h).toFixed(2)
-                            : 'N/A'}
+                          {formatPaceMinPerKm(post.activity_data.pace_min_per_km)}
                         </Text>
                       </View>
                     </View>
@@ -790,7 +794,7 @@ export default function ChatScreen() {
                           >
                             <View style={styles.pollOptionRow}>
                               <Text style={styles.pollOptionLabel}>{option.label}</Text>
-                              <Text style={styles.pollOptionVotes}>{`${option.votes} â€¢ ${percentage}%`}</Text>
+                              <Text style={styles.pollOptionVotes}>{`${option.votes} â¢ ${percentage}%`}</Text>
                             </View>
                           </TouchableOpacity>
                         );
@@ -983,6 +987,7 @@ export default function ChatScreen() {
           </View>
         </View>
       </Modal>
+
     </View>
   );
 }

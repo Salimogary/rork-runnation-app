@@ -1,10 +1,11 @@
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, TextInput, ActivityIndicator, Share, useWindowDimensions } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIcon, MessageSquare, Paperclip, EyeOff, Lock, Trash2, AlertTriangle, Star, Share2, Crown, HelpCircle, Phone, Globe, Volume2, VolumeX } from "lucide-react-native";
+import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIcon, MessageSquare, Paperclip, EyeOff, Lock, Trash2, AlertTriangle, Star, Share2, Crown, HelpCircle, Phone, Globe, Volume2, VolumeX, Info, Handshake, Ruler } from "lucide-react-native";
 import { Linking } from "react-native";
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useDistanceUnit } from "@/contexts/DistanceUnitContext";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { trpc } from "@/lib/trpc";
@@ -14,10 +15,55 @@ import * as Haptics from "expo-haptics";
 import { getNotificationsEnabled, setNotificationsEnabled as saveNotificationsEnabled } from "@/utils/notifications";
 import { getServerClient } from "@/lib/server-client";
 import { formatCountryName } from "@/constants/country-utils";
+import { WORLD_COUNTRIES } from "@/constants/countries";
 import { getActivityVoiceAssistantEnabled, setActivityVoiceAssistantEnabled as saveActivityVoiceAssistantEnabled } from "@/utils/activityVoice";
+import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system/legacy";
+
+function normalizeSettingsCountryCode(country: string | null | undefined): string | null {
+  const value = String(country || "").trim();
+  if (!value) return null;
+  const upper = value.toUpperCase();
+  if (upper.length === 2) return upper;
+  const match = WORLD_COUNTRIES.find((item) => item.name.toLowerCase() === value.toLowerCase());
+  return match?.iso_alpha2?.toUpperCase() ?? null;
+}
+
+const GLOBAL_SERVICE_ROLE_NAMES = new Set([
+  "junior_runners_club_coordinator",
+  "golden_age_runners_club_coordinator",
+  "treadmill_runners_club_coordinator",
+  "para_runners_club_coordinator",
+  "magazine_columnist_fitness_coach",
+  "magazine_columnist_sports_journalist",
+  "magazine_columnist_motivation_speaker",
+]);
+
+function getServiceRoleButtonLabel(roleName: string, countryName: string): string {
+  switch (roleName) {
+    case "club_coordinator":
+      return "Create Club";
+    case "country_coordinator":
+      return `Take up ${countryName} Coordinator Role`;
+    case "event_organizer":
+      return `Create an Event Organizer profile in ${countryName}.`;
+    case "shop_manager":
+      return `Create a Shop Manager profile in ${countryName}.`;
+    case "junior_runners_club_coordinator":
+      return "Take up the Junior Runners Club Coordinator role.";
+    case "golden_age_runners_club_coordinator":
+      return "Take up the Golden Age Runners Club Coordinator role.";
+    case "treadmill_runners_club_coordinator":
+      return "Take up the Treadmill Runners Club Coordinator role.";
+    case "para_runners_club_coordinator":
+      return "Take up the Para Runners Club Coordinator role.";
+    default:
+      return "Take up role";
+  }
+}
 
 export default function SettingsScreen() {
-  const { signOut, user, roleSession, privateMode, setPrivateMode, verifyPin, deleteAccount } = useAuth();
+  const { signOut, user, registrationId, roleSession, privateMode, setPrivateMode, verifyPin, deleteAccount } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
   const { width } = useWindowDimensions();
@@ -30,14 +76,11 @@ export default function SettingsScreen() {
   }, []);
   const [locationEnabled, setLocationEnabled] = useState(true);
   const { isDark, setDarkMode, colors: themeColors } = useTheme();
+  const { distanceUnit, distanceUnitLabel, distanceUnitShortLabel, toggleDistanceUnit } = useDistanceUnit();
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackCategory, setFeedbackCategory] = useState<"bug" | "feature" | "support" | "billing">("feature");
   const [feedbackAttachment, setFeedbackAttachment] = useState<string | null>(null);
-  const [showPinModal, setShowPinModal] = useState(false);
-  const [signOutPin, setSignOutPin] = useState('');
-  const [signOutPinError, setSignOutPinError] = useState('');
-  const [isVerifyingPin, setIsVerifyingPin] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletePin, setDeletePin] = useState('');
   const [deletePinError, setDeletePinError] = useState('');
@@ -49,6 +92,15 @@ export default function SettingsScreen() {
   const { subscriptionStatus, trialDaysRemaining, subscription } = useSubscription();
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showFaqModal, setShowFaqModal] = useState(false);
+  const [showServiceTeamModal, setShowServiceTeamModal] = useState(false);
+  const [showChatReportModal, setShowChatReportModal] = useState(false);
+  const [chatReportDescription, setChatReportDescription] = useState("");
+  const [chatReportPostId, setChatReportPostId] = useState("");
+  const [chatReportReason, setChatReportReason] = useState<"abuse" | "hate" | "disrespect" | "divisive" | "sectarian" | "pornographic" | "spam" | "other">("abuse");
+  const [chatReportScreenshot, setChatReportScreenshot] = useState<{ uri: string; mimeType?: string | null; fileName?: string | null } | null>(null);
+  const [serviceWebsiteUrl, setServiceWebsiteUrl] = useState("");
+  const [serviceLinkedinUrl, setServiceLinkedinUrl] = useState("");
+  const [serviceSocialUrl, setServiceSocialUrl] = useState("");
   const [expandedFaqIds, setExpandedFaqIds] = useState<string[]>([]);
   const adminTapCount = useRef<number>(0);
   const adminTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -81,44 +133,56 @@ export default function SettingsScreen() {
     { enabled: showHelpModal }
   );
 
-  const { data: faqEntries = [], isLoading: isLoadingFaqs } = trpc.support.getFaqEntries.useQuery(
+  const { data: faqEntries = [], isLoading: isLoadingFaqs, error: faqError } = trpc.support.getFaqEntries.useQuery(
     undefined,
     { enabled: showFaqModal }
   );
 
-
-  const handleSignOut = () => {
-    setShowPinModal(true);
-    setSignOutPin('');
-    setSignOutPinError('');
-  };
-
-  const handlePinVerifyAndSignOut = async () => {
-    if (!signOutPin.trim()) {
-      setSignOutPinError('Enter your password');
-      return;
-    }
-    setIsVerifyingPin(true);
-    setSignOutPinError('');
-    try {
-      const valid = await verifyPin(signOutPin);
-      if (valid) {
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setShowPinModal(false);
-        setSignOutPin('');
-        await signOut();
-        router.replace('/register' as any);
+  const effectiveRegistrationId = registrationId || user?.id || "";
+  const { data: serviceProfile, isLoading: isLoadingServiceProfile } = trpc.profile.getBundle.useQuery(
+    { registrationId: effectiveRegistrationId },
+    { enabled: showServiceTeamModal && !!effectiveRegistrationId }
+  );
+  const serviceProfileAny = serviceProfile as any;
+  const serviceCountryCode = normalizeSettingsCountryCode(
+    serviceProfileAny?.profile?.country_code || serviceProfileAny?.profile?.country
+  );
+  const serviceCountryName = formatCountryName(serviceCountryCode) || formatCountryName(serviceProfileAny?.profile?.country) || "Your country";
+  const {
+    data: serviceTeamData,
+    isLoading: isLoadingServiceRoles,
+    error: serviceTeamError,
+    refetch: refetchServiceTeamRoles,
+  } = trpc.serviceTeam.getRoles.useQuery(
+    { countryCode: serviceCountryCode || "" },
+    { enabled: showServiceTeamModal && !!serviceCountryCode }
+  );
+  const requestServiceRoleMutation = trpc.serviceTeam.requestRole.useMutation({
+    onSuccess: () => {
+      if (Platform.OS !== "web") {
+        Alert.alert("Request Submitted", "Your service team request has been sent for admin approval.");
       } else {
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        setSignOutPinError('Incorrect password. Please try again.');
-        setSignOutPin('');
+        alert("Your service team request has been sent for admin approval.");
       }
-    } catch {
-      setSignOutPinError('Verification failed. Try again.');
-      setSignOutPin('');
-    } finally {
-      setIsVerifyingPin(false);
-    }
+      setServiceWebsiteUrl("");
+      setServiceLinkedinUrl("");
+      setServiceSocialUrl("");
+      void refetchServiceTeamRoles();
+    },
+    onError: (error) => {
+      if (Platform.OS !== "web") {
+        Alert.alert("Request Failed", error.message || "Could not submit the role request.");
+      } else {
+        alert(error.message || "Could not submit the role request.");
+      }
+    },
+  });
+
+
+  const handleSignOut = async () => {
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    await signOut();
+    router.replace('/register' as any);
   };
 
   const showComingSoon = (feature: string) => {
@@ -220,6 +284,82 @@ export default function SettingsScreen() {
       } else {
         alert('Failed to submit suggestion. Please try again.');
       }
+    },
+  });
+
+  const encodeReportScreenshot = async (uri: string, mimeType?: string | null) => {
+    const resolvedMimeType = mimeType || (uri.toLowerCase().includes(".png") ? "image/png" : "image/jpeg");
+    if (Platform.OS === "web") {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
+        reader.onerror = () => reject(new Error("Could not read screenshot."));
+        reader.readAsDataURL(blob);
+      });
+      return { base64, mimeType: resolvedMimeType };
+    }
+
+    const base64 = await FileSystem.readAsStringAsync(uri, { encoding: "base64" });
+    return { base64, mimeType: resolvedMimeType };
+  };
+
+  const pickChatReportScreenshot = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Permission Required", "Please allow photo access to attach a screenshot.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: "images" as any,
+      allowsEditing: false,
+      quality: 0.75,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      setChatReportScreenshot({
+        uri: asset.uri,
+        mimeType: asset.mimeType,
+        fileName: asset.fileName ?? "chat-report-screenshot",
+      });
+    }
+  };
+
+  const chatReportMutation = useMutation({
+    mutationFn: async () => {
+      const regId = registrationId || user?.id;
+      if (!regId) throw new Error("Please sign in before submitting a report.");
+      if (!chatReportDescription.trim() || chatReportDescription.trim().length < 10) {
+        throw new Error("Please add a brief description of at least 10 characters.");
+      }
+
+      const screenshotPayload = chatReportScreenshot
+        ? await encodeReportScreenshot(chatReportScreenshot.uri, chatReportScreenshot.mimeType)
+        : null;
+
+      await getServerClient().social.reportContent.mutate({
+        registrationId: regId,
+        postId: chatReportPostId.trim() || null,
+        commentId: null,
+        reasonCategory: chatReportReason,
+        description: chatReportDescription.trim(),
+        screenshotBase64: screenshotPayload?.base64 ?? null,
+        screenshotMimeType: screenshotPayload?.mimeType ?? null,
+      });
+    },
+    onSuccess: () => {
+      setShowChatReportModal(false);
+      setChatReportDescription("");
+      setChatReportPostId("");
+      setChatReportReason("abuse");
+      setChatReportScreenshot(null);
+      Alert.alert("Report Submitted", "Thank you. An admin will review the chat report.");
+    },
+    onError: (error: any) => {
+      Alert.alert("Report Failed", error?.message || "Could not submit report.");
     },
   });
 
@@ -414,6 +554,31 @@ export default function SettingsScreen() {
           </View>
         </TouchableOpacity>
 
+        <TouchableOpacity
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
+          onPress={() => {
+            toggleDistanceUnit();
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          }}
+        >
+          <View style={styles.settingLeft}>
+            <View style={[styles.iconContainer, { backgroundColor: distanceUnit === "miles" ? "#EFF6FF" : "#ECFDF5" }]}>
+              <Ruler size={22} color={distanceUnit === "miles" ? "#3b82f6" : "#10b981"} />
+            </View>
+            <View style={styles.settingTextContainer}>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Distance Measure</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>
+                {distanceUnitLabel} selected
+              </Text>
+            </View>
+          </View>
+          <View style={[styles.unitTogglePill, { backgroundColor: distanceUnit === "miles" ? "#EFF6FF" : "#ECFDF5" }]}>
+            <Text style={[styles.unitToggleText, { color: distanceUnit === "miles" ? "#3b82f6" : "#10b981" }]}>
+              {distanceUnitShortLabel}
+            </Text>
+          </View>
+        </TouchableOpacity>
+
         <TouchableOpacity 
           style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]} 
           onPress={() => setLocationEnabled(!locationEnabled)}
@@ -474,7 +639,39 @@ export default function SettingsScreen() {
 
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>Support</Text>
-        
+
+        <TouchableOpacity
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
+          onPress={() => router.push("/about-us" as any)}
+        >
+          <View style={styles.settingLeft}>
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#0D3320' : '#ECFDF5' }]}>
+              <Info size={22} color="#10b981" />
+            </View>
+            <View style={styles.settingTextContainer}>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>About RunNation</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Where runners belong</Text>
+            </View>
+          </View>
+          <ChevronRight size={20} color={themeColors.iconMuted} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
+          onPress={() => setShowServiceTeamModal(true)}
+        >
+          <View style={styles.settingLeft}>
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#3B2000' : '#FFF7ED' }]}>
+              <Handshake size={22} color="#f97316" />
+            </View>
+            <View style={styles.settingTextContainer}>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Join Service Team</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Take up a role or opportunity in the community</Text>
+            </View>
+          </View>
+          <ChevronRight size={20} color={themeColors.iconMuted} />
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
           onPress={() => setShowHelpModal(true)}
@@ -485,7 +682,7 @@ export default function SettingsScreen() {
             </View>
             <View style={styles.settingTextContainer}>
               <Text style={[styles.settingTitle, { color: themeColors.text }]}>Help</Text>
-              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Support desk contacts</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Support contacts</Text>
             </View>
           </View>
           <ChevronRight size={20} color={themeColors.iconMuted} />
@@ -493,15 +690,15 @@ export default function SettingsScreen() {
 
         <TouchableOpacity
           style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
-          onPress={() => setShowFaqModal(true)}
+          onPress={() => setShowChatReportModal(true)}
         >
           <View style={styles.settingLeft}>
-            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
-              <FileText size={22} color="#4b5563" />
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#3B1111' : '#FEF2F2' }]}>
+              <AlertTriangle size={22} color="#dc2626" />
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={[styles.settingTitle, { color: themeColors.text }]}>FAQ</Text>
-              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Quick answers to common RunNation questions</Text>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Report Chat Abuse</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Send screenshot and offence details for admin review</Text>
             </View>
           </View>
           <ChevronRight size={20} color={themeColors.iconMuted} />
@@ -518,6 +715,22 @@ export default function SettingsScreen() {
             <View style={styles.settingTextContainer}>
               <Text style={[styles.settingTitle, { color: themeColors.text }]}>Policy, Terms and Conditions</Text>
               <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>View our policies and terms</Text>
+            </View>
+          </View>
+          <ChevronRight size={20} color={themeColors.iconMuted} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
+          onPress={() => setShowFaqModal(true)}
+        >
+          <View style={styles.settingLeft}>
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
+              <FileText size={22} color="#4b5563" />
+            </View>
+            <View style={styles.settingTextContainer}>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>FAQ</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Quick answers to common RunNation questions</Text>
             </View>
           </View>
           <ChevronRight size={20} color={themeColors.iconMuted} />
@@ -757,78 +970,6 @@ export default function SettingsScreen() {
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
                   <Text style={styles.submitFeedbackText}>Send Feedback</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={showPinModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowPinModal(false)}
-      >
-        <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
-          <View style={[styles.pinModalContent, { backgroundColor: themeColors.modalBackground }]}>
-            <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
-              <Text style={[styles.detailTitle, { color: themeColors.text }]}>Verify Password</Text>
-              <TouchableOpacity onPress={() => {
-                setShowPinModal(false);
-                setSignOutPin('');
-                setSignOutPinError('');
-              }}>
-                <XIcon size={24} color={themeColors.iconDefault} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.pinModalBody}>
-              <View style={[styles.pinLockIcon, { backgroundColor: isDark ? '#3B1515' : '#fef2f2' }]}>
-                <Lock size={28} color="#ef4444" />
-              </View>
-              <Text style={[styles.pinModalSubtitle, { color: themeColors.textSecondary }]}>Enter your password to sign out</Text>
-
-              <TextInput
-                style={[styles.input, { width: '100%' }]}
-                value={signOutPin}
-                onChangeText={(text) => {
-                  setSignOutPin(text);
-                  if (signOutPinError) setSignOutPinError('');
-                }}
-                secureTextEntry
-                autoFocus
-                editable={!isVerifyingPin}
-              />
-
-              {!!signOutPinError && (
-                <Text style={styles.pinErrorText}>{signOutPinError}</Text>
-              )}
-            </View>
-
-            <View style={[styles.feedbackActions, { borderTopColor: themeColors.border }]}>
-              <TouchableOpacity
-                style={[styles.cancelFeedbackButton, { backgroundColor: themeColors.inputBackground }]}
-                onPress={() => {
-                  setShowPinModal(false);
-                  setSignOutPin('');
-                  setSignOutPinError('');
-                }}
-              >
-                <Text style={[styles.cancelFeedbackText, { color: themeColors.textSecondary }]}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.signOutConfirmButton,
-                  (!signOutPin.trim() || isVerifyingPin) && styles.submitFeedbackButtonDisabled
-                ]}
-                onPress={handlePinVerifyAndSignOut}
-                disabled={!signOutPin.trim() || isVerifyingPin}
-              >
-                {isVerifyingPin ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.submitFeedbackText}>Sign Out</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -1173,6 +1314,282 @@ export default function SettingsScreen() {
       </Modal>
 
       <Modal
+        visible={showChatReportModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowChatReportModal(false)}
+      >
+        <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.detailModalContent, { backgroundColor: themeColors.modalBackground }]}>
+            <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.detailTitle, { color: themeColors.text }]}>Report Chat Abuse</Text>
+              <TouchableOpacity onPress={() => setShowChatReportModal(false)}>
+                <XIcon size={24} color={themeColors.iconDefault} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.feedbackForm}>
+              <Text style={[styles.feedbackLabel, { color: themeColors.text }]}>Offence type</Text>
+              <View style={styles.categoryGrid}>
+                {[
+                  { key: "abuse", label: "Abusive" },
+                  { key: "hate", label: "Hateful" },
+                  { key: "disrespect", label: "Disrespectful" },
+                  { key: "divisive", label: "Divisive" },
+                  { key: "sectarian", label: "Sectarian" },
+                  { key: "pornographic", label: "Pornographic" },
+                  { key: "spam", label: "Spam" },
+                  { key: "other", label: "Other" },
+                ].map((item) => (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={[
+                      styles.categoryButton,
+                      chatReportReason === item.key && styles.categoryButtonActive,
+                    ]}
+                    onPress={() => setChatReportReason(item.key as any)}
+                  >
+                    <Text style={[
+                      styles.categoryButtonText,
+                      chatReportReason === item.key && styles.categoryButtonTextActive,
+                    ]}>
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={[styles.feedbackLabel, { color: themeColors.text }]}>Post ID (optional)</Text>
+              <TextInput
+                style={[styles.feedbackInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                value={chatReportPostId}
+                onChangeText={setChatReportPostId}
+                placeholder="Leave blank if you only have a screenshot"
+                placeholderTextColor={themeColors.textLight}
+                autoCapitalize="none"
+              />
+
+              <Text style={[styles.feedbackLabel, { color: themeColors.text }]}>Brief description</Text>
+              <TextInput
+                style={[styles.feedbackInput, styles.feedbackTextArea, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                value={chatReportDescription}
+                onChangeText={setChatReportDescription}
+                placeholder="Explain what happened and why it should be reviewed."
+                placeholderTextColor={themeColors.textLight}
+                multiline
+                numberOfLines={5}
+                textAlignVertical="top"
+              />
+
+              <TouchableOpacity
+                style={[styles.attachButton, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder }]}
+                onPress={pickChatReportScreenshot}
+              >
+                <Paperclip size={20} color="#dc2626" />
+                <Text style={styles.attachButtonText}>
+                  {chatReportScreenshot ? "Change Screenshot" : "Attach Screenshot"}
+                </Text>
+              </TouchableOpacity>
+
+              {chatReportScreenshot ? (
+                <View style={styles.attachmentPreview}>
+                  <Text style={styles.attachmentText}>{chatReportScreenshot.fileName || "Screenshot attached"}</Text>
+                  <TouchableOpacity onPress={() => setChatReportScreenshot(null)}>
+                    <XIcon size={18} color="#666" />
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              <View style={styles.feedbackActions}>
+                <TouchableOpacity
+                  style={[styles.cancelFeedbackButton, { backgroundColor: themeColors.inputBackground }]}
+                  onPress={() => setShowChatReportModal(false)}
+                >
+                  <Text style={[styles.cancelFeedbackText, { color: themeColors.textSecondary }]}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.submitFeedbackButton, (!chatReportDescription.trim() || chatReportMutation.isPending) && styles.submitFeedbackButtonDisabled]}
+                  disabled={!chatReportDescription.trim() || chatReportMutation.isPending}
+                  onPress={() => chatReportMutation.mutate()}
+                >
+                  <Text style={styles.submitFeedbackText}>
+                    {chatReportMutation.isPending ? "Submitting..." : "Submit Report"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showServiceTeamModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowServiceTeamModal(false)}
+      >
+        <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.helpModalContent, { backgroundColor: themeColors.modalBackground }]}>
+            <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.detailTitle, { color: themeColors.text }]}>Join Service Team</Text>
+              <TouchableOpacity onPress={() => setShowServiceTeamModal(false)}>
+                <XIcon size={24} color={themeColors.iconDefault} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.helpBody}>
+              <Text style={[styles.helpSectionLabel, { color: themeColors.textSecondary }]}>
+                {(serviceTeamData?.countryName || serviceCountryName).toUpperCase()}
+              </Text>
+              <Text style={[styles.serviceIntroText, { color: themeColors.textSecondary }]}>
+                Take up a role or opportunity in the community. Roles are shown by country and update from the live RunNation role assignments.
+              </Text>
+
+              {isLoadingServiceProfile || isLoadingServiceRoles ? (
+                <View style={styles.helpLoadingContainer}>
+                  <ActivityIndicator size="small" color="#f97316" />
+                  <Text style={[styles.helpLoadingText, { color: themeColors.textSecondary }]}>Checking service roles...</Text>
+                </View>
+              ) : !serviceCountryCode ? (
+                <View style={styles.helpEmptyContainer}>
+                  <Text style={[styles.helpEmptyText, { color: themeColors.textLight }]}>
+                    Add your country in your profile to see local service team opportunities.
+                  </Text>
+                </View>
+              ) : serviceTeamError ? (
+                <View style={styles.helpEmptyContainer}>
+                  <Text style={[styles.helpEmptyText, { color: themeColors.textLight }]}>
+                    Could not load service roles right now.
+                  </Text>
+                </View>
+              ) : serviceTeamData?.existingRole ? (
+                <View style={[styles.serviceRoleCard, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}>
+                  <View style={styles.serviceRoleHeader}>
+                    <Text style={[styles.serviceRoleTitle, { color: themeColors.text }]}>Role already active</Text>
+                    <View style={[styles.serviceStatusPill, styles.serviceStatusFilled]}>
+                      <Text style={[styles.serviceStatusText, styles.serviceStatusTextFilled]}>Active</Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.serviceRoleDescription, { color: themeColors.textSecondary }]}>
+                    You already have a role: {serviceTeamData.existingRole.roleLabel} in {serviceTeamData.existingRole.countryName || serviceTeamData.existingRole.countryCode || serviceCountryName}.
+                  </Text>
+                </View>
+              ) : (
+                serviceTeamData?.roles.map((role) => {
+                  const available = role.status === "available";
+                  const isGlobalRole = GLOBAL_SERVICE_ROLE_NAMES.has(role.roleName);
+                  return (
+                    <View
+                      key={role.roleName}
+                      style={[styles.serviceRoleCard, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}
+                    >
+                      <View style={styles.serviceRoleHeader}>
+                        <Text style={[styles.serviceRoleTitle, { color: themeColors.text }]}>{role.label}</Text>
+                        <View
+                          style={[
+                            styles.serviceStatusPill,
+                            available && styles.serviceStatusAvailable,
+                            role.status === "filled" && styles.serviceStatusFilled,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.serviceStatusText,
+                              available && styles.serviceStatusTextAvailable,
+                              role.status === "filled" && styles.serviceStatusTextFilled,
+                            ]}
+                          >
+                            {role.statusLabel}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={[styles.serviceRoleDescription, { color: themeColors.textSecondary }]}>
+                        {role.description}
+                      </Text>
+                      {role.activities.length > 0 ? (
+                        <View style={styles.serviceActivities}>
+                          <Text style={[styles.serviceActivitiesTitle, { color: themeColors.text }]}>Activities</Text>
+                          {role.activities.map((activity) => (
+                            <Text key={activity} style={[styles.serviceActivityText, { color: themeColors.textSecondary }]}>
+                              - {activity}
+                            </Text>
+                          ))}
+                        </View>
+                      ) : null}
+                      {isGlobalRole && role.available ? (
+                        <View style={styles.serviceApplicantLinks}>
+                          <Text style={[styles.serviceActivitiesTitle, { color: themeColors.text }]}>Applicant Links (optional)</Text>
+                          <Text style={[styles.serviceRoleDescription, { color: themeColors.textSecondary }]}>
+                            Global roles are not linked to a country and are reviewed from the Super Admin portfolio.
+                          </Text>
+                          <TextInput
+                            style={[styles.serviceLinkInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                            value={serviceWebsiteUrl}
+                            onChangeText={setServiceWebsiteUrl}
+                            placeholder="Website"
+                            placeholderTextColor={themeColors.textLight}
+                            autoCapitalize="none"
+                            keyboardType="url"
+                          />
+                          <TextInput
+                            style={[styles.serviceLinkInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                            value={serviceLinkedinUrl}
+                            onChangeText={setServiceLinkedinUrl}
+                            placeholder="LinkedIn"
+                            placeholderTextColor={themeColors.textLight}
+                            autoCapitalize="none"
+                            keyboardType="url"
+                          />
+                          <TextInput
+                            style={[styles.serviceLinkInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                            value={serviceSocialUrl}
+                            onChangeText={setServiceSocialUrl}
+                            placeholder="Social page"
+                            placeholderTextColor={themeColors.textLight}
+                            autoCapitalize="none"
+                            keyboardType="url"
+                          />
+                        </View>
+                      ) : null}
+                      <TouchableOpacity
+                        style={[
+                          styles.serviceTakeRoleButton,
+                          (!role.available || requestServiceRoleMutation.isPending) && styles.serviceTakeRoleButtonDisabled,
+                        ]}
+                        disabled={!role.available || requestServiceRoleMutation.isPending}
+                        onPress={() => {
+                          if (!serviceCountryCode) return;
+                          requestServiceRoleMutation.mutate({
+                            roleName: role.roleName as any,
+                            countryCode: serviceCountryCode,
+                            websiteUrl: isGlobalRole ? serviceWebsiteUrl : null,
+                            linkedinUrl: isGlobalRole ? serviceLinkedinUrl : null,
+                            socialUrl: isGlobalRole ? serviceSocialUrl : null,
+                          });
+                        }}
+                      >
+                        {requestServiceRoleMutation.isPending ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <Text style={styles.serviceTakeRoleText}>
+                            {role.hasPendingRequest
+                              ? "Pending Approval"
+                              : role.available
+                                ? getServiceRoleButtonLabel(role.roleName, serviceTeamData?.countryName || serviceCountryName)
+                                : "Not available"}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={showFaqModal}
         animationType="slide"
         transparent={true}
@@ -1197,6 +1614,12 @@ export default function SettingsScreen() {
                 <View style={styles.helpLoadingContainer}>
                   <ActivityIndicator size="small" color="#3b82f6" />
                   <Text style={[styles.helpLoadingText, { color: themeColors.textSecondary }]}>Loading FAQs...</Text>
+                </View>
+              ) : faqError ? (
+                <View style={styles.helpEmptyContainer}>
+                  <Text style={[styles.helpEmptyText, { color: themeColors.textLight }]}>
+                    Could not load FAQ entries right now.
+                  </Text>
                 </View>
               ) : faqEntries.length === 0 ? (
                 <View style={styles.helpEmptyContainer}>
@@ -1494,6 +1917,18 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: "#10b981",
   },
+  unitTogglePill: {
+    minWidth: 48,
+    borderRadius: 999,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    alignItems: "center" as const,
+  },
+  unitToggleText: {
+    fontSize: 13,
+    fontWeight: "900" as const,
+    textTransform: "uppercase" as const,
+  },
   iconContainerActive: {
     backgroundColor: "#f97316",
   },
@@ -1505,6 +1940,32 @@ const styles = StyleSheet.create({
     flexDirection: "row" as const,
     flexWrap: "wrap" as const,
     gap: 8,
+  },
+  feedbackForm: {
+    padding: 20,
+  },
+  categoryGrid: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 8,
+    marginBottom: 16,
+  },
+  categoryButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#f5f5f5",
+  },
+  categoryButtonActive: {
+    backgroundColor: "#fee2e2",
+  },
+  categoryButtonText: {
+    fontSize: 13,
+    fontWeight: "600" as const,
+    color: "#666",
+  },
+  categoryButtonTextActive: {
+    color: "#dc2626",
   },
   feedbackCategoryChip: {
     paddingHorizontal: 12,
@@ -1537,6 +1998,10 @@ const styles = StyleSheet.create({
     minHeight: 120,
     borderWidth: 1,
     borderColor: "#e0e0e0",
+  },
+  feedbackTextArea: {
+    minHeight: 120,
+    textAlignVertical: "top" as const,
   },
   input: {
     backgroundColor: "#f5f5f5",
@@ -1942,6 +2407,101 @@ const styles = StyleSheet.create({
   helpActionText: {
     fontSize: 14,
     fontWeight: "500" as const,
+  },
+  serviceIntroText: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 14,
+  },
+  serviceRoleCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
+  },
+  serviceRoleHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    gap: 10,
+    marginBottom: 8,
+  },
+  serviceRoleTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: "700" as const,
+  },
+  serviceRoleDescription: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  serviceActivities: {
+    marginTop: 10,
+    gap: 4,
+  },
+  serviceActivitiesTitle: {
+    fontSize: 12,
+    fontWeight: "800" as const,
+    textTransform: "uppercase" as const,
+  },
+  serviceActivityText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  serviceApplicantLinks: {
+    marginTop: 12,
+    gap: 8,
+  },
+  serviceLinkInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+  },
+  serviceTakeRoleButton: {
+    marginTop: 12,
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: "center" as const,
+    backgroundColor: "#f97316",
+  },
+  serviceTakeRoleButtonDisabled: {
+    backgroundColor: "#9CA3AF",
+  },
+  serviceTakeRoleText: {
+    fontSize: 14,
+    fontWeight: "800" as const,
+    color: "#fff",
+  },
+  serviceStatusPill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: "#F3F4F6",
+  },
+  serviceStatusAvailable: {
+    backgroundColor: "#D1FAE5",
+  },
+  serviceStatusSoon: {
+    backgroundColor: "#FFF7ED",
+  },
+  serviceStatusFilled: {
+    backgroundColor: "#FEE2E2",
+  },
+  serviceStatusText: {
+    fontSize: 11,
+    fontWeight: "800" as const,
+    color: "#6B7280",
+  },
+  serviceStatusTextAvailable: {
+    color: "#047857",
+  },
+  serviceStatusTextSoon: {
+    color: "#f97316",
+  },
+  serviceStatusTextFilled: {
+    color: "#dc2626",
   },
   faqHintText: {
     fontSize: 13,

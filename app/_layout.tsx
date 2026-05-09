@@ -6,6 +6,7 @@ import { CountryNamesProvider } from "@/contexts/CountryNamesContext";
 import { SubscriptionProvider, useSubscription } from "@/contexts/SubscriptionContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
+import { DistanceUnitProvider } from "@/contexts/DistanceUnitContext";
 import { TRPCProvider } from "../lib/trpc";
 import * as SplashScreen from "expo-splash-screen";
 import * as Linking from "expo-linking";
@@ -139,6 +140,7 @@ function NavigationGuard() {
       currentSegment === "participants" ||
       currentSegment === "medal-list" ||
       currentSegment === "policy" ||
+      currentSegment === "about-us" ||
       currentSegment === "subscription";
 
     if (user) {
@@ -195,6 +197,7 @@ function RootLayoutNav() {
         <Stack.Screen name="participants" options={{ title: "Participants" }} />
         <Stack.Screen name="medal-list" options={{ title: "Medal List" }} />
         <Stack.Screen name="policy" options={{ presentation: "modal", title: "Policy & Terms" }} />
+        <Stack.Screen name="about-us" options={{ presentation: "modal", title: "About Us" }} />
         <Stack.Screen name="subscription" options={{ presentation: "modal", title: "Subscription" }} />
         <Stack.Screen name="+not-found" />
       </Stack>
@@ -251,9 +254,11 @@ export default function RootLayout() {
           <ThemeProvider>
             <AuthProvider>
               <SubscriptionProvider>
-                <NotificationProvider>
-                  <RootLayoutNav />
-                </NotificationProvider>
+                <DistanceUnitProvider>
+                  <NotificationProvider>
+                    <RootLayoutNav />
+                  </NotificationProvider>
+                </DistanceUnitProvider>
               </SubscriptionProvider>
             </AuthProvider>
           </ThemeProvider>

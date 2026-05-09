@@ -34,7 +34,7 @@ export default publicProcedure
 
     const endTime = new Date();
     const startTime = new Date(endTime.getTime() - totalMinutes * 60 * 1000);
-    const calculatedPace = totalMinutes > 0 ? distanceKm / (totalMinutes / 60) : 0;
+    const calculatedPace = totalMinutes > 0 && distanceKm > 0 ? totalMinutes / distanceKm : 0;
 
     const { error: insertError } = await ctx.supabase
       .from("activities")
@@ -45,7 +45,7 @@ export default publicProcedure
         distance_km: distanceKm,
         start_time: startTime.toISOString().split("T")[1].split(".")[0],
         end_time: endTime.toISOString().split("T")[1].split(".")[0],
-        pace_km_h: calculatedPace,
+        pace_min_per_km: calculatedPace,
       });
 
     if (insertError) {

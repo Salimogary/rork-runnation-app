@@ -7,6 +7,14 @@ const MANAGED_ROLE_NAMES = [
   "country_coordinator",
   "club_coordinator",
   "event_organizer",
+  "shop_manager",
+  "junior_runners_club_coordinator",
+  "golden_age_runners_club_coordinator",
+  "treadmill_runners_club_coordinator",
+  "para_runners_club_coordinator",
+  "magazine_columnist_fitness_coach",
+  "magazine_columnist_sports_journalist",
+  "magazine_columnist_motivation_speaker",
 ] as const;
 
 function getRoleName(row: any): string | null {
@@ -34,8 +42,8 @@ export default publicProcedure.query(async ({ ctx }) => {
         .order("created_at", { ascending: false }),
       ctx.supabase
         .from("admin_invites")
-        .select("invite_id, email, role_id, country_code, club_id, organizer_id, invited_by, accepted_by, status, created_at, expires_at, roles(role_name)")
-        .eq("status", "pending")
+        .select("invite_id, email, role_id, country_code, club_id, organizer_id, applicant_website_url, applicant_linkedin_url, applicant_social_url, invited_by, accepted_by, status, created_at, expires_at, roles(role_name)")
+        .in("status", ["pending", "revoked"])
         .order("created_at", { ascending: false }),
       ctx.supabase
         .from("countries")
@@ -120,6 +128,9 @@ export default publicProcedure.query(async ({ ctx }) => {
       clubName: invite.club_id ? clubMap.get(invite.club_id)?.club_name ?? null : null,
       organizerId: invite.organizer_id ?? null,
       organizerName: invite.organizer_id ? organizerMap.get(invite.organizer_id)?.organizer_name ?? null : null,
+      websiteUrl: invite.applicant_website_url ?? null,
+      linkedinUrl: invite.applicant_linkedin_url ?? null,
+      socialUrl: invite.applicant_social_url ?? null,
       status: invite.status,
       createdAt: invite.created_at,
       expiresAt: invite.expires_at,

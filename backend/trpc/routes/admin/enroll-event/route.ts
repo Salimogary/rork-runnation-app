@@ -210,12 +210,18 @@ export default publicProcedure
 
     const { data: event } = await ctx.supabase
       .from("events")
-      .select("event_id, country, country_code, is_virtual, entry, payment_details")
+      .select("event_id, country, country_code, is_virtual, entry, payment_details, organizer_payment_link, runnation_payment_link_enabled, registration_closes_at")
       .eq("event_id", input.eventId)
       .maybeSingle();
 
     if (!event) {
       throw new Error("Event not found");
+    }
+
+    const registrationCloseDate = String(event.registration_closes_at || "").slice(0, 10);
+    const today = new Date().toISOString().slice(0, 10);
+    if (registrationCloseDate && today > registrationCloseDate) {
+      throw new Error("Registration for this event is closed.");
     }
 
     const { data: userProfile, error: userProfileError } = await ctx.supabase
@@ -319,6 +325,8 @@ export default publicProcedure
         mode: "payment_required",
         message: "Your event payment will be reviewed before you are added to the participant list.",
         paymentDetails: event.payment_details || null,
+        organizerPaymentLink: event.organizer_payment_link || null,
+        runnationPaymentLinkEnabled: event.runnation_payment_link_enabled === true,
         enrollment: data,
       };
     }

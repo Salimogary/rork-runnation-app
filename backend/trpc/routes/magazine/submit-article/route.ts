@@ -5,15 +5,12 @@ import { requireRegistrationOwner } from "../../../rbac";
 
 const MAGAZINE_BUCKET = "magazine";
 
+const countWords = (value: string) => value.trim().split(/\s+/).filter(Boolean).length;
+const isColumnCategory = (value: string) => value.trim().toLowerCase().includes("column");
+
 const getExtensionFromMime = (mimeType?: string | null) => {
   if (!mimeType) return "bin";
-  if (mimeType.includes("pdf")) return "pdf";
-  if (mimeType.includes("wordprocessingml")) return "docx";
-  if (mimeType.includes("msword")) return "doc";
   if (mimeType.includes("plain")) return "txt";
-  if (mimeType.includes("jpeg")) return "jpg";
-  if (mimeType.includes("png")) return "png";
-  if (mimeType.includes("webp")) return "webp";
   return mimeType.split("/")[1]?.replace(/[^a-z0-9]/gi, "").toLowerCase() || "bin";
 };
 
@@ -32,7 +29,11 @@ export default publicProcedure
       title: z.string().trim().min(6).max(140),
       category: z.string().trim().min(2).max(60),
       pitch: z.string().trim().min(20).max(700),
-      body: z.string().trim().min(80).max(6000),
+      body: z
+        .string()
+        .trim()
+        .min(1),
+      externalLink: z.string().trim().url().nullable().optional(),
       attachmentBase64: z.string().nullable(),
       attachmentName: z.string().trim().nullable(),
       attachmentType: z.string().trim().nullable(),
@@ -58,6 +59,20 @@ export default publicProcedure
       errorMessage: "You already submitted a story with that title recently.",
     });
 
+    const bodyWords = countWords(input.body);
+    const isColumn = isColumnCategory(input.category);
+    const isValidWordCount = isColumn
+      ? bodyWords >= 250 && bodyWords <= 300
+      : bodyWords >= 150 && bodyWords <= 250;
+
+    if (!isValidWordCount) {
+      throw new Error(
+        isColumn
+          ? "Column body must be between 250 and 300 words."
+          : "Article body must be between 150 and 250 words."
+      );
+    }
+
     const { data: profile } = await ctx.supabase
       .from("profiles")
       .select("profile_id")
@@ -68,6 +83,10 @@ export default publicProcedure
     let attachmentPath: string | null = null;
 
     if (input.attachmentBase64 && input.attachmentName) {
+      if (input.attachmentType && !input.attachmentType.includes("plain")) {
+        throw new Error("Please upload a plain text .txt file only.");
+      }
+
       const fileName = safeFileName(input.attachmentName, input.attachmentType);
       attachmentPath = `article-submissions/${input.registrationId}/${Date.now()}-${fileName}`;
       const { error: uploadError } = await ctx.supabase.storage
@@ -98,9 +117,8 @@ export default publicProcedure
         category: input.category.trim(),
         pitch: input.pitch.trim(),
         body: input.body.trim(),
+        external_link: input.externalLink?.trim() || null,
         attachment_url: attachmentUrl,
-        attachment_name: input.attachmentName || null,
-        attachment_type: input.attachmentType || null,
         status: "submitted",
       })
       .select("submission_id, status, created_at")

@@ -1,230 +1,334 @@
 import React, { useMemo, useState } from "react";
-import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { Stack, useRouter } from "expo-router";
-import { BookOpen, Camera, Edit3, Star } from "lucide-react-native";
-import { Image } from "expo-image";
-import { LinearGradient } from "expo-linear-gradient";
-import { trpc } from "@/lib/trpc";
 import {
-  MagazineArticleCard,
-  MagazineIssueCard,
-  MagazineSectionHeader,
-} from "@/components/magazine/MagazineComponents";
-import { getArticlesForIssue, getLatestIssue, magazineIssues } from "@/lib/magazine-data";
+  ActivityIndicator,
+  Linking,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { Image } from "expo-image";
+import { Stack, useRouter } from "expo-router";
+import { ExternalLink, ImagePlus, PenLine } from "lucide-react-native";
+
+import { colors as appColors } from "@/constants/colors";
 import { useTheme } from "@/contexts/ThemeContext";
+import { trpc } from "@/lib/trpc";
 
-type MagazineTab =
-  | "runner-spotlight"
-  | "club-feature"
-  | "community-story"
-  | "fitness-coach"
-  | "events"
-  | "gear-pick"
-  | "gallery";
+type MagazinePage = "News" | "Events" | "Community" | "Columns" | "Gallery";
 
-const ISSUE_TABS: { key: MagazineTab; label: string; subtitle: string }[] = [
-  { key: "runner-spotlight", label: "Runner Spotlight", subtitle: "2 articles" },
-  { key: "club-feature", label: "Club Feature", subtitle: "2 articles" },
-  { key: "community-story", label: "Community Story", subtitle: "2 user picks" },
-  { key: "fitness-coach", label: "Fitness Coach", subtitle: "1 column" },
-  { key: "events", label: "Events", subtitle: "Preview + review" },
-  { key: "gear-pick", label: "Gear Pick", subtitle: "1 pick" },
-  { key: "gallery", label: "Gallery", subtitle: "Approved photos" },
-];
+type MagazineArticle = {
+  article_id: string;
+  registration_id: string | null;
+  page: MagazinePage;
+  author: string;
+  article_date: string;
+  title: string;
+  body: string;
+  picture_link: string | null;
+  external_link: string | null;
+  created_at: string;
+};
+
+const pages: MagazinePage[] = ["News", "Events", "Community", "Columns", "Gallery"];
+
+function excerpt(text: string, limit = 180) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= limit) return normalized;
+  return `${normalized.slice(0, limit).trim()}...`;
+}
+
+function ArticleTitle({ children, large = false }: { children: string; large?: boolean }) {
+  return (
+    <Text numberOfLines={2} style={large ? styles.leadTitle : styles.articleTitle}>
+      {children}
+    </Text>
+  );
+}
+
+function ArticleExcerpt({ children, lines }: { children: string; lines?: number }) {
+  return (
+    <Text numberOfLines={lines} style={styles.bodyText}>
+      {children}
+    </Text>
+  );
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function ArticleImage({ uri, large = false }: { uri?: string | null; large?: boolean }) {
+  if (!uri) {
+    return (
+      <View style={[styles.placeholderImage, large && styles.largeImage]}>
+        <Text style={styles.placeholderText}>RunNation</Text>
+      </View>
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={[styles.articleImage, large && styles.largeImage]}
+      contentFit="cover"
+      transition={180}
+    />
+  );
+}
+
+function ReadLink({ url }: { url?: string | null }) {
+  if (!url) return null;
+
+  return (
+    <TouchableOpacity style={styles.readLink} onPress={() => Linking.openURL(url)} activeOpacity={0.8}>
+      <Text style={styles.readLinkText}>Open link</Text>
+      <ExternalLink size={14} color={appColors.primary} />
+    </TouchableOpacity>
+  );
+}
+
+function MetaLine({ article }: { article: MagazineArticle }) {
+  return (
+    <Text style={styles.metaLine}>
+      {article.author} · {formatDate(article.article_date || article.created_at)}
+    </Text>
+  );
+}
+
+function NewsLayout({ articles }: { articles: MagazineArticle[] }) {
+  if (!articles.length) return <EmptyPage page="News" />;
+
+  return (
+    <View style={styles.section}>
+      {articles.map((article) => (
+        <View key={article.article_id} style={styles.articleCard}>
+          <ArticleImage uri={article.picture_link} large />
+          <View style={styles.articleCardText}>
+            <MetaLine article={article} />
+            <ArticleTitle large>{article.title}</ArticleTitle>
+            <ArticleExcerpt>{article.body}</ArticleExcerpt>
+            <ReadLink url={article.external_link} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function EventsLayout({ articles }: { articles: MagazineArticle[] }) {
+  if (!articles.length) return <EmptyPage page="Events" />;
+
+  return (
+    <View style={styles.section}>
+      {articles.map((article) => (
+        <View key={article.article_id} style={styles.articleCard}>
+          <ArticleImage uri={article.picture_link} large />
+          <View style={styles.articleCardText}>
+            <MetaLine article={article} />
+            <ArticleTitle large>{article.title}</ArticleTitle>
+            <ArticleExcerpt>{article.body}</ArticleExcerpt>
+            <ReadLink url={article.external_link} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function CommunityLayout({ articles }: { articles: MagazineArticle[] }) {
+  if (!articles.length) return <EmptyPage page="Community" />;
+
+  return (
+    <View style={styles.section}>
+      {articles.map((article) => (
+        <View key={article.article_id} style={styles.communityCard}>
+          <ArticleImage uri={article.picture_link} large />
+          <View style={styles.communityHeader}>
+            <View style={styles.communityMeta}>
+              <ArticleTitle large>{article.title}</ArticleTitle>
+              <MetaLine article={article} />
+            </View>
+          </View>
+          <Text style={styles.quoteText}>{article.body}</Text>
+          <ReadLink url={article.external_link} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function ColumnsLayout({ articles }: { articles: MagazineArticle[] }) {
+  if (!articles.length) return <EmptyPage page="Columns" />;
+
+  return (
+    <View style={styles.section}>
+      {articles.map((article) => (
+        <View key={article.article_id} style={styles.columnCard}>
+          <View style={styles.columnAccent} />
+          <ArticleImage uri={article.picture_link} large />
+          <View style={styles.columnBody}>
+            <Text style={styles.columnLabel}>By {article.author}</Text>
+            <ArticleTitle large>{article.title}</ArticleTitle>
+            <Text style={styles.metaLine}>{formatDate(article.article_date || article.created_at)}</Text>
+            <ArticleExcerpt>{article.body}</ArticleExcerpt>
+            <ReadLink url={article.external_link} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function GalleryLayout({ articles }: { articles: MagazineArticle[] }) {
+  if (!articles.length) return <EmptyPage page="Gallery" />;
+
+  return (
+    <View style={styles.galleryFeed}>
+      {articles.map((article) => (
+        <View key={article.article_id} style={styles.galleryCard}>
+          {article.picture_link ? (
+            <Image source={{ uri: article.picture_link }} style={styles.galleryImage} contentFit="cover" transition={180} />
+          ) : (
+            <View style={styles.galleryImagePlaceholder}>
+              <Text style={styles.placeholderText}>RunNation</Text>
+            </View>
+          )}
+          <View style={styles.galleryText}>
+            <ArticleTitle>{article.title}</ArticleTitle>
+            <Text numberOfLines={1} style={styles.metaLine}>{article.author}</Text>
+            <ArticleExcerpt lines={2}>{excerpt(article.body, 80)}</ArticleExcerpt>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function EmptyPage({ page }: { page: MagazinePage }) {
+  return (
+    <View style={styles.emptyState}>
+      <Text style={styles.emptyTitle}>No {page.toLowerCase()} articles yet</Text>
+      <Text style={styles.emptyText}>Approved stories will appear here, newest first.</Text>
+    </View>
+  );
+}
 
 export default function MagazineScreen() {
   const router = useRouter();
-  const { colors } = useTheme();
-  const [activeTab, setActiveTab] = useState<MagazineTab>("runner-spotlight");
-  const [refreshing, setRefreshing] = useState(false);
-  const latestIssue = getLatestIssue();
-  const { data: pictorials = [], refetch: refetchPictorials } = trpc.magazine.getPictorials.useQuery(undefined, {
-    retry: 1,
-  });
-  const thisVolume = getArticlesForIssue(latestIssue.slug);
-  const pictureOfWeek = pictorials.find((item: any) => item.is_picture_of_week) ?? pictorials[0];
+  const { isDark } = useTheme();
+  const [selectedPage, setSelectedPage] = useState<MagazinePage>("News");
 
-  const activeArticles = useMemo(() => {
-    if (activeTab === "events") {
-      return thisVolume
-        .filter((article) => article.categorySlug === "event-preview" || article.categorySlug === "event-review")
-        .sort((a, b) => b.publishDate.localeCompare(a.publishDate))
-        .slice(0, 2);
-    }
+  const articlesQuery = trpc.magazine.getArticles.useQuery({ limit: 80 });
 
-    if (activeTab === "gallery") return [];
+  const articlesByPage = useMemo(() => {
+    const grouped = new Map<MagazinePage, MagazineArticle[]>();
+    pages.forEach((page) => grouped.set(page, []));
 
-    const limitByTab: Record<Exclude<MagazineTab, "events" | "gallery">, number> = {
-      "runner-spotlight": 2,
-      "club-feature": 2,
-      "community-story": 2,
-      "fitness-coach": 1,
-      "gear-pick": 1,
-    };
+    ((articlesQuery.data ?? []) as MagazineArticle[]).forEach((article) => {
+      if (pages.includes(article.page)) {
+        grouped.get(article.page)?.push(article);
+      }
+    });
 
-    return thisVolume
-      .filter((article) => article.categorySlug === activeTab)
-      .sort((a, b) => b.publishDate.localeCompare(a.publishDate))
-      .slice(0, limitByTab[activeTab]);
-  }, [activeTab, thisVolume]);
+    pages.forEach((page) => {
+      grouped.get(page)?.sort((a, b) => {
+        const aDate = new Date(a.article_date || a.created_at).getTime();
+        const bDate = new Date(b.article_date || b.created_at).getTime();
+        return bDate - aDate;
+      });
+    });
 
-  const handleRefresh = () => {
-    setRefreshing(true);
-    void refetchPictorials().finally(() => setRefreshing(false));
+    return grouped;
+  }, [articlesQuery.data]);
+
+  const selectedArticles = articlesByPage.get(selectedPage) ?? [];
+
+  const renderSelectedPage = () => {
+    if (selectedPage === "News") return <NewsLayout articles={selectedArticles} />;
+    if (selectedPage === "Events") return <EventsLayout articles={selectedArticles} />;
+    if (selectedPage === "Community") return <CommunityLayout articles={selectedArticles} />;
+    if (selectedPage === "Columns") return <ColumnsLayout articles={selectedArticles} />;
+    return <GalleryLayout articles={selectedArticles} />;
   };
 
+  const submitAction =
+    selectedPage === "Community"
+      ? {
+          icon: <PenLine size={20} color="#FFFFFF" />,
+          label: "Submit community article",
+          route: "/magazine/submit" as const,
+        }
+      : selectedPage === "Gallery"
+        ? {
+            icon: <ImagePlus size={20} color="#FFFFFF" />,
+            label: "Submit gallery photo",
+            route: "/magazine/pictorial-submit" as const,
+          }
+        : null;
+
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Stack.Screen
-        options={{
-          title: "Magazine",
-          headerRight: () => (
-            <TouchableOpacity onPress={() => router.push("/magazine/submit" as any)} style={styles.headerSubmitButton}>
-              <Edit3 size={18} color="#fff" />
-            </TouchableOpacity>
-          ),
-        }}
-      />
+    <View style={[styles.container, isDark && styles.darkContainer]}>
+      <Stack.Screen options={{ title: "Magazine" }} />
 
       <ScrollView
-        style={styles.scroll}
         contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={articlesQuery.isFetching} onRefresh={() => articlesQuery.refetch()} />
+        }
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />}
       >
-        <View style={styles.pageIntro}>
-          <View style={[styles.magazineIcon, { backgroundColor: colors.cardBackground }]}>
-            <BookOpen size={24} color={colors.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.eyebrow, { color: colors.primary }]}>Biweekly Editorial</Text>
-            <Text style={[styles.pageTitle, { color: colors.text }]}>RunNation Magazine</Text>
-            <Text style={[styles.pageSubtitle, { color: colors.textSecondary }]}>
-              A cover-led issue with runner stories, clubs, coach notes, events, gear, and community pictorials.
-            </Text>
-          </View>
+        <View style={styles.header}>
+          <Text style={styles.brand}>The Running Post</Text>
+          {submitAction ? (
+            <TouchableOpacity
+              accessibilityLabel={submitAction.label}
+              activeOpacity={0.85}
+              onPress={() => router.push(submitAction.route)}
+              style={styles.headerIconButton}
+            >
+              {submitAction.icon}
+            </TouchableOpacity>
+          ) : null}
         </View>
 
-        <TouchableOpacity style={styles.coverPage} activeOpacity={0.9} onPress={() => router.push(`/magazine/${latestIssue.slug}` as any)}>
-          <Image source={{ uri: pictureOfWeek?.photo_url || latestIssue.coverImageUrl }} style={styles.coverImage} contentFit="cover" transition={250} />
-          <LinearGradient colors={["rgba(0,0,0,0.08)", "rgba(0,0,0,0.82)"]} style={styles.coverOverlay}>
-            <Image source={require("../../assets/images/adaptive-icon.png")} style={styles.coverLogo} contentFit="contain" />
-            <View style={styles.coverTopRow}>
-              <Text style={styles.coverKicker}>RunNation Magazine</Text>
-              <Text style={styles.coverIssue}>
-                Vol. {latestIssue.volumeNumber} / Issue {latestIssue.issueNumber}
-              </Text>
-            </View>
-            <View>
-              <Text style={styles.coverDate}>
-                {new Date(latestIssue.publicationDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
-              </Text>
-              <Text style={styles.coverTitle}>{latestIssue.title}</Text>
-              <Text style={styles.coverSubtitle}>{latestIssue.subtitle}</Text>
-              {pictureOfWeek ? (
-                <Text style={styles.coverCredit}>
-                  Cover: Picture of the Week / {[pictureOfWeek.club, pictureOfWeek.country].filter(Boolean).join(" / ")}
-                </Text>
-              ) : null}
-            </View>
-          </LinearGradient>
-        </TouchableOpacity>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabRow}>
-          {ISSUE_TABS.map((tab) => {
-            const isActive = activeTab === tab.key;
+        <View style={styles.tabs}>
+          {pages.map((page) => {
+            const isActive = selectedPage === page;
             return (
               <TouchableOpacity
-                key={tab.key}
-                style={[
-                  styles.issueTab,
-                  {
-                    backgroundColor: isActive ? colors.primary : colors.cardBackground,
-                    borderColor: isActive ? colors.primary : colors.border,
-                  },
-                ]}
-                onPress={() => setActiveTab(tab.key)}
-                activeOpacity={0.78}
+                key={page}
+                style={[styles.tab, isActive && styles.activeTab]}
+                onPress={() => setSelectedPage(page)}
+                activeOpacity={0.85}
               >
-                <Text style={[styles.issueTabLabel, { color: isActive ? "#fff" : colors.text }]}>{tab.label}</Text>
-                <Text style={[styles.issueTabSubtitle, { color: isActive ? "rgba(255,255,255,0.78)" : colors.textSecondary }]}>{tab.subtitle}</Text>
+                <Text style={[styles.tabText, isActive && styles.activeTabText]}>{page}</Text>
               </TouchableOpacity>
             );
           })}
-        </ScrollView>
-
-        {activeTab === "gallery" ? (
-          <>
-            <MagazineSectionHeader title="Event Pictorial Gallery" subtitle="All approved community-submitted pictures." />
-            {pictorials.length === 0 ? (
-              <View style={[styles.pictorialEmpty, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-                <Camera size={26} color={colors.primary} />
-                <Text style={[styles.pictorialTitle, { color: colors.text }]}>No approved pictures yet</Text>
-                <Text style={[styles.pictorialCaption, { color: colors.textSecondary }]}>Approved event pictorials will appear here.</Text>
-              </View>
-            ) : (
-              <View style={styles.galleryGrid}>
-                {pictorials.map((item: any) => (
-                  <View key={item.pictorial_id} style={[styles.galleryCard, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-                    <Image source={{ uri: item.photo_url }} style={styles.galleryImage} contentFit="cover" transition={200} />
-                    <View style={styles.galleryBody}>
-                      {item.is_picture_of_week ? (
-                        <View style={styles.pictureOfWeekRow}>
-                          <Star size={12} color={colors.primary} fill={colors.primary} />
-                          <Text style={[styles.pictureOfWeekText, { color: colors.primary }]}>Picture of the Week</Text>
-                        </View>
-                      ) : null}
-                      <Text style={[styles.galleryTitle, { color: colors.text }]} numberOfLines={1}>{item.event_name}</Text>
-                      <Text style={[styles.pictorialMeta, { color: colors.textSecondary }]} numberOfLines={1}>
-                        {[item.club, item.country, item.event_date].filter(Boolean).join(" / ")}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )}
-          </>
-        ) : (
-          <>
-            <MagazineSectionHeader
-              title={ISSUE_TABS.find((tab) => tab.key === activeTab)?.label ?? "This Issue"}
-              subtitle={ISSUE_TABS.find((tab) => tab.key === activeTab)?.subtitle}
-            />
-            {activeArticles.map((article) => (
-              <MagazineArticleCard
-                key={article.articleId}
-                article={article}
-                onPress={() => router.push(`/magazine/article/${article.slug}` as any)}
-              />
-            ))}
-          </>
-        )}
-
-        <TouchableOpacity
-          style={[styles.submitPictorialButton, { backgroundColor: colors.primary }]}
-          onPress={() => router.push("/magazine/pictorial-submit" as any)}
-          activeOpacity={0.82}
-        >
-          <Camera size={18} color="#fff" />
-          <Text style={styles.submitPictorialText}>Submit Event Pictorial</Text>
-        </TouchableOpacity>
-
-        <View style={styles.footer}>
-          <MagazineSectionHeader title="Previous Issues" subtitle="Issue-based publishing is ready for a biweekly rhythm." />
-          {magazineIssues.slice(1).map((issue) => (
-            <MagazineIssueCard key={issue.issueId} issue={issue} onPress={() => router.push(`/magazine/${issue.slug}` as any)} />
-          ))}
-          <TouchableOpacity
-            style={[styles.submitStoryCard, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}
-            onPress={() => router.push("/magazine/submit" as any)}
-            activeOpacity={0.82}
-          >
-            <Text style={[styles.submitStoryTitle, { color: colors.text }]}>Have a RunNation story?</Text>
-            <Text style={[styles.submitStoryText, { color: colors.textSecondary }]}>
-              Submit a runner spotlight, club story, wellness piece, or event idea for admin review.
-            </Text>
-          </TouchableOpacity>
         </View>
+
+        {articlesQuery.isLoading ? (
+          <View style={styles.loadingState}>
+            <ActivityIndicator color={appColors.primary} />
+            <Text style={styles.emptyText}>Loading magazine...</Text>
+          </View>
+        ) : articlesQuery.error ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Magazine could not load</Text>
+            <Text style={styles.emptyText}>Pull down to try again.</Text>
+          </View>
+        ) : (
+          renderSelectedPage()
+        )}
       </ScrollView>
     </View>
   );
@@ -233,232 +337,251 @@ export default function MagazineScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: "#FFFFFF",
   },
-  scroll: {
-    flex: 1,
+  darkContainer: {
+    backgroundColor: "#FFFFFF",
   },
   content: {
-    padding: 18,
-    paddingBottom: 36,
+    paddingBottom: 28,
   },
-  headerSubmitButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.2)",
+  header: {
     alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-  pageIntro: {
     flexDirection: "row",
-    gap: 14,
-    alignItems: "flex-start",
-    marginBottom: 18,
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 2,
   },
-  magazineIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 18,
+  brand: {
+    color: "#111827",
+    fontSize: 27,
+    fontWeight: "800",
+    letterSpacing: 0,
+  },
+  headerIconButton: {
     alignItems: "center",
+    backgroundColor: appColors.primary,
+    borderRadius: 8,
+    height: 40,
     justifyContent: "center",
+    width: 40,
   },
-  eyebrow: {
-    fontSize: 12,
-    textTransform: "uppercase",
-    letterSpacing: 1.2,
-    fontWeight: "900",
+  tabs: {
+    alignItems: "flex-end",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    paddingTop: 6,
   },
-  pageTitle: {
-    fontSize: 30,
-    lineHeight: 34,
-    fontWeight: "900",
-    letterSpacing: -0.8,
-    marginTop: 2,
+  tab: {
+    alignItems: "center",
+    borderBottomColor: "transparent",
+    borderBottomWidth: 3,
+    flex: 1,
+    paddingBottom: 6,
+    paddingHorizontal: 1,
   },
-  pageSubtitle: {
-    fontSize: 14,
-    lineHeight: 20,
+  activeTab: {
+    borderBottomColor: appColors.primary,
+  },
+  tabText: {
+    color: "#111827",
+    fontSize: 13,
+    fontWeight: "800",
+    letterSpacing: 0,
+    textAlign: "center",
+  },
+  activeTabText: {
+    color: "#111827",
+  },
+  section: {
+    gap: 18,
+    paddingHorizontal: 20,
+  },
+  articleCard: {
+    backgroundColor: "#F9FAFB",
+    borderColor: "#E5E7EB",
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  articleCardText: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 12,
+  },
+  articleImage: {
+    backgroundColor: "#E5E7EB",
+    borderRadius: 8,
+    height: 116,
+    width: 116,
+  },
+  largeImage: {
+    borderRadius: 0,
+    height: 420,
+    width: "100%",
+  },
+  placeholderImage: {
+    alignItems: "center",
+    backgroundColor: "#F3F4F6",
+    borderRadius: 8,
+    height: 116,
+    justifyContent: "center",
+    width: 116,
+  },
+  placeholderText: {
+    color: appColors.primary,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  leadTitle: {
+    color: "#111827",
+    fontSize: 19,
+    fontWeight: "800",
+    lineHeight: 24,
+    marginTop: 4,
+  },
+  articleTitle: {
+    color: "#111827",
+    fontSize: 16,
+    fontWeight: "800",
+    lineHeight: 21,
+  },
+  bodyText: {
+    color: "#4B5563",
+    fontSize: 13,
+    lineHeight: 19,
     marginTop: 5,
   },
-  coverPage: {
-    height: 470,
-    borderRadius: 32,
-    overflow: "hidden",
-    marginBottom: 18,
-  },
-  coverImage: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  coverOverlay: {
-    flex: 1,
-    justifyContent: "space-between",
-    padding: 22,
-  },
-  coverLogo: {
-    position: "absolute",
-    top: 20,
-    right: 20,
-    width: 62,
-    height: 62,
-    opacity: 0.34,
-  },
-  coverTopRow: {
-    gap: 8,
-  },
-  coverKicker: {
-    color: "rgba(255,255,255,0.82)",
+  metaLine: {
+    color: "#6B7280",
     fontSize: 12,
-    fontWeight: "900",
-    letterSpacing: 1.4,
-    textTransform: "uppercase",
-  },
-  coverIssue: {
-    alignSelf: "flex-start",
-    color: "#fff",
-    backgroundColor: "rgba(255,255,255,0.18)",
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: 999,
-    fontSize: 12,
-    fontWeight: "800",
-    overflow: "hidden",
-  },
-  coverDate: {
-    color: "rgba(255,255,255,0.86)",
-    fontSize: 13,
-    fontWeight: "800",
-    marginBottom: 8,
-  },
-  coverTitle: {
-    color: "#fff",
-    fontSize: 38,
-    lineHeight: 40,
-    fontWeight: "900",
-    letterSpacing: -1,
-  },
-  coverSubtitle: {
-    color: "rgba(255,255,255,0.9)",
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: 10,
-  },
-  coverCredit: {
-    alignSelf: "flex-start",
-    color: "rgba(255,255,255,0.9)",
-    backgroundColor: "rgba(0,0,0,0.25)",
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 999,
-    fontSize: 11,
-    fontWeight: "800",
-    marginTop: 14,
-    overflow: "hidden",
-  },
-  tabRow: {
-    gap: 10,
-    paddingBottom: 24,
-  },
-  issueTab: {
-    borderWidth: 1,
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    minWidth: 142,
-  },
-  issueTabLabel: {
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  issueTabSubtitle: {
-    fontSize: 11,
     fontWeight: "700",
-    marginTop: 3,
   },
-  footer: {
-    marginTop: 14,
-  },
-  submitStoryCard: {
-    borderWidth: 1,
-    borderRadius: 22,
-    padding: 18,
-    marginTop: 16,
-  },
-  submitStoryTitle: {
-    fontSize: 18,
-    fontWeight: "900",
-    marginBottom: 6,
-  },
-  submitStoryText: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  galleryGrid: {
+  readLink: {
+    alignItems: "center",
+    alignSelf: "flex-start",
     flexDirection: "row",
-    flexWrap: "wrap",
+    gap: 5,
+    marginTop: 8,
+  },
+  readLinkText: {
+    color: appColors.primary,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  rowArticle: {
+    borderBottomColor: "#E5E7EB",
+    borderBottomWidth: 1,
+    flexDirection: "row",
     gap: 12,
-    marginBottom: 16,
+    minHeight: 138,
+    paddingBottom: 14,
+  },
+  rowBody: {
+    flex: 1,
+  },
+  communityCard: {
+    backgroundColor: "#F9FAFB",
+    borderColor: "#E5E7EB",
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: "hidden",
+    paddingBottom: 12,
+  },
+  communityHeader: {
+    flexDirection: "row",
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+  },
+  communityMeta: {
+    flex: 1,
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  quoteText: {
+    color: "#111827",
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 6,
+    paddingHorizontal: 12,
+  },
+  columnCard: {
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E5E7EB",
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  columnAccent: {
+    backgroundColor: appColors.primary,
+    height: 6,
+    width: "100%",
+  },
+  columnBody: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  columnLabel: {
+    color: appColors.primary,
+    fontSize: 12,
+    fontWeight: "800",
+    marginBottom: 2,
+  },
+  galleryFeed: {
+    gap: 16,
+    paddingHorizontal: 20,
   },
   galleryCard: {
-    width: "48%",
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E5E7EB",
+    borderRadius: 8,
     borderWidth: 1,
-    borderRadius: 20,
+    minHeight: 580,
     overflow: "hidden",
   },
   galleryImage: {
+    backgroundColor: "#E5E7EB",
+    height: 520,
     width: "100%",
-    height: 132,
   },
-  galleryBody: {
-    padding: 10,
-    gap: 4,
-  },
-  pictureOfWeekRow: {
-    flexDirection: "row",
+  galleryImagePlaceholder: {
     alignItems: "center",
-    gap: 6,
+    backgroundColor: "#F3F4F6",
+    height: 520,
+    justifyContent: "center",
+    width: "100%",
   },
-  pictureOfWeekText: {
-    fontSize: 12,
-    fontWeight: "900",
-    textTransform: "uppercase",
-    letterSpacing: 0.7,
+  galleryText: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
-  pictorialTitle: {
+  emptyState: {
+    alignItems: "center",
+    marginHorizontal: 20,
+    padding: 28,
+  },
+  loadingState: {
+    alignItems: "center",
+    gap: 12,
+    marginHorizontal: 20,
+    padding: 28,
+  },
+  emptyTitle: {
+    color: "#111827",
     fontSize: 18,
-    fontWeight: "900",
+    fontWeight: "800",
+    textAlign: "center",
   },
-  pictorialMeta: {
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  galleryTitle: {
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  pictorialCaption: {
+  emptyText: {
+    color: "#6B7280",
     fontSize: 14,
     lineHeight: 20,
-  },
-  pictorialEmpty: {
-    borderWidth: 1,
-    borderRadius: 24,
-    padding: 18,
-    gap: 8,
-    marginBottom: 12,
-  },
-  submitPictorialButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 9,
-    borderRadius: 16,
-    paddingVertical: 14,
-    marginBottom: 24,
-  },
-  submitPictorialText: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "900",
+    marginTop: 6,
+    textAlign: "center",
   },
 });

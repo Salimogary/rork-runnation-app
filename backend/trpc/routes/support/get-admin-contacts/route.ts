@@ -25,6 +25,21 @@ function roleLabel(roleName: string) {
   }
 }
 
+const SUPPORT_ROLE_NAMES = new Set(["super_admin", "country_admin", "country_coordinator"]);
+
+function supportRolePriority(roleName: string) {
+  switch (roleName) {
+    case "super_admin":
+      return 0;
+    case "country_admin":
+      return 1;
+    case "country_coordinator":
+      return 2;
+    default:
+      return 99;
+  }
+}
+
 export default publicProcedure.query(async ({ ctx }) => {
   let actorCountryCode: string | null = null;
 
@@ -59,7 +74,7 @@ export default publicProcedure.query(async ({ ctx }) => {
     .map((row: any) => {
       const roleSource = Array.isArray(row.roles) ? row.roles[0] : row.roles;
       const roleName = roleSource?.role_name as string | undefined;
-      if (!roleName || roleName === "club_coordinator" || roleName === "user") {
+      if (!roleName || !SUPPORT_ROLE_NAMES.has(roleName)) {
         return null;
       }
       return {
@@ -120,7 +135,7 @@ export default publicProcedure.query(async ({ ctx }) => {
   const registrationById = new Map((registrations ?? []).map((registration: any) => [registration.registration_id, registration]));
   const contactByRegistrationId = new Map((contacts ?? []).map((contact: any) => [contact.registration_id, contact]));
 
-  const result = filteredAssignments
+  const contactsResult = filteredAssignments
     .map((assignment) => {
       const profile = profileById.get(assignment.userId);
       const registration = profile?.registration_id
@@ -149,11 +164,28 @@ export default publicProcedure.query(async ({ ctx }) => {
       };
     })
     .sort((a, b) => {
-      const aPriority = actorCountryCode && a.countryCode === actorCountryCode ? 0 : a.roleName === "super_admin" ? 1 : 2;
-      const bPriority = actorCountryCode && b.countryCode === actorCountryCode ? 0 : b.roleName === "super_admin" ? 1 : 2;
+      const aPriority = supportRolePriority(a.roleName);
+      const bPriority = supportRolePriority(b.roleName);
       if (aPriority !== bPriority) return aPriority - bPriority;
       return `${a.countryLabel} ${a.name}`.localeCompare(`${b.countryLabel} ${b.name}`);
     });
 
-  return result;
+  const globalAdmin = contactsResult.find((contact) => contact.roleName === "super_admin") ?? null;
+  const countryAdmin = actorCountryCode
+    ? contactsResult.find(
+        (contact) =>
+          contact.countryCode === actorCountryCode &&
+          (contact.roleName === "country_admin" || contact.roleName === "country_coordinator")
+      ) ?? null
+    : null;
+
+  if (!countryAdmin) {
+    return globalAdmin ? [globalAdmin] : [];
+  }
+
+  if (!globalAdmin || globalAdmin.id === countryAdmin.id) {
+    return [countryAdmin];
+  }
+
+  return [countryAdmin, globalAdmin];
 });

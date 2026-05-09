@@ -8,11 +8,13 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
+  Platform,
+  Share,
 } from "react-native";
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
-import { useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { Picker } from "@react-native-picker/picker";
 import * as ImagePicker from "expo-image-picker";
@@ -26,6 +28,7 @@ import {
   Target,
   Users,
   Check,
+  ChevronLeft,
   ChevronRight,
   Globe,
   MapPin,
@@ -41,6 +44,7 @@ import {
   CreditCard,
   Zap,
   Circle,
+  Plane,
 } from "lucide-react-native";
 import { getAllBadges, getEarnedBadgeCount, getProfileCompleteBadge } from "@/utils/badges";
 import type { Badge } from "@/utils/badges";
@@ -51,8 +55,20 @@ import type { ProfileCompletionInputs } from "@/utils/profileCompletion";
 import { getServerClient } from "@/lib/server-client";
 import { supabase } from "@/lib/supabase";
 import { WORLD_COUNTRIES } from "@/constants/countries";
+import { filterVisibleClubsForAge, getAgeFromDob, isAtLeastRunNationAge } from "@/utils/specialClubs";
 
 const FALLBACK_COUNTRIES = WORLD_COUNTRIES;
+const RUNNATION_APP_LINK = "";
+
+const normalizeCountryLabel = (value?: string | null) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const upper = raw.toUpperCase();
+  const country = FALLBACK_COUNTRIES.find(
+    (item) => item.iso_alpha2.toUpperCase() === upper || item.name.toLowerCase() === raw.toLowerCase()
+  );
+  return (country?.name || raw).trim().toLowerCase();
+};
 
 interface UserProfile {
   registration_id: string;
@@ -65,6 +81,10 @@ interface UserProfile {
   sex?: string;
   city_town_district?: string;
   country?: string;
+  travel_country?: string | null;
+  travel_country_code?: string | null;
+  travel_start_date?: string | null;
+  travel_end_date?: string | null;
   club?: string;
   dob?: string;
   email_verified?: boolean;
@@ -87,6 +107,10 @@ interface ClubItem {
   country: string | null;
   location: string | null;
   description: string | null;
+  is_special_club?: boolean | null;
+  special_club_code?: string | null;
+  age_min?: number | null;
+  age_max?: number | null;
 }
 
 interface ClubMembership {
@@ -101,7 +125,7 @@ interface ClubMembership {
   proposed_description?: string | null;
 }
 
-type EditSection = "profile" | "goals" | "club" | null;
+type EditSection = "profile" | "goals" | "club" | "travel" | null;
 type ClubChoice = "join" | "existing" | "start" | "organizer" | "none" | null;
 
 interface ClubStartRequestData {
@@ -196,14 +220,26 @@ export default function ProfileScreen() {
     () => (profileBundle?.clubs as ClubItem[] | undefined) ?? [],
     [profileBundle]
   );
+  const countryClubs = useMemo(() => {
+    const userCountry = normalizeCountryLabel(profile?.country);
+    if (!userCountry) return [];
+    return clubs.filter((club) => normalizeCountryLabel(club.country) === userCountry);
+  }, [clubs, profile?.country]);
+  const visibleClubs = useMemo(
+    () => filterVisibleClubsForAge(clubs, countryClubs, getAgeFromDob(profile?.dob)),
+    [clubs, countryClubs, profile?.dob]
+  );
   const countryOptions = useMemo(() => {
     const rows = (countriesData as { name: string; iso_alpha2: string }[]) || FALLBACK_COUNTRIES;
-    const currentCountry = String(formData.country || profile?.country || "");
-    const hasCurrentCountry = !currentCountry || rows.some((country) => country.name === currentCountry || country.iso_alpha2 === currentCountry);
-    return hasCurrentCountry
-      ? rows
-      : [{ name: currentCountry, iso_alpha2: currentCountry }, ...rows];
-  }, [countriesData, formData.country, profile?.country]);
+    const currentCountries = [
+      String(formData.country || profile?.country || ""),
+      String(formData.travel_country || profile?.travel_country || ""),
+    ].filter(Boolean);
+    const extras = currentCountries
+      .filter((currentCountry) => !rows.some((country) => country.name === currentCountry || country.iso_alpha2 === currentCountry))
+      .map((currentCountry) => ({ name: currentCountry, iso_alpha2: currentCountry }));
+    return [...extras, ...rows];
+  }, [countriesData, formData.country, formData.travel_country, profile?.country, profile?.travel_country]);
   const clubMembership = (profileBundle?.clubMembership as ClubMembership | null | undefined) ?? null;
 
   const isEmailVerified = profile?.email_verified === true;
@@ -247,6 +283,14 @@ export default function ProfileScreen() {
 
   const handleAdminPortalPress = useCallback(async () => {
     router.push('/admin' as any);
+  }, [router]);
+
+  const handleBackPress = useCallback(() => {
+    if (typeof (router as any).canGoBack === "function" && (router as any).canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace("/(tabs)" as any);
   }, [router]);
 
   const sendVerificationMutation = useMutation({
@@ -302,22 +346,34 @@ export default function ProfileScreen() {
       contact: { email?: string; country_code?: string; phone?: string };
     }) => {
       if (!user) throw new Error("Not authenticated");
+      const registrationPayload: Record<string, string | null | undefined> = {};
+      ([
+        "first_name",
+        "other_names",
+        "username",
+        "sex",
+        "dob",
+        "city_town_district",
+        "country",
+        "travel_country",
+        "travel_country_code",
+        "travel_start_date",
+        "travel_end_date",
+      ] as const).forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(registration, key)) {
+          registrationPayload[key] = registration[key] ?? null;
+        }
+      });
+      const contactPayload: Record<string, string | null | undefined> = {};
+      (["email", "country_code", "phone"] as const).forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(contact, key)) {
+          contactPayload[key] = contact[key] ?? null;
+        }
+      });
       await getServerClient().profile.updateProfile.mutate({
         registrationId: user.id,
-        registration: {
-          first_name: registration.first_name ?? null,
-          other_names: registration.other_names ?? null,
-          username: registration.username ?? null,
-          sex: registration.sex ?? null,
-          dob: registration.dob ?? null,
-          city_town_district: registration.city_town_district ?? null,
-          country: registration.country ?? null,
-        },
-        contact: {
-          email: contact.email ?? null,
-          country_code: contact.country_code ?? null,
-          phone: contact.phone ?? null,
-        },
+        registration: registrationPayload,
+        contact: contactPayload,
       });
     },
     onSuccess: () => {
@@ -500,11 +556,39 @@ export default function ProfileScreen() {
         setClubStartRequest({ clubName: "", country: profile?.country || "", description: "" });
         setOrganizerRequest({ organizerName: "", country: profile?.country || "", description: "" });
       }
+    } else if (section === "travel" && profile) {
+      setFormData({
+        travel_country: profile.travel_country ?? "",
+        travel_country_code: profile.travel_country_code ?? "",
+        travel_start_date: profile.travel_start_date ?? "",
+        travel_end_date: profile.travel_end_date ?? "",
+      });
     }
     setEditSection(section);
   }, [profile, userGoals, goals, clubMembership, clubs]);
 
+  const isValidIsoDate = (value?: string | null) => {
+    if (!value) return true;
+    const match = value.match(/^\d{4}-\d{2}-\d{2}$/);
+    if (!match) return false;
+    const date = new Date(`${value}T00:00:00Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  };
+
   const handleSaveProfile = () => {
+    if (!String(formData.dob || "").trim()) {
+      Alert.alert("Date of Birth Required", "Please add your date of birth before saving your profile.");
+      return;
+    }
+    if (!String(formData.country || "").trim()) {
+      Alert.alert("Nationality Required", "Please add your nationality before saving your profile.");
+      return;
+    }
+    if (formData.dob && !isAtLeastRunNationAge(formData.dob)) {
+      Alert.alert("Minimum Age Required", "RunNation registration is available for users aged 8 years and above.");
+      return;
+    }
+
     const { country_code, phone, email, ...regFields } = formData;
     updateProfileMutation.mutate({
       registration: regFields,
@@ -513,6 +597,51 @@ export default function ProfileScreen() {
         phone,
         email,
       },
+    });
+  };
+
+  const handleSaveTravel = () => {
+    const travelCountry = String(formData.travel_country || "").trim();
+    const travelStart = String(formData.travel_start_date || "").trim();
+    const travelEnd = String(formData.travel_end_date || "").trim();
+    const selectedCountry = countryOptions.find((country) => country.name === travelCountry || country.iso_alpha2 === travelCountry);
+
+    if (!travelCountry && !travelStart && !travelEnd) {
+      updateProfileMutation.mutate({
+        registration: {
+          travel_country: null,
+          travel_country_code: null,
+          travel_start_date: null,
+          travel_end_date: null,
+        },
+        contact: {},
+      });
+      return;
+    }
+
+    if (!travelCountry || !travelStart || !travelEnd) {
+      Alert.alert("Travel Details", "Please choose a destination country and enter both travel dates.");
+      return;
+    }
+
+    if (!isValidIsoDate(travelStart) || !isValidIsoDate(travelEnd)) {
+      Alert.alert("Travel Dates", "Please enter travel dates in YYYY-MM-DD format.");
+      return;
+    }
+
+    if (travelEnd < travelStart) {
+      Alert.alert("Travel Dates", "Travel end date cannot be before the start date.");
+      return;
+    }
+
+    updateProfileMutation.mutate({
+      registration: {
+        travel_country: selectedCountry?.name || travelCountry,
+        travel_country_code: selectedCountry?.iso_alpha2 || null,
+        travel_start_date: travelStart,
+        travel_end_date: travelEnd,
+      },
+      contact: {},
     });
   };
 
@@ -541,7 +670,7 @@ export default function ProfileScreen() {
         Alert.alert("Select a Club", "Please choose a club from the list.");
         return;
       }
-      const selectedClub = clubs.find((c) => c.club_id === selectedClubId);
+      const selectedClub = visibleClubs.find((c) => c.club_id === selectedClubId);
       clubValue = selectedClub?.club_name || null;
       clubIdValue = selectedClub?.club_id || null;
       newMemberValue = "Yes";
@@ -550,7 +679,7 @@ export default function ProfileScreen() {
         Alert.alert("Select a Club", "Please choose your club from the list.");
         return;
       }
-      const selectedClub = clubs.find((c) => c.club_id === selectedClubId);
+      const selectedClub = visibleClubs.find((c) => c.club_id === selectedClubId);
       clubValue = selectedClub?.club_name || null;
       clubIdValue = selectedClub?.club_id || null;
       newMemberValue = "No";
@@ -610,6 +739,29 @@ export default function ProfileScreen() {
           ? organizerRequest.description.trim()
           : null,
     });
+  };
+
+  const shareMissingClubInvite = async () => {
+    const link = RUNNATION_APP_LINK || "RunNation app download link coming soon";
+    const message = [
+      "Hello Coach/Club Coordinator, I am joining RunNation and could not find our club on the club list.",
+      "Please join RunNation and create our club profile so members can connect, register, and appear under the right club.",
+      `App link: ${link}`,
+      "If you permit me to create it, I can create the club profile from Settings > Join Service Team after completing registration.",
+      "RunNation - Where runners belong",
+    ].join("\n\n");
+
+    if (Platform.OS === "web") {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(message);
+        alert("Club invitation message copied.");
+        return;
+      }
+      alert(message);
+      return;
+    }
+
+    await Share.share({ message });
   };
 
   const handleCancel = () => {
@@ -716,6 +868,21 @@ export default function ProfileScreen() {
             <View style={styles.editMenuTextWrap}>
               <Text style={styles.editMenuItemTitle}>Club Membership</Text>
               <Text style={styles.editMenuItemDesc}>Update your club preferences</Text>
+            </View>
+            <ChevronRight size={18} color="#999" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.editMenuItem}
+            onPress={() => handleEditMenuSelect("travel")}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.editMenuIcon, { backgroundColor: "#06b6d4" }]}>
+              <Plane size={20} color="#fff" />
+            </View>
+            <View style={styles.editMenuTextWrap}>
+              <Text style={styles.editMenuItemTitle}>Traveling</Text>
+              <Text style={styles.editMenuItemDesc}>Access events while you travel</Text>
             </View>
             <ChevronRight size={18} color="#999" />
           </TouchableOpacity>
@@ -959,12 +1126,85 @@ export default function ProfileScreen() {
     </View>
   );
 
+  const renderTravelEdit = () => (
+    <View style={styles.infoContainer}>
+      <Text style={styles.editSectionTitle}>Edit Traveling</Text>
+      <Text style={styles.editSectionSubtitle}>
+        During these dates, Events will show both your profile country and destination country.
+      </Text>
+
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Destination Country</Text>
+        <View style={styles.pickerContainer}>
+          <Picker
+            selectedValue={String(formData.travel_country ?? "")}
+            onValueChange={(value: string) => {
+              const selectedCountry = countryOptions.find((country) => country.name === value || country.iso_alpha2 === value);
+              setFormData({
+                ...formData,
+                travel_country: selectedCountry?.name || value,
+                travel_country_code: selectedCountry?.iso_alpha2 || null,
+              });
+            }}
+            style={styles.picker}
+          >
+            <Picker.Item label="Select destination country" value="" />
+            {countryOptions.map((country) => (
+              <Picker.Item key={`travel-${country.iso_alpha2}`} label={country.name} value={country.name} />
+            ))}
+          </Picker>
+        </View>
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>Start Date</Text>
+        <TextInput
+          style={styles.input}
+          value={String(formData.travel_start_date ?? "")}
+          onChangeText={(value) => setFormData({ ...formData, travel_start_date: value })}
+          placeholder="YYYY-MM-DD"
+          placeholderTextColor="#999"
+        />
+      </View>
+
+      <View style={styles.field}>
+        <Text style={styles.fieldLabel}>End Date</Text>
+        <TextInput
+          style={styles.input}
+          value={String(formData.travel_end_date ?? "")}
+          onChangeText={(value) => setFormData({ ...formData, travel_end_date: value })}
+          placeholder="YYYY-MM-DD"
+          placeholderTextColor="#999"
+        />
+      </View>
+
+      <Text style={styles.editSectionSubtitle}>
+        Clear all fields and save to remove travel access.
+      </Text>
+
+      <View style={styles.actionButtons}>
+        <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
+          <X size={20} color="#ef4444" />
+          <Text style={styles.cancelButtonText}>Cancel</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.saveButton}
+          onPress={handleSaveTravel}
+          disabled={updateProfileMutation.isPending}
+        >
+          <Save size={20} color="#fff" />
+          <Text style={styles.saveButtonText}>
+            {updateProfileMutation.isPending ? "Saving..." : "Save Travel"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
   const renderClubChoiceOptions = () => {
     const options: { key: ClubChoice; label: string; icon: React.ReactNode; desc: string }[] = [
       { key: "join", label: "Want to join a club", icon: <UserPlus size={20} color="#fff" />, desc: "Browse and join an existing club" },
       { key: "existing", label: "I already have a club", icon: <UserCheck size={20} color="#fff" />, desc: "Select your current club" },
-      { key: "start", label: "Want to start a club", icon: <PlusCircle size={20} color="#fff" />, desc: "Send a structured request for admin approval" },
-      { key: "organizer", label: "Event Organiser", icon: <Calendar size={20} color="#fff" />, desc: "Request organiser approval for posting events" },
       { key: "none", label: "No thanks", icon: <X size={20} color="#fff" />, desc: "Remove club membership" },
     ];
 
@@ -1004,11 +1244,13 @@ export default function ProfileScreen() {
   const renderClubList = (title: string) => (
     <View style={styles.clubSubSection}>
       <Text style={styles.clubSubTitle}>{title}</Text>
-      {clubs.length === 0 ? (
-        <ActivityIndicator color="#10b981" style={{ marginVertical: 20 }} />
-      ) : (
-        <View style={styles.clubsList}>
-          {clubs.map((club) => {
+      <View style={styles.clubsList}>
+        {clubs.length === 0 || visibleClubs.length === 0 ? (
+            <View style={styles.noClubCard}>
+              <Text style={styles.noClubText}>No clubs available in {profile?.country || "your country"} yet.</Text>
+            </View>
+        ) : null}
+        {visibleClubs.map((club) => {
             const isSelected = selectedClubId === club.club_id;
             return (
               <TouchableOpacity
@@ -1046,9 +1288,14 @@ export default function ProfileScreen() {
                 )}
               </TouchableOpacity>
             );
-          })}
-        </View>
-      )}
+        })}
+        <TouchableOpacity style={styles.missingClubCard} onPress={() => void shareMissingClubInvite()} activeOpacity={0.75}>
+          <Text style={styles.missingClubTitle}>My club is not on this list</Text>
+          <Text style={styles.missingClubText}>
+            Share RunNation with your club coordinator, or get permission to create the club profile from Settings &gt; Join Service Team after completing registration.
+          </Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
@@ -1161,8 +1408,8 @@ export default function ProfileScreen() {
 
         {renderClubChoiceOptions()}
 
-        {clubChoice === "join" && renderClubList("Choose a club to join")}
-        {clubChoice === "existing" && renderClubList("Select your current club")}
+        {clubChoice === "join" && renderClubList("List of clubs in your country")}
+        {clubChoice === "existing" && renderClubList("List of clubs in your country")}
         {clubChoice === "start" && renderStartNewClub()}
         {clubChoice === "organizer" && renderEventOrganizerRequest()}
         {clubChoice === "none" && (
@@ -1396,6 +1643,12 @@ export default function ProfileScreen() {
           { label: "Sex", value: profile.sex },
           { label: "City/Town/District", value: profile.city_town_district },
           { label: "Country", value: profile.country },
+          {
+            label: "Traveling",
+            value: profile.travel_country && profile.travel_start_date && profile.travel_end_date
+              ? `${profile.travel_country} (${profile.travel_start_date} to ${profile.travel_end_date})`
+              : undefined,
+          },
           { label: "Date of Birth", value: formatDateOfBirth(profile.dob) },
         ]).map((field) => (
           <View key={field.label} style={styles.field}>
@@ -1476,6 +1729,20 @@ export default function ProfileScreen() {
   );
 
   return (
+    <>
+    <Stack.Screen
+      options={{
+        title: "Profile",
+        headerShown: true,
+        headerStyle: { backgroundColor: themeColors.headerBackground },
+        headerTintColor: themeColors.headerText,
+        headerLeft: () => (
+          <TouchableOpacity onPress={handleBackPress} style={styles.orangeHeaderBackButton} activeOpacity={0.75}>
+            <ChevronLeft size={24} color={themeColors.headerText} />
+          </TouchableOpacity>
+        ),
+      }}
+    />
     <ScrollView style={[styles.container, { backgroundColor: themeColors.background }]} contentContainerStyle={styles.scrollContent}>
       <View style={styles.header}>
         <View style={styles.photoContainer}>
@@ -1523,6 +1790,7 @@ export default function ProfileScreen() {
       {editSection === "profile" && renderProfileEdit()}
       {editSection === "goals" && renderGoalsEdit()}
       {editSection === "club" && renderClubEdit()}
+      {editSection === "travel" && renderTravelEdit()}
       {!editSection && renderProfileView()}
 
       {renderEditMenu()}
@@ -1666,6 +1934,7 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </Modal>
     </ScrollView>
+    </>
   );
 }
 
@@ -1695,6 +1964,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     alignItems: "center",
     gap: 16,
+  },
+  orangeHeaderBackButton: {
+    marginLeft: 2,
+    padding: 6,
+    borderRadius: 999,
   },
   photoContainer: {
     position: "relative",
@@ -2094,6 +2368,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#666",
     marginLeft: 32,
+  },
+  missingClubCard: {
+    borderWidth: 1,
+    borderColor: "#93c5fd",
+    borderStyle: "dashed",
+    borderRadius: 12,
+    padding: 14,
+    backgroundColor: "#eff6ff",
+    gap: 5,
+  },
+  missingClubTitle: {
+    fontSize: 15,
+    fontWeight: "700" as const,
+    color: "#1d4ed8",
+  },
+  missingClubText: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: "#475569",
   },
   startClubCard: {
     backgroundColor: "#fff",

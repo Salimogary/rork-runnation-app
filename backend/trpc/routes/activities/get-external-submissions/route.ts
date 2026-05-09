@@ -1,5 +1,6 @@
 import { publicProcedure } from "../../../create-context";
 import { requireAdminPermission } from "../../../rbac";
+import { resolvePrivateActivityUploadUrl } from "../../../storage";
 
 export default publicProcedure.query(async ({ ctx }) => {
   try {
@@ -12,8 +13,17 @@ export default publicProcedure.query(async ({ ctx }) => {
     const { data: submissions, error } = await ctx.supabase
       .from("external_activity_submissions")
       .select(`
+        submission_id,
         registration_id,
-        activity_date
+        activity_date,
+        exercise_type,
+        start_time,
+        duration,
+        distance_km,
+        source_type,
+        source_label,
+        evidence_path,
+        evidence_mime_type
       `)
       .order("activity_date", { ascending: false });
 
@@ -43,26 +53,46 @@ export default publicProcedure.query(async ({ ctx }) => {
       ])
     );
 
-    const groupedByDate = new Map<string, Map<string, number>>();
+    const submissionsWithEvidence = await Promise.all(
+      (submissions || []).map(async (sub: any) => ({
+        submissionId: sub.submission_id,
+        registrationId: sub.registration_id,
+        activityDate: sub.activity_date,
+        exerciseType: sub.exercise_type,
+        startTime: sub.start_time,
+        duration: sub.duration,
+        distanceKm: sub.distance_km,
+        sourceType: sub.source_type,
+        sourceLabel: sub.source_label,
+        evidencePath: sub.evidence_path,
+        evidenceMimeType: sub.evidence_mime_type,
+        evidenceUrl: sub.evidence_path
+          ? await resolvePrivateActivityUploadUrl(ctx.supabase, sub.evidence_path)
+          : null,
+      }))
+    );
 
-    submissions?.forEach((sub) => {
-      const date = sub.activity_date;
+    const groupedByDate = new Map<string, Map<string, any[]>>();
+
+    submissionsWithEvidence.forEach((sub) => {
+      const date = sub.activityDate;
       if (!groupedByDate.has(date)) {
         groupedByDate.set(date, new Map());
       }
       const dateGroup = groupedByDate.get(date)!;
-      const currentCount = dateGroup.get(sub.registration_id) || 0;
-      dateGroup.set(sub.registration_id, currentCount + 1);
+      const currentSubmissions = dateGroup.get(sub.registrationId) || [];
+      dateGroup.set(sub.registrationId, [...currentSubmissions, sub]);
     });
 
     const result = [];
     for (const [activityDate, registrationMap] of groupedByDate.entries()) {
       const users = [];
-      for (const [registrationId, activityCount] of registrationMap.entries()) {
+      for (const [registrationId, userSubmissions] of registrationMap.entries()) {
         const user = regMap.get(registrationId);
         users.push({
           registrationId,
-          activityCount,
+          activityCount: userSubmissions.length,
+          submissions: userSubmissions,
           userName: user
             ? `${user.firstName} ${user.otherNames}`.trim() || user.username
             : "Unknown User",

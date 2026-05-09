@@ -115,7 +115,7 @@ export default publicProcedure
     const { data: events, error: eventsError } = eventIds.length
       ? await ctx.supabase
           .from("events")
-          .select("event_id, event_name, starts_at, ends_at, poster_link, has_medal, country, country_code, organizer")
+          .select("event_id, event_name, starts_at, ends_at, event_type, recurrence_frequency, recurrence_weekday, recurrence_weekdays, recurrence_monthly_mode, recurrence_month_day, recurrence_week_of_month, poster_link, has_medal, country, country_code, organizer")
           .in("event_id", eventIds)
       : { data: [], error: null };
 
@@ -158,6 +158,13 @@ export default publicProcedure
           eventName: event.event_name ?? "",
           startsAt: event.starts_at ?? null,
           endsAt: event.ends_at ?? null,
+          eventType: event.event_type ?? null,
+          recurrenceFrequency: event.recurrence_frequency ?? null,
+          recurrenceWeekday: event.recurrence_weekday ?? null,
+          recurrenceWeekdays: event.recurrence_weekdays ?? null,
+          recurrenceMonthlyMode: event.recurrence_monthly_mode ?? null,
+          recurrenceMonthDay: event.recurrence_month_day ?? null,
+          recurrenceWeekOfMonth: event.recurrence_week_of_month ?? null,
           posterLink: event.poster_link ?? null,
           hasMedal: event.has_medal ?? false,
           country: event.country ?? null,

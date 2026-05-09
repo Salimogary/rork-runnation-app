@@ -4,7 +4,8 @@ import { requireAdminPermission } from "../../../rbac";
 export default publicProcedure.query(async ({ ctx }) => {
   await requireAdminPermission(ctx, {
     allowSuperAdmin: true,
-          allowCountryCoordinator: true,
+    allowCountryAdmin: true,
+    allowCountryCoordinator: true,
     allowClubCoordinator: true,
   });
 

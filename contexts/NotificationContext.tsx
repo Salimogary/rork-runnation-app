@@ -17,9 +17,9 @@ import {
   checkAndNotifyTrialExpiry,
 } from '@/utils/notifications';
 
-const convertKmhToMinPerKm = (kmh: number): number => {
-  if (kmh <= 0) return 0;
-  return 60 / kmh;
+const normalizePaceMinPerKm = (paceMinPerKm: number): number => {
+  if (paceMinPerKm <= 0) return 0;
+  return paceMinPerKm;
 };
 
 export const [NotificationProvider, useNotifications] = createContextHook(() => {
@@ -147,16 +147,16 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
       if (fitnessGoal) {
         const { data: recentActivities } = await supabase
           .from('activities')
-          .select('pace_km_h')
+          .select('pace_min_per_km')
           .eq('registration_id', user.id)
           .order('activity_date', { ascending: false })
           .limit(5);
 
-        const valid = (recentActivities || []).filter((a: any) => a.pace_km_h > 0);
+        const valid = (recentActivities || []).filter((a: any) => a.pace_min_per_km > 0);
         if (valid.length > 0) {
-          const avgPaceKmh = valid.reduce((sum: number, a: any) => sum + a.pace_km_h, 0) / valid.length;
-          const avgMinPerKm = convertKmhToMinPerKm(avgPaceKmh);
-          const targetMinPerKm = convertKmhToMinPerKm(fitnessGoal.target_pace);
+          const avgpaceMinPerKm = valid.reduce((sum: number, a: any) => sum + a.pace_min_per_km, 0) / valid.length;
+          const avgMinPerKm = normalizePaceMinPerKm(avgpaceMinPerKm);
+          const targetMinPerKm = normalizePaceMinPerKm(fitnessGoal.target_pace_min_per_km);
           fitnessProgress = targetMinPerKm > 0
             ? Math.min(100, Math.max(0, (targetMinPerKm / avgMinPerKm) * 100))
             : 0;

@@ -67,12 +67,38 @@ export default publicProcedure.query(async ({ ctx }) => {
     }
 
     const organizerMap = new Map((organizers ?? []).map((organizer: any) => [organizer.organizer_id, organizer]));
+    const eventIds = (data ?? []).map((event: any) => String(event.event_id || "")).filter(Boolean);
+    const { data: magazineSubmissions, error: magazineError } = eventIds.length
+      ? await ctx.supabase
+          .from("magazine_article_submissions")
+          .select("submission_id, status, event_id, title, created_at")
+          .in("event_id", eventIds)
+          .neq("status", "deleted")
+          .order("created_at", { ascending: false })
+      : { data: [], error: null };
+
+    if (magazineError) {
+      console.warn("[getEvents] Could not fetch linked magazine submissions:", magazineError);
+    }
+
+    const magazineMap = new Map<string, any>();
+    (magazineError ? [] : magazineSubmissions ?? []).forEach((submission: any) => {
+      const eventId = String(submission.event_id || "");
+      if (eventId && !magazineMap.has(eventId)) {
+        magazineMap.set(eventId, submission);
+      }
+    });
+
     const mergedEvents = (data || []).map((event: any) => {
       const organizer = event.organizer ? organizerMap.get(event.organizer) : null;
+      const magazineSubmission = magazineMap.get(String(event.event_id || "")) ?? null;
       return {
         ...event,
         organizer_name: organizer?.organizer_name ?? null,
         organizer_country: organizer?.country ?? null,
+        magazine_submission_id: magazineSubmission?.submission_id ?? null,
+        magazine_submission_status: magazineSubmission?.status ?? null,
+        magazine_article_title: magazineSubmission?.title ?? null,
       };
     });
 
