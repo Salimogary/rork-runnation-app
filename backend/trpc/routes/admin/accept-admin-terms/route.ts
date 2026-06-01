@@ -8,7 +8,11 @@ export default publicProcedure.mutation(async ({ ctx }) => {
     allowCountryAdmin: true,
     allowCountryCoordinator: true,
     allowClubCoordinator: true,
+    allowSpecialClubCoordinator: true,
     allowEventOrganizer: true,
+    allowMagazineEditor: true,
+    allowMagazineColumnist: true,
+    allowChatRoomAdministrator: true,
   });
 
   if (!actor.authUserId) {
@@ -46,3 +50,4 @@ export default publicProcedure.mutation(async ({ ctx }) => {
     termsVersion: ADMIN_TERMS_VERSION,
   };
 });
+

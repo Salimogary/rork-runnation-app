@@ -3,6 +3,35 @@ import { publicProcedure } from "../../../create-context";
 import { logAdminAction, requireAdminPermission } from "../../../rbac";
 import { randomUUID } from "crypto";
 
+async function ensureEventCapacity(ctx: any, eventId: string) {
+  const { data: event, error: eventError } = await ctx.supabase
+    .from("events")
+    .select("event_id, participant_limit")
+    .eq("event_id", eventId)
+    .maybeSingle();
+
+  if (eventError || !event) {
+    throw new Error(eventError?.message || "Could not load the event capacity.");
+  }
+
+  if (typeof event.participant_limit !== "number" || !Number.isFinite(event.participant_limit)) {
+    return;
+  }
+
+  const { count, error } = await ctx.supabase
+    .from("events_participants")
+    .select("event_participant_id", { count: "exact", head: true })
+    .eq("event_id", eventId);
+
+  if (error) {
+    throw new Error(error.message || "Could not verify event participant limit.");
+  }
+
+  if ((count ?? 0) >= event.participant_limit) {
+    throw new Error("This event has reached its participant limit.");
+  }
+}
+
 export default publicProcedure
   .input(
     z.object({
@@ -15,6 +44,7 @@ export default publicProcedure
       allowCountryAdmin: true,
       allowCountryCoordinator: true,
       allowClubCoordinator: true,
+      allowSpecialClubCoordinator: true,
       allowEventOrganizer: true,
     });
 
@@ -41,7 +71,8 @@ export default publicProcedure
       !actor.isSuperAdmin &&
       !actor.isCountryAdmin &&
       !actor.isCountryCoordinator &&
-      !actor.isClubCoordinator;
+      !actor.isClubCoordinator &&
+      !actor.isSpecialClubCoordinator;
 
     if (isOrganizerOnly) {
       const { data: event, error: eventError } = await ctx.supabase
@@ -58,6 +89,8 @@ export default publicProcedure
         throw new Error("You can only confirm paid enrollments for your organizer-owned events.");
       }
     }
+
+    await ensureEventCapacity(ctx, enrollment.event_id);
 
     const { data: participant, error: insertError } = await ctx.supabase
       .from("events_participants")
@@ -96,3 +129,5 @@ export default publicProcedure
 
     return { success: true, participant };
   });
+
+

@@ -3,6 +3,7 @@ import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { Target, TrendingDown, TrendingUp, Award, Calendar, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints, Users, ArrowUp, ArrowDown, Minus, Trophy, Flame } from "lucide-react-native";
+import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -63,6 +64,10 @@ interface HealthGoalEntry {
   overall_health_score: number | null;
 }
 
+interface HealthProfile {
+  dob: string | null;
+}
+
 interface HabitDeclaration {
   declaration_id: number;
   registration_id: string;
@@ -83,6 +88,25 @@ interface GoalItem {
 interface RecentActivity {
   pace_min_per_km: number;
   activity_date: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  pause_duration_seconds?: number | null;
+}
+
+interface DurationActivity {
+  registration_id?: string;
+  activity_date: string;
+  start_time: string | null;
+  end_time: string | null;
+  pause_duration_seconds: number | null;
+}
+
+interface SmartFitGoalRank {
+  rank: number;
+  totalParticipants: number;
+  ageGroup: string;
+  healthScore: number;
+  clubName: string;
 }
 
 interface CommunityRankData {
@@ -91,6 +115,27 @@ interface CommunityRankData {
   AvgDistance: number;
   ActiveDays: number;
   AveragePace: number;
+}
+
+interface RankSummary {
+  label: string;
+  currentRank: number;
+  totalParticipants: number;
+  metricLabel: string;
+  metricValue: string;
+}
+
+interface FamilyRankRow {
+  registrationId: string;
+  distance: number;
+  activeDays: number;
+  averagePace: number;
+}
+
+interface MedalRankRow {
+  registrationId: string;
+  totalMedals: number;
+  points: number;
 }
 
 interface StoredRankSnapshot {
@@ -133,6 +178,20 @@ interface RegisteredEvent {
   currentDistance: number;
 }
 
+type GoalsSubPage = "overview" | "set" | "scorecard";
+type MedalBand = "Ultra" | "50k" | "42K" | "25K" | "21K" | "10k" | "5k" | "3k";
+
+const MEDAL_BANDS: { key: MedalBand; minKm: number; points: number }[] = [
+  { key: "Ultra", minKm: 50.01, points: 8 },
+  { key: "50k", minKm: 50, points: 7 },
+  { key: "42K", minKm: 42, points: 6 },
+  { key: "25K", minKm: 25, points: 5 },
+  { key: "21K", minKm: 21, points: 4 },
+  { key: "10k", minKm: 10, points: 3 },
+  { key: "5k", minKm: 5, points: 2 },
+  { key: "3k", minKm: 3, points: 1 },
+];
+
 const normalizePaceMinPerKm = (paceMinPerKm: number): number => {
   if (paceMinPerKm <= 0) return 0;
   return paceMinPerKm;
@@ -150,7 +209,144 @@ const normalizePaceInputMinPerKm = (minPerKm: number): number => {
   return minPerKm;
 };
 
+const getAgeFromDob = (dob?: string | null): number | null => {
+  if (!dob) return null;
+  const birthDate = new Date(dob);
+  if (Number.isNaN(birthDate.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age -= 1;
+  }
+  return age >= 0 ? age : null;
+};
+
+const isJuniorAge = (dob?: string | null): boolean => {
+  const age = getAgeFromDob(dob);
+  return age !== null && age <= 15;
+};
+
+const usesParaEquipment = (registration: any): boolean =>
+  registration?.has_disability === true && registration?.para_uses_equipment === true;
+
+const getDateOnly = (value?: string | null): string => String(value || "").slice(0, 10);
+
+const addDaysIso = (value: string, days: number): string => {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
+
+const minIsoDate = (a: string, b: string): string => (a <= b ? a : b);
+
+const getMedalBand = (distanceKm: number): (typeof MEDAL_BANDS)[number] | null =>
+  MEDAL_BANDS.find((band) => distanceKm >= band.minKm) || null;
+
+const getHealthRecommendations = (age: number | null) => {
+  const stepTarget = age !== null && age >= 60 ? 2000 : 3000;
+  const sleep = age !== null && age < 13
+    ? "9-12h"
+    : age !== null && age < 18
+      ? "8-10h"
+      : age !== null && age >= 65
+        ? "7-8h"
+        : "7-9h";
+  const heartRate = age !== null && age < 12 ? "70-120 bpm" : "60-100 bpm";
+  return {
+    steps: `${stepTarget.toLocaleString()}+/day`,
+    stepTarget,
+    duration: "30+ min/day",
+    heartRate,
+    sleep,
+    spo2: "95-100%",
+  };
+};
+
+const getMinutesFromTime = (value?: string | null): number | null => {
+  if (!value) return null;
+  const [hours, minutes, seconds] = value.split(":").map((part) => Number(part));
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  return (hours * 60) + minutes + (Number.isFinite(seconds) ? seconds / 60 : 0);
+};
+
+const getActivityDurationMinutes = (activity: DurationActivity): number | null => {
+  const startMinutes = getMinutesFromTime(activity.start_time);
+  const endMinutes = getMinutesFromTime(activity.end_time);
+  if (startMinutes === null || endMinutes === null) return null;
+  let duration = endMinutes - startMinutes;
+  if (duration < 0) duration += 24 * 60;
+  duration -= Math.floor((activity.pause_duration_seconds || 0) / 60);
+  return duration > 0 ? duration : null;
+};
+
+const formatDurationMinutes = (minutes: number): string => `${Math.round(minutes)} min`;
+
+const SMARTFIT_SPECIAL_CLUB_CODE = "smartfit_club";
+
+const normalizeSex = (value?: string | null): string => {
+  const lower = String(value || "").trim().toLowerCase();
+  if (lower.startsWith("m")) return "Male";
+  if (lower.startsWith("f")) return "Female";
+  return value ? String(value).trim() : "-";
+};
+
+const getSmartFitAgeGroup = (age: number | null): string => {
+  if (age === null || age <= 19) return "19-";
+  if (age <= 39) return "20-39";
+  if (age <= 59) return "40-59";
+  if (age <= 79) return "60-79";
+  return "80+";
+};
+
+const getSmartFitStepTarget = (ageGroup: string, sex: string): number => {
+  const isFemale = sex.toLowerCase().startsWith("f");
+  if (ageGroup === "19-") return 12000;
+  if (ageGroup === "20-39") return isFemale ? 9000 : 10000;
+  if (ageGroup === "40-59") return isFemale ? 8000 : 8500;
+  if (ageGroup === "60-79") return isFemale ? 6500 : 7000;
+  return isFemale ? 4500 : 5000;
+};
+
+const getSmartFitSleepTarget = (ageGroup: string): { min: number; max: number } => {
+  if (ageGroup === "19-") return { min: 8, max: 10 };
+  if (ageGroup === "60-79" || ageGroup === "80+") return { min: 7, max: 8 };
+  return { min: 7, max: 9 };
+};
+
+const scoreSmartFitHealth = (input: {
+  avgSteps: number;
+  avgHeartRate: number | null;
+  avgSleep: number | null;
+  avgSpo2: number | null;
+  ageGroup: string;
+  sex: string;
+}): number => {
+  const stepsScore = Math.min(100, (input.avgSteps / getSmartFitStepTarget(input.ageGroup, input.sex)) * 100);
+  let heartRateScore = 60;
+  if (input.avgHeartRate !== null) {
+    const ideal = input.ageGroup === "60-79" || input.ageGroup === "80+" ? 72 : input.sex === "Female" ? 74 : 70;
+    heartRateScore = Math.max(0, 100 - Math.abs(input.avgHeartRate - ideal) * 3);
+  }
+  let sleepScore = 60;
+  if (input.avgSleep !== null) {
+    const sleepTarget = getSmartFitSleepTarget(input.ageGroup);
+    if (input.avgSleep >= sleepTarget.min && input.avgSleep <= sleepTarget.max) {
+      sleepScore = 100;
+    } else {
+      const nearest = input.avgSleep < sleepTarget.min ? sleepTarget.min : sleepTarget.max;
+      sleepScore = Math.max(0, 100 - Math.abs(input.avgSleep - nearest) * 18);
+    }
+  }
+  let spo2Score = 70;
+  if (input.avgSpo2 !== null) {
+    spo2Score = input.avgSpo2 >= 95 ? 100 : input.avgSpo2 >= 90 ? 70 + (input.avgSpo2 - 90) * 6 : Math.max(0, input.avgSpo2 - 45);
+  }
+  return Math.round((stepsScore * 0.4) + (heartRateScore * 0.25) + (sleepScore * 0.25) + (spo2Score * 0.1));
+};
+
 export default function GoalsScreen() {
+  const router = useRouter();
   const { user } = useAuth();
   const { colors: themeColors } = useTheme();
   const { isSubscribed } = useSubscription();
@@ -181,6 +377,7 @@ export default function GoalsScreen() {
   const [habitFrequency, setHabitFrequency] = useState<string>("daily");
   const [habitStartDate, setHabitStartDate] = useState<string>("");
   const [previousRank, setPreviousRank] = useState<StoredRankSnapshot | null>(null);
+  const [activeGoalsPage, setActiveGoalsPage] = useState<GoalsSubPage>("overview");
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -219,7 +416,7 @@ export default function GoalsScreen() {
     if (name.includes("fitness") || name.includes("pace")) return "fitness";
     if (name.includes("weight")) return "weight";
     if (name.includes("health")) return "health";
-    if (name.includes("habit") || name.includes("discipline") || name.includes("training plan")) return "habit";
+    if (name.includes("habit") || name.includes("discipline") || name.includes("training plan")) return "dailyRun";
     if (name.includes("medal")) return "medals";
     if (name.includes("community") || name.includes("compete")) return "community";
     if (name.includes("event")) return "events";
@@ -234,7 +431,7 @@ export default function GoalsScreen() {
         keys.push(key);
       }
     }
-    const allKeys = ["fitness", "dailyRun", "weight", "health", "habit", "medals", "community", "events"];
+    const allKeys = ["fitness", "dailyRun", "weight", "health", "medals", "community", "events"];
     for (const k of allKeys) {
       if (!keys.includes(k)) {
         keys.push(k);
@@ -373,6 +570,28 @@ export default function GoalsScreen() {
     staleTime: 30000,
   });
 
+  const { data: healthDurationActivities = [], refetch: refetchHealthDurationActivities } = useQuery<DurationActivity[]>({
+    queryKey: ["healthDurationActivities", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      const { data, error } = await supabase
+        .from("activities")
+        .select("activity_date, start_time, end_time, pause_duration_seconds")
+        .eq("registration_id", user.id)
+        .not("start_time", "is", null)
+        .not("end_time", "is", null)
+        .order("activity_date", { ascending: false })
+        .limit(30);
+      if (error) {
+        console.error("[Goals] Error fetching health duration activities:", error);
+        return [];
+      }
+      return (data || []) as DurationActivity[];
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
   const saveFitnessGoalMutation = useMutation({
     mutationFn: async ({ paceMinPerKm, date }: { paceMinPerKm: number; date: string }) => {
       if (!user?.id) throw new Error("Not logged in");
@@ -448,6 +667,10 @@ export default function GoalsScreen() {
     if (validActivities.length === 0) return null;
 
     const avgpaceMinPerKm = validActivities.reduce((sum, a) => sum + a.pace_min_per_km, 0) / validActivities.length;
+    const lastThreeActivities = validActivities.slice(0, 3);
+    const lastThreeAvgpaceMinPerKm = lastThreeActivities.length > 0
+      ? lastThreeActivities.reduce((sum, a) => sum + a.pace_min_per_km, 0) / lastThreeActivities.length
+      : avgpaceMinPerKm;
     const targetpaceMinPerKm = fitnessGoal.target_pace_min_per_km;
 
     const avgMinPerKm = normalizePaceMinPerKm(avgpaceMinPerKm);
@@ -463,6 +686,7 @@ export default function GoalsScreen() {
 
     return {
       avgpaceMinPerKm,
+      lastThreeAvgpaceMinPerKm,
       targetpaceMinPerKm,
       avgMinPerKm,
       targetMinPerKm,
@@ -470,6 +694,7 @@ export default function GoalsScreen() {
       daysLeft,
       isAhead,
       activitiesUsed: validActivities.length,
+      lastThreeActivitiesUsed: lastThreeActivities.length,
     };
   }, [fitnessGoal, recentActivities]);
 
@@ -640,6 +865,25 @@ export default function GoalsScreen() {
     staleTime: 30000,
   });
 
+  const { data: healthProfile } = useQuery<HealthProfile | null>({
+    queryKey: ["healthProfile", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      const { data, error } = await supabase
+        .from("registrations")
+        .select("dob")
+        .eq("registration_id", user.id)
+        .maybeSingle();
+      if (error) {
+        console.error("[Goals] Error fetching health profile:", error);
+        return null;
+      }
+      return data as HealthProfile | null;
+    },
+    enabled: !!user?.id,
+    staleTime: 300000,
+  });
+
   const logHealthMutation = useMutation({
     mutationFn: async ({ steps, heartRateBpm, sleepHours, bloodOxygenSpo2 }: { steps: number; heartRateBpm: number | null; sleepHours: number | null; bloodOxygenSpo2: number | null }) => {
       if (!user?.id) throw new Error("Not logged in");
@@ -678,6 +922,8 @@ export default function GoalsScreen() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["healthGoalEntries", user?.id] });
+      void queryClient.invalidateQueries({ queryKey: ["smartfit-club"] });
+      void queryClient.invalidateQueries({ queryKey: ["smartfit-goal-rank", user?.id] });
       setShowHealthForm(false);
       setHealthStepsInput("");
       setHealthHeartRateInput("");
@@ -693,6 +939,19 @@ export default function GoalsScreen() {
 
   const healthScore = useMemo(() => {
     if (healthEntries.length === 0) return null;
+    const recent = healthEntries[0];
+    const age = getAgeFromDob(healthProfile?.dob);
+    const recommended = getHealthRecommendations(age);
+    const durationEntries = healthDurationActivities
+      .map((activity) => ({
+        activityDate: activity.activity_date,
+        minutes: getActivityDurationMinutes(activity),
+      }))
+      .filter((entry): entry is { activityDate: string; minutes: number } => entry.minutes !== null);
+    const recentDuration = durationEntries[0] ?? null;
+    const avgDuration = durationEntries.length > 0
+      ? durationEntries.reduce((sum, entry) => sum + entry.minutes, 0) / durationEntries.length
+      : null;
 
     let stepsTotal = 0;
     let heartRateTotal = 0;
@@ -724,7 +983,7 @@ export default function GoalsScreen() {
     const avgSleep = sleepCount > 0 ? sleepTotal / sleepCount : null;
     const avgSpo2 = spo2Count > 0 ? spo2Total / spo2Count : null;
 
-    const stepsScore = Math.min(100, (avgSteps / 10000) * 100);
+    const stepsScore = Math.min(100, (avgSteps / recommended.stepTarget) * 100);
 
     let heartRateScore = 50;
     if (avgHeartRate !== null) {
@@ -786,13 +1045,196 @@ export default function GoalsScreen() {
 
     return {
       overall: overallScore,
-      steps: { score: Math.round(stepsScore), avg: Math.round(avgSteps) },
-      heartRate: avgHeartRate !== null ? { score: Math.round(heartRateScore), avg: Math.round(avgHeartRate) } : null,
-      sleep: avgSleep !== null ? { score: Math.round(sleepScore), avg: parseFloat(avgSleep.toFixed(1)) } : null,
-      spo2: avgSpo2 !== null ? { score: Math.round(spo2Score), avg: parseFloat(avgSpo2.toFixed(1)) } : null,
+      steps: {
+        score: Math.round(stepsScore),
+        recent: `${(recent.steps || 0).toLocaleString()} steps`,
+        avg: `${Math.round(avgSteps).toLocaleString()}/day`,
+        recommended: recommended.steps,
+      },
+      duration: avgDuration !== null && recentDuration !== null ? {
+        recent: formatDurationMinutes(recentDuration.minutes),
+        avg: `${formatDurationMinutes(avgDuration)}/exercise`,
+        recommended: recommended.duration,
+      } : null,
+      heartRate: avgHeartRate !== null ? {
+        score: Math.round(heartRateScore),
+        recent: recent.heart_rate_bpm ? `${recent.heart_rate_bpm} bpm` : "-",
+        avg: `${Math.round(avgHeartRate)} bpm`,
+        recommended: recommended.heartRate,
+      } : null,
+      sleep: avgSleep !== null ? {
+        score: Math.round(sleepScore),
+        recent: recent.sleep_hours ? `${recent.sleep_hours}h` : "-",
+        avg: `${parseFloat(avgSleep.toFixed(1))}h`,
+        recommended: recommended.sleep,
+      } : null,
+      spo2: avgSpo2 !== null ? {
+        score: Math.round(spo2Score),
+        recent: recent.blood_oxygen_spo2 ? `${recent.blood_oxygen_spo2}%` : "-",
+        avg: `${parseFloat(avgSpo2.toFixed(1))}%`,
+        recommended: recommended.spo2,
+      } : null,
       entriesUsed: count,
     };
-  }, [healthEntries]);
+  }, [healthDurationActivities, healthEntries, healthProfile?.dob]);
+
+  const { data: smartFitGoalRank, refetch: refetchSmartFitGoalRank } = useQuery<SmartFitGoalRank | null>({
+    queryKey: ["smartfit-goal-rank", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+
+      const { data: clubs, error: clubsError } = await supabase
+        .from("clubs")
+        .select("club_id, club_name, coordinator_id")
+        .eq("special_club_code", SMARTFIT_SPECIAL_CLUB_CODE);
+      if (clubsError) {
+        console.error("[Goals] SmartFit club lookup error:", clubsError);
+        return null;
+      }
+
+      const clubRows = clubs || [];
+      const clubIds = clubRows.map((club: any) => club.club_id).filter(Boolean);
+      const coordinatorIds = clubRows.map((club: any) => club.coordinator_id).filter(Boolean);
+      if (clubIds.length === 0 && coordinatorIds.length === 0) return null;
+
+      const membershipRequestsPromise = clubIds.length > 0
+        ? supabase
+          .from("club_membership_request")
+          .select("registration_id")
+          .in("club_id", clubIds)
+          .eq("request_type", "membership")
+          .in("status", ["pending", "approved"])
+        : Promise.resolve({ data: [], error: null });
+      const legacyMembersPromise = coordinatorIds.length > 0
+        ? supabase
+          .from("club_members")
+          .select("registration_id")
+          .in("coordinator_id", coordinatorIds)
+        : Promise.resolve({ data: [], error: null });
+
+      const [
+        { data: membershipRequests, error: membershipError },
+        { data: legacyMembers, error: legacyError },
+      ] = await Promise.all([membershipRequestsPromise, legacyMembersPromise]);
+      if (membershipError) {
+        console.error("[Goals] SmartFit membership lookup error:", membershipError);
+        return null;
+      }
+      if (legacyError) {
+        console.error("[Goals] SmartFit legacy membership lookup error:", legacyError);
+        return null;
+      }
+
+      const memberIds = Array.from(new Set([
+        ...(membershipRequests || []).map((row: any) => row.registration_id).filter(Boolean),
+        ...(legacyMembers || []).map((row: any) => row.registration_id).filter(Boolean),
+      ]));
+      if (!memberIds.includes(user.id)) return null;
+      if (memberIds.length === 0) return null;
+
+      const [
+        { data: healthData, error: healthError },
+        { data: registrations, error: registrationError },
+        { data: activities, error: activityError },
+      ] = await Promise.all([
+        supabase
+          .from("health_goal")
+          .select("registration_id, record_date, steps, heart_rate_bpm, sleep_hours, blood_oxygen_spo2")
+          .in("registration_id", memberIds),
+        supabase
+          .from("registrations")
+          .select("registration_id, sex, dob")
+          .in("registration_id", memberIds),
+        supabase
+          .from("activities")
+          .select("registration_id, activity_date, start_time, end_time, pause_duration_seconds")
+          .in("registration_id", memberIds),
+      ]);
+      if (healthError) {
+        console.error("[Goals] SmartFit health lookup error:", healthError);
+        return null;
+      }
+      if (registrationError) {
+        console.error("[Goals] SmartFit registration lookup error:", registrationError);
+        return null;
+      }
+      if (activityError) {
+        console.error("[Goals] SmartFit activity lookup error:", activityError);
+        return null;
+      }
+
+      const profileMap = new Map((registrations || []).map((profile: any) => [profile.registration_id, profile]));
+      const healthByUser = new Map<string, any[]>();
+      (healthData || []).forEach((entry: any) => {
+        if (!entry.registration_id) return;
+        const rows = healthByUser.get(entry.registration_id) || [];
+        rows.push(entry);
+        healthByUser.set(entry.registration_id, rows);
+      });
+
+      const activityTimeByUser = new Map<string, { totalTime: number; days: Set<string> }>();
+      (activities || []).forEach((activity: DurationActivity) => {
+        if (!activity.registration_id) return;
+        const existing = activityTimeByUser.get(activity.registration_id) || { totalTime: 0, days: new Set<string>() };
+        existing.totalTime += getActivityDurationMinutes(activity) || 0;
+        const activityDate = String(activity.activity_date || "").slice(0, 10);
+        if (activityDate) existing.days.add(activityDate);
+        activityTimeByUser.set(activity.registration_id, existing);
+      });
+
+      const rows = [...healthByUser.entries()].map(([registrationId, entries]) => {
+        const profile = profileMap.get(registrationId) || {};
+        const days = new Set(entries.map((entry) => String(entry.record_date || "").slice(0, 10)).filter(Boolean)).size || entries.length;
+        const avgSteps = entries.reduce((sum, entry) => sum + Number(entry.steps || 0), 0) / Math.max(days, 1);
+        const heartRates = entries.map((entry) => Number(entry.heart_rate_bpm)).filter((value) => Number.isFinite(value) && value > 0);
+        const sleepHours = entries.map((entry) => Number(entry.sleep_hours)).filter((value) => Number.isFinite(value) && value > 0);
+        const spo2Values = entries.map((entry) => Number(entry.blood_oxygen_spo2)).filter((value) => Number.isFinite(value) && value > 0);
+        const sex = normalizeSex(profile.sex);
+        const ageGroup = getSmartFitAgeGroup(getAgeFromDob(profile.dob));
+        const activityStats = activityTimeByUser.get(registrationId);
+        const activityDays = activityStats?.days.size || 0;
+        const healthScoreValue = scoreSmartFitHealth({
+          avgSteps,
+          avgHeartRate: heartRates.length ? heartRates.reduce((sum, value) => sum + value, 0) / heartRates.length : null,
+          avgSleep: sleepHours.length ? sleepHours.reduce((sum, value) => sum + value, 0) / sleepHours.length : null,
+          avgSpo2: spo2Values.length ? spo2Values.reduce((sum, value) => sum + value, 0) / spo2Values.length : null,
+          ageGroup,
+          sex,
+        });
+        return {
+          registrationId,
+          ageGroup,
+          avgSteps: Math.round(avgSteps),
+          avgTime: activityStats && activityDays > 0 ? activityStats.totalTime / activityDays : 0,
+          days,
+          healthScore: healthScoreValue,
+        };
+      });
+
+      const userRow = rows.find((row) => row.registrationId === user.id);
+      if (!userRow) return null;
+      const groupRows = rows
+        .filter((row) => row.ageGroup === userRow.ageGroup)
+        .sort((a, b) =>
+          b.healthScore - a.healthScore ||
+          b.avgSteps - a.avgSteps ||
+          b.avgTime - a.avgTime ||
+          b.days - a.days
+        );
+      const rankIndex = groupRows.findIndex((row) => row.registrationId === user.id);
+      if (rankIndex < 0) return null;
+
+      return {
+        rank: rankIndex + 1,
+        totalParticipants: groupRows.length,
+        ageGroup: userRow.ageGroup,
+        healthScore: userRow.healthScore,
+        clubName: clubRows[0]?.club_name || "SmartFit Club",
+      };
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
 
   const handleLogHealth = useCallback(() => {
     const steps = parseInt(healthStepsInput, 10);
@@ -1157,6 +1599,32 @@ export default function GoalsScreen() {
 
 
 
+  const resolveCanonicalRegistrationIds = useCallback(async (registrationIds: string[]) => {
+    const uniqueRegistrationIds = Array.from(new Set(registrationIds.filter(Boolean)));
+    if (uniqueRegistrationIds.length === 0) return new Map<string, string>();
+
+    const [byAuthIdResult, byRegistrationIdResult] = await Promise.all([
+      supabase.from("profiles").select("profile_id, registration_id").in("profile_id", uniqueRegistrationIds),
+      supabase.from("profiles").select("profile_id, registration_id").in("registration_id", uniqueRegistrationIds),
+    ]);
+
+    if (byAuthIdResult.error) throw byAuthIdResult.error;
+    if (byRegistrationIdResult.error) throw byRegistrationIdResult.error;
+
+    const resolved = new Map<string, string>();
+    uniqueRegistrationIds.forEach((id) => resolved.set(id, id));
+    [...(byAuthIdResult.data || []), ...(byRegistrationIdResult.data || [])].forEach((profile: any) => {
+      const authId = String(profile.profile_id || "").trim();
+      const registrationId = String(profile.registration_id || "").trim();
+      if (authId && registrationId) {
+        resolved.set(authId, registrationId);
+        resolved.set(registrationId, registrationId);
+      }
+    });
+
+    return resolved;
+  }, []);
+
   const { data: communityRankData, isLoading: communityRankLoading, refetch: refetchCommunityRank } = useQuery<CommunityRankData[]>({
     queryKey: ["goalCommunityRank"],
     queryFn: async () => {
@@ -1170,7 +1638,7 @@ export default function GoalsScreen() {
         }
         const { data: registrations, error: regError } = await supabase
           .from("registrations")
-          .select('registration_id, first_name, other_names');
+          .select('registration_id, first_name, other_names, has_disability, para_uses_equipment');
         if (regError) {
           console.error("[Goals] Community rank registration fetch error:", JSON.stringify(regError));
           throw regError;
@@ -1198,6 +1666,7 @@ export default function GoalsScreen() {
         userStats.forEach((stats, regId) => {
           const registration = regMap.get(regId) as any;
           if (!registration) return;
+          if (registration.has_disability === true && registration.para_uses_equipment === true) return;
           const firstName = registration.first_name || "";
           const otherNames = registration.other_names || "";
           const fullName = [firstName, otherNames].filter((n: string) => n).join(" ") || "Unknown";
@@ -1216,6 +1685,64 @@ export default function GoalsScreen() {
         console.error("[Goals] Community rank query failed:", JSON.stringify(error));
         throw error;
       }
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
+  const { data: familyRanking, isLoading: familyRankLoading, refetch: refetchFamilyRank } = useQuery<RankSummary | null>({
+    queryKey: ["goalFamilyRank", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      const canonicalMap = await resolveCanonicalRegistrationIds([user.id]);
+      const ownerRegistrationId = canonicalMap.get(user.id) || user.id;
+
+      const { data: memberships, error: membershipError } = await supabase
+        .from("family_members")
+        .select("member_registration_id")
+        .eq("owner_registration_id", ownerRegistrationId);
+      if (membershipError) throw membershipError;
+
+      const familyIds = Array.from(new Set([ownerRegistrationId, ...(memberships || []).map((row: any) => row.member_registration_id)].filter(Boolean)));
+      if (familyIds.length === 0) return null;
+
+      const { data: activities, error: activityError } = await supabase
+        .from("activities")
+        .select("registration_id, activity_date, distance_km, pace_min_per_km")
+        .in("registration_id", familyIds);
+      if (activityError) throw activityError;
+
+      const rowsById = new Map<string, { distance: number; activeDays: Set<string>; paceSum: number; activityCount: number }>();
+      familyIds.forEach((id) => rowsById.set(id, { distance: 0, activeDays: new Set<string>(), paceSum: 0, activityCount: 0 }));
+      (activities || []).forEach((activity: any) => {
+        const regId = activity.registration_id;
+        if (!regId) return;
+        const existing = rowsById.get(regId) || { distance: 0, activeDays: new Set<string>(), paceSum: 0, activityCount: 0 };
+        existing.distance += Number(activity.distance_km) || 0;
+        existing.activeDays.add(getDateOnly(activity.activity_date));
+        existing.paceSum += Number(activity.pace_min_per_km) || 0;
+        existing.activityCount += 1;
+        rowsById.set(regId, existing);
+      });
+
+      const rows: FamilyRankRow[] = Array.from(rowsById.entries()).map(([registrationId, row]) => ({
+        registrationId,
+        distance: row.distance,
+        activeDays: row.activeDays.size,
+        averagePace: row.activityCount > 0 ? row.paceSum / row.activityCount : 0,
+      }));
+
+      const sorted = rows.sort((a, b) => b.distance - a.distance || b.activeDays - a.activeDays || a.averagePace - b.averagePace);
+      const userIndex = sorted.findIndex((row) => row.registrationId === ownerRegistrationId);
+      if (userIndex === -1 || sorted[userIndex].distance <= 0) return null;
+
+      return {
+        label: "Family",
+        currentRank: userIndex + 1,
+        totalParticipants: sorted.length,
+        metricLabel: "Distance",
+        metricValue: `${sorted[userIndex].distance.toFixed(1)} km`,
+      };
     },
     enabled: !!user?.id,
     staleTime: 30000,
@@ -1304,6 +1831,17 @@ export default function GoalsScreen() {
     };
   }, [communityRanking, previousRank]);
 
+  const communityActivityRankSummary = useMemo<RankSummary | null>(() => {
+    if (!communityRanking) return null;
+    return {
+      label: "Activity",
+      currentRank: communityRanking.currentRank,
+      totalParticipants: communityRanking.totalParticipants,
+      metricLabel: "Avg km/day",
+      metricValue: communityRanking.avgDistance.toFixed(1),
+    };
+  }, [communityRanking]);
+
   const { data: medalGoalData, isLoading: medalGoalLoading, refetch: refetchMedalGoal } = useQuery<MedalGoalData | null>({
     queryKey: ["medalGoalData", user?.id],
     queryFn: async () => {
@@ -1379,6 +1917,132 @@ export default function GoalsScreen() {
     enabled: !!user?.id,
     staleTime: 30000,
   });
+
+  const { data: communityMedalRanking, isLoading: communityMedalRankLoading, refetch: refetchCommunityMedalRank } = useQuery<RankSummary | null>({
+    queryKey: ["goalCommunityMedalRank", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const yearStart = `${currentYear}-01-01`;
+      const yearEnd = `${currentYear}-12-31`;
+      const todayIso = now.toISOString().slice(0, 10);
+      const yesterdayIso = addDaysIso(todayIso, -1);
+
+      const { data: events, error: eventsError } = await supabase
+        .from("events")
+        .select("event_id, starts_at, ends_at, has_medal, approval_status, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
+        .eq("has_medal", true)
+        .eq("approval_status", "approved")
+        .gte("ends_at", yearStart)
+        .lte("starts_at", yearEnd);
+      if (eventsError) throw eventsError;
+
+      const eventIds = (events || []).map((event: any) => event.event_id).filter(Boolean);
+      if (eventIds.length === 0) return null;
+
+      const { data: participants, error: participantsError } = await supabase
+        .from("events_participants")
+        .select("event_id, registration_id, distance_km")
+        .in("event_id", eventIds);
+      if (participantsError) throw participantsError;
+
+      const rawRegistrationIds = Array.from(new Set((participants || []).map((participant: any) => participant.registration_id).filter(Boolean)));
+      if (rawRegistrationIds.length === 0) return null;
+
+      const resolvedRegistrationIds = await resolveCanonicalRegistrationIds([...rawRegistrationIds, user.id]);
+      const userCanonicalId = resolvedRegistrationIds.get(user.id) || user.id;
+      const canonicalRegistrationIds = Array.from(new Set(rawRegistrationIds.map((id) => resolvedRegistrationIds.get(id) || id).filter(Boolean)));
+      const activityLookupIds = Array.from(new Set([...rawRegistrationIds, ...canonicalRegistrationIds]));
+
+      const [{ data: registrations, error: registrationError }, { data: activities, error: activityError }] = await Promise.all([
+        supabase
+          .from("registrations")
+          .select("registration_id, dob, has_disability, para_uses_equipment")
+          .in("registration_id", canonicalRegistrationIds),
+        supabase
+          .from("activities")
+          .select("registration_id, activity_date, distance_km")
+          .in("registration_id", activityLookupIds)
+          .gte("activity_date", yearStart)
+          .lte("activity_date", todayIso),
+      ]);
+      if (registrationError) throw registrationError;
+      if (activityError) throw activityError;
+
+      const registrationMap = new Map((registrations || []).map((registration: any) => [registration.registration_id, registration]));
+      const eventMap = new Map((events || []).map((event: any) => [event.event_id, event]));
+      const activityDistanceByRegDate = new Map<string, number>();
+      (activities || []).forEach((activity: any) => {
+        const canonicalId = resolvedRegistrationIds.get(activity.registration_id) || activity.registration_id;
+        const activityDate = getDateOnly(activity.activity_date);
+        if (!canonicalId || !activityDate) return;
+        const key = `${canonicalId}:${activityDate}`;
+        activityDistanceByRegDate.set(key, (activityDistanceByRegDate.get(key) || 0) + (Number(activity.distance_km) || 0));
+      });
+
+      const rowsByRegistration = new Map<string, MedalRankRow>();
+      (participants || []).forEach((participant: any) => {
+        const event = eventMap.get(participant.event_id);
+        const canonicalId = resolvedRegistrationIds.get(participant.registration_id) || participant.registration_id;
+        const registration = registrationMap.get(canonicalId);
+        if (!event || !canonicalId || !registration) return;
+        if (isJuniorAge(registration.dob) || usesParaEquipment(registration)) return;
+
+        const medalStart = getDateOnly(event.medal_date_start) || getDateOnly(event.starts_at);
+        const medalEnd = getDateOnly(event.medal_date_end) || getDateOnly(event.ends_at);
+        const participantDistance = Number(participant.distance_km) || 0;
+        const minDailyDistance = Number(event.medal_min_daily_distance) || 0;
+        const minCumulativeDistance = Number(event.medal_min_cumulative_distance) || 0;
+        const band = getMedalBand(minCumulativeDistance || minDailyDistance || participantDistance);
+        if (!band) return;
+
+        let totalDistance = participantDistance;
+        let qualified = participantDistance > 0 && (minDailyDistance <= 0 || participantDistance >= minDailyDistance);
+        if (medalStart && medalEnd) {
+          const cutoff = minIsoDate(medalEnd, medalEnd < todayIso ? medalEnd : yesterdayIso);
+          if (cutoff >= medalStart) {
+            totalDistance = 0;
+            let dailyQualified = true;
+            let cursor = medalStart;
+            while (cursor <= cutoff) {
+              const dayDistance = activityDistanceByRegDate.get(`${canonicalId}:${cursor}`) || 0;
+              totalDistance += dayDistance;
+              if (minDailyDistance > 0 && dayDistance < minDailyDistance) dailyQualified = false;
+              cursor = addDaysIso(cursor, 1);
+            }
+            qualified = dailyQualified && (minCumulativeDistance <= 0 || totalDistance >= minCumulativeDistance);
+          }
+        }
+        if (!qualified) return;
+
+        const existing = rowsByRegistration.get(canonicalId) || { registrationId: canonicalId, totalMedals: 0, points: 0 };
+        existing.totalMedals += 1;
+        existing.points += band.points;
+        rowsByRegistration.set(canonicalId, existing);
+      });
+
+      const sorted = Array.from(rowsByRegistration.values()).sort((a, b) => b.points - a.points || b.totalMedals - a.totalMedals);
+      const userIndex = sorted.findIndex((row) => row.registrationId === userCanonicalId);
+      if (userIndex === -1) return null;
+      const userRow = sorted[userIndex];
+
+      return {
+        label: "Medals",
+        currentRank: userIndex + 1,
+        totalParticipants: sorted.length,
+        metricLabel: "Medals",
+        metricValue: `${userRow.totalMedals} earned`,
+      };
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
+  const communityGoalRanks = useMemo(
+    () => [familyRanking, communityActivityRankSummary, communityMedalRanking].filter(Boolean) as RankSummary[],
+    [communityActivityRankSummary, communityMedalRanking, familyRanking]
+  );
 
   const { data: eventGoals = [], refetch: refetchEvents } = useQuery<RegisteredEvent[]>({
     queryKey: ["goalEvents", user?.id],
@@ -1467,10 +2131,14 @@ export default function GoalsScreen() {
     void refetchDailyRunGoal();
     void refetchDailyRunActivities();
     void refetchRecent();
+    void refetchHealthDurationActivities();
     void refetchHealth();
+    void refetchSmartFitGoalRank();
     void refetchHabit();
     void refetchCommunityRank();
+    void refetchFamilyRank();
     void refetchMedalGoal();
+    void refetchCommunityMedalRank();
   };
 
   const dailyRunProgress = useMemo(() => {
@@ -1498,11 +2166,12 @@ export default function GoalsScreen() {
       iter.setDate(iter.getDate() + 1);
     }
 
-    const totalDays = days.length;
     const runDays = days.filter((day) => day.hasRun).length;
-    const scorePercent = totalDays > 0 ? Math.round((runDays / totalDays) * 100) : 0;
     const elapsedDays = days.filter((day) => !day.isFuture).length;
+    const totalDays = days.length;
+    const scorePercent = elapsedDays > 0 ? Math.round((runDays / elapsedDays) * 100) : 0;
     const missedDays = days.filter((day) => !day.isFuture && !day.hasRun).length;
+    const targetRunsToDate = elapsedDays > 0 ? Math.ceil((elapsedDays * dailyRunGoal.target_percent) / 100) : 0;
 
     return {
       totalDays,
@@ -1511,7 +2180,8 @@ export default function GoalsScreen() {
       missedDays,
       scorePercent,
       targetPercent: dailyRunGoal.target_percent,
-      isOnTrack: scorePercent >= dailyRunGoal.target_percent,
+      targetRunsToDate,
+      isOnTrack: runDays >= targetRunsToDate,
       days,
     };
   }, [dailyRunActivities, dailyRunGoal]);
@@ -1689,28 +2359,191 @@ export default function GoalsScreen() {
     setShowGoalForm(true);
   }, [fitnessGoal]);
 
-  const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !dailyRunGoal && !fitnessGoalLoading && !dailyRunGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading && !habitDeclaration && !habitDeclarationLoading && !communityRanking && !communityRankLoading && !medalGoalData && !medalGoalLoading;
+  const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !dailyRunGoal && !fitnessGoalLoading && !dailyRunGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading && !habitDeclaration && !habitDeclarationLoading && communityGoalRanks.length === 0 && !communityRankLoading && !familyRankLoading && !communityMedalRankLoading && !medalGoalData && !medalGoalLoading;
+  const hasRunningGoal = !!dailyRunGoal || !!habitDeclaration;
+  const selectedGoalKeys = useMemo(() => {
+    const keys = new Set<string>();
+    userGoals.forEach((goal) => {
+      const key = goalNameToKey(goal.goal);
+      if (key) {
+        keys.add(key);
+      }
+    });
+    return keys;
+  }, [goalNameToKey, userGoals]);
+  const hasSelectedGoal = useCallback((goalKey: string): boolean => selectedGoalKeys.has(goalKey), [selectedGoalKeys]);
 
   const allGoalTypesMap = useMemo(() => {
-    const map: Record<string, { key: string; label: string; isTracked: boolean; icon: "zap" | "calendar" | "scale" | "heart" | "flame" | "trophy" | "users" }> = {
-      fitness: { key: "fitness", label: "Improve Fitness", isTracked: !!fitnessGoal, icon: "zap" },
-      dailyRun: { key: "dailyRun", label: "I Just Want to Run", isTracked: !!dailyRunGoal, icon: "calendar" },
-      weight: { key: "weight", label: "Weight Loss", isTracked: !!weightTargetGoal, icon: "scale" },
-      health: { key: "health", label: "General Health", isTracked: healthEntries.length > 0, icon: "heart" },
-      habit: { key: "habit", label: "Commit to a Training Plan", isTracked: !!habitDeclaration, icon: "flame" },
-      medals: { key: "medals", label: "Earn Medals", isTracked: !!medalGoalData && medalGoalData.enrolledEvents > 0, icon: "trophy" },
-      community: { key: "community", label: "Compete in Community", isTracked: !!communityRanking, icon: "users" },
+    const map: Record<string, { key: string; label: string; isTracked: boolean; icon: "zap" | "calendar" | "scale" | "heart" | "flame" | "trophy" | "users"; overview: string; measuredBy: string }> = {
+      fitness: {
+        key: "fitness",
+        label: "Improve Fitness",
+        isTracked: !!fitnessGoal,
+        icon: "zap",
+        overview: "Set a target pace and date, then compare it with the pace you actually run.",
+        measuredBy: "Measured by target pace against your average pace and the average pace from your last 3 runs.",
+      },
+      dailyRun: {
+        key: "dailyRun",
+        label: "I Just Want to Run",
+        isTracked: hasRunningGoal,
+        icon: "calendar",
+        overview: "This keeps the goal simple: decide how often you want to run, then check whether you are keeping that commitment.",
+        measuredBy: "Measured by actual run days between the start date and today against the target runs expected by today.",
+      },
+      weight: {
+        key: "weight",
+        label: "Weight Loss",
+        isTracked: !!weightTargetGoal,
+        icon: "scale",
+        overview: "This is linked to the Weight Loss Club and focuses on actual weight change plus the effort behind it.",
+        measuredBy: "Measured by actual weight loss, workout efficiency per 100 km or 100 hours, and future Weight Loss community ranking.",
+      },
+      health: {
+        key: "health",
+        label: "General Health",
+        isTracked: healthEntries.length > 0,
+        icon: "heart",
+        overview: "Track Your Health uses smartwatch-style readings to show whether your daily movement is improving.",
+        measuredBy: "Measured by average steps per day and health score. SmartFit Club rankings appear under Reports > My Club.",
+      },
+      medals: {
+        key: "medals",
+        label: "Earn Medals",
+        isTracked: (!!medalGoalData && medalGoalData.enrolledEvents > 0) || !!communityMedalRanking,
+        icon: "trophy",
+        overview: "Earn Medals follows your medal race participation and how many medals you actually earn.",
+        measuredBy: "Measured by medal races enrolled as a share of eligible local medal races, medals earned against yearly target, and future Community Medals ranking.",
+      },
+      community: {
+        key: "community",
+        label: "Compete in Community",
+        isTracked: communityGoalRanks.length > 0,
+        icon: "users",
+        overview: "Compete in Community brings together rankings from the clubs and community tables you belong to.",
+        measuredBy: "Measured by available community and club rankings from your memberships.",
+      },
     };
     return map;
-  }, [dailyRunGoal, fitnessGoal, weightTargetGoal, healthEntries, habitDeclaration, medalGoalData, communityRanking]);
+  }, [communityGoalRanks.length, communityMedalRanking, fitnessGoal, hasRunningGoal, healthEntries, medalGoalData, weightTargetGoal]);
 
   const allGoalTypes = useMemo(() => {
     const goalKeys = orderedGoalKeys.filter(k => k !== "events");
     return goalKeys.map(k => allGoalTypesMap[k]).filter(Boolean);
   }, [orderedGoalKeys, allGoalTypesMap]);
 
-  const trackedGoalsCount = useMemo(() => allGoalTypes.filter(g => g.isTracked).length, [allGoalTypes]);
-  const untrackedGoals = useMemo(() => allGoalTypes.filter(g => !g.isTracked), [allGoalTypes]);
+  const trackedGoals = useMemo(() => allGoalTypes.filter(g => hasSelectedGoal(g.key)), [allGoalTypes, hasSelectedGoal]);
+  const untrackedGoals = useMemo(() => allGoalTypes.filter(g => !hasSelectedGoal(g.key)), [allGoalTypes, hasSelectedGoal]);
+  const trackedGoalsCount = trackedGoals.length;
+  const hasGoalScore = useCallback((goalKey: string): boolean => {
+    if (goalKey === "fitness") return !!fitnessGoal;
+    if (goalKey === "dailyRun") return hasRunningGoal;
+    if (goalKey === "weight") return !!weightTargetGoal;
+    if (goalKey === "health") return healthEntries.length > 0;
+    if (goalKey === "medals") return !!medalGoalData || !!communityMedalRanking;
+    if (goalKey === "community") return communityGoalRanks.length > 0;
+    if (goalKey === "events") return ongoingEvents.length > 0;
+    return false;
+  }, [communityGoalRanks.length, communityMedalRanking, fitnessGoal, hasRunningGoal, healthEntries.length, medalGoalData, ongoingEvents.length, weightTargetGoal]);
+  const goalsSubPages: { key: GoalsSubPage; label: string }[] = [
+    { key: "overview", label: "Overview" },
+    { key: "set", label: "Set Goals" },
+    { key: "scorecard", label: "Score Card" },
+  ];
+  const openGoalSetup = useCallback((goalKey: string) => {
+    if (goalKey === "dailyRun") {
+      openDailyRunGoalForm();
+      return;
+    }
+    if (goalKey === "fitness") {
+      openEditGoalForm();
+      return;
+    }
+    if (goalKey === "weight") {
+      openEditWeightTarget();
+      return;
+    }
+    if (goalKey === "health") {
+      setShowHealthForm(true);
+      return;
+    }
+    if (goalKey === "medals") {
+      router.push("/events" as any);
+      return;
+    }
+    setActiveGoalsPage("set");
+  }, [openDailyRunGoalForm, openEditGoalForm, openEditWeightTarget, router]);
+  const renderTrainingPlanCard = () => {
+    if (habitDeclaration) {
+      return (
+        <View style={[styles.habitCard, styles.combinedHabitCard]}>
+          <View style={styles.habitDeclarationRow}>
+            <Text style={styles.habitDeclarationText}>
+              I <Text style={styles.habitHighlight}>{habitDeclaration.activity_type}</Text>{" "}
+              <Text style={styles.habitHighlight}>{habitDeclaration.target_amount}</Text>{" "}
+              <Text style={styles.habitHighlight}>{habitDeclaration.unit}</Text>{" "}
+              <Text style={styles.habitHighlight}>{habitDeclaration.frequency}</Text>
+            </Text>
+          </View>
+
+          <View style={styles.habitDateRow}>
+            <Calendar size={14} color={colors.textSecondary} />
+            <Text style={styles.habitDateText}>Since {formatGoalDate(habitDeclaration.start_date)}</Text>
+          </View>
+
+          {habitCommitment ? (
+            <>
+              <View style={styles.habitCommitmentHeader}>
+                <View style={[styles.habitCommitmentPill, { backgroundColor: getCommitmentColor(habitCommitment.percent) + "18" }]}>
+                  <Text style={[styles.habitCommitmentPillText, { color: getCommitmentColor(habitCommitment.percent) }]}>
+                    {getCommitmentLabel(habitCommitment.percent)}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.fitnessProgressSection}>
+                <View style={styles.fitnessProgressInfo}>
+                  <Text style={styles.fitnessProgressLabel}>Training plan commitment</Text>
+                  <Text style={styles.fitnessProgressPercent}>{habitCommitment.percent}%</Text>
+                </View>
+                <View style={styles.fitnessProgressTrack}>
+                  <LinearGradient
+                    colors={habitCommitment.percent >= 70 ? ["#0D9488", "#14B8A6"] : habitCommitment.percent >= 40 ? ["#F59E0B", "#FBBF24"] : ["#EF4444", "#F87171"]}
+                    style={[styles.fitnessProgressFill, { width: `${Math.max(2, habitCommitment.percent)}%` }]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                  />
+                </View>
+              </View>
+              <Text style={styles.habitCommitmentDetail}>
+                {habitCommitment.periodsMet} of {habitCommitment.periodsElapsed} {getFrequencyPeriodLabel(habitDeclaration.frequency)} met
+              </Text>
+            </>
+          ) : (
+            <View style={styles.noActivitiesInfo}>
+              <Flame size={24} color={colors.textLight} />
+              <Text style={styles.noActivitiesText}>Start logging activities to track your training progress</Text>
+            </View>
+          )}
+        </View>
+      );
+    }
+
+    if (activeGoalsPage === "scorecard" || habitDeclarationLoading) return null;
+
+    return (
+      <TouchableOpacity style={[styles.setupGoalCard, styles.combinedHabitCard]} onPress={openEditHabit} activeOpacity={0.8}>
+        <LinearGradient colors={["#0D9488", "#14B8A6"]} style={styles.setupGoalGradient}>
+          <Flame size={32} color={colors.white} />
+          <Text style={styles.setupGoalTitle}>Add a Training Plan</Text>
+          <Text style={styles.setupGoalSubtext}>Commit to a training amount and track consistency under I Just Want to Run.</Text>
+          <View style={styles.setupGoalButton}>
+            <Text style={[styles.setupGoalButtonText, { color: "#0D9488" }]}>Set Training Plan</Text>
+            <ChevronRight size={16} color="#0D9488" />
+          </View>
+        </LinearGradient>
+      </TouchableOpacity>
+    );
+  };
 
   if (!isSubscribed) {
     return (
@@ -1737,7 +2570,177 @@ export default function GoalsScreen() {
           </LinearGradient>
         </View>
 
+        <View style={styles.goalsPageTabs}>
+          {goalsSubPages.map((page) => (
+            <TouchableOpacity
+              key={page.key}
+              style={[styles.goalsPageTab, activeGoalsPage === page.key && styles.goalsPageTabActive]}
+              onPress={() => setActiveGoalsPage(page.key)}
+              activeOpacity={0.85}
+            >
+              <Text style={[styles.goalsPageTabText, activeGoalsPage === page.key && styles.goalsPageTabTextActive]}>
+                {page.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {activeGoalsPage === "overview" && (
+          <>
+            <View style={styles.section}>
+              <View style={styles.compactOverviewCard}>
+                <Text style={styles.compactOverviewTitle}>Goals are simple progress markers.</Text>
+                <Text style={styles.compactOverviewText}>
+                  Pick the areas you care about, then RunNation measures them from your runs, events, health logs, or weight entries. Score Card is where the detailed numbers live.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.compactSectionTitle}>Goals Being Tracked</Text>
+              {trackedGoals.length > 0 ? (
+                <View style={styles.overviewList}>
+                  {trackedGoals.map((goal) => (
+                    <View key={`tracked-${goal.key}`} style={styles.overviewGoalRow}>
+                      <View style={styles.overviewGoalInfo}>
+                        <Text style={styles.overviewGoalTitle}>{goal.label}</Text>
+                        <Text style={styles.overviewGoalText}>{goal.overview}</Text>
+                        <Text style={styles.overviewMeasuredText}>{goal.measuredBy}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.overviewEmptyText}>No goals are being tracked yet.</Text>
+              )}
+            </View>
+
+            {untrackedGoals.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.compactSectionTitle}>Goals Not Selected</Text>
+                <View style={styles.overviewList}>
+                  {untrackedGoals.map((goal) => (
+                    <View key={`untracked-${goal.key}`} style={styles.overviewGoalRow}>
+                      <View style={styles.overviewGoalInfo}>
+                        <Text style={styles.overviewGoalTitle}>{goal.label}</Text>
+                        <Text style={styles.overviewGoalText}>{goal.overview}</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.overviewStartButton}
+                        onPress={() => openGoalSetup(goal.key)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.overviewStartButtonText}>Start</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+          </>
+        )}
+
+        {activeGoalsPage === "set" && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Target size={18} color={colors.primary} />
+              <Text style={styles.sectionTitle}>Set Goals</Text>
+            </View>
+            <View style={styles.setGoalsGrid}>
+              {hasSelectedGoal("dailyRun") && (
+                <TouchableOpacity style={styles.setGoalActionCard} onPress={openDailyRunGoalForm} activeOpacity={0.85}>
+                  <Calendar size={22} color="#0EA5E9" />
+                  <View style={styles.setGoalActionInfo}>
+                    <Text style={styles.setGoalActionTitle}>I Just Want to Run</Text>
+                    <Text style={styles.setGoalActionText}>
+                      {dailyRunGoal ? "Update your running days target." : "Set your running days target."}
+                    </Text>
+                  </View>
+                  <ChevronRight size={16} color={colors.textLight} />
+                </TouchableOpacity>
+              )}
+
+              {hasSelectedGoal("dailyRun") && (
+                <TouchableOpacity
+                  style={styles.setGoalActionCard}
+                  onPress={() => {
+                    openEditHabit();
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Flame size={22} color="#0D9488" />
+                  <View style={styles.setGoalActionInfo}>
+                    <Text style={styles.setGoalActionTitle}>Training Plan</Text>
+                    <Text style={styles.setGoalActionText}>
+                      {habitDeclaration ? "Update your training declaration." : "Add a training plan to this running goal."}
+                    </Text>
+                  </View>
+                  <ChevronRight size={16} color={colors.textLight} />
+                </TouchableOpacity>
+              )}
+
+              {hasSelectedGoal("fitness") && (
+                <TouchableOpacity style={styles.setGoalActionCard} onPress={openEditGoalForm} activeOpacity={0.85}>
+                  <Zap size={22} color={colors.primary} />
+                  <View style={styles.setGoalActionInfo}>
+                    <Text style={styles.setGoalActionTitle}>Improve Fitness</Text>
+                    <Text style={styles.setGoalActionText}>{fitnessGoal ? "Update your pace target." : "Set a pace target."}</Text>
+                  </View>
+                  <ChevronRight size={16} color={colors.textLight} />
+                </TouchableOpacity>
+              )}
+
+              {hasSelectedGoal("weight") && (
+                <TouchableOpacity style={styles.setGoalActionCard} onPress={openEditWeightTarget} activeOpacity={0.85}>
+                  <Scale size={22} color="#10B981" />
+                  <View style={styles.setGoalActionInfo}>
+                    <Text style={styles.setGoalActionTitle}>Weight Loss</Text>
+                    <Text style={styles.setGoalActionText}>{weightTargetGoal ? "Update your target weight." : "Set a target weight."}</Text>
+                  </View>
+                  <ChevronRight size={16} color={colors.textLight} />
+                </TouchableOpacity>
+              )}
+
+              {hasSelectedGoal("health") && (
+                <TouchableOpacity style={styles.setGoalActionCard} onPress={() => setShowHealthForm(true)} activeOpacity={0.85}>
+                  <Heart size={22} color="#EF4444" />
+                  <View style={styles.setGoalActionInfo}>
+                    <Text style={styles.setGoalActionTitle}>General Health</Text>
+                    <Text style={styles.setGoalActionText}>Log health readings for your score.</Text>
+                  </View>
+                  <ChevronRight size={16} color={colors.textLight} />
+                </TouchableOpacity>
+              )}
+
+              {hasSelectedGoal("medals") && (
+                <TouchableOpacity style={styles.setGoalActionCard} onPress={() => router.push("/events" as any)} activeOpacity={0.85}>
+                  <Trophy size={22} color="#D97706" />
+                  <View style={styles.setGoalActionInfo}>
+                    <Text style={styles.setGoalActionTitle}>Earn Medals</Text>
+                    <Text style={styles.setGoalActionText}>Enroll in eligible races and track medal progress.</Text>
+                  </View>
+                  <ChevronRight size={16} color={colors.textLight} />
+                </TouchableOpacity>
+              )}
+
+              {hasSelectedGoal("community") && (
+                <TouchableOpacity style={styles.setGoalActionCard} onPress={() => router.push("/activity" as any)} activeOpacity={0.85}>
+                  <Users size={22} color="#0EA5E9" />
+                  <View style={styles.setGoalActionInfo}>
+                    <Text style={styles.setGoalActionTitle}>Compete in Community</Text>
+                    <Text style={styles.setGoalActionText}>Review your available community and club rankings.</Text>
+                  </View>
+                  <ChevronRight size={16} color={colors.textLight} />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        )}
+
         {orderedGoalKeys.map((goalKey) => {
+          if (activeGoalsPage !== "scorecard") return null;
+          if (!hasSelectedGoal(goalKey)) return null;
+          if (activeGoalsPage === "scorecard" && !hasGoalScore(goalKey)) return null;
           if (goalKey === "fitness") {
             return fitnessGoal && fitnessProgress ? (
               <View key="fitness" style={styles.section}>
@@ -1780,6 +2783,17 @@ export default function GoalsScreen() {
                     </View>
                   </View>
 
+                  <View style={styles.scoreGuideRow}>
+                    <View style={styles.scoreGuideItem}>
+                      <Text style={styles.scoreGuideValue}>{formatPaceMinPerKm(fitnessProgress.lastThreeAvgpaceMinPerKm)}</Text>
+                      <Text style={styles.scoreGuideLabel}>Last 3 runs avg pace</Text>
+                    </View>
+                    <View style={styles.scoreGuideItem}>
+                      <Text style={styles.scoreGuideValue}>{fitnessProgress.lastThreeActivitiesUsed}</Text>
+                      <Text style={styles.scoreGuideLabel}>Runs used</Text>
+                    </View>
+                  </View>
+
                   <View style={styles.fitnessProgressSection}>
                     <View style={styles.fitnessProgressInfo}>
                       <Text style={styles.fitnessProgressLabel}>Progress</Text>
@@ -1811,7 +2825,7 @@ export default function GoalsScreen() {
                   </View>
 
                   <Text style={styles.fitnessFootnote}>
-                    Based on last {fitnessProgress.activitiesUsed} {fitnessProgress.activitiesUsed === 1 ? "activity" : "activities"}
+                    Target pace is compared with your overall average pace and the average pace of your last 3 runs.
                   </Text>
                 </View>
               </View>
@@ -1879,7 +2893,7 @@ export default function GoalsScreen() {
                     </View>
                     <View style={[styles.dailyRunTargetPill, dailyRunProgress.isOnTrack ? styles.statusPillGood : styles.statusPillBehind]}>
                       <Text style={dailyRunProgress.isOnTrack ? styles.statusPillTextGood : styles.statusPillTextBehind}>
-                        Target {dailyRunProgress.targetPercent}%
+                        Target {dailyRunProgress.targetRunsToDate} runs
                       </Text>
                     </View>
                   </View>
@@ -1891,13 +2905,13 @@ export default function GoalsScreen() {
                     </View>
                     <View style={styles.communityStatDivider} />
                     <View style={styles.communityStatItem}>
-                      <Text style={styles.communityStatValue}>{dailyRunProgress.totalDays}</Text>
-                      <Text style={styles.communityStatLabel}>Total Days</Text>
+                      <Text style={styles.communityStatValue}>{dailyRunProgress.targetRunsToDate}</Text>
+                      <Text style={styles.communityStatLabel}>Target Runs</Text>
                     </View>
                     <View style={styles.communityStatDivider} />
                     <View style={styles.communityStatItem}>
-                      <Text style={styles.communityStatValue}>{dailyRunProgress.missedDays}</Text>
-                      <Text style={styles.communityStatLabel}>Missed</Text>
+                      <Text style={styles.communityStatValue}>{dailyRunProgress.elapsedDays}</Text>
+                      <Text style={styles.communityStatLabel}>Days to Date</Text>
                     </View>
                   </View>
 
@@ -1924,9 +2938,37 @@ export default function GoalsScreen() {
                   </View>
 
                   <Text style={styles.fitnessFootnote}>
-                    A day counts when you record at least one Run activity on that date.
+                    Commitment is measured up to today: actual run days compared with the target runs expected by now.
                   </Text>
                 </View>
+                {renderTrainingPlanCard()}
+              </View>
+            ) : habitDeclaration ? (
+              <View key="dailyRun" style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Calendar size={18} color="#0EA5E9" />
+                  <Text style={styles.sectionTitle}>I Just Want to Run</Text>
+                  <TouchableOpacity onPress={openEditHabit} style={styles.editButton} activeOpacity={0.7}>
+                    <Text style={styles.editButtonText}>Edit</Text>
+                    <ChevronRight size={14} color={colors.primary} />
+                  </TouchableOpacity>
+                </View>
+                {renderTrainingPlanCard()}
+                {activeGoalsPage !== "scorecard" && (
+                  <TouchableOpacity style={[styles.setupGoalCard, styles.combinedHabitCard]} onPress={openDailyRunGoalForm} activeOpacity={0.8}>
+                    <LinearGradient colors={["#0EA5E9", "#38BDF8"]} style={styles.setupGoalGradient}>
+                      <Calendar size={32} color={colors.white} />
+                      <Text style={styles.setupGoalTitle}>Add Running Days</Text>
+                      <Text style={styles.setupGoalSubtext}>
+                        Add a date range and run-day target to complete this goal.
+                      </Text>
+                      <View style={styles.setupGoalButton}>
+                        <Text style={[styles.setupGoalButtonText, { color: "#0EA5E9" }]}>Set Running Days</Text>
+                        <ChevronRight size={16} color="#0EA5E9" />
+                      </View>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
               </View>
             ) : !dailyRunGoalLoading ? (
               <View key="dailyRun" style={styles.section}>
@@ -1947,6 +2989,7 @@ export default function GoalsScreen() {
                     </View>
                   </LinearGradient>
                 </TouchableOpacity>
+                {renderTrainingPlanCard()}
               </View>
             ) : null;
           }
@@ -2031,43 +3074,41 @@ export default function GoalsScreen() {
 
                   {weightProgress.current !== null && (
                     <View style={styles.weightEffectivenessSection}>
-                      <Text style={styles.weightHistoryTitle}>Workout Effectiveness</Text>
+                      <Text style={styles.weightHistoryTitle}>Weight Loss Club Score</Text>
                       <View style={styles.weightEffectivenessGrid}>
                         <View style={styles.weightEffectivenessTile}>
-                          <Text style={styles.weightEffectivenessValue}>{weightProgress.activityDistance.toFixed(1)}</Text>
-                          <Text style={styles.weightEffectivenessLabel}>km</Text>
+                          <Text style={styles.weightEffectivenessValue}>{weightProgress.lostSoFar.toFixed(1)}</Text>
+                          <Text style={styles.weightEffectivenessLabel}>kg lost</Text>
                         </View>
                         <View style={styles.weightEffectivenessTile}>
-                          <Text style={styles.weightEffectivenessValue}>{weightProgress.activityHours.toFixed(1)}</Text>
-                          <Text style={styles.weightEffectivenessLabel}>hours</Text>
+                          <Text style={styles.weightEffectivenessValue}>
+                            {weightProgress.lossPerKm !== null ? (weightProgress.lossPerKm * 100).toFixed(2) : "--"}
+                          </Text>
+                          <Text style={styles.weightEffectivenessLabel}>kg / 100 km</Text>
                         </View>
                         <View style={styles.weightEffectivenessTile}>
-                          <Text style={styles.weightEffectivenessValue}>{weightProgress.activityDays}</Text>
-                          <Text style={styles.weightEffectivenessLabel}>days</Text>
+                          <Text style={styles.weightEffectivenessValue}>
+                            {weightProgress.lossPerHour !== null ? (weightProgress.lossPerHour * 100).toFixed(2) : "--"}
+                          </Text>
+                          <Text style={styles.weightEffectivenessLabel}>kg / 100 hrs</Text>
                         </View>
                       </View>
                       <View style={styles.weightEfficiencyRow}>
                         <View style={styles.weightEfficiencyItem}>
-                          <Text style={styles.weightEfficiencyValue}>
-                            {weightProgress.lossPerKm !== null ? weightProgress.lossPerKm.toFixed(3) : "--"}
-                          </Text>
-                          <Text style={styles.weightEfficiencyLabel}>kg/km</Text>
+                          <Text style={styles.weightEfficiencyValue}>{weightProgress.activityDistance.toFixed(1)}</Text>
+                          <Text style={styles.weightEfficiencyLabel}>workout km</Text>
                         </View>
                         <View style={styles.weightEfficiencyItem}>
-                          <Text style={styles.weightEfficiencyValue}>
-                            {weightProgress.lossPerHour !== null ? weightProgress.lossPerHour.toFixed(2) : "--"}
-                          </Text>
-                          <Text style={styles.weightEfficiencyLabel}>kg/hour</Text>
+                          <Text style={styles.weightEfficiencyValue}>{weightProgress.activityHours.toFixed(1)}</Text>
+                          <Text style={styles.weightEfficiencyLabel}>workout hrs</Text>
                         </View>
                         <View style={styles.weightEfficiencyItem}>
-                          <Text style={styles.weightEfficiencyValue}>
-                            {weightProgress.lossPerDay !== null ? weightProgress.lossPerDay.toFixed(2) : "--"}
-                          </Text>
-                          <Text style={styles.weightEfficiencyLabel}>kg/day</Text>
+                          <Text style={styles.weightEfficiencyValue}>Soon</Text>
+                          <Text style={styles.weightEfficiencyLabel}>community rank</Text>
                         </View>
                       </View>
                       <Text style={styles.weightEffectivenessHint}>
-                        Based on weight lost since your first log and approved workouts in your activity history.
+                        Measures actual weight loss, workout efficiency, and future commitment ranking in the Weight Loss community.
                       </Text>
                     </View>
                   )}
@@ -2153,97 +3194,94 @@ export default function GoalsScreen() {
                     </View>
                   </View>
 
-                  <View style={styles.healthBreakdown}>
-                    <View style={styles.healthMetricRow}>
-                      <View style={styles.healthMetricIcon}>
-                        <Footprints size={16} color="#4A90E2" />
+                  {smartFitGoalRank && (
+                    <View style={styles.goalClubRankRow}>
+                      <View style={styles.goalClubRankInfo}>
+                        <Text style={styles.goalClubRankLabel}>{smartFitGoalRank.clubName}</Text>
+                        <Text style={styles.goalClubRankSubtext}>Age group {smartFitGoalRank.ageGroup} • health score {smartFitGoalRank.healthScore}</Text>
                       </View>
-                      <View style={styles.healthMetricInfo}>
-                        <Text style={styles.healthMetricLabel}>Steps</Text>
-                        <Text style={styles.healthMetricValue}>{healthScore.steps.avg.toLocaleString()}/day</Text>
-                      </View>
-                      <View style={styles.healthMetricBarContainer}>
-                        <View style={styles.healthMetricBarTrack}>
-                          <View style={[styles.healthMetricBarFill, { width: `${healthScore.steps.score}%`, backgroundColor: "#4A90E2" }]} />
-                        </View>
-                        <Text style={styles.healthMetricScore}>{healthScore.steps.score}</Text>
+                      <View style={styles.goalClubRankPill}>
+                        <Text style={styles.goalClubRankValue}>#{smartFitGoalRank.rank}</Text>
+                        <Text style={styles.goalClubRankOf}>of {smartFitGoalRank.totalParticipants}</Text>
                       </View>
                     </View>
+                  )}
+
+                  <View style={styles.healthBreakdown}>
+                    <View style={styles.healthMetricSummaryHeader}>
+                      <Text style={[styles.healthMetricSummaryHeaderText, styles.healthMetricSummaryLabelCell]}>Metric</Text>
+                      <Text style={styles.healthMetricSummaryHeaderText}>Recent</Text>
+                      <Text style={styles.healthMetricSummaryHeaderText}>Average</Text>
+                      <Text style={styles.healthMetricSummaryHeaderText}>Recommended</Text>
+                    </View>
+                    <View style={styles.healthMetricRow}>
+                      <View style={styles.healthMetricNameCell}>
+                        <View style={styles.healthMetricIcon}>
+                          <Footprints size={16} color="#4A90E2" />
+                        </View>
+                        <Text style={styles.healthMetricLabel} numberOfLines={1}>Steps</Text>
+                      </View>
+                      <Text style={styles.healthMetricValue} numberOfLines={1}>{healthScore.steps.recent}</Text>
+                      <Text style={styles.healthMetricValue} numberOfLines={1}>{healthScore.steps.avg}</Text>
+                      <Text style={styles.healthMetricRecommendedValue} numberOfLines={1}>{healthScore.steps.recommended}</Text>
+                    </View>
+
+                    {healthScore.duration && (
+                      <View style={styles.healthMetricRow}>
+                        <View style={styles.healthMetricNameCell}>
+                          <View style={styles.healthMetricIcon}>
+                            <Clock size={16} color="#F59E0B" />
+                          </View>
+                          <Text style={styles.healthMetricLabel} numberOfLines={1}>Duration</Text>
+                        </View>
+                        <Text style={styles.healthMetricValue} numberOfLines={1}>{healthScore.duration.recent}</Text>
+                        <Text style={styles.healthMetricValue} numberOfLines={1}>{healthScore.duration.avg}</Text>
+                        <Text style={styles.healthMetricRecommendedValue} numberOfLines={1}>{healthScore.duration.recommended}</Text>
+                      </View>
+                    )}
 
                     {healthScore.heartRate && (
                       <View style={styles.healthMetricRow}>
-                        <View style={styles.healthMetricIcon}>
-                          <Heart size={16} color="#E11D48" />
-                        </View>
-                        <View style={styles.healthMetricInfo}>
-                          <Text style={styles.healthMetricLabel}>Heart Rate</Text>
-                          <Text style={styles.healthMetricValue}>{healthScore.heartRate.avg} bpm</Text>
-                        </View>
-                        <View style={styles.healthMetricBarContainer}>
-                          <View style={styles.healthMetricBarTrack}>
-                            <View style={[styles.healthMetricBarFill, { width: `${healthScore.heartRate.score}%`, backgroundColor: "#E11D48" }]} />
+                        <View style={styles.healthMetricNameCell}>
+                          <View style={styles.healthMetricIcon}>
+                            <Heart size={16} color="#E11D48" />
                           </View>
-                          <Text style={styles.healthMetricScore}>{healthScore.heartRate.score}</Text>
+                          <Text style={styles.healthMetricLabel} numberOfLines={1}>Heart Rate</Text>
                         </View>
+                        <Text style={styles.healthMetricValue} numberOfLines={1}>{healthScore.heartRate.recent}</Text>
+                        <Text style={styles.healthMetricValue} numberOfLines={1}>{healthScore.heartRate.avg}</Text>
+                        <Text style={styles.healthMetricRecommendedValue} numberOfLines={1}>{healthScore.heartRate.recommended}</Text>
                       </View>
                     )}
 
                     {healthScore.sleep && (
                       <View style={styles.healthMetricRow}>
-                        <View style={styles.healthMetricIcon}>
-                          <Moon size={16} color="#8B5CF6" />
-                        </View>
-                        <View style={styles.healthMetricInfo}>
-                          <Text style={styles.healthMetricLabel}>Sleep</Text>
-                          <Text style={styles.healthMetricValue}>{healthScore.sleep.avg}h/night</Text>
-                        </View>
-                        <View style={styles.healthMetricBarContainer}>
-                          <View style={styles.healthMetricBarTrack}>
-                            <View style={[styles.healthMetricBarFill, { width: `${healthScore.sleep.score}%`, backgroundColor: "#8B5CF6" }]} />
+                        <View style={styles.healthMetricNameCell}>
+                          <View style={styles.healthMetricIcon}>
+                            <Moon size={16} color="#8B5CF6" />
                           </View>
-                          <Text style={styles.healthMetricScore}>{healthScore.sleep.score}</Text>
+                          <Text style={styles.healthMetricLabel} numberOfLines={1}>Sleep</Text>
                         </View>
+                        <Text style={styles.healthMetricValue} numberOfLines={1}>{healthScore.sleep.recent}</Text>
+                        <Text style={styles.healthMetricValue} numberOfLines={1}>{healthScore.sleep.avg}</Text>
+                        <Text style={styles.healthMetricRecommendedValue} numberOfLines={1}>{healthScore.sleep.recommended}</Text>
                       </View>
                     )}
 
                     {healthScore.spo2 && (
                       <View style={styles.healthMetricRow}>
-                        <View style={styles.healthMetricIcon}>
-                          <Droplets size={16} color="#0EA5E9" />
-                        </View>
-                        <View style={styles.healthMetricInfo}>
-                          <Text style={styles.healthMetricLabel}>Blood Oxygen</Text>
-                          <Text style={styles.healthMetricValue}>{healthScore.spo2.avg}% SpO2</Text>
-                        </View>
-                        <View style={styles.healthMetricBarContainer}>
-                          <View style={styles.healthMetricBarTrack}>
-                            <View style={[styles.healthMetricBarFill, { width: `${healthScore.spo2.score}%`, backgroundColor: "#0EA5E9" }]} />
+                        <View style={styles.healthMetricNameCell}>
+                          <View style={styles.healthMetricIcon}>
+                            <Droplets size={16} color="#0EA5E9" />
                           </View>
-                          <Text style={styles.healthMetricScore}>{healthScore.spo2.score}</Text>
+                          <Text style={styles.healthMetricLabel} numberOfLines={1}>Blood O₂</Text>
                         </View>
+                        <Text style={styles.healthMetricValue} numberOfLines={1}>{healthScore.spo2.recent}</Text>
+                        <Text style={styles.healthMetricValue} numberOfLines={1}>{healthScore.spo2.avg}</Text>
+                        <Text style={styles.healthMetricRecommendedValue} numberOfLines={1}>{healthScore.spo2.recommended}</Text>
                       </View>
                     )}
                   </View>
-
-                  <Text style={styles.fitnessFootnote}>
-                    Based on last {healthScore.entriesUsed} {healthScore.entriesUsed === 1 ? "day" : "days"}
-                  </Text>
-
-                  {healthEntries.length > 0 && (
-                    <View style={styles.healthHistorySection}>
-                      <Text style={styles.weightHistoryTitle}>Recent Entries</Text>
-                      {healthEntries.slice(0, 5).map((entry) => (
-                        <View key={entry.health_id} style={styles.healthHistoryRow}>
-                          <Text style={styles.weightHistoryDate}>{formatGoalDate(entry.record_date)}</Text>
-                          <View style={styles.healthHistoryStats}>
-                            <Text style={styles.healthHistoryStat}>{entry.steps?.toLocaleString() ?? "-"} steps</Text>
-                            {entry.heart_rate_bpm ? <Text style={styles.healthHistoryStatSub}>{entry.heart_rate_bpm} bpm</Text> : null}
-                            {entry.blood_oxygen_spo2 ? <Text style={styles.healthHistoryStatSub}>{entry.blood_oxygen_spo2}% SpO2</Text> : null}
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                  )}
                 </View>
               </View>
             ) : !healthLoading ? (
@@ -2372,7 +3410,7 @@ export default function GoalsScreen() {
                         <Text style={styles.medalRatioNumber}>{medalGoalData.enrolledEvents}</Text>
                         <Text style={styles.medalRatioOf}>/ {medalGoalData.totalEvents}</Text>
                       </View>
-                      <Text style={styles.medalRatioLabel}>Races Enrolled</Text>
+                      <Text style={styles.medalRatioLabel}>Eligible Races Enrolled</Text>
                       <View style={styles.medalRatioBarTrack}>
                         <View style={[styles.medalRatioBarFill, { width: `${medalGoalData.enrollmentRatio}%`, backgroundColor: "#D97706" }]} />
                       </View>
@@ -2386,7 +3424,7 @@ export default function GoalsScreen() {
                         <Text style={[styles.medalRatioNumber, { color: "#059669" }]}>{medalGoalData.medalsEarned}</Text>
                         <Text style={styles.medalRatioOf}>/ {medalGoalData.enrolledEvents}</Text>
                       </View>
-                      <Text style={styles.medalRatioLabel}>Medals Earned</Text>
+                      <Text style={styles.medalRatioLabel}>Medals Earned / Target</Text>
                       <View style={styles.medalRatioBarTrack}>
                         <View style={[styles.medalRatioBarFill, { width: `${medalGoalData.medalRatio}%`, backgroundColor: "#059669" }]} />
                       </View>
@@ -2429,8 +3467,27 @@ export default function GoalsScreen() {
                   )}
 
                   <Text style={styles.fitnessFootnote}>
-                    {medalGoalData.totalEvents} {medalGoalData.totalEvents === 1 ? "race" : "races"} available
+                    Enrollment is measured against eligible medal races. Individual medal rank follows the Community Medals table.
                   </Text>
+                  {communityMedalRanking ? (
+                    <View style={styles.goalRankList}>
+                      <View style={styles.goalRankRow}>
+                        <View style={styles.goalRankInfo}>
+                          <Text style={styles.goalRankLabel}>Medals Individual Rank</Text>
+                          <Text style={styles.goalRankSubtext}>{communityMedalRanking.metricValue}</Text>
+                        </View>
+                        <View style={styles.goalRankPill}>
+                          <Text style={styles.goalRankValue}>#{communityMedalRanking.currentRank}</Text>
+                          <Text style={styles.goalRankOf}>of {communityMedalRanking.totalParticipants}</Text>
+                        </View>
+                      </View>
+                    </View>
+                  ) : communityMedalRankLoading ? (
+                    <View style={styles.scoreComingSoonRow}>
+                      <Text style={styles.scoreComingSoonLabel}>Medals Individual Rank</Text>
+                      <Text style={styles.scoreComingSoonPill}>Loading</Text>
+                    </View>
+                  ) : null}
                 </View>
               </View>
             ) : !medalGoalLoading ? (
@@ -2453,70 +3510,48 @@ export default function GoalsScreen() {
           }
 
           if (goalKey === "community") {
-            return communityRanking ? (
+            return communityGoalRanks.length > 0 ? (
               <View key="community" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Users size={18} color="#0EA5E9" />
                   <Text style={styles.sectionTitle}>Compete in Community</Text>
                 </View>
                 <View style={styles.communityCard}>
-                  <View style={styles.communityRankCenter}>
-                    <View style={styles.communityRankCircle}>
-                      <Text style={styles.communityRankNumber}>#{communityRanking.currentRank}</Text>
-                      <Text style={styles.communityRankOf}>of {communityRanking.totalParticipants}</Text>
-                    </View>
-                    {rankChange ? (
-                      <View style={[
-                        styles.rankChangePill,
-                        rankChange.isImproving && styles.rankChangePillUp,
-                        rankChange.isDeclining && styles.rankChangePillDown,
-                        rankChange.isSame && styles.rankChangePillSame,
-                      ]}>
-                        {rankChange.isImproving ? (
-                          <ArrowUp size={13} color="#10B981" />
-                        ) : rankChange.isDeclining ? (
-                          <ArrowDown size={13} color="#EF4444" />
-                        ) : (
-                          <Minus size={13} color="#F59E0B" />
-                        )}
-                        <Text style={[
-                          styles.rankChangeText,
-                          rankChange.isImproving && styles.rankChangeTextUp,
-                          rankChange.isDeclining && styles.rankChangeTextDown,
-                          rankChange.isSame && styles.rankChangeTextSame,
-                        ]}>
-                          {rankChange.isImproving
-                            ? `Up ${Math.abs(rankChange.diff)} ${Math.abs(rankChange.diff) === 1 ? "place" : "places"}`
-                            : rankChange.isDeclining
-                            ? `Down ${Math.abs(rankChange.diff)} ${Math.abs(rankChange.diff) === 1 ? "place" : "places"}`
-                            : "No change"}
-                        </Text>
+                  <View style={styles.goalRankList}>
+                    {communityGoalRanks.map((rank) => (
+                      <View key={rank.label} style={styles.goalRankRow}>
+                        <View style={styles.goalRankInfo}>
+                          <Text style={styles.goalRankLabel}>{rank.label}</Text>
+                          <Text style={styles.goalRankSubtext}>{rank.metricLabel}: {rank.metricValue}</Text>
+                        </View>
+                        <View style={styles.goalRankPill}>
+                          <Text style={styles.goalRankValue}>#{rank.currentRank}</Text>
+                          <Text style={styles.goalRankOf}>of {rank.totalParticipants}</Text>
+                        </View>
                       </View>
-                    ) : (
-                      <View style={[styles.rankChangePill, styles.rankChangePillSame]}>
-                        <Text style={[styles.rankChangeText, styles.rankChangeTextSame]}>First check-in</Text>
-                      </View>
-                    )}
+                    ))}
                   </View>
 
-                  <View style={styles.communityStatsRow}>
-                    <View style={styles.communityStatItem}>
-                      <Text style={styles.communityStatValue}>{communityRanking.avgDistance.toFixed(1)}</Text>
-                      <Text style={styles.communityStatLabel}>Avg km/day</Text>
+                  {communityRanking ? (
+                    <View style={styles.communityStatsRow}>
+                      <View style={styles.communityStatItem}>
+                        <Text style={styles.communityStatValue}>{communityRanking.avgDistance.toFixed(1)}</Text>
+                        <Text style={styles.communityStatLabel}>Avg km/day</Text>
+                      </View>
+                      <View style={styles.communityStatDivider} />
+                      <View style={styles.communityStatItem}>
+                        <Text style={styles.communityStatValue}>{communityRanking.activeDays}</Text>
+                        <Text style={styles.communityStatLabel}>Active Days</Text>
+                      </View>
+                      <View style={styles.communityStatDivider} />
+                      <View style={styles.communityStatItem}>
+                        <Text style={styles.communityStatValue}>
+                          {communityRanking.avgPace > 0 ? formatPaceMinPerKm(communityRanking.avgPace) : "--"}
+                        </Text>
+                        <Text style={styles.communityStatLabel}>Avg Pace</Text>
+                      </View>
                     </View>
-                    <View style={styles.communityStatDivider} />
-                    <View style={styles.communityStatItem}>
-                      <Text style={styles.communityStatValue}>{communityRanking.activeDays}</Text>
-                      <Text style={styles.communityStatLabel}>Active Days</Text>
-                    </View>
-                    <View style={styles.communityStatDivider} />
-                    <View style={styles.communityStatItem}>
-                      <Text style={styles.communityStatValue}>
-                        {communityRanking.avgPace > 0 ? formatPaceMinPerKm(communityRanking.avgPace) : "--"}
-                      </Text>
-                      <Text style={styles.communityStatLabel}>Avg Pace</Text>
-                    </View>
-                  </View>
+                  ) : null}
 
                   {rankChange && rankChange.previousRank > 0 && (
                     <View style={styles.communityHistoryRow}>
@@ -2526,11 +3561,11 @@ export default function GoalsScreen() {
                   )}
 
                   <Text style={styles.fitnessFootnote}>
-                    Ranked by average daily distance
+                    Pulls individual ranks from Family, Community Activity, and Community Medals.
                   </Text>
                 </View>
               </View>
-            ) : !communityRankLoading ? (
+            ) : !communityRankLoading && !familyRankLoading && !communityMedalRankLoading ? (
               <View key="community" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Users size={18} color="#0EA5E9" />
@@ -2604,7 +3639,7 @@ export default function GoalsScreen() {
 
 
 
-        {hasNoGoals && (
+        {hasNoGoals && activeGoalsPage === "set" && (
           <View style={styles.emptyContainer}>
             <Target size={48} color={colors.lightGray} />
             <Text style={styles.emptyTitle}>No Goals Set Yet</Text>
@@ -2614,11 +3649,11 @@ export default function GoalsScreen() {
           </View>
         )}
 
-        {untrackedGoals.length > 0 && !hasNoGoals && (
+        {untrackedGoals.length > 0 && !hasNoGoals && (activeGoalsPage === "set" || activeGoalsPage === "scorecard") && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Target size={18} color={colors.textLight} />
-              <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Goals Not Being Tracked</Text>
+              <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Goals Not Selected</Text>
             </View>
             <View style={styles.untrackedContainer}>
               {untrackedGoals.map((goal) => (
@@ -2939,7 +3974,7 @@ export default function GoalsScreen() {
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Activity Type *</Text>
                 <View style={styles.habitChipRow}>
-                  {["Walk", "Run", "Treadmill"].map((type) => (
+                  {["Walk", "Run", "Cycle"].map((type) => (
                     <TouchableOpacity
                       key={type}
                       style={[styles.habitChip, habitActivityType === type && styles.habitChipActive]}
@@ -3195,18 +4230,47 @@ const styles = StyleSheet.create({
     width: 1,
     backgroundColor: "rgba(255,255,255,0.25)",
   },
-  section: {
+  goalsPageTabs: {
+    flexDirection: "row" as const,
+    gap: 8,
     paddingHorizontal: 16,
-    marginTop: 20,
+    paddingTop: 12,
+  },
+  goalsPageTab: {
+    flex: 1,
+    minHeight: 40,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    borderRadius: 10,
+    backgroundColor: colors.cardBackground,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 8,
+  },
+  goalsPageTabActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  goalsPageTabText: {
+    fontSize: 12,
+    fontWeight: "800" as const,
+    color: colors.textSecondary,
+  },
+  goalsPageTabTextActive: {
+    color: colors.white,
+  },
+  section: {
+    paddingHorizontal: 12,
+    marginTop: 12,
   },
   sectionHeader: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   sectionTitle: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: "700" as const,
     color: colors.text,
     flex: 1,
@@ -3220,6 +4284,115 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600" as const,
     color: colors.primary,
+  },
+  compactOverviewCard: {
+    backgroundColor: colors.cardBackground,
+    borderRadius: 8,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  compactOverviewTitle: {
+    fontSize: 15,
+    fontWeight: "800" as const,
+    color: colors.text,
+  },
+  compactOverviewText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    marginTop: 5,
+  },
+  compactSectionTitle: {
+    fontSize: 14,
+    fontWeight: "800" as const,
+    color: colors.text,
+    marginBottom: 8,
+  },
+  overviewList: {
+    gap: 8,
+  },
+  overviewGoalRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    backgroundColor: colors.cardBackground,
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  overviewGoalInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  overviewGoalTitle: {
+    fontSize: 14,
+    fontWeight: "800" as const,
+    color: colors.text,
+  },
+  overviewGoalText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 16,
+    marginTop: 3,
+  },
+  overviewMeasuredText: {
+    fontSize: 11,
+    color: colors.textLight,
+    lineHeight: 15,
+    marginTop: 4,
+  },
+  overviewEmptyText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    backgroundColor: colors.cardBackground,
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  overviewStartButton: {
+    minWidth: 64,
+    minHeight: 32,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    borderRadius: 8,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 10,
+  },
+  overviewStartButtonText: {
+    fontSize: 12,
+    fontWeight: "800" as const,
+    color: colors.white,
+  },
+  setGoalsGrid: {
+    gap: 10,
+  },
+  setGoalActionCard: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 12,
+    backgroundColor: colors.cardBackground,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  setGoalActionInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  setGoalActionTitle: {
+    fontSize: 15,
+    fontWeight: "800" as const,
+    color: colors.text,
+  },
+  setGoalActionText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+    lineHeight: 16,
   },
   fitnessCard: {
     backgroundColor: colors.cardBackground,
@@ -3235,22 +4408,22 @@ const styles = StyleSheet.create({
     flexDirection: "row" as const,
     alignItems: "center" as const,
     justifyContent: "space-between" as const,
-    marginBottom: 20,
+    marginBottom: 10,
   },
   paceBlock: {
     alignItems: "center" as const,
     flex: 1,
   },
   paceBlockLabel: {
-    fontSize: 11,
+    fontSize: 9,
     fontWeight: "600" as const,
     color: colors.textSecondary,
     textTransform: "uppercase" as const,
-    letterSpacing: 0.5,
+    letterSpacing: 0,
     marginBottom: 4,
   },
   paceBlockValue: {
-    fontSize: 26,
+    fontSize: 20,
     fontWeight: "800" as const,
   },
   paceGood: {
@@ -3260,29 +4433,29 @@ const styles = StyleSheet.create({
     color: "#EF4444",
   },
   paceBlockValueTarget: {
-    fontSize: 26,
+    fontSize: 20,
     fontWeight: "800" as const,
     color: colors.text,
   },
   paceBlockUnit: {
-    fontSize: 11,
+    fontSize: 10,
     color: colors.textSecondary,
     marginTop: 2,
   },
   paceArrowContainer: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 4,
   },
   statusPillGood: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: 4,
     backgroundColor: "#ECFDF5",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
   statusPillTextGood: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700" as const,
     color: "#10B981",
   },
@@ -3291,17 +4464,17 @@ const styles = StyleSheet.create({
     alignItems: "center" as const,
     gap: 4,
     backgroundColor: "#FEF2F2",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
   statusPillTextBehind: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700" as const,
     color: "#EF4444",
   },
   fitnessProgressSection: {
-    marginBottom: 14,
+    marginBottom: 8,
   },
   fitnessProgressInfo: {
     flexDirection: "row" as const,
@@ -3348,6 +4521,55 @@ const styles = StyleSheet.create({
     color: colors.textLight,
     textAlign: "center" as const,
     fontStyle: "italic" as const,
+  },
+  scoreGuideRow: {
+    flexDirection: "row" as const,
+    gap: 8,
+    marginBottom: 14,
+  },
+  scoreGuideItem: {
+    flex: 1,
+    backgroundColor: colors.extraLightGray,
+    borderRadius: 12,
+    padding: 10,
+    alignItems: "center" as const,
+  },
+  scoreGuideValue: {
+    fontSize: 16,
+    fontWeight: "800" as const,
+    color: colors.text,
+  },
+  scoreGuideLabel: {
+    fontSize: 10,
+    fontWeight: "700" as const,
+    color: colors.textSecondary,
+    marginTop: 3,
+    textAlign: "center" as const,
+  },
+  scoreComingSoonRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    gap: 10,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+  },
+  scoreComingSoonLabel: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "700" as const,
+    color: colors.textSecondary,
+  },
+  scoreComingSoonPill: {
+    fontSize: 11,
+    fontWeight: "800" as const,
+    color: "#92400E",
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
   },
   noActivitiesInfo: {
     alignItems: "center" as const,
@@ -3409,13 +4631,15 @@ const styles = StyleSheet.create({
   },
   weightCard: {
     backgroundColor: colors.cardBackground,
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
     shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
   },
   weightRow: {
     flexDirection: "row" as const,
@@ -3595,14 +4819,16 @@ const styles = StyleSheet.create({
   },
   eventGoalCard: {
     backgroundColor: colors.cardBackground,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 10,
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
     shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 1,
   },
   eventGoalHeader: {
     flexDirection: "row" as const,
@@ -3820,29 +5046,31 @@ const styles = StyleSheet.create({
   },
   healthCard: {
     backgroundColor: colors.cardBackground,
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
     shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
   },
   healthScoreCircleContainer: {
     alignItems: "center" as const,
-    marginBottom: 20,
+    marginBottom: 6,
   },
   healthScoreCircle: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    borderWidth: 5,
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    borderWidth: 4,
     alignItems: "center" as const,
     justifyContent: "center" as const,
     marginBottom: 10,
   },
   healthScoreNumber: {
-    fontSize: 36,
+    fontSize: 26,
     fontWeight: "900" as const,
   },
   healthScoreOutOf: {
@@ -3859,35 +5087,122 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700" as const,
   },
+  goalClubRankRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 10,
+  },
+  goalClubRankInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  goalClubRankLabel: {
+    fontSize: 12,
+    fontWeight: "800" as const,
+    color: colors.text,
+  },
+  goalClubRankSubtext: {
+    fontSize: 10,
+    fontWeight: "600" as const,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  goalClubRankPill: {
+    minWidth: 54,
+    alignItems: "center" as const,
+    backgroundColor: colors.white,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  goalClubRankValue: {
+    fontSize: 15,
+    fontWeight: "900" as const,
+    color: "#16A34A",
+    lineHeight: 17,
+  },
+  goalClubRankOf: {
+    fontSize: 9,
+    fontWeight: "700" as const,
+    color: colors.textSecondary,
+  },
   healthBreakdown: {
-    gap: 14,
-    marginBottom: 14,
+    gap: 0,
+  },
+  healthMetricSummaryHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 4,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  healthMetricSummaryHeaderText: {
+    flex: 0.9,
+    fontSize: 9,
+    fontWeight: "800" as const,
+    color: colors.textLight,
+    textAlign: "right" as const,
+    textTransform: "uppercase" as const,
+  },
+  healthMetricSummaryLabelCell: {
+    flex: 1.35,
+    textAlign: "left" as const,
   },
   healthMetricRow: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: 10,
+    gap: 4,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  healthMetricNameCell: {
+    flex: 1.35,
+    minWidth: 0,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 5,
   },
   healthMetricIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 7,
     backgroundColor: colors.extraLightGray,
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
   healthMetricInfo: {
-    flex: 1,
+    flex: 0.95,
+    minWidth: 0,
   },
   healthMetricLabel: {
-    fontSize: 13,
-    fontWeight: "600" as const,
+    flex: 1,
+    minWidth: 0,
+    fontSize: 10,
+    fontWeight: "800" as const,
     color: colors.text,
   },
   healthMetricValue: {
-    fontSize: 11,
+    flex: 0.9,
+    fontSize: 9,
+    fontWeight: "700" as const,
     color: colors.textSecondary,
-    marginTop: 1,
+    textAlign: "right" as const,
+  },
+  healthMetricRecommendedValue: {
+    flex: 0.9,
+    fontSize: 9,
+    fontWeight: "800" as const,
+    color: colors.text,
+    textAlign: "right" as const,
   },
   healthMetricBarContainer: {
     flexDirection: "row" as const,
@@ -3924,6 +5239,79 @@ const styles = StyleSheet.create({
     justifyContent: "space-between" as const,
     alignItems: "center" as const,
     paddingVertical: 6,
+  },
+  smartFitSection: {
+    marginTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+    paddingTop: 12,
+  },
+  smartFitAgeGroup: {
+    marginBottom: 12,
+  },
+  smartFitAgeTitle: {
+    fontSize: 12,
+    fontWeight: "800" as const,
+    color: colors.textSecondary,
+    marginBottom: 4,
+  },
+  smartFitTable: {
+    minWidth: 620,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    overflow: "hidden" as const,
+  },
+  smartFitTableHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    backgroundColor: colors.extraLightGray,
+    paddingVertical: 8,
+  },
+  smartFitTableRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.cardBackground,
+  },
+  smartFitCurrentUserRow: {
+    backgroundColor: "#FFF7ED",
+  },
+  smartFitHeaderText: {
+    fontSize: 10,
+    fontWeight: "900" as const,
+    color: colors.textSecondary,
+    textTransform: "uppercase" as const,
+    paddingHorizontal: 6,
+  },
+  smartFitCellText: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+    color: colors.text,
+    paddingHorizontal: 6,
+  },
+  smartFitRankCell: {
+    width: 58,
+  },
+  smartFitNameCell: {
+    width: 130,
+  },
+  smartFitSexCell: {
+    width: 46,
+  },
+  smartFitDaysCell: {
+    width: 52,
+  },
+  smartFitStepsCell: {
+    width: 86,
+  },
+  smartFitScoreCell: {
+    width: 98,
+  },
+  smartFitRemarksCell: {
+    width: 100,
   },
   healthHistoryStats: {
     alignItems: "flex-end" as const,
@@ -3976,7 +5364,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   disciplineGoalName: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "700" as const,
     color: colors.text,
   },
@@ -4081,31 +5469,82 @@ const styles = StyleSheet.create({
   },
   communityCard: {
     backgroundColor: colors.cardBackground,
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
     shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  goalRankList: {
+    gap: 8,
+    marginBottom: 10,
+  },
+  goalRankRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    backgroundColor: "#F0F9FF",
+    borderWidth: 1,
+    borderColor: "#BAE6FD",
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  goalRankInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  goalRankLabel: {
+    fontSize: 12,
+    fontWeight: "900" as const,
+    color: colors.text,
+  },
+  goalRankSubtext: {
+    marginTop: 2,
+    fontSize: 10,
+    fontWeight: "700" as const,
+    color: colors.textSecondary,
+  },
+  goalRankPill: {
+    minWidth: 56,
+    alignItems: "center" as const,
+    backgroundColor: colors.white,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  goalRankValue: {
+    fontSize: 15,
+    fontWeight: "900" as const,
+    color: "#0EA5E9",
+    lineHeight: 17,
+  },
+  goalRankOf: {
+    fontSize: 9,
+    fontWeight: "700" as const,
+    color: colors.textSecondary,
   },
   communityRankCenter: {
     alignItems: "center" as const,
-    marginBottom: 20,
+    marginBottom: 10,
   },
   communityRankCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 5,
+    width: 86,
+    height: 86,
+    borderRadius: 43,
+    borderWidth: 4,
     borderColor: "#0EA5E9",
     alignItems: "center" as const,
     justifyContent: "center" as const,
-    marginBottom: 12,
+    marginBottom: 8,
     backgroundColor: "#F0F9FF",
   },
   communityRankNumber: {
-    fontSize: 32,
+    fontSize: 23,
     fontWeight: "900" as const,
     color: "#0EA5E9",
   },
@@ -4193,47 +5632,49 @@ const styles = StyleSheet.create({
   },
   dailyRunCard: {
     backgroundColor: colors.cardBackground,
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
     shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
   },
   dailyRunScoreRow: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     justifyContent: "space-between" as const,
-    marginBottom: 14,
+    marginBottom: 8,
   },
   dailyRunScore: {
-    fontSize: 38,
+    fontSize: 27,
     fontWeight: "900" as const,
-    lineHeight: 42,
+    lineHeight: 30,
   },
   dailyRunScoreLabel: {
-    fontSize: 12,
+    fontSize: 10,
     color: colors.textSecondary,
     fontWeight: "700" as const,
     marginTop: 2,
   },
   dailyRunTargetPill: {
     borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
   dailyRunCalendarGrid: {
     flexDirection: "row" as const,
     flexWrap: "wrap" as const,
-    gap: 6,
-    marginTop: 6,
-    marginBottom: 12,
+    gap: 4,
+    marginTop: 4,
+    marginBottom: 8,
   },
   dailyRunDayCell: {
-    width: 42,
-    height: 46,
-    borderRadius: 10,
+    width: 32,
+    height: 36,
+    borderRadius: 7,
     backgroundColor: colors.extraLightGray,
     alignItems: "center" as const,
     justifyContent: "center" as const,
@@ -4267,18 +5708,20 @@ const styles = StyleSheet.create({
   },
   medalGoalCard: {
     backgroundColor: colors.cardBackground,
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
     shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
   },
   medalRatiosRow: {
     flexDirection: "row" as const,
     alignItems: "flex-start" as const,
-    marginBottom: 16,
+    marginBottom: 10,
   },
   medalRatioBlock: {
     flex: 1,
@@ -4286,23 +5729,23 @@ const styles = StyleSheet.create({
   },
   medalRatioCircle: {
     alignItems: "center" as const,
-    marginBottom: 8,
+    marginBottom: 4,
   },
   medalRatioNumber: {
-    fontSize: 32,
+    fontSize: 22,
     fontWeight: "900" as const,
     color: "#D97706",
   },
   medalRatioOf: {
-    fontSize: 13,
+    fontSize: 11,
     color: colors.textSecondary,
     marginTop: -4,
   },
   medalRatioLabel: {
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "600" as const,
     color: colors.textSecondary,
-    marginBottom: 8,
+    marginBottom: 5,
   },
   medalRatioBarTrack: {
     width: "80%" as const,
@@ -4323,14 +5766,14 @@ const styles = StyleSheet.create({
   },
   medalRatioDivider: {
     width: 1,
-    height: 80,
+    height: 58,
     backgroundColor: colors.divider,
     alignSelf: "center" as const,
   },
   medalEventsList: {
     borderTopWidth: 1,
     borderTopColor: colors.divider,
-    paddingTop: 12,
+    paddingTop: 8,
     marginBottom: 10,
   },
   medalEventRow: {
@@ -4374,27 +5817,32 @@ const styles = StyleSheet.create({
   },
   habitCard: {
     backgroundColor: colors.cardBackground,
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
     shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  combinedHabitCard: {
+    marginTop: 12,
   },
   habitDeclarationRow: {
     backgroundColor: "#F0FDFA",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
     borderLeftWidth: 4,
     borderLeftColor: "#0D9488",
   },
   habitDeclarationText: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: "600" as const,
     color: colors.text,
-    lineHeight: 26,
+    lineHeight: 19,
   },
   habitHighlight: {
     fontWeight: "800" as const,
@@ -4404,7 +5852,7 @@ const styles = StyleSheet.create({
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: 6,
-    marginBottom: 16,
+    marginBottom: 8,
   },
   habitDateText: {
     fontSize: 13,

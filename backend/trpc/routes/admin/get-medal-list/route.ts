@@ -54,7 +54,7 @@ const getMedalList = publicProcedure
 
       const { data: registrations, error: regError } = await ctx.supabase
         .from("registrations")
-        .select('registration_id, first_name, other_names, country')
+        .select('registration_id, first_name, other_names, country, has_disability, para_uses_equipment, para_equipment_type, para_equipment_other')
         .in("registration_id", regIds);
 
       if (regError) {
@@ -229,6 +229,17 @@ const getMedalList = publicProcedure
             otherNames: registration?.other_names || "",
             country: registration?.country ?? "",
             club: clubByRegistration.get(participant.registration_id) ?? "",
+            paraUsesEquipment: registration?.has_disability === true && registration?.para_uses_equipment === true,
+            paraEquipmentGroup: registration?.has_disability === true && registration?.para_uses_equipment === true
+              ? registration?.para_equipment_type === "other"
+                ? registration?.para_equipment_other || "Other"
+                : ({
+                    wheelchair: "Wheelchair",
+                    handcycle: "Handcycle",
+                    prosthetic_blades: "Prosthetic blades",
+                    other: "Other",
+                  } as Record<string, string>)[registration?.para_equipment_type || ""] || "Other"
+              : null,
             eventName: event?.event_name || "",
             medalMinDailyDistance,
             medalMinCumulativeDistance,
@@ -251,3 +262,4 @@ const getMedalList = publicProcedure
   });
 
 export default getMedalList;
+

@@ -71,12 +71,13 @@ Root app environment:
 - `EXPO_PUBLIC_API_URL`
 - `EXPO_PUBLIC_SUPABASE_URL`
 - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+- `GOOGLE_MAPS_ANDROID_API_KEY`
 
 Backend environment:
 
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `CORS_ORIGINS`
+- `CORS_ORIGINS` comma-separated allowed origins; do not use `*`
 - `TRUST_PROXY`
 - `RATE_LIMIT_*`
 - `INPUT_MAX_STRING_LENGTH`
@@ -96,6 +97,15 @@ For limited Wi-Fi range testing:
 - Finish flow opens a RunNation share card with Save, Share, and Close options
 
 Treadmill records count for workouts, reports, and goals, but not for event credit. Smart watch and other sports app imports can count for event credit after club or organizer approval with evidence where required.
+
+## Release Readiness Notes
+
+- Express backend uses CORS allow-listing, security headers, request sanitization, and general/sensitive rate limits.
+- Sensitive write routes include registration/login, feedback, social posts/reports, service-role requests, family linking, magazine submissions, uploads, event/admin writes, and donation intents.
+- The Running Post Gallery is image-only; accepted pictorials without a valid JPG/PNG/WEBP URL are not shown in the public Gallery.
+- Workout recording uses foreground GPS plus Expo background location with an Android foreground-service notification so distance can continue while the screen is locked.
+- Standalone Android builds that render `react-native-maps` must be built with `GOOGLE_MAPS_ANDROID_API_KEY`; Expo Go may not reveal a missing-key issue.
+- Before a test APK, run `npx tsc --noEmit`, restart the backend after environment changes, restart Expo, and confirm Render has current `CORS_ORIGINS`.
 
 ## GitHub Handoff
 

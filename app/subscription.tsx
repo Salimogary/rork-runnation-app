@@ -15,6 +15,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import type { SubscriptionPlan, PaymentMethod } from '@/contexts/SubscriptionContext';
 import { supabase } from '@/lib/supabase';
+import { trpc } from '@/lib/trpc';
 import { useMutation } from '@tanstack/react-query';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import * as Haptics from 'expo-haptics';
@@ -61,6 +62,12 @@ export default function SubscriptionScreen() {
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [showClubPayments, setShowClubPayments] = useState(false);
+
+  const { data: clubPayments = [], isLoading: clubPaymentsLoading, error: clubPaymentsError, refetch: refetchClubPayments } = trpc.profile.getClubPaymentStatus.useQuery(
+    { registrationId: user?.id ?? '00000000-0000-0000-0000-000000000000' },
+    { enabled: !!user?.id && showClubPayments }
+  );
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -209,8 +216,8 @@ export default function SubscriptionScreen() {
           </View>
           <Text style={styles.pendingTitle}>Payment Pending</Text>
           <Text style={styles.pendingText}>
-            Your subscription payment is being processed. You'll get full access
-            once it's confirmed.
+            Your subscription payment is being processed. You will get full access
+            once it is confirmed.
           </Text>
           <TouchableOpacity
             style={styles.refreshButton}
@@ -326,6 +333,63 @@ export default function SubscriptionScreen() {
               </TouchableOpacity>
             );
           })}
+        </View>
+
+        <View style={styles.otherPaymentsSection}>
+          <View style={styles.otherPaymentsHeader}>
+            <View style={styles.otherPaymentsIconWrap}>
+              <CreditCard size={20} color={colors.primary} />
+            </View>
+            <View style={styles.otherPaymentsTitleWrap}>
+              <Text style={styles.otherPaymentsTitle}>Other payments</Text>
+              <Text style={styles.otherPaymentsText}>Club membership fees and collections created by your club coordinator.</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.otherPaymentsButton}
+              onPress={() => {
+                setShowClubPayments((value) => !value);
+                if (!showClubPayments) void refetchClubPayments();
+              }}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.otherPaymentsButtonText}>{showClubPayments ? 'Hide' : 'View'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {showClubPayments ? (
+            <View style={styles.clubPaymentsList}>
+              {clubPaymentsLoading ? (
+                <Text style={styles.clubPaymentMeta}>Loading club payment status...</Text>
+              ) : clubPaymentsError ? (
+                <Text style={styles.clubPaymentMeta}>Club payment status is not available right now.</Text>
+              ) : clubPayments.length === 0 ? (
+                <Text style={styles.clubPaymentMeta}>No club payments are assigned to you yet.</Text>
+              ) : (
+                clubPayments.map((payment: any) => (
+                  <View key={payment.paymentId} style={styles.clubPaymentRow}>
+                    <View style={styles.clubPaymentInfo}>
+                      <Text style={styles.clubPaymentTitle}>{payment.title}</Text>
+                      <Text style={styles.clubPaymentMeta}>
+                        {payment.clubName} - {payment.currency} {Number(payment.amount || 0).toLocaleString()}
+                        {payment.dueDate ? ` - Due ${payment.dueDate}` : ''}
+                      </Text>
+                    </View>
+                    <View style={[
+                      styles.clubPaymentStatus,
+                      payment.status === 'paid' ? styles.clubPaymentStatusPaid : payment.status === 'pending' ? styles.clubPaymentStatusPending : styles.clubPaymentStatusUnpaid,
+                    ]}>
+                      <Text style={[
+                        styles.clubPaymentStatusText,
+                        payment.status === 'paid' ? styles.clubPaymentStatusTextPaid : payment.status === 'pending' ? styles.clubPaymentStatusTextPending : styles.clubPaymentStatusTextUnpaid,
+                      ]}>
+                        {payment.status}
+                      </Text>
+                    </View>
+                  </View>
+                ))
+              )}
+            </View>
+          ) : null}
         </View>
 
         {showPaymentForm && selectedPlan && (
@@ -520,6 +584,108 @@ const styles = StyleSheet.create({
   },
   pricingSection: {
     marginBottom: 20,
+  },
+  otherPaymentsSection: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  otherPaymentsHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 12,
+  },
+  otherPaymentsIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#FFF3E8',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  otherPaymentsTitleWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  otherPaymentsTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: '#1A1A1A',
+  },
+  otherPaymentsText: {
+    fontSize: 12,
+    color: '#777',
+    lineHeight: 17,
+  },
+  otherPaymentsButton: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+  },
+  otherPaymentsButtonText: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+    color: '#fff',
+  },
+  clubPaymentsList: {
+    gap: 10,
+    marginTop: 14,
+  },
+  clubPaymentRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 10,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  clubPaymentInfo: {
+    flex: 1,
+  },
+  clubPaymentTitle: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: '#1A1A1A',
+  },
+  clubPaymentMeta: {
+    fontSize: 12,
+    color: '#777',
+    lineHeight: 18,
+  },
+  clubPaymentStatus: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  clubPaymentStatusPaid: {
+    backgroundColor: '#DCFCE7',
+  },
+  clubPaymentStatusPending: {
+    backgroundColor: '#FEF3C7',
+  },
+  clubPaymentStatusUnpaid: {
+    backgroundColor: '#FEE2E2',
+  },
+  clubPaymentStatusText: {
+    fontSize: 11,
+    fontWeight: '800' as const,
+    textTransform: 'uppercase' as const,
+  },
+  clubPaymentStatusTextPaid: {
+    color: '#15803D',
+  },
+  clubPaymentStatusTextPending: {
+    color: '#B45309',
+  },
+  clubPaymentStatusTextUnpaid: {
+    color: '#B91C1C',
   },
   pricingNote: {
     fontSize: 14,

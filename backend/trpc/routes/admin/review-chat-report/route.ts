@@ -19,15 +19,20 @@ export default publicProcedure
       reportId: z.string().uuid(),
       action: z.enum(["remove_content", "dismiss", "ban_user"]),
       adminNotes: z.string().trim().max(1000).nullable().optional(),
+      suspensionUntil: z.string().trim().nullable().optional(),
     })
   )
   .mutation(async ({ input, ctx }) => {
     const actor = await requireAdminPermission(ctx, {
       allowSuperAdmin: true,
-      allowCountryAdmin: true,
-      allowCountryCoordinator: true,
-      allowClubCoordinator: true,
+      allowChatRoomAdministrator: true,
     });
+
+    const isSuspensionRequest = input.action === "ban_user" && !actor.isSuperAdmin;
+    const suspensionUntil = input.suspensionUntil ? new Date(input.suspensionUntil) : null;
+    if (input.action === "ban_user" && (!suspensionUntil || Number.isNaN(suspensionUntil.getTime()) || suspensionUntil.getTime() <= Date.now())) {
+      throw new Error("Please provide a future suspension end date.");
+    }
 
     const { data: report, error: reportError } = await ctx.supabase
       .from("chat_moderation_reports")
@@ -38,7 +43,7 @@ export default publicProcedure
     if (reportError || !report) {
       throw new Error(reportError?.message || "Report was not found.");
     }
-    if (report.status !== "pending") {
+    if (report.status !== "pending" && input.action !== "ban_user") {
       throw new Error("This report has already been reviewed.");
     }
 
@@ -92,18 +97,33 @@ export default publicProcedure
         updated_at: new Date().toISOString(),
       };
 
-      if (input.action === "ban_user") {
+      if (input.action === "ban_user" && actor.isSuperAdmin) {
         flagUpdate.is_banned = true;
         flagUpdate.banned_at = new Date().toISOString();
         flagUpdate.banned_by = actor.authUserId;
         flagUpdate.ban_reason = input.adminNotes || "Repeated or severe chat offence.";
+        flagUpdate.suspended_until = suspensionUntil?.toISOString() ?? null;
+        flagUpdate.suspension_status = "approved";
+        flagUpdate.suspension_approved_by = actor.authUserId;
+        flagUpdate.suspension_approved_at = new Date().toISOString();
+      } else if (isSuspensionRequest) {
+        flagUpdate.is_banned = false;
+        flagUpdate.ban_reason = input.adminNotes || "Chat suspension requested after moderation review.";
+        flagUpdate.suspended_until = suspensionUntil?.toISOString() ?? null;
+        flagUpdate.suspension_status = "pending";
+        flagUpdate.suspension_requested_by = actor.authUserId;
+        flagUpdate.suspension_requested_at = new Date().toISOString();
       }
 
       await ctx.supabase.from("user_moderation_flags").upsert(flagUpdate, { onConflict: "registration_id" });
     }
 
     const status =
-      input.action === "dismiss" ? "dismissed" : input.action === "ban_user" ? "user_banned" : "content_removed";
+      input.action === "dismiss"
+        ? "dismissed"
+        : input.action === "ban_user" && actor.isSuperAdmin
+        ? "user_banned"
+        : "content_removed";
 
     const { error: updateError } = await ctx.supabase
       .from("chat_moderation_reports")
@@ -121,14 +141,32 @@ export default publicProcedure
 
     await logAdminAction(ctx, {
       actorUserId: actor.authUserId,
-      targetUserId: report.reported_registration_id,
       actionType: `chat_report_${status}`,
       metadata: {
         reportId: input.reportId,
         postId: report.social_post_id,
         commentId: report.comment_id,
+        reportedRegistrationId: report.reported_registration_id,
       },
     });
 
+    if (input.action === "remove_content") {
+      await logAdminAction(ctx, {
+        actorUserId: actor.authUserId,
+        actionType: report.comment_id ? "social_comment_deleted" : "social_post_deleted",
+        metadata: {
+          contentType: report.comment_id ? "comment" : "post",
+          contentId: report.comment_id || report.social_post_id,
+          postId: report.social_post_id,
+          reportId: input.reportId,
+          ownerRegistrationId: report.reported_registration_id,
+          deletedByRole: actor.isSuperAdmin ? "Global Admin" : "Chat Room Administrator",
+          deletionSource: "chat_report_review",
+          contentPreview: input.adminNotes || "Content removed after moderation review.",
+        },
+      });
+    }
+
     return { success: true };
   });
+

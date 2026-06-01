@@ -6,11 +6,22 @@ import { ACTIVITY_UPLOADS_BUCKET } from "../../../storage";
 export default publicProcedure
   .input(z.object({ pendingActivityId: z.string().min(1) }))
   .mutation(async ({ input, ctx }) => {
-    await requireAdminPermission(ctx, {
+    const actor = await requireAdminPermission(ctx, {
       allowSuperAdmin: true,
-            allowCountryCoordinator: true,
+      allowCountryCoordinator: true,
       allowClubCoordinator: true,
+      allowSpecialClubCoordinator: true,
     });
+    const isTreadmillCoordinator = actor.roles.some((role) => role.roleName === "treadmill_runners_club_coordinator");
+    if (
+      actor.isSpecialClubCoordinator &&
+      !isTreadmillCoordinator &&
+      !actor.isSuperAdmin &&
+      !actor.isCountryCoordinator &&
+      !actor.isClubCoordinator
+    ) {
+      throw new Error("Only the Treadmill Runners Club coordinator can reject treadmill approvals.");
+    }
 
     const { data: activity, error: fetchError } = await ctx.supabase
       .from("pending_activities")
@@ -37,4 +48,5 @@ export default publicProcedure
 
     return { success: true };
   });
+
 

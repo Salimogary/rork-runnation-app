@@ -4,10 +4,21 @@ import { requireAdminPermission } from "../../../rbac";
 
 const MANAGED_ROLE_NAMES = new Set([
   "super_admin",
+  "global_admin",
   "country_admin",
   "country_coordinator",
   "club_coordinator",
+  "junior_runners_club_coordinator",
+  "golden_age_runners_club_coordinator",
+  "treadmill_runners_club_coordinator",
+  "para_runners_club_coordinator",
+  "smartfit_club_coordinator",
   "event_organizer",
+  "magazine_editor",
+  "chat_room_administrator",
+  "magazine_columnist_fitness_coach",
+  "magazine_columnist_sports_journalist",
+  "magazine_columnist_motivation_speaker",
 ]);
 
 export default publicProcedure.query(async ({ ctx }) => {
@@ -16,7 +27,11 @@ export default publicProcedure.query(async ({ ctx }) => {
     allowCountryAdmin: true,
     allowCountryCoordinator: true,
     allowClubCoordinator: true,
+    allowSpecialClubCoordinator: true,
     allowEventOrganizer: true,
+    allowMagazineEditor: true,
+    allowMagazineColumnist: true,
+    allowChatRoomAdministrator: true,
   });
 
   if (!actor.authUserId) {
@@ -36,7 +51,7 @@ export default publicProcedure.query(async ({ ctx }) => {
   const roleNames = (assignments ?? [])
     .map((row: any) => {
       const roleSource = Array.isArray(row.roles) ? row.roles[0] : row.roles;
-      return roleSource?.role_name ?? null;
+      return roleSource?.role_name?.trim().toLowerCase() ?? null;
     })
     .filter((roleName: string | null): roleName is string => Boolean(roleName))
     .filter((roleName) => MANAGED_ROLE_NAMES.has(roleName));
@@ -59,3 +74,4 @@ export default publicProcedure.query(async ({ ctx }) => {
     roleNames,
   };
 });
+

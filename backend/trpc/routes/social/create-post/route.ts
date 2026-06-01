@@ -34,14 +34,17 @@ export default publicProcedure
     await requireRegistrationOwner(ctx, input.registrationId);
     const { data: moderationFlag, error: moderationFlagError } = await ctx.supabase
       .from("user_moderation_flags")
-      .select("is_banned")
+      .select("is_banned, suspended_until")
       .eq("registration_id", input.registrationId)
       .maybeSingle();
 
     if (moderationFlagError) {
       throw new Error(moderationFlagError.message || "Could not check chat access.");
     }
-    if (moderationFlag?.is_banned) {
+    if (
+      moderationFlag?.is_banned &&
+      (!moderationFlag.suspended_until || new Date(moderationFlag.suspended_until).getTime() > Date.now())
+    ) {
       throw new Error("Your chat access is currently restricted after moderation review.");
     }
 

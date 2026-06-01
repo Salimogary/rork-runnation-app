@@ -19,7 +19,7 @@ function formatActorType(roleNames: string[]): string {
   if (roleNames.includes("country_admin")) return "Country Admin";
   if (roleNames.includes("country_coordinator")) return "Country Coordinator";
   if (roleNames.includes("club_coordinator")) return "Club Coordinator";
-  if (roleNames.includes("super_admin")) return "Global Admin";
+  if (roleNames.includes("super_admin") || roleNames.includes("global_admin")) return "Global Admin";
   return "Admin";
 }
 
@@ -68,7 +68,7 @@ export default publicProcedure
     const filteredActorIds = [...actorRoles.entries()]
       .filter(([, roleInfo]) => {
         if (input.userType === "all") {
-          return roleInfo.roleNames.has("country_admin") || roleInfo.roleNames.has("country_coordinator") || roleInfo.roleNames.has("club_coordinator");
+          return roleInfo.roleNames.has("super_admin") || roleInfo.roleNames.has("global_admin") || roleInfo.roleNames.has("country_admin") || roleInfo.roleNames.has("country_coordinator") || roleInfo.roleNames.has("club_coordinator");
         }
         return roleInfo.roleNames.has(input.userType);
       })
@@ -136,3 +136,4 @@ export default publicProcedure
       };
     });
   });
+

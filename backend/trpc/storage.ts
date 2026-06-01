@@ -1,4 +1,4 @@
-export const ACTIVITY_UPLOADS_BUCKET = "activity uploads";
+export const ACTIVITY_UPLOADS_BUCKET = "activity-uploads";
 
 export function getExtensionFromMimeType(mimeType?: string | null): string {
   if (!mimeType) return "bin";
@@ -24,7 +24,11 @@ export async function resolvePrivateActivityUploadUrl(
     .createSignedUrl(storedPath, expiresInSeconds);
 
   if (error) {
-    throw new Error(error.message || "Failed to create a secure file URL.");
+    console.warn("[Storage] Could not create signed activity upload URL:", {
+      path: storedPath,
+      message: error.message,
+    });
+    return null;
   }
 
   return data?.signedUrl ?? null;

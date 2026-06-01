@@ -14,6 +14,7 @@ export default publicProcedure
       allowCountryAdmin: true,
       allowCountryCoordinator: true,
       allowClubCoordinator: true,
+      allowSpecialClubCoordinator: true,
     });
 
     console.log('[getParticipants] Fetching participants for eventId:', input.eventId);
@@ -76,4 +77,5 @@ export default publicProcedure
 
     return participants;
   });
+
 

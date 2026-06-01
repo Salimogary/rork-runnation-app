@@ -1,0 +1,8 @@
+
+> expo-app@1.0.0 start-web
+> bunx rork start -p j3kt8bxpo6o5n3oxp48kg --web --tunnel
+
+env: load .env
+env: export EXPO_PUBLIC_API_URL EXPO_PUBLIC_API_URL_PROD EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_ANON_KEY
+Starting project at C:\Users\salim\rork-runnation-app
+Starting Metro Bundler

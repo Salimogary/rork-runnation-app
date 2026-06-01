@@ -34,11 +34,11 @@ async function usernameExists(
 ): Promise<boolean> {
   let profileQuery = ctx.supabase
     .from("profiles")
-    .select("id")
+    .select("profile_id")
     .eq("username", username);
 
   if (currentProfileId) {
-    profileQuery = profileQuery.neq("id", currentProfileId);
+    profileQuery = profileQuery.neq("profile_id", currentProfileId);
   }
 
   const [{ data: registration }, { data: profile }] = await Promise.all([

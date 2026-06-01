@@ -23,4 +23,3 @@ end $$;
 create index if not exists idx_external_activity_submissions_source_type
   on public.external_activity_submissions using btree (source_type)
   where source_type is not null;
-

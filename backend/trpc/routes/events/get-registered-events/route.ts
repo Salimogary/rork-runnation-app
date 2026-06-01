@@ -110,12 +110,30 @@ export default publicProcedure
       throw new Error(`Failed to fetch registered events: ${error.message}`);
     }
 
-    const eventIds = [...new Set((data || []).map((item: any) => item.event_id).filter(Boolean))];
+    const { data: pendingEnrollments, error: pendingError } = await ctx.supabase
+      .from("event_enrollments")
+      .select("event_id, registration_id, created_at, status")
+      .eq("registration_id", resolvedRegistrationId)
+      .in("status", ["pending", "awaiting_payment"]);
+
+    if (pendingError) {
+      throw new Error(`Failed to fetch pending event enrollments: ${pendingError.message}`);
+    }
+
+    const participantEventIds = new Set((data || []).map((item: any) => item.event_id).filter(Boolean));
+    const eventIds = [
+      ...new Set([
+        ...(data || []).map((item: any) => item.event_id).filter(Boolean),
+        ...(pendingEnrollments || [])
+          .map((item: any) => item.event_id)
+          .filter((eventId: string | null) => eventId && !participantEventIds.has(eventId)),
+      ]),
+    ];
 
     const { data: events, error: eventsError } = eventIds.length
       ? await ctx.supabase
           .from("events")
-          .select("event_id, event_name, starts_at, ends_at, event_type, recurrence_frequency, recurrence_weekday, recurrence_weekdays, recurrence_monthly_mode, recurrence_month_day, recurrence_week_of_month, poster_link, has_medal, country, country_code, organizer")
+          .select("event_id, event_name, starts_at, ends_at, event_type, recurrence_frequency, recurrence_weekday, recurrence_weekdays, recurrence_monthly_mode, recurrence_month_day, recurrence_week_of_month, poster_link, has_medal, country, country_code, organizer, event_location")
           .in("event_id", eventIds)
       : { data: [], error: null };
 
@@ -148,7 +166,7 @@ export default publicProcedure
       (organizers || []).map((organizer: any) => [organizer.organizer_id, organizer.organizer_name ?? null])
     );
 
-    return (data || [])
+    const participantRows = (data || [])
       .map((item: any) => {
         const event = eventMap.get(item.event_id);
         if (!event) return null;
@@ -171,10 +189,47 @@ export default publicProcedure
           countryCode: event.country_code ?? null,
           organizer: event.organizer ?? null,
           organizerLabel: event.organizer ? organizerMap.get(event.organizer) ?? null : null,
+          eventLocation: event.event_location ?? null,
           distanceKm: item.distance_km ?? null,
           timeSeconds: item.time_seconds ?? null,
           registrationDate: item.registration_date ?? null,
+          registrationStatus: "registered",
         };
       })
       .filter(Boolean);
+
+    const pendingRows = (pendingEnrollments || [])
+      .filter((item: any) => !participantEventIds.has(item.event_id))
+      .map((item: any) => {
+        const event = eventMap.get(item.event_id);
+        if (!event) return null;
+
+        return {
+          eventId: event.event_id ?? item.event_id,
+          eventName: event.event_name ?? "",
+          startsAt: event.starts_at ?? null,
+          endsAt: event.ends_at ?? null,
+          eventType: event.event_type ?? null,
+          recurrenceFrequency: event.recurrence_frequency ?? null,
+          recurrenceWeekday: event.recurrence_weekday ?? null,
+          recurrenceWeekdays: event.recurrence_weekdays ?? null,
+          recurrenceMonthlyMode: event.recurrence_monthly_mode ?? null,
+          recurrenceMonthDay: event.recurrence_month_day ?? null,
+          recurrenceWeekOfMonth: event.recurrence_week_of_month ?? null,
+          posterLink: event.poster_link ?? null,
+          hasMedal: event.has_medal ?? false,
+          country: event.country ?? null,
+          countryCode: event.country_code ?? null,
+          organizer: event.organizer ?? null,
+          organizerLabel: event.organizer ? organizerMap.get(event.organizer) ?? null : null,
+          eventLocation: event.event_location ?? null,
+          distanceKm: null,
+          timeSeconds: null,
+          registrationDate: item.created_at ?? null,
+          registrationStatus: "pending",
+        };
+      })
+      .filter(Boolean);
+
+    return [...participantRows, ...pendingRows];
   });

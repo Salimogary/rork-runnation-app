@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import { ensureEventOrganizerForUser } from "../../../event-organizer-profile";
 import { logAdminAction, requireAdminPermission } from "../../../rbac";
 
 const roleNameSchema = z.enum([
-  "country_admin",
   "country_coordinator",
   "club_coordinator",
   "event_organizer",
@@ -27,7 +27,7 @@ export default publicProcedure
     const countryCode = input.countryCode?.trim().toUpperCase() || null;
     const clubId = input.clubId ?? null;
 
-    if ((roleName === "country_admin" || roleName === "country_coordinator") && !countryCode) {
+    if (roleName === "country_coordinator" && !countryCode) {
       throw new Error("Country code is required for country-scoped roles.");
     }
 
@@ -57,16 +57,7 @@ export default publicProcedure
     let organizerId = roleName === "event_organizer" ? existingAssignment.organizer_id ?? null : null;
 
     if (roleName === "event_organizer" && !organizerId) {
-      const { data: resolvedOrganizerId, error: organizerError } = await ctx.supabase.rpc(
-        "ensure_event_organizer_for_user",
-        { p_user_id: existingAssignment.user_id }
-      );
-
-      if (organizerError || !resolvedOrganizerId) {
-        throw new Error(organizerError?.message || "Could not create the event organizer profile.");
-      }
-
-      organizerId = resolvedOrganizerId;
+      organizerId = await ensureEventOrganizerForUser(ctx, String(existingAssignment.user_id));
     }
 
     const { error } = await ctx.supabase
@@ -103,3 +94,4 @@ export default publicProcedure
 
     return { success: true };
   });
+

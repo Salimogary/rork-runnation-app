@@ -39,6 +39,7 @@ import completeEventRunRoute from "./routes/activities/complete-event-run/route"
 import getDeliveryOrdersRoute from "./routes/admin/get-delivery-orders/route";
 import updateDeliveryOrderStatusRoute from "./routes/admin/update-delivery-order-status/route";
 import getMagazineSubmissionsRoute from "./routes/admin/get-magazine-submissions/route";
+import getMyMagazineArticlesRoute from "./routes/admin/get-my-magazine-articles/route";
 import updateMagazineSubmissionStatusRoute from "./routes/admin/update-magazine-submission-status/route";
 import deleteMagazineSubmissionRoute from "./routes/admin/delete-magazine-submission/route";
 import getMagazinePictorialsRoute from "./routes/admin/get-magazine-pictorials/route";
@@ -55,6 +56,7 @@ import getEventOrganizersRoute from "./routes/admin/get-event-organizers/route";
 import updateEventOrganizerRoute from "./routes/admin/update-event-organizer/route";
 import deactivateEventOrganizerRoute from "./routes/admin/deactivate-event-organizer/route";
 import getAdminTermsStatusRoute from "./routes/admin/get-admin-terms-status/route";
+import getAdminTermsContentRoute from "./routes/admin/get-admin-terms-content/route";
 import acceptAdminTermsRoute from "./routes/admin/accept-admin-terms/route";
 import createRoleRequestRoute from "./routes/admin/create-role-request/route";
 import approveRoleRequestRoute from "./routes/admin/approve-role-request/route";
@@ -63,8 +65,32 @@ import updateRoleAssignmentRoute from "./routes/admin/update-role-assignment/rou
 import deleteRoleAssignmentRoute from "./routes/admin/delete-role-assignment/route";
 import getChatReportsRoute from "./routes/admin/get-chat-reports/route";
 import reviewChatReportRoute from "./routes/admin/review-chat-report/route";
+import getDeletedChatLogsRoute from "./routes/admin/get-deleted-chat-logs/route";
 import requestAdminPasswordResetRoute from "./routes/admin/request-password-reset/route";
 import resetAdminPasswordRoute from "./routes/admin/reset-password/route";
+import getClubPaymentsRoute from "./routes/admin/get-club-payments/route";
+import createClubPaymentRoute from "./routes/admin/create-club-payment/route";
+import updateClubPaymentRecordRoute from "./routes/admin/update-club-payment-record/route";
+import requestClubPayoutRoute from "./routes/admin/request-club-payout/route";
+import getClubWhatsappLinksRoute from "./routes/admin/get-club-whatsapp-links/route";
+import upsertClubWhatsappLinkRoute from "./routes/admin/upsert-club-whatsapp-link/route";
+import deleteClubWhatsappLinkRoute from "./routes/admin/delete-club-whatsapp-link/route";
+import upsertAdminWhatsappLinkRoute from "./routes/admin/upsert-admin-whatsapp-link/route";
+import deleteAdminWhatsappLinkRoute from "./routes/admin/delete-admin-whatsapp-link/route";
+import requestRoleResignationRoute from "./routes/admin/request-role-resignation/route";
+import getClubDeletionManagementRoute from "./routes/admin/get-club-deletion-management/route";
+import requestClubDeletionRoute from "./routes/admin/request-club-deletion/route";
+import reviewClubDeletionRoute from "./routes/admin/review-club-deletion/route";
+import getMilestonesRoute from "./routes/admin/get-milestones/route";
+import upsertMilestoneRoute from "./routes/admin/upsert-milestone/route";
+import getClubStatusReportRoute from "./routes/admin/get-club-status-report/route";
+import getEventResultsReportRoute from "./routes/admin/get-event-results-report/route";
+import getMyTeamRoute from "./routes/admin/get-my-team/route";
+import createMagazineNewsArticleRoute from "./routes/admin/create-magazine-news-article/route";
+import updateMagazineEntryRoute from "./routes/admin/update-magazine-entry/route";
+import createClubProfileRoute from "./routes/admin/create-club-profile/route";
+import getAdminProfileRoute from "./routes/admin/get-admin-profile/route";
+import updateAdminProfileRoute from "./routes/admin/update-admin-profile/route";
 import registerRoute from "./routes/auth/register/route";
 import saveContactsRoute from "./routes/auth/save-contacts/route";
 import saveGoalsRoute from "./routes/auth/save-goals/route";
@@ -91,6 +117,7 @@ import markMentionsReadRoute from "./routes/social/mark-mentions-read/route";
 import togglePostReactionRoute from "./routes/social/toggle-post-reaction/route";
 import toggleCommentReactionRoute from "./routes/social/toggle-comment-reaction/route";
 import reportContentRoute from "./routes/social/report-content/route";
+import getMyChatReportsRoute from "./routes/social/get-my-chat-reports/route";
 import getProfileBundleRoute from "./routes/profile/get-bundle/route";
 import updateProfileRoute from "./routes/profile/update-profile/route";
 import saveProfileGoalsRoute from "./routes/profile/save-goals/route";
@@ -98,6 +125,8 @@ import saveProfileClubMembershipRoute from "./routes/profile/save-club-membershi
 import uploadProfilePhotoRoute from "./routes/profile/upload-photo/route";
 import sendEmailVerificationRoute from "./routes/profile/send-email-verification/route";
 import verifyEmailCodeRoute from "./routes/profile/verify-email-code/route";
+import getClubPaymentStatusRoute from "./routes/profile/get-club-payment-status/route";
+import leaveClubMembershipRoute from "./routes/profile/leave-club-membership/route";
 import getRoleSessionRoute from "./routes/session/get-role-session/route";
 import getPublicEventsRoute from "./routes/events/get-events/route";
 import getRegisteredEventsRoute from "./routes/events/get-registered-events/route";
@@ -108,8 +137,12 @@ import getMagazineArticlesRoute from "./routes/magazine/get-articles/route";
 import getAdminContactsRoute from "./routes/support/get-admin-contacts/route";
 import getFaqEntriesRoute from "./routes/support/get-faq-entries/route";
 import getAboutStatsRoute from "./routes/support/get-about-stats/route";
+import submitDonationRoute from "./routes/support/submit-donation/route";
 import getServiceTeamRolesRoute from "./routes/service-team/get-service-roles/route";
 import requestServiceTeamRoleRoute from "./routes/service-team/request-role/route";
+import getFamilyMembersRoute from "./routes/family/get-family-members/route";
+import addFamilyMemberRoute from "./routes/family/add-family-member/route";
+import removeFamilyMemberRoute from "./routes/family/remove-family-member/route";
 
 export const appRouter = createTRPCRouter({
   example: createTRPCRouter({
@@ -151,6 +184,7 @@ export const appRouter = createTRPCRouter({
     getDeliveryOrders: getDeliveryOrdersRoute,
     updateDeliveryOrderStatus: updateDeliveryOrderStatusRoute,
     getMagazineSubmissions: getMagazineSubmissionsRoute,
+    getMyMagazineArticles: getMyMagazineArticlesRoute,
     updateMagazineSubmissionStatus: updateMagazineSubmissionStatusRoute,
     deleteMagazineSubmission: deleteMagazineSubmissionRoute,
     getMagazinePictorials: getMagazinePictorialsRoute,
@@ -167,6 +201,7 @@ export const appRouter = createTRPCRouter({
     updateEventOrganizer: updateEventOrganizerRoute,
     deactivateEventOrganizer: deactivateEventOrganizerRoute,
     getAdminTermsStatus: getAdminTermsStatusRoute,
+    getAdminTermsContent: getAdminTermsContentRoute,
     acceptAdminTerms: acceptAdminTermsRoute,
     createRoleRequest: createRoleRequestRoute,
     approveRoleRequest: approveRoleRequestRoute,
@@ -175,8 +210,32 @@ export const appRouter = createTRPCRouter({
     deleteRoleAssignment: deleteRoleAssignmentRoute,
     getChatReports: getChatReportsRoute,
     reviewChatReport: reviewChatReportRoute,
+    getDeletedChatLogs: getDeletedChatLogsRoute,
     requestPasswordReset: requestAdminPasswordResetRoute,
     resetPassword: resetAdminPasswordRoute,
+    getClubPayments: getClubPaymentsRoute,
+    createClubPayment: createClubPaymentRoute,
+    updateClubPaymentRecord: updateClubPaymentRecordRoute,
+    requestClubPayout: requestClubPayoutRoute,
+    getClubWhatsappLinks: getClubWhatsappLinksRoute,
+    upsertClubWhatsappLink: upsertClubWhatsappLinkRoute,
+    deleteClubWhatsappLink: deleteClubWhatsappLinkRoute,
+    upsertAdminWhatsappLink: upsertAdminWhatsappLinkRoute,
+    deleteAdminWhatsappLink: deleteAdminWhatsappLinkRoute,
+    requestRoleResignation: requestRoleResignationRoute,
+    getClubDeletionManagement: getClubDeletionManagementRoute,
+    requestClubDeletion: requestClubDeletionRoute,
+    reviewClubDeletion: reviewClubDeletionRoute,
+    getMilestones: getMilestonesRoute,
+    upsertMilestone: upsertMilestoneRoute,
+    getClubStatusReport: getClubStatusReportRoute,
+    getEventResultsReport: getEventResultsReportRoute,
+    getMyTeam: getMyTeamRoute,
+    createMagazineNewsArticle: createMagazineNewsArticleRoute,
+    updateMagazineEntry: updateMagazineEntryRoute,
+    createClubProfile: createClubProfileRoute,
+    getAdminProfile: getAdminProfileRoute,
+    updateAdminProfile: updateAdminProfileRoute,
   }),
   activities: createTRPCRouter({
     submitTreadmillActivity: submitTreadmillActivityRoute,
@@ -215,6 +274,7 @@ export const appRouter = createTRPCRouter({
     togglePostReaction: togglePostReactionRoute,
     toggleCommentReaction: toggleCommentReactionRoute,
     reportContent: reportContentRoute,
+    getMyChatReports: getMyChatReportsRoute,
     deletePost: deleteSocialPostRoute,
     getCurrentActivity: getCurrentActivityRoute,
   }),
@@ -226,6 +286,8 @@ export const appRouter = createTRPCRouter({
     uploadPhoto: uploadProfilePhotoRoute,
     sendEmailVerification: sendEmailVerificationRoute,
     verifyEmailCode: verifyEmailCodeRoute,
+    getClubPaymentStatus: getClubPaymentStatusRoute,
+    leaveClubMembership: leaveClubMembershipRoute,
   }),
   session: createTRPCRouter({
     getRoleSession: getRoleSessionRoute,
@@ -244,10 +306,16 @@ export const appRouter = createTRPCRouter({
     getAdminContacts: getAdminContactsRoute,
     getFaqEntries: getFaqEntriesRoute,
     getAboutStats: getAboutStatsRoute,
+    submitDonation: submitDonationRoute,
   }),
   serviceTeam: createTRPCRouter({
     getRoles: getServiceTeamRolesRoute,
     requestRole: requestServiceTeamRoleRoute,
+  }),
+  family: createTRPCRouter({
+    getMembers: getFamilyMembersRoute,
+    addMember: addFamilyMemberRoute,
+    removeMember: removeFamilyMemberRoute,
   }),
 });
 

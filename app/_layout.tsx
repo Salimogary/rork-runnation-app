@@ -7,10 +7,16 @@ import { SubscriptionProvider, useSubscription } from "@/contexts/SubscriptionCo
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
 import { DistanceUnitProvider } from "@/contexts/DistanceUnitContext";
+import { WeightUnitProvider } from "@/contexts/WeightUnitContext";
 import { TRPCProvider } from "../lib/trpc";
 import * as SplashScreen from "expo-splash-screen";
 import * as Linking from "expo-linking";
-import { Platform, View, Text } from "react-native";
+import { LogBox, Platform, View, Text } from "react-native";
+
+LogBox.ignoreLogs([
+  "AuthApiError: Invalid Refresh Token",
+  "Invalid Refresh Token: Refresh Token Not Found",
+]);
 
 function getAuthParamsFromUrl(url: string) {
   const queryString = url.includes("?") ? url.split("?")[1]?.split("#")[0] ?? "" : "";
@@ -74,6 +80,10 @@ function useDeepLinkHandler() {
           return;
         }
 
+        if (!authParams.code && (!authParams.accessToken || !authParams.refreshToken)) {
+          return;
+        }
+
         const { supabase } = await import("@/lib/supabase");
 
         if (authParams.code) {
@@ -128,8 +138,10 @@ function NavigationGuard() {
     const inAdminLogin = currentSegment === "admin-login";
     const inAdmin = currentSegment === "admin";
     const inSubscription = currentSegment === "subscription";
+    const inAuthCallback = currentSegment === "auth-callback";
+    const inPolicy = currentSegment === "policy";
 
-    if (inAdminLogin || inAdmin) return;
+    if (inAdminLogin || inAdmin || inAuthCallback) return;
 
     const inAllowedRoute =
       currentSegment === "settings" ||
@@ -153,11 +165,11 @@ function NavigationGuard() {
       }
     } else {
       if (!hasSeenOnboarding) {
-        if (!inOnboarding && !inRegister) {
+        if (!inOnboarding && !inRegister && !inPolicy) {
           router.replace("/onboarding" as never);
         }
       } else {
-        if (!inRegister && !inOnboarding) {
+        if (!inRegister && !inOnboarding && !inPolicy) {
           router.replace("/register" as never);
         }
       }
@@ -181,6 +193,7 @@ function RootLayoutNav() {
       }}>
         <Stack.Screen name="onboarding" options={{ headerShown: false }} />
         <Stack.Screen name="register" options={{ headerShown: false }} />
+        <Stack.Screen name="auth-callback" options={{ headerShown: false }} />
         <Stack.Screen name="profleSetup" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: "modal", title: "Modal" }} />
@@ -205,25 +218,30 @@ function RootLayoutNav() {
   );
 }
 
-function ErrorFallback() {
+function ErrorFallback({ message }: { message?: string }) {
   return (
     <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 20 }}>
       <Text style={{ fontSize: 16, textAlign: "center" }}>Something went wrong. Please restart the app.</Text>
+      {message ? (
+        <Text style={{ marginTop: 12, fontSize: 12, textAlign: "center", color: "#666" }}>
+          {message}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
-  { hasError: boolean }
+  { hasError: boolean; message?: string }
 > {
   constructor(props: { children: React.ReactNode }) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, message: undefined };
   }
 
-  static getDerivedStateFromError() {
-    return { hasError: true };
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, message: error.message };
   }
 
   componentDidCatch(error: Error) {
@@ -232,7 +250,7 @@ class ErrorBoundary extends React.Component<
 
   render() {
     if (this.state.hasError) {
-      return <ErrorFallback />;
+      return <ErrorFallback message={this.state.message} />;
     }
     return this.props.children;
   }
@@ -255,9 +273,11 @@ export default function RootLayout() {
             <AuthProvider>
               <SubscriptionProvider>
                 <DistanceUnitProvider>
-                  <NotificationProvider>
-                    <RootLayoutNav />
-                  </NotificationProvider>
+                  <WeightUnitProvider>
+                    <NotificationProvider>
+                      <RootLayoutNav />
+                    </NotificationProvider>
+                  </WeightUnitProvider>
                 </DistanceUnitProvider>
               </SubscriptionProvider>
             </AuthProvider>

@@ -1,21 +1,9 @@
 begin;
 
 -- Some environments ended up with multiple RBAC helper overloads after the
--- country_coordinator and event_organizer migrations. Replace-by-signature is
--- not enough when older variants are already present, so we hard-reset the
--- overloaded helpers before recreating the canonical versions.
-
-drop function if exists public.can_manage_role_assignment(uuid, bigint, text, uuid, uuid);
-drop function if exists public.can_manage_role_assignment(uuid, bigint, text, uuid);
-drop function if exists public.has_role(uuid, text, text, uuid, uuid);
-drop function if exists public.has_role(uuid, text, text, uuid);
-drop function if exists public.validate_role_scope(bigint, text, uuid, uuid);
-drop function if exists public.validate_role_scope(bigint, text, uuid);
-drop function if exists public.is_event_organizer(uuid, uuid);
-drop function if exists public.is_club_coordinator(uuid, uuid);
-drop function if exists public.is_country_coordinator(uuid, text);
-drop function if exists public.is_country_admin(uuid, text);
-drop function if exists public.is_super_admin(uuid);
+-- country_coordinator and event_organizer migrations. Policies may already
+-- depend on these helper signatures, so keep this migration non-destructive and
+-- replace the canonical organizer-aware helpers in place.
 
 create or replace function public.validate_role_scope(
   p_role_id bigint,
@@ -55,7 +43,7 @@ begin
     return false;
   end if;
 
-  if v_role_name = 'club_coordinator' and p_club_id is null then
+  if v_role_name = 'club_coordinator' and p_club_id is null and p_country_code is null then
     return false;
   end if;
 
@@ -100,7 +88,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select public.has_role(p_user_id, 'super_admin'::text, null, null, null);
+  select public.has_role(p_user_id, 'super_admin'::text, null::text, null::uuid, null::uuid);
 $$;
 
 create or replace function public.is_country_admin(
@@ -113,7 +101,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select public.has_role(p_user_id, 'country_admin'::text, p_country_code, null, null);
+  select public.has_role(p_user_id, 'country_admin'::text, p_country_code, null::uuid, null::uuid);
 $$;
 
 create or replace function public.is_country_coordinator(
@@ -126,7 +114,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select public.has_role(p_user_id, 'country_coordinator'::text, p_country_code, null, null);
+  select public.has_role(p_user_id, 'country_coordinator'::text, p_country_code, null::uuid, null::uuid);
 $$;
 
 create or replace function public.is_club_coordinator(
@@ -139,7 +127,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select public.has_role(p_user_id, 'club_coordinator'::text, null, p_club_id, null);
+  select public.has_role(p_user_id, 'club_coordinator'::text, null::text, p_club_id, null::uuid);
 $$;
 
 create or replace function public.is_event_organizer(
@@ -152,7 +140,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select public.has_role(p_user_id, 'event_organizer'::text, null, null, p_organizer_id);
+  select public.has_role(p_user_id, 'event_organizer'::text, null::text, null::uuid, p_organizer_id);
 $$;
 
 create or replace function public.can_manage_role_assignment(

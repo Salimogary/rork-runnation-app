@@ -1,41 +1,75 @@
-import React, { useMemo, useState } from "react";
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Image } from "expo-image";
 import { Stack, useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
-import { FileText, Link as LinkIcon, Paperclip, Send, X } from "lucide-react-native";
+import * as ImagePicker from "expo-image-picker";
+import { Camera, FileText, Link as LinkIcon, Paperclip, Send, X } from "lucide-react-native";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { getServerClient } from "@/lib/server-client";
 
 const countWords = (value: string) => value.trim().split(/\s+/).filter(Boolean).length;
 
+async function readImageAsBase64(uri: string): Promise<string> {
+  if (Platform.OS === "web") {
+    const response = await fetch(uri);
+    if (!response.ok) {
+      throw new Error("Could not read the selected article photo.");
+    }
+
+    const blob = await response.blob();
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Could not prepare the selected article photo."));
+      reader.readAsDataURL(blob);
+    });
+    const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
+    if (!base64) {
+      throw new Error("Could not prepare the selected article photo.");
+    }
+    return base64;
+  }
+
+  return FileSystem.readAsStringAsync(uri, { encoding: "base64" });
+}
+
 export default function MagazineSubmitScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { registrationId, user } = useAuth();
-  const [authorName, setAuthorName] = useState(user?.username ?? "");
+  const { registrationId, roleSession } = useAuth();
+  const [authorName, setAuthorName] = useState(roleSession.displayName ?? "");
   const [email, setEmail] = useState("");
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("Community");
   const [pitch, setPitch] = useState("");
   const [body, setBody] = useState("");
   const [externalLink, setExternalLink] = useState("");
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [photoBase64, setPhotoBase64] = useState<string | null>(null);
+  const [photoMimeType, setPhotoMimeType] = useState("image/jpeg");
   const [attachment, setAttachment] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const bodyWordCount = useMemo(() => countWords(body), [body]);
   const bodyWordTarget = category === "Columns" ? { min: 250, max: 300 } : { min: 150, max: 250 };
   const isBodyWordCountValid = bodyWordCount >= bodyWordTarget.min && bodyWordCount <= bodyWordTarget.max;
 
+  useEffect(() => {
+    if (!authorName.trim() && roleSession.displayName) {
+      setAuthorName(roleSession.displayName);
+    }
+  }, [authorName, roleSession.displayName]);
+
   const canSubmit = useMemo(
     () =>
       registrationId &&
       authorName.trim().length >= 2 &&
-      email.includes("@") &&
+      (!email.trim() || email.includes("@")) &&
       title.trim().length >= 6 &&
-      pitch.trim().length >= 20 &&
       isBodyWordCountValid,
-    [authorName, email, isBodyWordCountValid, pitch, registrationId, title]
+    [authorName, email, isBodyWordCountValid, registrationId, title]
   );
 
   const handleSubmit = async () => {
@@ -43,8 +77,8 @@ export default function MagazineSubmitScreen() {
       Alert.alert(
         "Almost there",
         category === "Columns"
-          ? "Please complete all fields. Column body should be between 250 and 300 words."
-          : "Please complete all fields. Article body should be between 150 and 250 words."
+          ? "Please complete the required fields. Column body should be between 250 and 300 words."
+          : "Please complete the required fields. Article body should be between 150 and 250 words."
       );
       return;
     }
@@ -54,16 +88,19 @@ export default function MagazineSubmitScreen() {
       const attachmentBase64 = attachment
         ? await FileSystem.readAsStringAsync(attachment.uri, { encoding: "base64" })
         : null;
+      const articlePhotoBase64 = photoUri ? photoBase64 || await readImageAsBase64(photoUri) : null;
 
       await getServerClient().magazine.submitArticle.mutate({
         registrationId,
         authorName,
-        email,
+        email: email.trim() || null,
         title,
         category,
-        pitch,
+        pitch: pitch.trim() || null,
         body,
         externalLink: externalLink.trim() || null,
+        photoBase64: articlePhotoBase64,
+        photoMimeType: articlePhotoBase64 ? photoMimeType : null,
         attachmentBase64,
         attachmentName: attachment?.name ?? null,
         attachmentType: attachment?.mimeType ?? null,
@@ -78,6 +115,28 @@ export default function MagazineSubmitScreen() {
       Alert.alert("Submission Failed", error instanceof Error ? error.message : "Could not submit your article right now.");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const pickPhoto = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Permission Required", "Please allow photo access to add a story picture.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: "images" as any,
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.9,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      setPhotoUri(result.assets[0].uri);
+      setPhotoBase64(result.assets[0].base64 || null);
+      setPhotoMimeType(result.assets[0].mimeType || "image/jpeg");
     }
   };
 
@@ -106,7 +165,7 @@ export default function MagazineSubmitScreen() {
         <TextInput style={[styles.input, { backgroundColor: colors.cardBackground, color: colors.text, borderColor: colors.border }]} value={authorName} onChangeText={setAuthorName} placeholder="Your name" placeholderTextColor={colors.textLight} />
       </View>
       <View style={styles.field}>
-        <Text style={[styles.label, { color: colors.text }]}>Email</Text>
+        <Text style={[styles.label, { color: colors.text }]}>Email (optional)</Text>
         <TextInput style={[styles.input, { backgroundColor: colors.cardBackground, color: colors.text, borderColor: colors.border }]} value={email} onChangeText={setEmail} placeholder="you@example.com" placeholderTextColor={colors.textLight} autoCapitalize="none" keyboardType="email-address" />
       </View>
       <View style={styles.field}>
@@ -131,7 +190,7 @@ export default function MagazineSubmitScreen() {
       </ScrollView>
 
       <View style={styles.field}>
-        <Text style={[styles.label, { color: colors.text }]}>Short pitch</Text>
+        <Text style={[styles.label, { color: colors.text }]}>Short pitch (optional)</Text>
         <TextInput
           style={[styles.input, styles.textAreaSmall, { backgroundColor: colors.cardBackground, color: colors.text, borderColor: colors.border }]}
           value={pitch}
@@ -158,7 +217,7 @@ export default function MagazineSubmitScreen() {
       </View>
 
       <View style={styles.field}>
-        <Text style={[styles.label, { color: colors.text }]}>External link</Text>
+        <Text style={[styles.label, { color: colors.text }]}>External link (optional)</Text>
         <View style={[styles.linkInputWrap, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
           <LinkIcon size={18} color={colors.primary} />
           <TextInput
@@ -171,6 +230,30 @@ export default function MagazineSubmitScreen() {
             keyboardType="url"
           />
         </View>
+      </View>
+
+      <View style={styles.field}>
+        <Text style={[styles.label, { color: colors.text }]}>Story picture (optional)</Text>
+        {photoUri ? (
+          <View style={[styles.photoCard, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+            <Image source={{ uri: photoUri }} style={styles.photoPreview} contentFit="cover" />
+            <TouchableOpacity style={styles.photoRemoveButton} onPress={() => {
+              setPhotoUri(null);
+              setPhotoBase64(null);
+              setPhotoMimeType("image/jpeg");
+            }}>
+              <X size={18} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity style={[styles.photoPicker, { backgroundColor: colors.cardBackground, borderColor: colors.border }]} onPress={pickPhoto}>
+            <Camera size={24} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.attachButtonText, { color: colors.text }]}>Add story picture</Text>
+              <Text style={[styles.attachmentHint, { color: colors.textSecondary }]}>Optional JPG, PNG, or WEBP image</Text>
+            </View>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.field}>
@@ -282,6 +365,37 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingHorizontal: 15,
     paddingVertical: 14,
+  },
+  photoPicker: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 15,
+    paddingVertical: 14,
+  },
+  photoCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    overflow: "hidden",
+    minHeight: 190,
+    position: "relative",
+  },
+  photoPreview: {
+    width: "100%",
+    height: 210,
+  },
+  photoRemoveButton: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   attachButtonText: {
     fontSize: 14,

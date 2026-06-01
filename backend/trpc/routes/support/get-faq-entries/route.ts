@@ -3,123 +3,135 @@ import { publicProcedure } from "../../../create-context";
 const DEFAULT_FAQS = [
   {
     faq_id: "default-1",
-    question: "How do I join an event?",
+    question: "How do events, approvals, and event payments work?",
     answer:
-      "Open Events, choose an event that matches your country or is marked virtual, then tap Participate. Free events add you straight to participants, club-approved events go to review, and paid events wait for payment confirmation.",
+      "Events may be free, approval-based, paid, virtual, local, recurring, same-day, or multiday. Your enrollment may be confirmed immediately, sent to an admin or club coordinator for review, or held until payment is confirmed.",
     display_order: 10,
   },
   {
     faq_id: "default-2",
-    question: "Why can't I join some events?",
+    question: "Why can't I join some events or shop in some countries?",
     answer:
-      "Some non-virtual events are limited to your registered country. You may also need club approval or payment before your slot is confirmed.",
+      "Some events and shop items are country-specific. Travel settings may temporarily open eligible events in another country, while paid events, shop orders, and delivery remain subject to country, currency, and admin processing rules.",
     display_order: 20,
   },
   {
     faq_id: "default-3",
-    question: "What does Private Mode do?",
+    question: "How do activity uploads and treadmill activities get approved?",
     answer:
-      "Private Mode hides your data from public leaderboards and community-style views where the app supports that setting. You can still use your core account features normally.",
+      "Manual, smart watch, sports-app, and treadmill submissions can enter an admin review queue when proof or event credit is needed. Treadmill activity counts for workouts and goals but not event credit unless a future event specifically allows it.",
     display_order: 30,
   },
   {
     faq_id: "default-4",
-    question: "How are treadmill activities approved?",
+    question: "How do clubs and special clubs work?",
     answer:
-      "Treadmill sessions go to the admin review queue with the proof photo you submit. An admin checks the evidence before the activity is accepted into your records.",
+      "A user may have one normal club plus any number of eligible special clubs. Normal club membership requires approval by the relevant coordinator, while eligible special clubs may be added automatically from profile and goal criteria.",
     display_order: 40,
   },
   {
     faq_id: "default-5",
-    question: "Why does my profile completion matter?",
+    question: "How do I join my club WhatsApp group?",
     answer:
-      "Profile completion helps unlock a cleaner app experience by making sure your core details, goals, verification state, and admin requirements are properly set up.",
-    display_order: 50,
+      "Go to Profile > My Clubs and look for the WhatsApp column or Join button beside your club. The button appears only for clubs you belong to after a club coordinator or admin has saved that club's WhatsApp invite link.",
+    display_order: 45,
   },
   {
     faq_id: "default-6",
-    question: "How do payments work in RunNation?",
+    question: "Who can join each special club?",
     answer:
-      "Subscriptions, paid events, and any approved payment-based workflows may require confirmation before access is granted. Where a fee applies, the app or the responsible admin should communicate the payment instructions clearly.",
-    display_order: 60,
+      "Junior Runners is for users aged 8 to 15. Golden Age Runners is for users aged 60 and above. Para Runners is available when your profile says you have a disability, with an extra equipment question for wheelchair, handcycle, prosthetic blades, or other gear. Treadmill Runners is available when your profile says you do indoor workouts. SmartFit Club is available when your profile says you use a smart watch to record workouts and you have selected General Health as one of your goals.",
+    display_order: 50,
   },
   {
     faq_id: "default-7",
-    question: "How do I contact an admin quickly?",
+    question: "How does RunNation support special running groups?",
     answer:
-      "Go to Settings > Help. You will find admin contacts there with quick WhatsApp and email actions where contact details are available.",
-    display_order: 70,
+      "RunNation is intentionally built for inclusion. Juniors compete within their own running community rather than adult/general rankings. Para users who use equipment stay in Para club leaderboards for exercise and appear in separate Para athlete event sections; para users with no gear can also appear in general community leaderboards. Golden Age, Treadmill, and SmartFit users also get relevant reports and club views.",
+    display_order: 60,
   },
   {
     faq_id: "default-8",
-    question: "Can I submit suggestions or report a problem?",
+    question: "Why does profile completion matter?",
     answer:
-      "Yes. Use Settings > Suggestions to send feedback. Choose the category that best matches your issue so the team can route it faster.",
-    display_order: 80,
+      "Profile fields drive important eligibility and safety rules, including age groups, country, clubs, SmartFit eligibility, Para and Treadmill options, goals, reports, rankings, service roles, and admin visibility. Missing fields can hide features that depend on those inputs.",
+    display_order: 70,
   },
   {
     faq_id: "default-9",
-    question: "How do I edit my profile details?",
+    question: "How do goals, scorecards, and special club rankings connect?",
     answer:
-      "Open Profile to update your personal details, country, photo, goals, and other account information. Keeping your profile current helps the app match you to the right events and community views.",
-    display_order: 90,
+      "Goal pages show the goals you selected. Related special club ranks may appear where relevant, such as SmartFit rank inside General Health. Unselected goals may be shown separately as inactive options rather than mixed into your active scorecard.",
+    display_order: 80,
   },
   {
     faq_id: "default-10",
-    question: "Why is my email verification important?",
+    question: "What does Private Mode do?",
     answer:
-      "A verified email helps with account recovery, trust, and profile completion. If you signed in with Google or Apple, the app may already recognise that email as verified.",
-    display_order: 100,
+      "Private Mode hides your data from public leaderboards and community-style views where the app supports that setting. You can still use your core account features normally.",
+    display_order: 90,
   },
   {
     faq_id: "default-11",
-    question: "What happens after I submit an external activity?",
+    question: "How do admin and service team roles work?",
     answer:
-      "External activities go into a review flow so an admin can confirm the submission before it appears in your main activity records.",
-    display_order: 110,
+      "Eligible users can apply through Join Service Team for roles such as club coordinator, country coordinator, event organizer, shop manager, special club coordinator, or approved magazine roles. Requests may include optional suitability notes, links, and contact instructions. Most users may hold only one active service role at a time.",
+    display_order: 100,
   },
   {
     faq_id: "default-12",
-    question: "How do club requests work?",
+    question: "Can under-18 users hold service roles?",
     answer:
-      "When you request to join a club, the request goes to the relevant admin or coordinator for review. You should see the club reflected in your account once the request is approved.",
-    display_order: 120,
+      "Under-18 users generally cannot hold service roles. The exceptional case is the Junior Runners Club Coordinator role, because that role exists specifically to support the junior community under the app's safeguards.",
+    display_order: 110,
   },
   {
     faq_id: "default-13",
-    question: "Why is an event marked view only?",
+    question: "What happens when an admin resigns or a role is deleted?",
     answer:
-      "An event may be view only if it is outside your registered country and is not virtual, or if the app is showing it for visibility but not for direct enrollment.",
-    display_order: 130,
+      "Non-Global Admins can submit a resignation request with a reason. The request stays pending for 12 hours unless a Global Admin acts sooner. Before admin access is deleted, RunNation stores a summarized resigned-admin audit log for accountability.",
+    display_order: 120,
   },
   {
     faq_id: "default-14",
-    question: "How do medals work for events?",
+    question: "Can a club coordinator delete a club?",
     answer:
-      "Some events include medal tracking. When that happens, the event may define daily or cumulative distance targets and a medal date range that determine who qualifies.",
-    display_order: 140,
+      "A club coordinator may request deletion for a club they created. If the club has no members it may be deleted immediately; if it has members, deletion stays pending for 12 hours and remains subject to the admin approval leg.",
+    display_order: 130,
   },
   {
     faq_id: "default-15",
-    question: "Can I change my country later?",
+    question: "How do donations work on RunNation?",
     answer:
-      "Yes, but changing country can affect local events, club matching, shop availability, and admin contact suggestions. It is best to keep it aligned with where you actually participate.",
-    display_order: 150,
+      "RunNation accepts voluntary donations to help support the app's operational costs, development, and community mission as a growing startup platform. The app may record donation details such as donation intent, amount, payment option, country, and optional remarks.",
+    display_order: 140,
   },
   {
     faq_id: "default-16",
-    question: "Where do I find support if something looks wrong?",
+    question: "How does the RunNation reward system work?",
     answer:
-      "Start with Settings > Help for admin contacts, then use Suggestions if you want to report a bug, ask for a feature, or explain a support issue in more detail.",
-    display_order: 160,
+      "RunNation may recognize and reward users for outstanding participation and contribution within the community. Rewards may be based on independent community polls on the chat page, recommendations from admins, or special recognition by Management for exceptional contributions such as community support, suggestions, leadership, or engagement. Rewards may include running gear, merchandise, or complimentary subscription periods.",
+    display_order: 141,
   },
   {
     faq_id: "default-17",
-    question: "Can I hold more than one role at a time?",
-    answer: "No.",
-    display_order: 170,
+    question: "How are community content, magazine submissions, and reports moderated?",
+    answer:
+      "Admins may review chat reports, screenshots, social content, magazine articles, pictorials, activity uploads, and event-related submissions. Abusive, hateful, pornographic, divisive, sectarian, misleading, unsafe, or spam content may be rejected, restricted, removed, or escalated.",
+    display_order: 150,
+  },
+  {
+    faq_id: "default-18",
+    question: "Why might submissions or uploads be temporarily limited?",
+    answer:
+      "RunNation uses backend rate limits, input checks, file-type validation, role checks, and moderation logs to reduce spam, duplicate submissions, and abuse. If you submit many items quickly, wait a short time and try again.",
+    display_order: 160,
   },
 ];
+
+const CURATED_FAQ_QUESTIONS = new Set(
+  DEFAULT_FAQS.map((faq) => faq.question.trim().toLowerCase())
+);
 
 function isMissingSchemaError(error: unknown) {
   const message =
@@ -134,6 +146,7 @@ function isMissingSchemaError(error: unknown) {
 function normalizeFaqRows(rows: any[] | null | undefined) {
   return (rows ?? [])
     .filter((row) => row?.question && row?.answer && row?.is_active !== false)
+    .filter((row) => CURATED_FAQ_QUESTIONS.has(String(row.question).trim().toLowerCase()))
     .map((row) => ({
       faq_id: row.faq_id,
       question: String(row.question),
@@ -146,6 +159,20 @@ function normalizeFaqRows(rows: any[] | null | undefined) {
       }
       return String(a.faq_id).localeCompare(String(b.faq_id));
     });
+}
+
+function mergeRequiredDefaultFaqs(rows: ReturnType<typeof normalizeFaqRows>) {
+  const existingQuestions = new Set(rows.map((row) => row.question.trim().toLowerCase()));
+  const missingDefaults = DEFAULT_FAQS.filter(
+    (defaultFaq) => !existingQuestions.has(defaultFaq.question.trim().toLowerCase())
+  );
+
+  return [...rows, ...missingDefaults].sort((a, b) => {
+    if (a.display_order !== b.display_order) {
+      return a.display_order - b.display_order;
+    }
+    return String(a.faq_id).localeCompare(String(b.faq_id));
+  });
 }
 
 export default publicProcedure.query(async ({ ctx }) => {
@@ -171,7 +198,7 @@ export default publicProcedure.query(async ({ ctx }) => {
     }
 
     const fallbackRows = normalizeFaqRows(fallbackData);
-    return fallbackRows.length ? fallbackRows : DEFAULT_FAQS;
+    return fallbackRows.length ? mergeRequiredDefaultFaqs(fallbackRows) : DEFAULT_FAQS;
   }
 
   const rows = normalizeFaqRows(data);
@@ -179,5 +206,5 @@ export default publicProcedure.query(async ({ ctx }) => {
     return DEFAULT_FAQS;
   }
 
-  return rows;
+  return mergeRequiredDefaultFaqs(rows);
 });

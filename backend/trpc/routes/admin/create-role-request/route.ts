@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import { ensureEventOrganizerForUser } from "../../../event-organizer-profile";
 import { logAdminAction, requireAdminPermission } from "../../../rbac";
 
 const roleNameSchema = z.enum([
-  "country_admin",
   "country_coordinator",
   "club_coordinator",
   "event_organizer",
@@ -28,7 +28,10 @@ export default publicProcedure
     const countryCode = input.countryCode?.trim().toUpperCase() || null;
     const clubId = input.clubId ?? null;
 
-    if ((roleName === "country_admin" || roleName === "country_coordinator") && !countryCode) {
+    if (
+      (roleName === "country_coordinator" || roleName === "event_organizer") &&
+      !countryCode
+    ) {
       throw new Error("Country code is required for country-scoped roles.");
     }
 
@@ -65,6 +68,10 @@ export default publicProcedure
       { p_email: email }
     );
 
+    if (roleName === "event_organizer" && !resolvedUserId) {
+      throw new Error("The user must sign in first before you can create an Event Organizer role request for them.");
+    }
+
     if (resolvedUserId) {
       const { data: activeRoles, error: activeRolesError } = await ctx.supabase
         .from("user_role_assignments")
@@ -82,15 +89,22 @@ export default publicProcedure
       }
     }
 
+    let organizerId: string | null = null;
+    if (roleName === "event_organizer") {
+      organizerId = await ensureEventOrganizerForUser(ctx, String(resolvedUserId), {
+        country: countryCode,
+        isActive: false,
+      });
+    }
+
     const { data, error } = await ctx.supabase
       .from("admin_invites")
       .insert({
         email,
         role_id: roleRow.role_id,
-        country_code:
-          roleName === "club_coordinator" || roleName === "event_organizer" ? null : countryCode,
+        country_code: roleName === "club_coordinator" || roleName === "event_organizer" ? null : countryCode,
         club_id: roleName === "club_coordinator" ? clubId : null,
-        organizer_id: null,
+        organizer_id: organizerId,
         invited_by: actor.authUserId,
         status: "pending",
       })
@@ -104,8 +118,7 @@ export default publicProcedure
     await logAdminAction(ctx, {
       actorUserId: actor.authUserId,
       actionType: "role_request_created",
-      targetCountryCode:
-        roleName === "club_coordinator" || roleName === "event_organizer" ? null : countryCode,
+      targetCountryCode: roleName === "club_coordinator" ? null : countryCode,
       targetClubId: roleName === "club_coordinator" ? clubId : null,
       metadata: {
         inviteId: data.invite_id,
@@ -116,3 +129,4 @@ export default publicProcedure
 
     return { success: true, inviteId: data.invite_id };
   });
+

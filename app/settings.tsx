@@ -1,19 +1,24 @@
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, TextInput, ActivityIndicator, Share, useWindowDimensions } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIcon, MessageSquare, Paperclip, EyeOff, Lock, Trash2, AlertTriangle, Star, Share2, Crown, HelpCircle, Phone, Globe, Volume2, VolumeX, Info, Handshake, Ruler } from "lucide-react-native";
+import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIcon, MessageSquare, Paperclip, EyeOff, Eye, Lock, Trash2, AlertTriangle, Star, Share2, Crown, HelpCircle, Phone, Globe, Volume2, VolumeX, Info, Handshake, Check } from "lucide-react-native";
 import { Linking } from "react-native";
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useDistanceUnit } from "@/contexts/DistanceUnitContext";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { trpc } from "@/lib/trpc";
 import { supabase } from "@/lib/supabase";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import {
+  canOpenServiceTeamEntry,
+  getServiceTeamEntrySubtitle,
+  isServiceTeamMinor,
+} from "@/utils/serviceTeam";
 import * as Haptics from "expo-haptics";
 import { getNotificationsEnabled, setNotificationsEnabled as saveNotificationsEnabled } from "@/utils/notifications";
 import { getServerClient } from "@/lib/server-client";
+import { hasAdminPortalAccess as getHasAdminPortalAccess } from "@/lib/role-session";
 import { formatCountryName } from "@/constants/country-utils";
 import { WORLD_COUNTRIES } from "@/constants/countries";
 import { getActivityVoiceAssistantEnabled, setActivityVoiceAssistantEnabled as saveActivityVoiceAssistantEnabled } from "@/utils/activityVoice";
@@ -29,15 +34,57 @@ function normalizeSettingsCountryCode(country: string | null | undefined): strin
   return match?.iso_alpha2?.toUpperCase() ?? null;
 }
 
-const GLOBAL_SERVICE_ROLE_NAMES = new Set([
+const SPECIAL_CLUB_COORDINATOR_ROLE_NAMES = new Set([
   "junior_runners_club_coordinator",
   "golden_age_runners_club_coordinator",
   "treadmill_runners_club_coordinator",
   "para_runners_club_coordinator",
-  "magazine_columnist_fitness_coach",
-  "magazine_columnist_sports_journalist",
-  "magazine_columnist_motivation_speaker",
+  "smartfit_club_coordinator",
 ]);
+
+const SERVICE_APPLICANT_LINKS_HELPER =
+  "Optional: add up to 3 links where admins can learn more about your background and suitability for this role—for example a website, LinkedIn profile, social handle, or published article.";
+
+const SERVICE_APPLICANT_STATEMENT_HELPER =
+  "Optional: briefly explain why admins should consider you for this role. Use 25-250 words if you choose to add it.";
+
+const REQUIRED_FRONTEND_FAQS = [
+  {
+    faq_id: "frontend-special-club-eligibility",
+    question: "Who can join each special club?",
+    answer:
+      "Junior Runners is for users aged 8 to 15. Golden Age Runners is for users aged 60 and above. Para Runners is available when your profile says you have a disability. Treadmill Runners is available when your profile says you do indoor workouts. SmartFit Club is available when your profile says you use a smart watch to record workouts and you have selected General Health as one of your goals.",
+    display_order: 190,
+  },
+];
+
+const DONATION_CURRENCY_BY_COUNTRY: Record<string, string> = {
+  UG: "UGX",
+  KE: "KES",
+  TZ: "TZS",
+  RW: "RWF",
+  GH: "GHS",
+  ZM: "ZMW",
+  MW: "MWK",
+  NG: "NGN",
+  ZA: "ZAR",
+  US: "USD",
+  GB: "GBP",
+  EU: "EUR",
+};
+
+const MOBILE_MONEY_COUNTRIES = new Set(["UG", "KE", "TZ", "RW", "GH", "ZM", "MW", "CM", "CI", "SN"]);
+
+type DonationPaymentMethod = "card" | "mobile_money";
+type ServiceRoleAvailabilityGrouping = "grouped" | "flat";
+type ChatReportTab = "complaint" | "feedback";
+
+function formatSettingsDate(value?: string | null): string {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString();
+}
 
 function getServiceRoleButtonLabel(roleName: string, countryName: string): string {
   switch (roleName) {
@@ -57,9 +104,19 @@ function getServiceRoleButtonLabel(roleName: string, countryName: string): strin
       return "Take up the Treadmill Runners Club Coordinator role.";
     case "para_runners_club_coordinator":
       return "Take up the Para Runners Club Coordinator role.";
+    case "smartfit_club_coordinator":
+      return "Take up the SmartFit Club Coordinator role.";
+    case "magazine_editor":
+      return "Apply to lead The Running Post as Magazine Editor.";
+    case "chat_room_administrator":
+      return "Apply to screen Chat Abuse Reports.";
     default:
       return "Take up role";
   }
+}
+
+function countWords(value: string): number {
+  return value.trim().split(/\s+/).filter(Boolean).length;
 }
 
 export default function SettingsScreen() {
@@ -76,7 +133,6 @@ export default function SettingsScreen() {
   }, []);
   const [locationEnabled, setLocationEnabled] = useState(true);
   const { isDark, setDarkMode, colors: themeColors } = useTheme();
-  const { distanceUnit, distanceUnitLabel, distanceUnitShortLabel, toggleDistanceUnit } = useDistanceUnit();
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackCategory, setFeedbackCategory] = useState<"bug" | "feature" | "support" | "billing">("feature");
@@ -92,19 +148,32 @@ export default function SettingsScreen() {
   const { subscriptionStatus, trialDaysRemaining, subscription } = useSubscription();
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showFaqModal, setShowFaqModal] = useState(false);
+  const [showDonateModal, setShowDonateModal] = useState(false);
+  const [donationAmount, setDonationAmount] = useState("");
+  const [donationRemarks, setDonationRemarks] = useState("");
+  const [donationPaymentMethod, setDonationPaymentMethod] = useState<DonationPaymentMethod>("card");
   const [showServiceTeamModal, setShowServiceTeamModal] = useState(false);
+  const [serviceRoleAvailabilityGrouping, setServiceRoleAvailabilityGrouping] = useState<ServiceRoleAvailabilityGrouping>("grouped");
+  const [selectedServiceRole, setSelectedServiceRole] = useState<any | null>(null);
   const [showChatReportModal, setShowChatReportModal] = useState(false);
+  const [chatReportTab, setChatReportTab] = useState<ChatReportTab>("complaint");
   const [chatReportDescription, setChatReportDescription] = useState("");
-  const [chatReportPostId, setChatReportPostId] = useState("");
   const [chatReportReason, setChatReportReason] = useState<"abuse" | "hate" | "disrespect" | "divisive" | "sectarian" | "pornographic" | "spam" | "other">("abuse");
   const [chatReportScreenshot, setChatReportScreenshot] = useState<{ uri: string; mimeType?: string | null; fileName?: string | null } | null>(null);
   const [serviceWebsiteUrl, setServiceWebsiteUrl] = useState("");
   const [serviceLinkedinUrl, setServiceLinkedinUrl] = useState("");
   const [serviceSocialUrl, setServiceSocialUrl] = useState("");
+  const [serviceApplicantStatements, setServiceApplicantStatements] = useState<Record<string, string>>({});
+  const [serviceContactConsents, setServiceContactConsents] = useState<Record<string, boolean>>({});
+  const [serviceContactInstructions, setServiceContactInstructions] = useState<Record<string, string>>({});
+  const [serviceProposedNames, setServiceProposedNames] = useState<Record<string, string>>({});
+  const [serviceProposedLocations, setServiceProposedLocations] = useState<Record<string, string>>({});
+  const [serviceProposedDescriptions, setServiceProposedDescriptions] = useState<Record<string, string>>({});
   const [expandedFaqIds, setExpandedFaqIds] = useState<string[]>([]);
   const adminTapCount = useRef<number>(0);
   const adminTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const helpGridColumns = width >= 700 ? 2 : 1;
+  const hasAdminPortalAccess = getHasAdminPortalAccess(roleSession);
 
   const handleVersionTap = useCallback(() => {
     adminTapCount.current += 1;
@@ -137,17 +206,62 @@ export default function SettingsScreen() {
     undefined,
     { enabled: showFaqModal }
   );
+  const displayedFaqEntries = useMemo(() => {
+    const rows = Array.isArray(faqEntries) ? faqEntries : [];
+    const existingQuestions = new Set(
+      rows.map((faq: any) => String(faq.question || "").trim().toLowerCase())
+    );
+    return [
+      ...rows,
+      ...REQUIRED_FRONTEND_FAQS.filter(
+        (faq) => !existingQuestions.has(faq.question.trim().toLowerCase())
+      ),
+    ].sort((a: any, b: any) => {
+      const orderDiff = Number(a.display_order ?? 0) - Number(b.display_order ?? 0);
+      if (orderDiff !== 0) return orderDiff;
+      return String(a.faq_id).localeCompare(String(b.faq_id));
+    });
+  }, [faqEntries]);
 
   const effectiveRegistrationId = registrationId || user?.id || "";
   const { data: serviceProfile, isLoading: isLoadingServiceProfile } = trpc.profile.getBundle.useQuery(
     { registrationId: effectiveRegistrationId },
-    { enabled: showServiceTeamModal && !!effectiveRegistrationId }
+    { enabled: !!effectiveRegistrationId }
   );
   const serviceProfileAny = serviceProfile as any;
   const serviceCountryCode = normalizeSettingsCountryCode(
     serviceProfileAny?.profile?.country_code || serviceProfileAny?.profile?.country
   );
   const serviceCountryName = formatCountryName(serviceCountryCode) || formatCountryName(serviceProfileAny?.profile?.country) || "Your country";
+  const chatReportRegistrationId = registrationId || user?.id || "";
+
+  const {
+    data: myChatReports = [],
+    isLoading: isLoadingMyChatReports,
+    error: myChatReportsError,
+    refetch: refetchMyChatReports,
+  } = trpc.social.getMyChatReports.useQuery(
+    { registrationId: chatReportRegistrationId },
+    {
+      enabled: Boolean(showChatReportModal && chatReportRegistrationId),
+    }
+  );
+  const donationCurrency = DONATION_CURRENCY_BY_COUNTRY[serviceCountryCode || ""] || "USD";
+  const donationPaymentOptions = useMemo<Array<{ key: DonationPaymentMethod; label: string; caption: string }>>(() => {
+    const options: Array<{ key: DonationPaymentMethod; label: string; caption: string }> = [
+      { key: "card", label: "Card", caption: "Visa, Mastercard or bank card" },
+    ];
+    if (serviceCountryCode && MOBILE_MONEY_COUNTRIES.has(serviceCountryCode)) {
+      options.push({ key: "mobile_money", label: "Mobile money", caption: `${serviceCountryName} mobile wallet` });
+    }
+    return options;
+  }, [serviceCountryCode, serviceCountryName]);
+
+  useEffect(() => {
+    if (!donationPaymentOptions.some((option) => option.key === donationPaymentMethod)) {
+      setDonationPaymentMethod("card");
+    }
+  }, [donationPaymentMethod, donationPaymentOptions]);
   const {
     data: serviceTeamData,
     isLoading: isLoadingServiceRoles,
@@ -155,8 +269,36 @@ export default function SettingsScreen() {
     refetch: refetchServiceTeamRoles,
   } = trpc.serviceTeam.getRoles.useQuery(
     { countryCode: serviceCountryCode || "" },
-    { enabled: showServiceTeamModal && !!serviceCountryCode }
+    { enabled: !!serviceCountryCode }
   );
+  const serviceProfileDob = serviceProfileAny?.profile?.dob as string | undefined;
+  const serviceTeamEntryEnabled = useMemo(() => {
+    if (serviceTeamData?.canOpenServiceTeam !== undefined) {
+      if (!serviceCountryCode && !serviceTeamData.existingRole) {
+        return !isServiceTeamMinor(serviceProfileDob);
+      }
+      return serviceTeamData.canOpenServiceTeam;
+    }
+    return canOpenServiceTeamEntry(serviceProfileDob, serviceTeamData?.roles, !!serviceTeamData?.existingRole);
+  }, [serviceCountryCode, serviceProfileDob, serviceTeamData]);
+  const serviceTeamEntrySubtitle = useMemo(
+    () => getServiceTeamEntrySubtitle(serviceProfileDob, serviceTeamData?.roles),
+    [serviceProfileDob, serviceTeamData?.roles]
+  );
+  const handleServiceTeamPress = useCallback(() => {
+    if (serviceTeamEntryEnabled) {
+      setShowServiceTeamModal(true);
+      return;
+    }
+    const message = isServiceTeamMinor(serviceProfileDob)
+      ? "Users under 18 can apply only when the Junior Runners Club Coordinator role is vacant. Check back when the role becomes available."
+      : "Add your date of birth in Profile to check service team eligibility.";
+    if (Platform.OS !== "web") {
+      Alert.alert("Join Service Team", message);
+    } else {
+      alert(message);
+    }
+  }, [serviceProfileDob, serviceTeamEntryEnabled]);
   const requestServiceRoleMutation = trpc.serviceTeam.requestRole.useMutation({
     onSuccess: () => {
       if (Platform.OS !== "web") {
@@ -167,6 +309,14 @@ export default function SettingsScreen() {
       setServiceWebsiteUrl("");
       setServiceLinkedinUrl("");
       setServiceSocialUrl("");
+      setServiceApplicantStatements({});
+      setServiceContactConsents({});
+      setServiceContactInstructions({});
+      setServiceProposedNames({});
+      setServiceProposedLocations({});
+      setServiceProposedDescriptions({});
+      setSelectedServiceRole(null);
+      setShowServiceTeamModal(false);
       void refetchServiceTeamRoles();
     },
     onError: (error) => {
@@ -287,6 +437,132 @@ export default function SettingsScreen() {
     },
   });
 
+  const getServiceRoleAllowsApplicantLinks = useCallback((roleName: string) => {
+    return roleName !== "event_organizer" && roleName !== "club_coordinator";
+  }, []);
+
+  const submitServiceRoleRequest = useCallback((role: any) => {
+    if (!serviceCountryCode || !role?.roleName) return;
+
+    const roleAllowsApplicantLinks = getServiceRoleAllowsApplicantLinks(role.roleName);
+    const applicantStatement = serviceApplicantStatements[role.roleName] || "";
+    const contactConsent = serviceContactConsents[role.roleName] === true;
+    const contactInstructions = serviceContactInstructions[role.roleName] || "";
+    const needsProposedProfile = role.roleName === "club_coordinator" || role.roleName === "event_organizer";
+    const proposedName = serviceProposedNames[role.roleName] || "";
+    const proposedLocation = serviceProposedLocations[role.roleName] || "";
+    const proposedDescription = serviceProposedDescriptions[role.roleName] || "";
+    const statementWordCount = countWords(applicantStatement);
+
+    if (needsProposedProfile && (!proposedName.trim() || !proposedLocation.trim())) {
+      const message =
+        role.roleName === "club_coordinator"
+          ? "Please add the proposed club name and location before submitting."
+          : "Please add the organizer profile name and base location before submitting.";
+      if (Platform.OS !== "web") {
+        Alert.alert("Join Service Team", message);
+      } else {
+        alert(message);
+      }
+      return;
+    }
+
+    if (applicantStatement.trim() && (statementWordCount < 25 || statementWordCount > 250)) {
+      const message = "The optional role statement must be 25-250 words.";
+      if (Platform.OS !== "web") {
+        Alert.alert("Join Service Team", message);
+      } else {
+        alert(message);
+      }
+      return;
+    }
+
+    requestServiceRoleMutation.mutate({
+      roleName: role.roleName as any,
+      countryCode: serviceCountryCode,
+      websiteUrl: roleAllowsApplicantLinks ? serviceWebsiteUrl : null,
+      linkedinUrl: roleAllowsApplicantLinks ? serviceLinkedinUrl : null,
+      socialUrl: roleAllowsApplicantLinks ? serviceSocialUrl : null,
+      applicantStatement: applicantStatement.trim() || null,
+      contactConsent,
+      contactInstructions: contactConsent ? contactInstructions.trim() || null : null,
+      proposedName: needsProposedProfile ? proposedName.trim() : null,
+      proposedLocation: needsProposedProfile ? proposedLocation.trim() : null,
+      proposedDescription: needsProposedProfile ? proposedDescription.trim() || null : null,
+    });
+  }, [
+    getServiceRoleAllowsApplicantLinks,
+    requestServiceRoleMutation,
+    serviceApplicantStatements,
+    serviceContactConsents,
+    serviceContactInstructions,
+    serviceCountryCode,
+    serviceLinkedinUrl,
+    serviceProposedDescriptions,
+    serviceProposedLocations,
+    serviceProposedNames,
+    serviceSocialUrl,
+    serviceWebsiteUrl,
+  ]);
+
+  const serviceRoleGroups = useMemo(() => {
+    const roles = serviceTeamData?.roles ?? [];
+    const groupForRole = (role: any) => {
+      if (role.status === "available") return "Available";
+      if (role.hasPendingRequest || role.status === "pending") return "Pending";
+      if (role.status === "coming_soon") return "Coming Soon";
+      if (role.status === "filled") return "Filled";
+      return "Other";
+    };
+    if (serviceRoleAvailabilityGrouping === "flat") {
+      return [{ title: "All Roles", roles }];
+    }
+    return ["Available", "Pending", "Coming Soon", "Filled", "Other"]
+      .map((title) => ({ title, roles: roles.filter((role: any) => groupForRole(role) === title) }))
+      .filter((group) => group.roles.length > 0);
+  }, [serviceRoleAvailabilityGrouping, serviceTeamData?.roles]);
+
+  const donationMutation = useMutation({
+    mutationFn: async () => {
+      const regId = registrationId || user?.id;
+      if (!regId) throw new Error("Please sign in before donating.");
+      const amount = Number(donationAmount.replace(/,/g, "").trim());
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error("Please enter a valid donation amount.");
+      }
+
+      await getServerClient().support.submitDonation.mutate({
+        registrationId: regId,
+        amount,
+        currency: donationCurrency,
+        countryCode: serviceCountryCode,
+        paymentMethod: donationPaymentMethod,
+        remarks: donationRemarks.trim() || null,
+      });
+    },
+    onSuccess: () => {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setShowDonateModal(false);
+      setDonationAmount("");
+      setDonationRemarks("");
+      setDonationPaymentMethod("card");
+      const message = "Thank you for standing with RunNation. Your donation details have been recorded, and the team will use them to follow through with the selected payment option.";
+      if (Platform.OS !== "web") {
+        Alert.alert("Thank You", message);
+      } else {
+        alert(message);
+      }
+    },
+    onError: (error: any) => {
+      const message = error?.message || "Could not record the donation right now.";
+      if (Platform.OS !== "web") {
+        Alert.alert("Donation Not Sent", message);
+      } else {
+        alert(message);
+      }
+    },
+  });
+
   const encodeReportScreenshot = async (uri: string, mimeType?: string | null) => {
     const resolvedMimeType = mimeType || (uri.toLowerCase().includes(".png") ? "image/png" : "image/jpeg");
     if (Platform.OS === "web") {
@@ -342,7 +618,7 @@ export default function SettingsScreen() {
 
       await getServerClient().social.reportContent.mutate({
         registrationId: regId,
-        postId: chatReportPostId.trim() || null,
+        postId: null,
         commentId: null,
         reasonCategory: chatReportReason,
         description: chatReportDescription.trim(),
@@ -351,9 +627,9 @@ export default function SettingsScreen() {
       });
     },
     onSuccess: () => {
+      void refetchMyChatReports();
       setShowChatReportModal(false);
       setChatReportDescription("");
-      setChatReportPostId("");
       setChatReportReason("abuse");
       setChatReportScreenshot(null);
       Alert.alert("Report Submitted", "Thank you. An admin will review the chat report.");
@@ -554,31 +830,6 @@ export default function SettingsScreen() {
           </View>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
-          onPress={() => {
-            toggleDistanceUnit();
-            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          }}
-        >
-          <View style={styles.settingLeft}>
-            <View style={[styles.iconContainer, { backgroundColor: distanceUnit === "miles" ? "#EFF6FF" : "#ECFDF5" }]}>
-              <Ruler size={22} color={distanceUnit === "miles" ? "#3b82f6" : "#10b981"} />
-            </View>
-            <View style={styles.settingTextContainer}>
-              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Distance Measure</Text>
-              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>
-                {distanceUnitLabel} selected
-              </Text>
-            </View>
-          </View>
-          <View style={[styles.unitTogglePill, { backgroundColor: distanceUnit === "miles" ? "#EFF6FF" : "#ECFDF5" }]}>
-            <Text style={[styles.unitToggleText, { color: distanceUnit === "miles" ? "#3b82f6" : "#10b981" }]}>
-              {distanceUnitShortLabel}
-            </Text>
-          </View>
-        </TouchableOpacity>
-
         <TouchableOpacity 
           style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]} 
           onPress={() => setLocationEnabled(!locationEnabled)}
@@ -658,18 +909,44 @@ export default function SettingsScreen() {
 
         <TouchableOpacity
           style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
-          onPress={() => setShowServiceTeamModal(true)}
+          onPress={() => setShowDonateModal(true)}
         >
           <View style={styles.settingLeft}>
-            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#3B2000' : '#FFF7ED' }]}>
-              <Handshake size={22} color="#f97316" />
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#3B1111' : '#FEF2F2' }]}>
+              <Handshake size={22} color="#ef4444" />
             </View>
             <View style={styles.settingTextContainer}>
-              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Join Service Team</Text>
-              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Take up a role or opportunity in the community</Text>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Donate</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Help RunNation keep serving runners</Text>
             </View>
           </View>
           <ChevronRight size={20} color={themeColors.iconMuted} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.settingItem,
+            { backgroundColor: themeColors.cardBackground },
+            !serviceTeamEntryEnabled && styles.settingItemDisabled,
+          ]}
+          onPress={handleServiceTeamPress}
+          disabled={!serviceTeamEntryEnabled}
+          activeOpacity={serviceTeamEntryEnabled ? 0.7 : 1}
+        >
+          <View style={styles.settingLeft}>
+            <View style={[styles.iconContainer, { backgroundColor: isDark ? '#3B2000' : '#FFF7ED' }]}>
+              <Handshake size={22} color={serviceTeamEntryEnabled ? "#f97316" : themeColors.iconMuted} />
+            </View>
+            <View style={styles.settingTextContainer}>
+              <Text style={[styles.settingTitle, { color: serviceTeamEntryEnabled ? themeColors.text : themeColors.textLight }]}>
+                Join Service Team
+              </Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>
+                {serviceTeamEntrySubtitle}
+              </Text>
+            </View>
+          </View>
+          <ChevronRight size={20} color={serviceTeamEntryEnabled ? themeColors.iconMuted : themeColors.textLight} />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -787,7 +1064,7 @@ export default function SettingsScreen() {
         </TouchableOpacity>
       </View>
 
-      {user && roleSession.hasAdminAccess && (
+      {user && hasAdminPortalAccess && (
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>Admin</Text>
           <TouchableOpacity
@@ -809,6 +1086,8 @@ export default function SettingsScreen() {
                       ? 'Country admin tools available'
                       : roleSession.isCountryCoordinator
                         ? 'Country coordinator tools available'
+                        : roleSession.isSpecialClubCoordinator
+                          ? 'Special club tools available'
                         : roleSession.isEventOrganizer
                           ? 'Event organizer tools available'
                       : 'Coordinator tools available'}
@@ -970,6 +1249,129 @@ export default function SettingsScreen() {
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
                   <Text style={styles.submitFeedbackText}>Send Feedback</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showDonateModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowDonateModal(false)}
+      >
+        <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.detailModalContent, { backgroundColor: themeColors.modalBackground }]}>
+            <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.detailTitle, { color: themeColors.text }]}>Donate</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowDonateModal(false);
+                  setDonationAmount("");
+                  setDonationRemarks("");
+                  setDonationPaymentMethod("card");
+                }}
+              >
+                <XIcon size={24} color={themeColors.iconDefault} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.donationScroll} contentContainerStyle={styles.donationBody}>
+              <Text style={[styles.donationCaption, { color: themeColors.textSecondary }]}>
+                RunNation is still a young startup with a big mission: to keep runners connected, included, and supported wherever they are. Any gift, small or large, helps keep the app running, improve the tools clubs depend on, and carry this community further.
+              </Text>
+
+              <View style={styles.donationFieldGroup}>
+                <Text style={[styles.feedbackLabel, { color: themeColors.text }]}>Amount ({donationCurrency})</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                  placeholder={`Enter amount in ${donationCurrency}`}
+                  placeholderTextColor={themeColors.textLight}
+                  keyboardType="decimal-pad"
+                  value={donationAmount}
+                  onChangeText={setDonationAmount}
+                />
+              </View>
+
+              <View style={styles.donationFieldGroup}>
+                <Text style={[styles.feedbackLabel, { color: themeColors.text }]}>Payment option</Text>
+                <View style={styles.donationMethodGrid}>
+                  {donationPaymentOptions.map((option) => {
+                    const isActive = donationPaymentMethod === option.key;
+                    return (
+                      <TouchableOpacity
+                        key={option.key}
+                        style={[
+                          styles.donationMethodButton,
+                          { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder },
+                          isActive && styles.donationMethodButtonActive,
+                        ]}
+                        onPress={() => setDonationPaymentMethod(option.key)}
+                      >
+                        <Text style={[styles.donationMethodLabel, { color: isActive ? "#dc2626" : themeColors.text }]}>
+                          {option.label}
+                        </Text>
+                        <Text style={[styles.donationMethodCaption, { color: themeColors.textSecondary }]}>
+                          {option.caption}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                {!serviceCountryCode || !MOBILE_MONEY_COUNTRIES.has(serviceCountryCode) ? (
+                  <Text style={[styles.donationHint, { color: themeColors.textLight }]}>
+                    Mobile money appears automatically where it is supported for the user country.
+                  </Text>
+                ) : null}
+              </View>
+
+              <View style={styles.donationFieldGroup}>
+                <Text style={[styles.feedbackLabel, { color: themeColors.text }]}>Remarks (optional)</Text>
+                <TextInput
+                  style={[styles.feedbackInput, styles.feedbackTextArea, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                  placeholder="You can add donor particulars, a reason for the gift, or a short note to the RunNation team."
+                  placeholderTextColor={themeColors.textLight}
+                  multiline
+                  maxLength={1000}
+                  value={donationRemarks}
+                  onChangeText={setDonationRemarks}
+                  textAlignVertical="top"
+                />
+                <Text style={[styles.characterCount, { color: themeColors.textLight }]}>{donationRemarks.length}/1000</Text>
+              </View>
+            </ScrollView>
+
+            <View style={[styles.feedbackActions, { borderTopColor: themeColors.border }]}>
+              <TouchableOpacity
+                style={[styles.cancelFeedbackButton, { backgroundColor: themeColors.inputBackground }]}
+                onPress={() => {
+                  setShowDonateModal(false);
+                  setDonationAmount("");
+                  setDonationRemarks("");
+                  setDonationPaymentMethod("card");
+                }}
+              >
+                <Text style={[styles.cancelFeedbackText, { color: themeColors.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.submitFeedbackButton,
+                  styles.donationSubmitButton,
+                  (!donationAmount.trim() || donationMutation.isPending) && styles.submitFeedbackButtonDisabled,
+                ]}
+                onPress={() => {
+                  if (!donationMutation.isPending) {
+                    donationMutation.mutate();
+                  }
+                }}
+                disabled={!donationAmount.trim() || donationMutation.isPending}
+              >
+                {donationMutation.isPending ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.submitFeedbackText}>Send Donation</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -1328,96 +1730,149 @@ export default function SettingsScreen() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.feedbackForm}>
-              <Text style={[styles.feedbackLabel, { color: themeColors.text }]}>Offence type</Text>
-              <View style={styles.categoryGrid}>
-                {[
-                  { key: "abuse", label: "Abusive" },
-                  { key: "hate", label: "Hateful" },
-                  { key: "disrespect", label: "Disrespectful" },
-                  { key: "divisive", label: "Divisive" },
-                  { key: "sectarian", label: "Sectarian" },
-                  { key: "pornographic", label: "Pornographic" },
-                  { key: "spam", label: "Spam" },
-                  { key: "other", label: "Other" },
-                ].map((item) => (
+            <View style={styles.reportTabBar}>
+              {[
+                { key: "complaint", label: "Make Complaint" },
+                { key: "feedback", label: "Feedback" },
+              ].map((tab) => {
+                const active = chatReportTab === tab.key;
+                return (
                   <TouchableOpacity
-                    key={item.key}
-                    style={[
-                      styles.categoryButton,
-                      chatReportReason === item.key && styles.categoryButtonActive,
-                    ]}
-                    onPress={() => setChatReportReason(item.key as any)}
+                    key={tab.key}
+                    style={[styles.reportTabButton, active && styles.reportTabButtonActive]}
+                    onPress={() => setChatReportTab(tab.key as ChatReportTab)}
                   >
-                    <Text style={[
-                      styles.categoryButtonText,
-                      chatReportReason === item.key && styles.categoryButtonTextActive,
-                    ]}>
-                      {item.label}
-                    </Text>
+                    <Text style={[styles.reportTabText, active && styles.reportTabTextActive]}>{tab.label}</Text>
                   </TouchableOpacity>
-                ))}
-              </View>
+                );
+              })}
+            </View>
 
-              <Text style={[styles.feedbackLabel, { color: themeColors.text }]}>Post ID (optional)</Text>
-              <TextInput
-                style={[styles.feedbackInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
-                value={chatReportPostId}
-                onChangeText={setChatReportPostId}
-                placeholder="Leave blank if you only have a screenshot"
-                placeholderTextColor={themeColors.textLight}
-                autoCapitalize="none"
-              />
-
-              <Text style={[styles.feedbackLabel, { color: themeColors.text }]}>Brief description</Text>
-              <TextInput
-                style={[styles.feedbackInput, styles.feedbackTextArea, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
-                value={chatReportDescription}
-                onChangeText={setChatReportDescription}
-                placeholder="Explain what happened and why it should be reviewed."
-                placeholderTextColor={themeColors.textLight}
-                multiline
-                numberOfLines={5}
-                textAlignVertical="top"
-              />
-
-              <TouchableOpacity
-                style={[styles.attachButton, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder }]}
-                onPress={pickChatReportScreenshot}
-              >
-                <Paperclip size={20} color="#dc2626" />
-                <Text style={styles.attachButtonText}>
-                  {chatReportScreenshot ? "Change Screenshot" : "Attach Screenshot"}
-                </Text>
-              </TouchableOpacity>
-
-              {chatReportScreenshot ? (
-                <View style={styles.attachmentPreview}>
-                  <Text style={styles.attachmentText}>{chatReportScreenshot.fileName || "Screenshot attached"}</Text>
-                  <TouchableOpacity onPress={() => setChatReportScreenshot(null)}>
-                    <XIcon size={18} color="#666" />
-                  </TouchableOpacity>
+            {chatReportTab === "complaint" ? (
+              <ScrollView style={styles.feedbackForm}>
+                <Text style={[styles.feedbackLabel, { color: themeColors.text }]}>Offence type</Text>
+                <View style={styles.categoryGrid}>
+                  {[
+                    { key: "abuse", label: "Abusive" },
+                    { key: "hate", label: "Hateful" },
+                    { key: "disrespect", label: "Disrespectful" },
+                    { key: "divisive", label: "Divisive" },
+                    { key: "sectarian", label: "Sectarian" },
+                    { key: "pornographic", label: "Pornographic" },
+                    { key: "spam", label: "Spam" },
+                    { key: "other", label: "Other" },
+                  ].map((item) => (
+                    <TouchableOpacity
+                      key={item.key}
+                      style={[
+                        styles.categoryButton,
+                        chatReportReason === item.key && styles.categoryButtonActive,
+                      ]}
+                      onPress={() => setChatReportReason(item.key as any)}
+                    >
+                      <Text style={[
+                        styles.categoryButtonText,
+                        chatReportReason === item.key && styles.categoryButtonTextActive,
+                      ]}>
+                        {item.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-              ) : null}
 
-              <View style={styles.feedbackActions}>
+                <Text style={[styles.feedbackLabel, { color: themeColors.text }]}>Brief description</Text>
+                <TextInput
+                  style={[styles.feedbackInput, styles.feedbackTextArea, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                  value={chatReportDescription}
+                  onChangeText={setChatReportDescription}
+                  placeholder="Explain what happened and why it should be reviewed."
+                  placeholderTextColor={themeColors.textLight}
+                  multiline
+                  numberOfLines={5}
+                  textAlignVertical="top"
+                />
+
                 <TouchableOpacity
-                  style={[styles.cancelFeedbackButton, { backgroundColor: themeColors.inputBackground }]}
-                  onPress={() => setShowChatReportModal(false)}
+                  style={[styles.attachButton, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder }]}
+                  onPress={pickChatReportScreenshot}
                 >
-                  <Text style={[styles.cancelFeedbackText, { color: themeColors.textSecondary }]}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.submitFeedbackButton, (!chatReportDescription.trim() || chatReportMutation.isPending) && styles.submitFeedbackButtonDisabled]}
-                  disabled={!chatReportDescription.trim() || chatReportMutation.isPending}
-                  onPress={() => chatReportMutation.mutate()}
-                >
-                  <Text style={styles.submitFeedbackText}>
-                    {chatReportMutation.isPending ? "Submitting..." : "Submit Report"}
+                  <Paperclip size={20} color="#dc2626" />
+                  <Text style={styles.attachButtonText}>
+                    {chatReportScreenshot ? "Change Screenshot" : "Attach Screenshot"}
                   </Text>
                 </TouchableOpacity>
-              </View>
-            </ScrollView>
+                <Text style={[styles.feedbackHintText, { color: themeColors.textSecondary }]}>
+                  Please attach a screenshot that clearly shows the user name, date, and offensive content.
+                </Text>
+
+                {chatReportScreenshot ? (
+                  <View style={styles.attachmentPreview}>
+                    <Text style={styles.attachmentText}>{chatReportScreenshot.fileName || "Screenshot attached"}</Text>
+                    <TouchableOpacity onPress={() => setChatReportScreenshot(null)}>
+                      <XIcon size={18} color="#666" />
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+
+                <View style={styles.feedbackActions}>
+                  <TouchableOpacity
+                    style={[styles.cancelFeedbackButton, { backgroundColor: themeColors.inputBackground }]}
+                    onPress={() => setShowChatReportModal(false)}
+                  >
+                    <Text style={[styles.cancelFeedbackText, { color: themeColors.textSecondary }]}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.submitFeedbackButton, (!chatReportDescription.trim() || chatReportMutation.isPending) && styles.submitFeedbackButtonDisabled]}
+                    disabled={!chatReportDescription.trim() || chatReportMutation.isPending}
+                    onPress={() => chatReportMutation.mutate()}
+                  >
+                    <Text style={styles.submitFeedbackText}>
+                      {chatReportMutation.isPending ? "Submitting..." : "Submit Report"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            ) : (
+              <ScrollView style={styles.feedbackForm} horizontal showsHorizontalScrollIndicator={false}>
+                <View style={styles.chatFeedbackTable}>
+                  <View style={[styles.chatFeedbackRow, styles.chatFeedbackHeader]}>
+                    <View style={[styles.chatFeedbackCell, { width: 95 }]}><Text style={styles.chatFeedbackHeaderText}>Date</Text></View>
+                    <View style={[styles.chatFeedbackCell, { width: 110 }]}><Text style={styles.chatFeedbackHeaderText}>Type</Text></View>
+                    <View style={[styles.chatFeedbackCell, { width: 115 }]}><Text style={styles.chatFeedbackHeaderText}>Status</Text></View>
+                    <View style={[styles.chatFeedbackCell, { width: 220 }]}><Text style={styles.chatFeedbackHeaderText}>Complaint</Text></View>
+                    <View style={[styles.chatFeedbackCell, { width: 240 }]}><Text style={styles.chatFeedbackHeaderText}>Admin Feedback</Text></View>
+                  </View>
+                  {isLoadingMyChatReports ? (
+                    <View style={styles.chatFeedbackEmpty}>
+                      <Text style={[styles.chatFeedbackText, { color: themeColors.textSecondary }]}>Loading feedback...</Text>
+                    </View>
+                  ) : myChatReportsError ? (
+                    <View style={styles.chatFeedbackEmpty}>
+                      <Text style={styles.chatFeedbackError}>Could not load feedback.</Text>
+                    </View>
+                  ) : (myChatReports as any[]).length === 0 ? (
+                    <View style={styles.chatFeedbackEmpty}>
+                      <Text style={[styles.chatFeedbackText, { color: themeColors.textSecondary }]}>No chat report feedback yet.</Text>
+                    </View>
+                  ) : (
+                    (myChatReports as any[]).map((report) => (
+                      <View key={report.reportId} style={styles.chatFeedbackRow}>
+                        <View style={[styles.chatFeedbackCell, { width: 95 }]}><Text style={styles.chatFeedbackText}>{formatSettingsDate(report.createdAt)}</Text></View>
+                        <View style={[styles.chatFeedbackCell, { width: 110 }]}><Text style={styles.chatFeedbackText}>{report.reasonCategory}</Text></View>
+                        <View style={[styles.chatFeedbackCell, { width: 115 }]}><Text style={[styles.chatFeedbackText, styles.chatFeedbackStatus]}>{report.status}</Text></View>
+                        <View style={[styles.chatFeedbackCell, { width: 220 }]}><Text style={styles.chatFeedbackText} numberOfLines={4}>{report.description}</Text></View>
+                        <View style={[styles.chatFeedbackCell, { width: 240 }]}>
+                          <Text style={styles.chatFeedbackText} numberOfLines={4}>
+                            {report.adminNotes || (report.status === "pending" ? "Awaiting admin review." : "Reviewed. No note added.")}
+                          </Text>
+                          {report.reviewedAt ? <Text style={styles.chatFeedbackMuted}>Reviewed {formatSettingsDate(report.reviewedAt)}</Text> : null}
+                        </View>
+                      </View>
+                    ))
+                  )}
+                </View>
+              </ScrollView>
+            )}
           </View>
         </View>
       </Modal>
@@ -1442,7 +1897,9 @@ export default function SettingsScreen() {
                 {(serviceTeamData?.countryName || serviceCountryName).toUpperCase()}
               </Text>
               <Text style={[styles.serviceIntroText, { color: themeColors.textSecondary }]}>
-                Take up a role or opportunity in the community. Roles are shown by country and update from the live RunNation role assignments.
+                {serviceTeamData?.isMinorApplicant
+                  ? "Users under 18 may apply only for the Junior Runners Club Coordinator role when it is vacant. Other service roles require you to be 18 or older."
+                  : "Take up a role or opportunity in the community. Roles are shown by country and update from the live RunNation role assignments."}
               </Text>
 
               {isLoadingServiceProfile || isLoadingServiceRoles ? (
@@ -1475,116 +1932,325 @@ export default function SettingsScreen() {
                   </Text>
                 </View>
               ) : (
-                serviceTeamData?.roles.map((role) => {
-                  const available = role.status === "available";
-                  const isGlobalRole = GLOBAL_SERVICE_ROLE_NAMES.has(role.roleName);
-                  return (
-                    <View
-                      key={role.roleName}
-                      style={[styles.serviceRoleCard, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}
-                    >
-                      <View style={styles.serviceRoleHeader}>
-                        <Text style={[styles.serviceRoleTitle, { color: themeColors.text }]}>{role.label}</Text>
-                        <View
+                <View style={styles.serviceTableSection}>
+                  <View style={styles.serviceGroupToggle}>
+                    {[
+                      { key: "grouped", label: "Group by availability" },
+                      { key: "flat", label: "All roles" },
+                    ].map((option) => (
+                      <TouchableOpacity
+                        key={option.key}
+                        style={[
+                          styles.serviceGroupToggleButton,
+                          serviceRoleAvailabilityGrouping === option.key && styles.serviceGroupToggleButtonActive,
+                        ]}
+                        onPress={() => setServiceRoleAvailabilityGrouping(option.key as ServiceRoleAvailabilityGrouping)}
+                      >
+                        <Text
                           style={[
-                            styles.serviceStatusPill,
-                            available && styles.serviceStatusAvailable,
-                            role.status === "filled" && styles.serviceStatusFilled,
+                            styles.serviceGroupToggleText,
+                            serviceRoleAvailabilityGrouping === option.key && styles.serviceGroupToggleTextActive,
                           ]}
                         >
-                          <Text
-                            style={[
-                              styles.serviceStatusText,
-                              available && styles.serviceStatusTextAvailable,
-                              role.status === "filled" && styles.serviceStatusTextFilled,
-                            ]}
-                          >
-                            {role.statusLabel}
-                          </Text>
-                        </View>
-                      </View>
-                      <Text style={[styles.serviceRoleDescription, { color: themeColors.textSecondary }]}>
-                        {role.description}
-                      </Text>
-                      {role.activities.length > 0 ? (
-                        <View style={styles.serviceActivities}>
-                          <Text style={[styles.serviceActivitiesTitle, { color: themeColors.text }]}>Activities</Text>
-                          {role.activities.map((activity) => (
-                            <Text key={activity} style={[styles.serviceActivityText, { color: themeColors.textSecondary }]}>
-                              - {activity}
-                            </Text>
-                          ))}
-                        </View>
-                      ) : null}
-                      {isGlobalRole && role.available ? (
-                        <View style={styles.serviceApplicantLinks}>
-                          <Text style={[styles.serviceActivitiesTitle, { color: themeColors.text }]}>Applicant Links (optional)</Text>
-                          <Text style={[styles.serviceRoleDescription, { color: themeColors.textSecondary }]}>
-                            Global roles are not linked to a country and are reviewed from the Super Admin portfolio.
-                          </Text>
-                          <TextInput
-                            style={[styles.serviceLinkInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
-                            value={serviceWebsiteUrl}
-                            onChangeText={setServiceWebsiteUrl}
-                            placeholder="Website"
-                            placeholderTextColor={themeColors.textLight}
-                            autoCapitalize="none"
-                            keyboardType="url"
-                          />
-                          <TextInput
-                            style={[styles.serviceLinkInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
-                            value={serviceLinkedinUrl}
-                            onChangeText={setServiceLinkedinUrl}
-                            placeholder="LinkedIn"
-                            placeholderTextColor={themeColors.textLight}
-                            autoCapitalize="none"
-                            keyboardType="url"
-                          />
-                          <TextInput
-                            style={[styles.serviceLinkInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
-                            value={serviceSocialUrl}
-                            onChangeText={setServiceSocialUrl}
-                            placeholder="Social page"
-                            placeholderTextColor={themeColors.textLight}
-                            autoCapitalize="none"
-                            keyboardType="url"
-                          />
-                        </View>
-                      ) : null}
-                      <TouchableOpacity
-                        style={[
-                          styles.serviceTakeRoleButton,
-                          (!role.available || requestServiceRoleMutation.isPending) && styles.serviceTakeRoleButtonDisabled,
-                        ]}
-                        disabled={!role.available || requestServiceRoleMutation.isPending}
-                        onPress={() => {
-                          if (!serviceCountryCode) return;
-                          requestServiceRoleMutation.mutate({
-                            roleName: role.roleName as any,
-                            countryCode: serviceCountryCode,
-                            websiteUrl: isGlobalRole ? serviceWebsiteUrl : null,
-                            linkedinUrl: isGlobalRole ? serviceLinkedinUrl : null,
-                            socialUrl: isGlobalRole ? serviceSocialUrl : null,
-                          });
-                        }}
-                      >
-                        {requestServiceRoleMutation.isPending ? (
-                          <ActivityIndicator size="small" color="#fff" />
-                        ) : (
-                          <Text style={styles.serviceTakeRoleText}>
-                            {role.hasPendingRequest
-                              ? "Pending Approval"
-                              : role.available
-                                ? getServiceRoleButtonLabel(role.roleName, serviceTeamData?.countryName || serviceCountryName)
-                                : "Not available"}
-                          </Text>
-                        )}
+                          {option.label}
+                        </Text>
                       </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  {serviceRoleGroups.map((group) => (
+                    <View key={group.title} style={styles.serviceTableGroup}>
+                      <Text style={[styles.serviceTableGroupTitle, { color: themeColors.textSecondary }]}>
+                        {group.title.toUpperCase()} ({group.roles.length})
+                      </Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                        <View style={[styles.serviceRoleTable, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}>
+                          <View style={[styles.serviceRoleTableRow, styles.serviceRoleTableHeader, { borderBottomColor: themeColors.border }]}>
+                            <Text style={[styles.serviceRoleCellHeader, styles.serviceRoleColRole, { color: themeColors.textSecondary }]}>Role</Text>
+                            <Text style={[styles.serviceRoleCellHeader, styles.serviceRoleColSlots, { color: themeColors.textSecondary }]}>Slots</Text>
+                            <Text style={[styles.serviceRoleCellHeader, styles.serviceRoleColStatus, { color: themeColors.textSecondary }]}>Availability</Text>
+                            <Text style={[styles.serviceRoleCellHeader, styles.serviceRoleColAction, { color: themeColors.textSecondary }]}>Preview</Text>
+                          </View>
+                          {group.roles.map((role: any) => {
+                            const available = role.status === "available";
+                            const comingSoon = role.status === "coming_soon";
+                            return (
+                              <View
+                                key={role.roleName}
+                                style={[
+                                  styles.serviceRoleTableRow,
+                                  comingSoon && styles.serviceRoleTableRowMuted,
+                                  { borderBottomColor: themeColors.border },
+                                ]}
+                              >
+                                <Text style={[styles.serviceRoleCellText, styles.serviceRoleColRole, { color: themeColors.text }]} numberOfLines={2}>
+                                  {role.label}
+                                </Text>
+                                <Text style={[styles.serviceRoleCellText, styles.serviceRoleColSlots, { color: themeColors.textSecondary }]}>
+                                  {role.slotsUsed}/{role.slotsTotal}
+                                </Text>
+                                <View style={styles.serviceRoleColStatus}>
+                                  <View
+                                    style={[
+                                      styles.serviceStatusPill,
+                                      available && styles.serviceStatusAvailable,
+                                      comingSoon && styles.serviceStatusSoon,
+                                      role.hasPendingRequest && styles.serviceStatusSoon,
+                                      role.status === "filled" && styles.serviceStatusFilled,
+                                    ]}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.serviceStatusText,
+                                        available && styles.serviceStatusTextAvailable,
+                                        comingSoon && styles.serviceStatusTextSoon,
+                                        role.hasPendingRequest && styles.serviceStatusTextSoon,
+                                        role.status === "filled" && styles.serviceStatusTextFilled,
+                                      ]}
+                                      numberOfLines={1}
+                                    >
+                                      {role.statusLabel}
+                                    </Text>
+                                  </View>
+                                </View>
+                                <View style={styles.serviceRoleColAction}>
+                                  <TouchableOpacity
+                                    style={styles.servicePreviewButton}
+                                    onPress={() => setSelectedServiceRole(role)}
+                                  >
+                                    <Eye size={15} color="#fff" />
+                                    <Text style={styles.servicePreviewButtonText}>Preview</Text>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      </ScrollView>
                     </View>
-                  );
-                })
+                  ))}
+                </View>
               )}
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!selectedServiceRole}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setSelectedServiceRole(null)}
+      >
+        <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.detailModalContent, { backgroundColor: themeColors.modalBackground }]}>
+            <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.detailTitle, { color: themeColors.text }]}>Role Preview</Text>
+              <TouchableOpacity onPress={() => setSelectedServiceRole(null)}>
+                <XIcon size={24} color={themeColors.iconDefault} />
+              </TouchableOpacity>
+            </View>
+
+            {selectedServiceRole ? (() => {
+              const role = selectedServiceRole;
+              const available = role.status === "available";
+              const roleAllowsApplicantLinks = getServiceRoleAllowsApplicantLinks(role.roleName);
+              const applicantStatement = serviceApplicantStatements[role.roleName] || "";
+              const contactConsent = serviceContactConsents[role.roleName] === true;
+              const contactInstructions = serviceContactInstructions[role.roleName] || "";
+              const needsProposedProfile = role.roleName === "club_coordinator" || role.roleName === "event_organizer";
+              const proposedName = serviceProposedNames[role.roleName] || "";
+              const proposedLocation = serviceProposedLocations[role.roleName] || "";
+              const proposedDescription = serviceProposedDescriptions[role.roleName] || "";
+
+              return (
+                <ScrollView style={styles.servicePreviewBody}>
+                  <View style={styles.servicePreviewTitleRow}>
+                    <Text style={[styles.servicePreviewTitle, { color: themeColors.text }]}>{role.label}</Text>
+                    <View
+                                    style={[
+                                      styles.serviceStatusPill,
+                                      available && styles.serviceStatusAvailable,
+                                      role.status === "coming_soon" && styles.serviceStatusSoon,
+                                      role.hasPendingRequest && styles.serviceStatusSoon,
+                                      role.status === "filled" && styles.serviceStatusFilled,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                                        styles.serviceStatusText,
+                                        available && styles.serviceStatusTextAvailable,
+                                        role.status === "coming_soon" && styles.serviceStatusTextSoon,
+                                        role.hasPendingRequest && styles.serviceStatusTextSoon,
+                                        role.status === "filled" && styles.serviceStatusTextFilled,
+                        ]}
+                      >
+                        {role.statusLabel}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={[styles.serviceRoleDescription, { color: themeColors.textSecondary }]}>
+                    {role.description}
+                  </Text>
+
+                  {needsProposedProfile && role.available ? (
+                    <View style={styles.serviceApplicantLinks}>
+                      <Text style={[styles.serviceActivitiesTitle, { color: themeColors.text }]}>
+                        {role.roleName === "club_coordinator" ? "Club Details" : "Organizer Details"}
+                      </Text>
+                      <TextInput
+                        style={[styles.serviceLinkInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                        value={proposedName}
+                        onChangeText={(text) => setServiceProposedNames((current) => ({ ...current, [role.roleName]: text }))}
+                        placeholder={role.roleName === "club_coordinator" ? "Club name" : "Organizer profile name"}
+                        placeholderTextColor={themeColors.textLight}
+                        autoCapitalize="words"
+                      />
+                      <TextInput
+                        style={[styles.serviceLinkInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                        value={proposedLocation}
+                        onChangeText={(text) => setServiceProposedLocations((current) => ({ ...current, [role.roleName]: text }))}
+                        placeholder={role.roleName === "club_coordinator" ? "Club location or home town" : "Organizer base location"}
+                        placeholderTextColor={themeColors.textLight}
+                        autoCapitalize="words"
+                      />
+                      <TextInput
+                        style={[
+                          styles.serviceStatementInput,
+                          { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text },
+                        ]}
+                        value={proposedDescription}
+                        onChangeText={(text) => setServiceProposedDescriptions((current) => ({ ...current, [role.roleName]: text }))}
+                        placeholder={role.roleName === "club_coordinator" ? "Brief club description, target runners, meeting plan, or community need." : "Brief organizer description, event focus, experience, or planned event type."}
+                        placeholderTextColor={themeColors.textLight}
+                        multiline
+                        textAlignVertical="top"
+                      />
+                    </View>
+                  ) : null}
+
+                  {role.activities.length > 0 ? (
+                    <View style={styles.serviceActivities}>
+                      <Text style={[styles.serviceActivitiesTitle, { color: themeColors.text }]}>Job Details</Text>
+                      {role.activities.map((activity: string) => (
+                        <Text key={activity} style={[styles.serviceActivityText, { color: themeColors.textSecondary }]}>
+                          - {activity}
+                        </Text>
+                      ))}
+                    </View>
+                  ) : null}
+
+                  {roleAllowsApplicantLinks && role.available ? (
+                    <View style={styles.serviceApplicantLinks}>
+                      <Text style={[styles.serviceActivitiesTitle, { color: themeColors.text }]}>Applicant Links (optional)</Text>
+                      <Text style={[styles.serviceRoleDescription, { color: themeColors.textSecondary }]}>
+                        {SERVICE_APPLICANT_LINKS_HELPER}
+                      </Text>
+                      <TextInput
+                        style={[styles.serviceLinkInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                        value={serviceWebsiteUrl}
+                        onChangeText={setServiceWebsiteUrl}
+                        placeholder=""
+                        placeholderTextColor={themeColors.textLight}
+                        autoCapitalize="none"
+                        keyboardType="url"
+                      />
+                      <TextInput
+                        style={[styles.serviceLinkInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                        value={serviceLinkedinUrl}
+                        onChangeText={setServiceLinkedinUrl}
+                        placeholder=""
+                        placeholderTextColor={themeColors.textLight}
+                        autoCapitalize="none"
+                        keyboardType="url"
+                      />
+                      <TextInput
+                        style={[styles.serviceLinkInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                        value={serviceSocialUrl}
+                        onChangeText={setServiceSocialUrl}
+                        placeholder=""
+                        placeholderTextColor={themeColors.textLight}
+                        autoCapitalize="none"
+                        keyboardType="url"
+                      />
+                    </View>
+                  ) : null}
+
+                  {role.available ? (
+                    <View style={styles.serviceApplicantLinks}>
+                      <Text style={[styles.serviceActivitiesTitle, { color: themeColors.text }]}>Why Consider You? (optional)</Text>
+                      <Text style={[styles.serviceRoleDescription, { color: themeColors.textSecondary }]}>
+                        {SERVICE_APPLICANT_STATEMENT_HELPER}
+                      </Text>
+                      <TextInput
+                        style={[
+                          styles.serviceStatementInput,
+                          { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text },
+                        ]}
+                        value={applicantStatement}
+                        onChangeText={(text) => setServiceApplicantStatements((current) => ({ ...current, [role.roleName]: text }))}
+                        placeholder="Briefly share your experience, motivation, availability, or community contribution."
+                        placeholderTextColor={themeColors.textLight}
+                        multiline
+                        textAlignVertical="top"
+                      />
+                      <Text style={[styles.serviceWordCountText, { color: themeColors.textSecondary }]}>
+                        {countWords(applicantStatement)} / 25-250 words
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {role.available ? (
+                    <View style={styles.serviceApplicantLinks}>
+                      <TouchableOpacity
+                        style={styles.serviceCheckboxRow}
+                        activeOpacity={0.85}
+                        onPress={() => setServiceContactConsents((current) => ({ ...current, [role.roleName]: !contactConsent }))}
+                      >
+                        <View style={[styles.serviceCheckboxBox, contactConsent && styles.serviceCheckboxBoxChecked]}>
+                          {contactConsent ? <Check size={13} color="#fff" /> : null}
+                        </View>
+                        <Text style={[styles.serviceCheckboxText, { color: themeColors.text }]}>
+                          I want to be contacted if I am selected for this role.
+                        </Text>
+                      </TouchableOpacity>
+                      {contactConsent ? (
+                        <TextInput
+                          style={[styles.serviceLinkInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                          value={contactInstructions}
+                          onChangeText={(text) => setServiceContactInstructions((current) => ({ ...current, [role.roleName]: text }))}
+                          placeholder="e.g. WhatsApp me on +25612356774"
+                          placeholderTextColor={themeColors.textLight}
+                          autoCapitalize="sentences"
+                        />
+                      ) : null}
+                    </View>
+                  ) : null}
+
+                  <TouchableOpacity
+                    style={[
+                      styles.serviceTakeRoleButton,
+                      (!role.available || requestServiceRoleMutation.isPending) && styles.serviceTakeRoleButtonDisabled,
+                    ]}
+                    disabled={!role.available || requestServiceRoleMutation.isPending}
+                    onPress={() => submitServiceRoleRequest(role)}
+                  >
+                    {requestServiceRoleMutation.isPending ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.serviceTakeRoleText}>
+                        {role.hasPendingRequest
+                          ? "Pending Approval"
+                          : role.available
+                            ? getServiceRoleButtonLabel(role.roleName, serviceTeamData?.countryName || serviceCountryName)
+                            : "Not available"}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </ScrollView>
+              );
+            })() : null}
           </View>
         </View>
       </Modal>
@@ -1606,9 +2272,6 @@ export default function SettingsScreen() {
 
             <ScrollView style={styles.helpBody}>
               <Text style={[styles.helpSectionLabel, { color: themeColors.textSecondary }]}>COMMON QUESTIONS</Text>
-              <Text style={[styles.faqHintText, { color: themeColors.textSecondary }]}>
-                FAQ content is sourced from the <Text style={styles.faqHintCode}>public.faq_entries</Text> table, so you can add, edit, or remove entries in Supabase whenever you want.
-              </Text>
 
               {isLoadingFaqs ? (
                 <View style={styles.helpLoadingContainer}>
@@ -1621,12 +2284,12 @@ export default function SettingsScreen() {
                     Could not load FAQ entries right now.
                   </Text>
                 </View>
-              ) : faqEntries.length === 0 ? (
+              ) : displayedFaqEntries.length === 0 ? (
                 <View style={styles.helpEmptyContainer}>
                   <Text style={[styles.helpEmptyText, { color: themeColors.textLight }]}>No FAQ entries available</Text>
                 </View>
               ) : (
-                faqEntries.map((faq: any) => {
+                displayedFaqEntries.map((faq: any) => {
                   const expanded = expandedFaqIds.includes(String(faq.faq_id));
                   return (
                     <TouchableOpacity
@@ -1675,6 +2338,9 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 12,
     paddingHorizontal: 4,
+  },
+  settingItemDisabled: {
+    opacity: 0.55,
   },
   settingItem: {
     flexDirection: "row",
@@ -1936,6 +2602,52 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 16,
   },
+  donationScroll: {
+    maxHeight: 520,
+  },
+  donationBody: {
+    padding: 20,
+    gap: 16,
+  },
+  donationCaption: {
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  donationFieldGroup: {
+    gap: 8,
+  },
+  donationMethodGrid: {
+    flexDirection: "row" as const,
+    gap: 10,
+    flexWrap: "wrap" as const,
+  },
+  donationMethodButton: {
+    flexGrow: 1,
+    flexBasis: 150,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    gap: 4,
+  },
+  donationMethodButtonActive: {
+    borderColor: "#ef4444",
+    backgroundColor: "#fef2f2",
+  },
+  donationMethodLabel: {
+    fontSize: 15,
+    fontWeight: "800" as const,
+  },
+  donationMethodCaption: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  donationHint: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  donationSubmitButton: {
+    backgroundColor: "#ef4444",
+  },
   feedbackCategoryRow: {
     flexDirection: "row" as const,
     flexWrap: "wrap" as const,
@@ -1943,6 +2655,87 @@ const styles = StyleSheet.create({
   },
   feedbackForm: {
     padding: 20,
+  },
+  reportTabBar: {
+    flexDirection: "row" as const,
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 4,
+  },
+  reportTabButton: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 10,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    backgroundColor: "#f3f4f6",
+  },
+  reportTabButtonActive: {
+    backgroundColor: "#111827",
+  },
+  reportTabText: {
+    fontSize: 13,
+    fontWeight: "800" as const,
+    color: "#6b7280",
+  },
+  reportTabTextActive: {
+    color: "#fff",
+  },
+  chatFeedbackTable: {
+    minWidth: 780,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 8,
+    overflow: "hidden" as const,
+  },
+  chatFeedbackRow: {
+    flexDirection: "row" as const,
+    minHeight: 46,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+  },
+  chatFeedbackHeader: {
+    minHeight: 34,
+    backgroundColor: "#f9fafb",
+  },
+  chatFeedbackCell: {
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    justifyContent: "center" as const,
+    borderRightWidth: 1,
+    borderRightColor: "#f3f4f6",
+  },
+  chatFeedbackHeaderText: {
+    fontSize: 10,
+    fontWeight: "900" as const,
+    color: "#4b5563",
+    textTransform: "uppercase" as const,
+  },
+  chatFeedbackText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: "#111827",
+  },
+  chatFeedbackStatus: {
+    fontWeight: "800" as const,
+    color: "#d97706",
+  },
+  chatFeedbackMuted: {
+    marginTop: 3,
+    fontSize: 10,
+    lineHeight: 13,
+    color: "#6b7280",
+  },
+  chatFeedbackError: {
+    fontSize: 12,
+    color: "#dc2626",
+    fontWeight: "800" as const,
+  },
+  chatFeedbackEmpty: {
+    minHeight: 72,
+    justifyContent: "center" as const,
+    paddingHorizontal: 12,
   },
   categoryGrid: {
     flexDirection: "row" as const,
@@ -1988,6 +2781,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600" as const,
     color: "#000",
+  },
+  feedbackHintText: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: -4,
+    marginBottom: 8,
   },
   feedbackInput: {
     backgroundColor: "#f5f5f5",
@@ -2413,6 +3212,126 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 14,
   },
+  serviceTableSection: {
+    gap: 12,
+    paddingBottom: 12,
+  },
+  serviceGroupToggle: {
+    flexDirection: "row" as const,
+    gap: 8,
+    backgroundColor: "#f3f4f6",
+    borderRadius: 10,
+    padding: 4,
+  },
+  serviceGroupToggleButton: {
+    flex: 1,
+    minHeight: 34,
+    borderRadius: 8,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    paddingHorizontal: 8,
+  },
+  serviceGroupToggleButtonActive: {
+    backgroundColor: "#111827",
+  },
+  serviceGroupToggleText: {
+    fontSize: 12,
+    fontWeight: "800" as const,
+    color: "#6b7280",
+    textAlign: "center" as const,
+  },
+  serviceGroupToggleTextActive: {
+    color: "#fff",
+  },
+  serviceTableGroup: {
+    gap: 7,
+  },
+  serviceTableGroupTitle: {
+    fontSize: 11,
+    fontWeight: "900" as const,
+    letterSpacing: 0.3,
+  },
+  serviceRoleTable: {
+    minWidth: 640,
+    borderWidth: 1,
+    borderRadius: 8,
+    overflow: "hidden" as const,
+  },
+  serviceRoleTableRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    minHeight: 44,
+    borderBottomWidth: 1,
+  },
+  serviceRoleTableRowMuted: {
+    opacity: 0.55,
+  },
+  serviceRoleTableHeader: {
+    minHeight: 32,
+    backgroundColor: "#f9fafb",
+  },
+  serviceRoleCellHeader: {
+    fontSize: 9,
+    fontWeight: "900" as const,
+    textTransform: "uppercase" as const,
+    paddingHorizontal: 8,
+  },
+  serviceRoleCellText: {
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: "700" as const,
+    paddingHorizontal: 8,
+  },
+  serviceRoleColRole: {
+    width: 260,
+  },
+  serviceRoleColSlots: {
+    width: 70,
+    textAlign: "center" as const,
+  },
+  serviceRoleColStatus: {
+    width: 180,
+    alignItems: "flex-start" as const,
+    justifyContent: "center" as const,
+    paddingHorizontal: 8,
+  },
+  serviceRoleColAction: {
+    width: 120,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  servicePreviewButton: {
+    minHeight: 30,
+    borderRadius: 7,
+    paddingHorizontal: 10,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 5,
+    backgroundColor: "#2563eb",
+  },
+  servicePreviewButtonText: {
+    fontSize: 11,
+    fontWeight: "900" as const,
+    color: "#fff",
+  },
+  servicePreviewBody: {
+    padding: 20,
+    maxHeight: 620,
+  },
+  servicePreviewTitleRow: {
+    flexDirection: "row" as const,
+    alignItems: "flex-start" as const,
+    justifyContent: "space-between" as const,
+    gap: 10,
+    marginBottom: 10,
+  },
+  servicePreviewTitle: {
+    flex: 1,
+    fontSize: 19,
+    lineHeight: 24,
+    fontWeight: "800" as const,
+  },
   serviceRoleCard: {
     borderWidth: 1,
     borderRadius: 14,
@@ -2459,6 +3378,43 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 14,
   },
+  serviceStatementInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    minHeight: 104,
+    lineHeight: 19,
+  },
+  serviceWordCountText: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+    textAlign: "right" as const,
+  },
+  serviceCheckboxRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+  },
+  serviceCheckboxBox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: "#f97316",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  serviceCheckboxBoxChecked: {
+    backgroundColor: "#f97316",
+  },
+  serviceCheckboxText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700" as const,
+    lineHeight: 18,
+  },
   serviceTakeRoleButton: {
     marginTop: 12,
     borderRadius: 10,
@@ -2502,15 +3458,6 @@ const styles = StyleSheet.create({
   },
   serviceStatusTextFilled: {
     color: "#dc2626",
-  },
-  faqHintText: {
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 16,
-  },
-  faqHintCode: {
-    fontWeight: "700" as const,
-    color: "#374151",
   },
   faqCard: {
     borderWidth: 1,

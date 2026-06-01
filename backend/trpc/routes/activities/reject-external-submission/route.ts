@@ -13,8 +13,9 @@ export default publicProcedure
     try {
       await requireAdminPermission(ctx, {
         allowSuperAdmin: true,
-              allowCountryCoordinator: true,
+        allowCountryCoordinator: true,
         allowClubCoordinator: true,
+        allowSpecialClubCoordinator: true,
       });
 
       const { error } = await ctx.supabase

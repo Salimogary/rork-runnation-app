@@ -9,6 +9,13 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "include": ["./**/*.ts"],
-  "exclude": ["dist", "node_modules", "hono.ts"]
+  "include": [
+    "./**/*.ts"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules",
+    "hono.ts"
+  ],
+  "extends": "expo/tsconfig.base"
 }

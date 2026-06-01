@@ -15,6 +15,8 @@ interface MedalParticipant {
   otherNames: string;
   country: string;
   club: string;
+  paraUsesEquipment?: boolean;
+  paraEquipmentGroup?: string | null;
   eventName: string;
   qualifiedDays: number;
   totalDistance: number;
@@ -87,10 +89,13 @@ export default function MedalListScreen() {
 
   const groupedByEvent = useMemo(() => {
     return filteredList.reduce((acc, participant) => {
-      if (!acc[participant.eventId]) {
-        acc[participant.eventId] = [];
+      const groupKey = participant.paraUsesEquipment
+        ? `${participant.eventId}__para__${participant.paraEquipmentGroup || "Para Athletes"}`
+        : participant.eventId;
+      if (!acc[groupKey]) {
+        acc[groupKey] = [];
       }
-      acc[participant.eventId].push(participant);
+      acc[groupKey].push(participant);
       return acc;
     }, {} as Record<string, MedalParticipant[]>);
   }, [filteredList]);
@@ -163,7 +168,9 @@ export default function MedalListScreen() {
             </View>
           ) : (
             <View style={styles.participantsContainer}>
-              {Object.entries(groupedByEvent).map(([eventId, participants]) => {
+              {Object.entries(groupedByEvent).map(([groupKey, participants]) => {
+                const eventId = groupKey.split("__")[0];
+                const paraLabel = groupKey.includes("__para__") ? groupKey.split("__para__")[1] : "";
                 const eventMeta = eventMetaMap.get(eventId);
                 const organizerLabel = eventMeta?.organizerLabel || "";
                 const eventName = eventMeta?.eventName || participants[0]?.eventName || "Unknown Event";
@@ -172,6 +179,7 @@ export default function MedalListScreen() {
                   <View key={eventId} style={styles.eventBlock}>
                     <View style={styles.eventHeader}>
                       <Text style={styles.eventName}>{eventName}</Text>
+                      {paraLabel ? <Text style={styles.eventOrganizer}>Para Athletes - {paraLabel}</Text> : null}
                       <Text style={styles.eventOrganizer} numberOfLines={1}>
                         {organizerLabel || " "}
                       </Text>

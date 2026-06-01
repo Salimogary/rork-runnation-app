@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Linking,
@@ -8,8 +8,8 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Image,
 } from "react-native";
-import { Image } from "expo-image";
 import { Stack, useRouter } from "expo-router";
 import { ExternalLink, ImagePlus, PenLine } from "lucide-react-native";
 
@@ -66,21 +66,75 @@ function formatDate(value: string) {
   });
 }
 
-function ArticleImage({ uri, large = false }: { uri?: string | null; large?: boolean }) {
-  if (!uri) {
-    return (
-      <View style={[styles.placeholderImage, large && styles.largeImage]}>
-        <Text style={styles.placeholderText}>RunNation</Text>
-      </View>
+function isRenderableMagazineImageUrl(uri?: string | null): boolean {
+  const value = String(uri || "").trim();
+  return /\.(jpe?g|png|webp)(\?|#|$)/i.test(value);
+}
+
+function useRemoteImageAspectRatio(uri?: string | null) {
+  const [aspectRatio, setAspectRatio] = useState<number | null>(null);
+
+  useEffect(() => {
+    const imageUri = isRenderableMagazineImageUrl(uri) ? uri : null;
+    let isMounted = true;
+
+    setAspectRatio(null);
+    if (!imageUri) return;
+
+    Image.getSize(
+      imageUri,
+      (width, height) => {
+        if (isMounted && width > 0 && height > 0) {
+          setAspectRatio(width / height);
+        }
+      },
+      () => {
+        if (isMounted) setAspectRatio(null);
+      }
     );
+
+    return () => {
+      isMounted = false;
+    };
+  }, [uri]);
+
+  return aspectRatio;
+}
+
+function ArticleImage({ uri, large = false }: { uri?: string | null; large?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  const imageUri = isRenderableMagazineImageUrl(uri) ? uri : null;
+  const aspectRatio = useRemoteImageAspectRatio(imageUri);
+
+  if (!imageUri || failed) {
+    return null;
   }
 
   return (
     <Image
-      source={{ uri }}
-      style={[styles.articleImage, large && styles.largeImage]}
-      contentFit="cover"
-      transition={180}
+      source={{ uri: imageUri }}
+      style={[styles.articleImage, large && styles.largeImage, large && aspectRatio ? { aspectRatio } : null]}
+      resizeMode={large ? "contain" : "cover"}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function GalleryImage({ uri }: { uri?: string | null }) {
+  const [failed, setFailed] = useState(false);
+  const imageUri = isRenderableMagazineImageUrl(uri) ? uri : null;
+  const aspectRatio = useRemoteImageAspectRatio(imageUri);
+
+  if (!imageUri || failed) {
+    return null;
+  }
+
+  return (
+    <Image
+      source={{ uri: imageUri }}
+      style={[styles.galleryImage, aspectRatio ? { aspectRatio } : styles.galleryImageFallback]}
+      resizeMode="contain"
+      onError={() => setFailed(true)}
     />
   );
 }
@@ -189,19 +243,15 @@ function ColumnsLayout({ articles }: { articles: MagazineArticle[] }) {
 }
 
 function GalleryLayout({ articles }: { articles: MagazineArticle[] }) {
-  if (!articles.length) return <EmptyPage page="Gallery" />;
+  const photoArticles = articles.filter((article) => isRenderableMagazineImageUrl(article.picture_link));
+
+  if (!photoArticles.length) return <EmptyPage page="Gallery" />;
 
   return (
     <View style={styles.galleryFeed}>
-      {articles.map((article) => (
+      {photoArticles.map((article) => (
         <View key={article.article_id} style={styles.galleryCard}>
-          {article.picture_link ? (
-            <Image source={{ uri: article.picture_link }} style={styles.galleryImage} contentFit="cover" transition={180} />
-          ) : (
-            <View style={styles.galleryImagePlaceholder}>
-              <Text style={styles.placeholderText}>RunNation</Text>
-            </View>
-          )}
+          <GalleryImage uri={article.picture_link} />
           <View style={styles.galleryText}>
             <ArticleTitle>{article.title}</ArticleTitle>
             <Text numberOfLines={1} style={styles.metaLine}>{article.author}</Text>
@@ -234,6 +284,10 @@ export default function MagazineScreen() {
     pages.forEach((page) => grouped.set(page, []));
 
     ((articlesQuery.data ?? []) as MagazineArticle[]).forEach((article) => {
+      if (article.page === "Gallery" && !isRenderableMagazineImageUrl(article.picture_link)) {
+        return;
+      }
+
       if (pages.includes(article.page)) {
         grouped.get(article.page)?.push(article);
       }
@@ -420,7 +474,7 @@ const styles = StyleSheet.create({
   },
   largeImage: {
     borderRadius: 0,
-    height: 420,
+    minHeight: 180,
     width: "100%",
   },
   placeholderImage: {
@@ -541,13 +595,14 @@ const styles = StyleSheet.create({
     borderColor: "#E5E7EB",
     borderRadius: 8,
     borderWidth: 1,
-    minHeight: 580,
     overflow: "hidden",
   },
   galleryImage: {
     backgroundColor: "#E5E7EB",
-    height: 520,
     width: "100%",
+  },
+  galleryImageFallback: {
+    height: 360,
   },
   galleryImagePlaceholder: {
     alignItems: "center",

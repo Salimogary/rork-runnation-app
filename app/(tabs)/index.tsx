@@ -2,8 +2,9 @@ import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Platform, Modal, 
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge, Watch, Smartphone, ChevronRight, Heart, Activity, Droplets, Flame, Stethoscope } from "lucide-react-native";
+import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge, Watch, Smartphone, ChevronRight, Heart, Activity, Droplets, Flame, Stethoscope, Bike, ArrowLeft } from "lucide-react-native";
 import * as Location from "expo-location";
+import * as TaskManager from "expo-task-manager";
 import * as ImagePicker from "expo-image-picker";
 import * as Speech from "expo-speech";
 import MapView, { Circle, Polyline } from "react-native-maps";
@@ -21,9 +22,11 @@ import SubscriptionGate from "@/components/SubscriptionGate";
 import { getServerClient } from "@/lib/server-client";
 import { trpc } from "@/lib/trpc";
 import { getActivityVoiceAssistantEnabled } from "@/utils/activityVoice";
+import MyWorkouts from "@/components/MyWorkouts";
 
 type RunState = "idle" | "running" | "paused" | "finished";
-type ExerciseType = "Walk" | "Run" | "Treadmill" | null;
+type ExerciseType = "Walk" | "Run" | "Cycle" | "Treadmill" | null;
+type WorkoutTab = "record" | "event" | "sources";
 
 interface Coordinates {
   latitude: number;
@@ -99,12 +102,34 @@ const calculateDistance = (coord1: Coordinates, coord2: Coordinates): number => 
 const GPS_ACCURACY_THRESHOLD = 25;
 const MAX_SPEED_KMH_RUN = 45;
 const MAX_SPEED_KMH_WALK = 15;
+const MAX_SPEED_KMH_CYCLE = 70;
 const MIN_DISTANCE_BETWEEN_POINTS = 0.002;
 const MIN_DISTANCE_ACTIVITY = 0.5;
 const MIN_DISTANCE_WALK = MIN_DISTANCE_ACTIVITY;
 const MIN_DISTANCE_RUN = MIN_DISTANCE_ACTIVITY;
 const MIN_ACTIVITY_DURATION_MINUTES = 5;
 const MAX_DAILY_ACTIVITIES = 5;
+const BACKGROUND_LOCATION_TASK = "runnation-background-location";
+
+type BackgroundLocationPayload = {
+  locations?: Location.LocationObject[];
+};
+
+let backgroundLocationHandler: ((location: Location.LocationObject) => void) | null = null;
+
+if (Platform.OS !== "web" && !TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK)) {
+  TaskManager.defineTask<BackgroundLocationPayload>(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
+    if (error) {
+      console.warn("[Background Location] Task error:", error.message);
+      return;
+    }
+
+    const locations = data?.locations ?? [];
+    for (const location of locations) {
+      backgroundLocationHandler?.(location);
+    }
+  });
+}
 
 const countryFlagFromCountry = (country: string | null | undefined): string => {
   if (!country) return "";
@@ -156,12 +181,16 @@ export default function ExerciseScreen() {
   const [currentLocation, setCurrentLocation] = useState<Coordinates | null>(null);
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [exerciseType, setExerciseType] = useState<ExerciseType>(null);
+  const [activeWorkoutTab, setActiveWorkoutTab] = useState<WorkoutTab>("record");
+  const [showMyWorkouts, setShowMyWorkouts] = useState(false);
   const [countdownValue, setCountdownValue] = useState<string | null>(null);
   const [isCountdownActive, setIsCountdownActive] = useState(false);
   const [activityVoiceAssistantEnabled, setActivityVoiceAssistantEnabled] = useState(true);
   const [showRunDetailsModal, setShowRunDetailsModal] = useState(false);
   const [activitySaved, setActivitySaved] = useState(false);
   const [runnerProfile, setRunnerProfile] = useState<RunnerProfile | null>(null);
+  const [canUseCycleWorkout, setCanUseCycleWorkout] = useState(false);
+  const [cycleWorkoutOnly, setCycleWorkoutOnly] = useState(false);
   const [workoutLocation, setWorkoutLocation] = useState<WorkoutLocationDetails | null>(null);
   const [runCardTheme, setRunCardTheme] = useState<"light" | "dark">("dark");
   const [showTreadmillModal, setShowTreadmillModal] = useState(false);
@@ -193,7 +222,7 @@ export default function ExerciseScreen() {
   const [otherSportsForm, setOtherSportsForm] = useState({
     sportsApp: "",
     activityDate: "",
-    exerciseType: "Run" as "Run" | "Walk" | "Treadmill",
+    exerciseType: "Run" as "Run" | "Walk" | "Cycle" | "Treadmill",
     startTime: "",
     duration: "",
     distanceKm: "",
@@ -221,6 +250,7 @@ export default function ExerciseScreen() {
   const totalPauseDuration = useRef<number>(0);
   const pauseStartTimestamp = useRef<number | null>(null);
   const filteredPointCount = useRef<number>(0);
+  const lastProcessedLocationTimestamp = useRef<number | null>(null);
   const countdownTimeouts = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const updateDuration = useCallback(() => {
@@ -329,6 +359,8 @@ export default function ExerciseScreen() {
   useEffect(() => {
     if (!user?.id) {
       setRunnerProfile(null);
+      setCanUseCycleWorkout(false);
+      setCycleWorkoutOnly(false);
       return;
     }
 
@@ -386,8 +418,24 @@ export default function ExerciseScreen() {
           club,
           photoUrl: profilePhoto?.file_path || latestPhoto?.file_path || null,
         });
+
+        const { data: paraWorkoutProfile } = await supabase
+          .from("registrations")
+          .select("para_uses_equipment, para_equipment_type")
+          .eq("registration_id", user.id)
+          .maybeSingle();
+        setCanUseCycleWorkout(
+          paraWorkoutProfile?.para_uses_equipment === true &&
+          ["wheelchair", "handcycle"].includes(String(paraWorkoutProfile?.para_equipment_type || ""))
+        );
+        setCycleWorkoutOnly(
+          paraWorkoutProfile?.para_uses_equipment === true &&
+          ["wheelchair", "handcycle"].includes(String(paraWorkoutProfile?.para_equipment_type || ""))
+        );
       } catch (error) {
         console.error("[Run Details] Failed to load runner profile:", error);
+        setCanUseCycleWorkout(false);
+        setCycleWorkoutOnly(false);
         setRunnerProfile({
           name: user.username || "RunNation Runner",
           town: "",
@@ -401,6 +449,13 @@ export default function ExerciseScreen() {
 
     void loadRunnerProfile();
   }, [user?.id, user?.username]);
+
+  useEffect(() => {
+    setOtherSportsForm((prev) => {
+      const exerciseType = cycleWorkoutOnly ? "Cycle" : prev.exerciseType === "Cycle" && !canUseCycleWorkout ? "Run" : prev.exerciseType;
+      return prev.exerciseType === exerciseType ? prev : { ...prev, exerciseType };
+    });
+  }, [canUseCycleWorkout, cycleWorkoutOnly]);
 
   const requestLocationPermission = async () => {
     if (Platform.OS === 'web') {
@@ -448,7 +503,12 @@ export default function ExerciseScreen() {
     const timeDiffHours = (point.timestamp - lastValidPoint.current.timestamp) / (1000 * 3600);
     if (timeDiffHours > 0) {
       const speedKmh = dist / timeDiffHours;
-      const maxSpeed = exerciseT === "Walk" ? MAX_SPEED_KMH_WALK : MAX_SPEED_KMH_RUN;
+      const maxSpeed =
+        exerciseT === "Walk"
+          ? MAX_SPEED_KMH_WALK
+          : exerciseT === "Cycle"
+            ? MAX_SPEED_KMH_CYCLE
+            : MAX_SPEED_KMH_RUN;
 
       if (speedKmh > maxSpeed) {
         console.log('[GPS Filter] Rejected: unrealistic speed:', speedKmh.toFixed(1), 'km/h (max:', maxSpeed, ')');
@@ -461,6 +521,14 @@ export default function ExerciseScreen() {
   }, []);
 
   const handleLocationUpdate = useCallback((location: Location.LocationObject, exerciseT: ExerciseType) => {
+    if (
+      lastProcessedLocationTimestamp.current !== null &&
+      location.timestamp <= lastProcessedLocationTimestamp.current
+    ) {
+      return;
+    }
+    lastProcessedLocationTimestamp.current = location.timestamp;
+
     const newPoint: LocationPoint = {
       latitude: location.coords.latitude,
       longitude: location.coords.longitude,
@@ -500,7 +568,72 @@ export default function ExerciseScreen() {
     setCoords((prev) => [...prev, newCoord]);
   }, [isValidGpsPoint]);
 
+  const startBackgroundLocationWatch = useCallback(async (exerciseT: ExerciseType) => {
+    if (Platform.OS === "web" || !exerciseT) {
+      return;
+    }
+
+    try {
+      const backgroundPermission = await Location.requestBackgroundPermissionsAsync();
+      if (backgroundPermission.status !== "granted") {
+        console.warn("[Background Location] Permission not granted; lock-screen tracking may pause.");
+        return;
+      }
+
+      const alreadyStarted = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+      if (alreadyStarted) {
+        return;
+      }
+
+      await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+        accuracy: Location.Accuracy.BestForNavigation,
+        distanceInterval: 5,
+        timeInterval: 3000,
+        pausesUpdatesAutomatically: false,
+        showsBackgroundLocationIndicator: true,
+        foregroundService: {
+          notificationTitle: "RunNation workout active",
+          notificationBody: "Tracking distance while your screen is locked.",
+          notificationColor: "#FF6B35",
+          killServiceOnDestroy: false,
+        },
+      });
+      console.log("[Background Location] Started lock-screen tracking for", exerciseT);
+    } catch (error) {
+      console.warn("[Background Location] Could not start background tracking:", error);
+    }
+  }, []);
+
+  const stopBackgroundLocationWatch = useCallback(async () => {
+    if (Platform.OS === "web") {
+      return;
+    }
+
+    try {
+      const started = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+      if (started) {
+        await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+      }
+      backgroundLocationHandler = null;
+    } catch (error) {
+      console.warn("[Background Location] Could not stop background tracking:", error);
+    }
+  }, []);
+
   const startLocationWatch = useCallback(async (exerciseT: ExerciseType) => {
+    if (!exerciseT) {
+      return;
+    }
+
+    if (locationSubscription.current) {
+      locationSubscription.current.remove();
+      locationSubscription.current = null;
+    }
+
+    backgroundLocationHandler = (location) => {
+      handleLocationUpdate(location, exerciseT);
+    };
+
     locationSubscription.current = await Location.watchPositionAsync(
       {
         accuracy: Location.Accuracy.BestForNavigation,
@@ -511,13 +644,29 @@ export default function ExerciseScreen() {
         handleLocationUpdate(location, exerciseT);
       }
     );
-  }, [handleLocationUpdate]);
+    await startBackgroundLocationWatch(exerciseT);
+  }, [handleLocationUpdate, startBackgroundLocationWatch]);
+
+  useEffect(() => {
+    return () => {
+      void stopBackgroundLocationWatch();
+    };
+  }, [stopBackgroundLocationWatch]);
 
   const startTracking = useCallback(async (type: ExerciseType, eventRun: RegisteredEventRun | null = null) => {
     if (!type) return;
 
     if (type === "Treadmill") {
       setShowTreadmillModal(true);
+      return;
+    }
+
+    if (type === "Cycle" && !canUseCycleWorkout) {
+      Alert.alert("Cycle Workouts", "Cycle is available for Para Runners who use a wheelchair or handcycle.");
+      return;
+    }
+    if ((type === "Walk" || type === "Run") && cycleWorkoutOnly) {
+      Alert.alert("Workout Type", "Your Para equipment profile qualifies for Cycle workouts only.");
       return;
     }
 
@@ -533,6 +682,7 @@ export default function ExerciseScreen() {
     setDistance(0);
     setDuration(0);
     lastValidPoint.current = null;
+    lastProcessedLocationTimestamp.current = null;
     isResuming.current = false;
     totalPauseDuration.current = 0;
     pauseStartTimestamp.current = null;
@@ -551,7 +701,7 @@ export default function ExerciseScreen() {
     }, 1000) as any;
 
     await startLocationWatch(type);
-  }, [startLocationWatch]);
+  }, [canUseCycleWorkout, cycleWorkoutOnly, startLocationWatch]);
 
   const playCountdownCue = useCallback((value: string) => {
     if (!activityVoiceAssistantEnabled) {
@@ -619,6 +769,15 @@ export default function ExerciseScreen() {
       return;
     }
 
+    if (type === "Cycle" && !canUseCycleWorkout) {
+      Alert.alert("Cycle Workouts", "Cycle is available for Para Runners who use a wheelchair or handcycle.");
+      return;
+    }
+    if ((type === "Walk" || type === "Run") && cycleWorkoutOnly) {
+      Alert.alert("Workout Type", "Your Para equipment profile qualifies for Cycle workouts only.");
+      return;
+    }
+
     setIsCountdownActive(true);
     try {
       for (const value of ["3", "2", "1", "START"]) {
@@ -633,7 +792,7 @@ export default function ExerciseScreen() {
       setIsCountdownActive(false);
       countdownTimeouts.current = [];
     }
-  }, [isCountdownActive, playCountdownCue, runState, startTracking, waitForCountdownStep]);
+  }, [canUseCycleWorkout, cycleWorkoutOnly, isCountdownActive, playCountdownCue, runState, startTracking, waitForCountdownStep]);
 
   const pauseTracking = () => {
     if (runningStartTimestamp.current !== null) {
@@ -648,7 +807,9 @@ export default function ExerciseScreen() {
     }
     if (locationSubscription.current) {
       locationSubscription.current.remove();
+      locationSubscription.current = null;
     }
+    void stopBackgroundLocationWatch();
     console.log('[Tracking] Paused. Elapsed so far:', elapsedBeforePause.current, 's');
   };
 
@@ -700,8 +861,8 @@ export default function ExerciseScreen() {
 
     const durationMinutes = finalDuration / 60;
     const requiredDistance = exerciseType === "Walk" ? MIN_DISTANCE_WALK : MIN_DISTANCE_RUN;
-    const needsDistance = (exerciseType === "Walk" || exerciseType === "Run") && distance < requiredDistance;
-    const needsTime = (exerciseType === "Walk" || exerciseType === "Run") && durationMinutes < MIN_ACTIVITY_DURATION_MINUTES;
+    const needsDistance = (exerciseType === "Walk" || exerciseType === "Run" || exerciseType === "Cycle") && distance < requiredDistance;
+    const needsTime = (exerciseType === "Walk" || exerciseType === "Run" || exerciseType === "Cycle") && durationMinutes < MIN_ACTIVITY_DURATION_MINUTES;
     if (needsDistance || needsTime) {
       if (pauseStartTimestamp.current === null) {
         pauseStartTimestamp.current = Date.now();
@@ -712,7 +873,9 @@ export default function ExerciseScreen() {
       }
       if (locationSubscription.current) {
         locationSubscription.current.remove();
+        locationSubscription.current = null;
       }
+      void stopBackgroundLocationWatch();
       Alert.alert(
         "Pause and Resume Later",
         `Recordable workouts need at least ${requiredDistance} km and ${MIN_ACTIVITY_DURATION_MINUTES} minutes. You have ${distance.toFixed(2)} km and ${Math.floor(durationMinutes)} minutes so far.`,
@@ -735,7 +898,9 @@ export default function ExerciseScreen() {
     }
     if (locationSubscription.current) {
       locationSubscription.current.remove();
+      locationSubscription.current = null;
     }
+    void stopBackgroundLocationWatch();
     setActivitySaved(false);
     setShowRunDetailsModal(true);
   };
@@ -888,10 +1053,16 @@ export default function ExerciseScreen() {
     elapsedBeforePause.current = 0;
     runningStartTimestamp.current = null;
     lastValidPoint.current = null;
+    lastProcessedLocationTimestamp.current = null;
     isResuming.current = false;
     totalPauseDuration.current = 0;
     pauseStartTimestamp.current = null;
     filteredPointCount.current = 0;
+    if (locationSubscription.current) {
+      locationSubscription.current.remove();
+      locationSubscription.current = null;
+    }
+    void stopBackgroundLocationWatch();
     countdownTimeouts.current.forEach(clearTimeout);
     countdownTimeouts.current = [];
     setCountdownValue(null);
@@ -1021,18 +1192,47 @@ export default function ExerciseScreen() {
     }
   };
 
-  const getEvidenceImagePayload = async (uri: string) => {
-    const imageBase64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: "base64",
-    });
+  const getMimeTypeFromUri = (uri: string) => {
+    const dataUriMatch = uri.match(/^data:([^;]+);base64,/);
+    if (dataUriMatch?.[1]) return dataUriMatch[1];
     const lowerUri = uri.toLowerCase();
-    const mimeType = lowerUri.includes(".png")
-      ? "image/png"
-      : lowerUri.includes(".webp")
-      ? "image/webp"
-      : lowerUri.includes(".avif")
-      ? "image/avif"
-      : "image/jpeg";
+    if (lowerUri.includes(".png")) return "image/png";
+    if (lowerUri.includes(".webp")) return "image/webp";
+    if (lowerUri.includes(".avif")) return "image/avif";
+    return "image/jpeg";
+  };
+
+  const readImageAsBase64 = async (uri: string) => {
+    const dataUriMatch = uri.match(/^data:[^;]+;base64,(.+)$/);
+    if (dataUriMatch?.[1]) return dataUriMatch[1];
+
+    if (Platform.OS !== "web") {
+      return FileSystem.readAsStringAsync(uri, {
+        encoding: "base64",
+      });
+    }
+
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = String(reader.result || "");
+        const base64 = result.split(",")[1];
+        if (base64) {
+          resolve(base64);
+        } else {
+          reject(new Error("Could not read selected image."));
+        }
+      };
+      reader.onerror = () => reject(new Error("Could not read selected image."));
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  const getEvidenceImagePayload = async (uri: string) => {
+    const imageBase64 = await readImageAsBase64(uri);
+    const mimeType = getMimeTypeFromUri(uri);
     return { evidenceImageBase64: imageBase64, evidenceMimeType: mimeType };
   };
 
@@ -1083,10 +1283,8 @@ export default function ExerciseScreen() {
     }
 
     try {
-      const imageBase64 = await FileSystem.readAsStringAsync(treadmillImage, {
-        encoding: "base64",
-      });
-      const mimeType = treadmillImage.toLowerCase().includes(".png") ? "image/png" : "image/jpeg";
+      const imageBase64 = await readImageAsBase64(treadmillImage);
+      const mimeType = getMimeTypeFromUri(treadmillImage);
 
       await getServerClient().activities.submitTreadmillActivity.mutate({
         registrationId: user.id,
@@ -1266,7 +1464,22 @@ export default function ExerciseScreen() {
       return;
     }
 
+    if (otherSportsForm.exerciseType === "Cycle" && !canUseCycleWorkout) {
+      Alert.alert("Cycle Workouts", "Cycle is available for Para Runners who use a wheelchair or handcycle.");
+      return;
+    }
+
+    if ((otherSportsForm.exerciseType === "Walk" || otherSportsForm.exerciseType === "Run") && cycleWorkoutOnly) {
+      Alert.alert("Workout Type", "Your Para equipment profile qualifies for Cycle workouts only.");
+      return;
+    }
+
     const durationRegex = /^\d{2}:\d{2}:\d{2}$/;
+    if (!/^\d{2}:\d{2}$/.test(otherSportsForm.startTime)) {
+      Alert.alert("Error", "Start time must be in HH:MM format (e.g., 07:30)");
+      return;
+    }
+
     if (!durationRegex.test(otherSportsForm.duration)) {
       Alert.alert("Error", "Duration must be in HH:MM:SS format (e.g., 00:45:30)");
       return;
@@ -1295,13 +1508,13 @@ export default function ExerciseScreen() {
         Alert.alert("Activity Not Saved", `A Walk must be at least ${MIN_ACTIVITY_DURATION_MINUTES} minutes to be saved.`);
         return;
       }
-    } else if (otherSportsForm.exerciseType === "Run") {
+    } else if (otherSportsForm.exerciseType === "Run" || otherSportsForm.exerciseType === "Cycle") {
       if (distanceNum < MIN_DISTANCE_RUN) {
-        Alert.alert("Activity Not Saved", `A Run must be at least ${MIN_DISTANCE_RUN} km to be saved.`);
+        Alert.alert("Activity Not Saved", `A ${otherSportsForm.exerciseType} must be at least ${MIN_DISTANCE_RUN} km to be saved.`);
         return;
       }
       if (durationMinutes < MIN_ACTIVITY_DURATION_MINUTES) {
-        Alert.alert("Activity Not Saved", `A Run must be at least ${MIN_ACTIVITY_DURATION_MINUTES} minutes to be saved.`);
+        Alert.alert("Activity Not Saved", `A ${otherSportsForm.exerciseType} must be at least ${MIN_ACTIVITY_DURATION_MINUTES} minutes to be saved.`);
         return;
       }
     }
@@ -1329,7 +1542,7 @@ export default function ExerciseScreen() {
       setOtherSportsForm({
         sportsApp: "",
         activityDate: "",
-        exerciseType: "Run",
+        exerciseType: cycleWorkoutOnly ? "Cycle" : "Run",
         startTime: "",
         duration: "",
         distanceKm: "",
@@ -1535,6 +1748,67 @@ export default function ExerciseScreen() {
         <View style={styles.controlsContainer}>
           {runState === "idle" && (
             <View style={styles.categoriesContainer}>
+              {showMyWorkouts ? (
+                <View style={styles.myWorkoutsHeader}>
+                  <TouchableOpacity
+                    style={styles.myWorkoutsBackButton}
+                    onPress={() => setShowMyWorkouts(false)}
+                    activeOpacity={0.75}
+                  >
+                    <ArrowLeft size={18} color={colors.primary} />
+                    <Text style={styles.myWorkoutsBackText}>Back</Text>
+                  </TouchableOpacity>
+                  <Text style={[styles.myWorkoutsTitle, { color: themeColors.text }]}>My Workouts</Text>
+                </View>
+              ) : (
+                <>
+                  <LinearGradient colors={["#111827", "#FF6B35"]} style={styles.workoutWelcomeCard}>
+                    <View style={styles.workoutWelcomeCopy}>
+                      <Text style={styles.workoutWelcomeKicker}>Workout</Text>
+                      <Text style={styles.workoutWelcomeTitle}>Ready to move</Text>
+                      <View style={styles.workoutWelcomeChips}>
+                        <View style={styles.workoutWelcomeChip}>
+                          <Footprints size={13} color={colors.white} />
+                          <Text style={styles.workoutWelcomeChipText}>Walk</Text>
+                        </View>
+                        <View style={styles.workoutWelcomeChip}>
+                          <Play size={13} color={colors.white} />
+                          <Text style={styles.workoutWelcomeChipText}>Run</Text>
+                        </View>
+                        <View style={styles.workoutWelcomeChip}>
+                          <Bike size={13} color={colors.white} />
+                          <Text style={styles.workoutWelcomeChipText}>Cycle</Text>
+                        </View>
+                      </View>
+                    </View>
+                    <View style={styles.workoutWelcomeIcon}>
+                      <Activity size={28} color={colors.white} />
+                    </View>
+                  </LinearGradient>
+                  <View style={styles.workoutTabs}>
+                    {([
+                      { key: "record", label: "Record" },
+                      { key: "event", label: "Event Run" },
+                      { key: "sources", label: "Sources" },
+                    ] as const).map((tab) => (
+                      <TouchableOpacity
+                        key={tab.key}
+                        style={[styles.workoutTabButton, activeWorkoutTab === tab.key && styles.workoutTabButtonActive]}
+                        onPress={() => setActiveWorkoutTab(tab.key)}
+                        activeOpacity={0.75}
+                      >
+                        <Text style={[styles.workoutTabText, activeWorkoutTab === tab.key && styles.workoutTabTextActive]}>
+                          {tab.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              )}
+
+              {showMyWorkouts ? (
+                <MyWorkouts />
+              ) : activeWorkoutTab === "record" && (
               <View style={styles.categorySection}>
                 <View style={styles.categoryHeaderRow}>
                   <View style={[styles.categoryDot, { backgroundColor: colors.primary }]} />
@@ -1543,17 +1817,22 @@ export default function ExerciseScreen() {
                 <Text style={[styles.categorySubtitle, { color: themeColors.textSecondary }]}>
                   Records multiday events plus non event activity
                 </Text>
+                <Text style={[styles.workoutHeadNote, { color: themeColors.textSecondary }]}>
+                  {cycleWorkoutOnly
+                    ? "Your Para equipment profile uses wheelchair/handcycle equipment, so Cycle is the available workout type."
+                    : "Cycle is available for wheelchair/handcycle Para users."}
+                </Text>
 
                 <View style={styles.exerciseRow}>
                   <TouchableOpacity
-                    style={styles.exerciseCard}
+                    style={[styles.exerciseCard, cycleWorkoutOnly && styles.exerciseCardDisabled]}
                     onPress={() => void startTrackingWithCountdown("Walk")}
-                    disabled={isCountdownActive}
+                    disabled={isCountdownActive || cycleWorkoutOnly}
                     activeOpacity={0.7}
                     testID="exercise-walk"
                   >
                     <LinearGradient
-                      colors={['#8B5CF6', '#A78BFA']}
+                      colors={cycleWorkoutOnly ? ['#9CA3AF', '#6B7280'] : ['#8B5CF6', '#A78BFA']}
                       style={styles.exerciseCardGradient}
                     >
                       <Footprints size={28} color={colors.white} />
@@ -1562,25 +1841,52 @@ export default function ExerciseScreen() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={styles.exerciseCard}
+                    style={[styles.exerciseCard, cycleWorkoutOnly && styles.exerciseCardDisabled]}
                     onPress={() => void startTrackingWithCountdown("Run")}
-                    disabled={isCountdownActive}
+                    disabled={isCountdownActive || cycleWorkoutOnly}
                     activeOpacity={0.7}
                     testID="exercise-run"
                   >
                     <LinearGradient
-                      colors={colors.gradient.orange}
+                      colors={cycleWorkoutOnly ? ['#9CA3AF', '#6B7280'] : colors.gradient.orange}
                       style={styles.exerciseCardGradient}
                     >
                       <Play size={28} color={colors.white} />
                       <Text style={styles.exerciseCardTitle}>Run</Text>
                     </LinearGradient>
                   </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.exerciseCard, !canUseCycleWorkout && styles.exerciseCardDisabled]}
+                    onPress={() => void startTrackingWithCountdown("Cycle")}
+                    disabled={isCountdownActive || !canUseCycleWorkout}
+                    activeOpacity={0.7}
+                    testID="exercise-cycle"
+                  >
+                    <LinearGradient
+                      colors={canUseCycleWorkout ? ['#0EA5E9', '#2563EB'] : ['#9CA3AF', '#6B7280']}
+                      style={styles.exerciseCardGradient}
+                    >
+                      <Bike size={28} color={colors.white} />
+                      <Text style={styles.exerciseCardTitle}>Cycle</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
                 </View>
+                <TouchableOpacity
+                  style={[styles.myWorkoutsButton, { backgroundColor: themeColors.cardBackground }]}
+                  onPress={() => setShowMyWorkouts(true)}
+                  activeOpacity={0.75}
+                >
+                  <View style={styles.myWorkoutsButtonIcon}>
+                    <Activity size={18} color={colors.white} />
+                  </View>
+                  <Text style={[styles.myWorkoutsButtonText, { color: themeColors.text }]}>My Workouts</Text>
+                  <ChevronRight size={18} color={themeColors.textLight} />
+                </TouchableOpacity>
               </View>
+              )}
 
-              <View style={styles.categorySeparator} />
-
+              {!showMyWorkouts && activeWorkoutTab === "event" && (
               <View style={styles.categorySection}>
                 <View style={styles.categoryHeaderRow}>
                   <View style={[styles.categoryDot, { backgroundColor: "#2563EB" }]} />
@@ -1616,13 +1922,13 @@ export default function ExerciseScreen() {
                   <ChevronRight size={18} color={themeColors.textLight} />
                 </TouchableOpacity>
               </View>
+              )}
 
-              <View style={styles.categorySeparator} />
-
+              {!showMyWorkouts && activeWorkoutTab === "sources" && (
               <View style={styles.categorySection}>
                 <View style={styles.categoryHeaderRow}>
                   <View style={[styles.categoryDot, { backgroundColor: colors.secondary }]} />
-                  <Text style={[styles.categoryTitle, { color: themeColors.text }]}>Add Workout Recordings from Other Source</Text>
+                  <Text style={[styles.categoryTitle, { color: themeColors.text }]}>Add From Other Source</Text>
                 </View>
                 <TouchableOpacity
                   style={[styles.addActivityCard, { backgroundColor: themeColors.cardBackground }]}
@@ -1635,7 +1941,7 @@ export default function ExerciseScreen() {
                   </LinearGradient>
                   <View style={styles.addActivityInfo}>
                     <Text style={[styles.addActivityTitle, { color: themeColors.text }]}>Treadmill</Text>
-                    <Text style={[styles.addActivitySub, { color: themeColors.textSecondary }]}>Record your treadmill activity here (doesn't count for events)</Text>
+                    <Text style={[styles.addActivitySub, { color: themeColors.textSecondary }]}>Record your treadmill activity here; it does not count for events</Text>
                   </View>
                   <ChevronRight size={18} color={themeColors.textLight} />
                 </TouchableOpacity>
@@ -1672,6 +1978,7 @@ export default function ExerciseScreen() {
                   <ChevronRight size={18} color={themeColors.textLight} />
                 </TouchableOpacity>
               </View>
+              )}
             </View>
           )}
 
@@ -2242,26 +2549,43 @@ export default function ExerciseScreen() {
               <View style={styles.inputGroup}>
                 <Text style={[styles.inputLabel, { color: themeColors.text }]}>Activity Type *</Text>
                 <View style={styles.typeChipsContainer}>
-                  {(["Run", "Walk"] as const).map((type) => (
-                    <TouchableOpacity
-                      key={type}
-                      style={[
-                        styles.typeChip,
-                        otherSportsForm.exerciseType === type && styles.typeChipActive,
-                      ]}
-                      onPress={() => setOtherSportsForm((prev) => ({ ...prev, exerciseType: type }))}
-                      activeOpacity={0.7}
-                    >
-                      <Text
+                  {(["Run", "Walk", "Cycle"] as const).map((type) => {
+                    const isTypeDisabled =
+                      (type === "Cycle" && !canUseCycleWorkout) ||
+                      ((type === "Walk" || type === "Run") && cycleWorkoutOnly);
+                    return (
+                      <TouchableOpacity
+                        key={type}
                         style={[
-                          styles.typeChipText,
-                          otherSportsForm.exerciseType === type && styles.typeChipTextActive,
+                          styles.typeChip,
+                          otherSportsForm.exerciseType === type && styles.typeChipActive,
+                          isTypeDisabled && styles.typeChipDisabled,
                         ]}
+                        onPress={() => {
+                          if (type === "Cycle" && !canUseCycleWorkout) {
+                            Alert.alert("Cycle Workouts", "Cycle is available for Para Runners who use a wheelchair or handcycle.");
+                            return;
+                          }
+                          if ((type === "Walk" || type === "Run") && cycleWorkoutOnly) {
+                            Alert.alert("Workout Type", "Your Para equipment profile qualifies for Cycle workouts only.");
+                            return;
+                          }
+                          setOtherSportsForm((prev) => ({ ...prev, exerciseType: type }));
+                        }}
+                        disabled={isTypeDisabled}
+                        activeOpacity={0.7}
                       >
-                        {type}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                        <Text
+                          style={[
+                            styles.typeChipText,
+                            otherSportsForm.exerciseType === type && styles.typeChipTextActive,
+                          ]}
+                        >
+                          {type}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               </View>
 
@@ -2433,12 +2757,149 @@ const styles = StyleSheet.create({
   controlsContainer: {
     paddingHorizontal: 16,
     paddingBottom: 12,
-    paddingTop: 4,
+    paddingTop: 16,
     flex: 1,
-    justifyContent: "center" as const,
+    justifyContent: "flex-start" as const,
   },
   categoriesContainer: {
+    gap: 14,
+  },
+  workoutWelcomeCard: {
+    minHeight: 104,
+    borderRadius: 18,
+    padding: 16,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    overflow: "hidden" as const,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.14,
+    shadowRadius: 9,
+    elevation: 4,
+  },
+  workoutWelcomeCopy: {
+    flex: 1,
+    gap: 5,
+  },
+  workoutWelcomeKicker: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 11,
+    fontWeight: "900" as const,
+    textTransform: "uppercase" as const,
+  },
+  workoutWelcomeTitle: {
+    color: colors.white,
+    fontSize: 24,
+    lineHeight: 29,
+    fontWeight: "900" as const,
+  },
+  workoutWelcomeChips: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
     gap: 6,
+    marginTop: 4,
+  },
+  workoutWelcomeChip: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.20)",
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  workoutWelcomeChipText: {
+    color: colors.white,
+    fontSize: 11,
+    fontWeight: "800" as const,
+  },
+  workoutWelcomeIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+  },
+  workoutTabs: {
+    flexDirection: "row" as const,
+    gap: 8,
+    backgroundColor: "rgba(255, 107, 53, 0.08)",
+    borderRadius: 12,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255, 107, 53, 0.14)",
+  },
+  workoutTabButton: {
+    flex: 1,
+    minHeight: 40,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    borderRadius: 9,
+    paddingHorizontal: 8,
+  },
+  workoutTabButtonActive: {
+    backgroundColor: colors.primary,
+  },
+  workoutTabText: {
+    fontSize: 12,
+    fontWeight: "800" as const,
+    color: colors.textSecondary,
+  },
+  workoutTabTextActive: {
+    color: colors.white,
+  },
+  myWorkoutsButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 12,
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 12,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  myWorkoutsButtonIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    backgroundColor: colors.primary,
+  },
+  myWorkoutsButtonText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "800" as const,
+  },
+  myWorkoutsHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+  },
+  myWorkoutsBackButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+    paddingVertical: 8,
+    paddingRight: 12,
+  },
+  myWorkoutsBackText: {
+    fontSize: 14,
+    fontWeight: "800" as const,
+    color: colors.primary,
+  },
+  myWorkoutsTitle: {
+    fontSize: 20,
+    fontWeight: "800" as const,
   },
   categorySection: {
     gap: 10,
@@ -2463,9 +2924,16 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: -6,
     marginLeft: 16,
-    marginBottom: 2,
+    marginBottom: 0,
     fontStyle: "italic" as const,
     opacity: 0.72,
+  },
+  workoutHeadNote: {
+    fontSize: 11,
+    lineHeight: 15,
+    marginLeft: 16,
+    marginTop: -4,
+    marginBottom: 2,
   },
   exerciseRow: {
     flexDirection: "row" as const,
@@ -2481,23 +2949,20 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 5,
   },
+  exerciseCardDisabled: {
+    opacity: 0.72,
+  },
   exerciseCardGradient: {
-    padding: 18,
+    padding: 14,
     alignItems: "center" as const,
     gap: 8,
-    minHeight: 110,
+    minHeight: 96,
     justifyContent: "center" as const,
   },
   exerciseCardTitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: "700" as const,
     color: colors.white,
-  },
-  exerciseCardSub: {
-    fontSize: 12,
-    color: colors.white,
-    opacity: 0.85,
-    fontWeight: "500" as const,
   },
   categorySeparator: {
     height: 1,
@@ -3124,6 +3589,9 @@ const styles = StyleSheet.create({
   typeChipActive: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
+  },
+  typeChipDisabled: {
+    opacity: 0.5,
   },
   typeChipText: {
     fontSize: 14,

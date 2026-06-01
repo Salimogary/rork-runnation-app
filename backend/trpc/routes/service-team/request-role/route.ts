@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import { assertServiceTeamRoleAllowedForAge, getApplicantAgeFromAuth } from "../age-eligibility";
+import { ensureEventOrganizerForUser } from "../../../event-organizer-profile";
 
 const SERVICE_ROLE_LIMITS: Record<string, number> = {
   event_organizer: 50,
@@ -10,10 +12,15 @@ const SERVICE_ROLE_LIMITS: Record<string, number> = {
   golden_age_runners_club_coordinator: 1,
   treadmill_runners_club_coordinator: 1,
   para_runners_club_coordinator: 1,
-  magazine_columnist_fitness_coach: 2,
-  magazine_columnist_sports_journalist: 2,
-  magazine_columnist_motivation_speaker: 2,
+  smartfit_club_coordinator: 1,
+  magazine_editor: 1,
+  chat_room_administrator: 1,
+  magazine_columnist_fitness_coach: 1,
+  magazine_columnist_sports_journalist: 1,
+  magazine_columnist_motivation_speaker: 1,
 };
+
+const DISABLED_SERVICE_ROLES = new Set(["shop_manager"]);
 
 const serviceRoleNameSchema = z.enum([
   "event_organizer",
@@ -24,12 +31,17 @@ const serviceRoleNameSchema = z.enum([
   "golden_age_runners_club_coordinator",
   "treadmill_runners_club_coordinator",
   "para_runners_club_coordinator",
+  "smartfit_club_coordinator",
+  "magazine_editor",
+  "chat_room_administrator",
   "magazine_columnist_fitness_coach",
   "magazine_columnist_sports_journalist",
   "magazine_columnist_motivation_speaker",
 ]);
 
 const GLOBAL_SERVICE_ROLES = new Set([
+  "magazine_editor",
+  "chat_room_administrator",
   "magazine_columnist_fitness_coach",
   "magazine_columnist_sports_journalist",
   "magazine_columnist_motivation_speaker",
@@ -37,9 +49,42 @@ const GLOBAL_SERVICE_ROLES = new Set([
   "golden_age_runners_club_coordinator",
   "treadmill_runners_club_coordinator",
   "para_runners_club_coordinator",
+  "smartfit_club_coordinator",
+]);
+
+const ROLES_WITHOUT_APPLICANT_LINKS = new Set([
+  "event_organizer",
+  "club_coordinator",
 ]);
 
 const optionalLinkSchema = z
+  .string()
+  .trim()
+  .max(500)
+  .optional()
+  .nullable()
+  .transform((value) => {
+    const trimmed = String(value ?? "").trim();
+    return trimmed.length > 0 ? trimmed : null;
+  });
+
+const optionalApplicantStatementSchema = z
+  .string()
+  .trim()
+  .max(3000)
+  .optional()
+  .nullable()
+  .transform((value) => {
+    const trimmed = String(value ?? "").trim();
+    return trimmed.length > 0 ? trimmed : null;
+  })
+  .refine((value) => {
+    if (!value) return true;
+    const wordCount = value.split(/\s+/).filter(Boolean).length;
+    return wordCount >= 25 && wordCount <= 250;
+  }, "If provided, the role statement must be 25-250 words.");
+
+const proposedProfileFieldSchema = z
   .string()
   .trim()
   .max(500)
@@ -55,6 +100,11 @@ function roleFromRelation(row: any): string | null {
   return roleSource?.role_name ?? null;
 }
 
+function isGlobalAdminRole(roleName: string | null | undefined): boolean {
+  const normalized = roleName?.trim().toLowerCase();
+  return normalized === "super_admin" || normalized === "global_admin";
+}
+
 export default publicProcedure
   .input(
     z.object({
@@ -63,6 +113,12 @@ export default publicProcedure
       websiteUrl: optionalLinkSchema,
       linkedinUrl: optionalLinkSchema,
       socialUrl: optionalLinkSchema,
+      applicantStatement: optionalApplicantStatementSchema,
+      contactConsent: z.boolean().optional().default(false),
+      contactInstructions: optionalLinkSchema,
+      proposedName: proposedProfileFieldSchema,
+      proposedLocation: proposedProfileFieldSchema,
+      proposedDescription: proposedProfileFieldSchema,
     })
   )
   .mutation(async ({ input, ctx }) => {
@@ -72,8 +128,23 @@ export default publicProcedure
 
     const countryCode = input.countryCode.trim().toUpperCase();
     const roleName = input.roleName;
+    if (DISABLED_SERVICE_ROLES.has(roleName)) {
+      throw new Error("Shop Manager is coming soon. The online store is not ready yet.");
+    }
     const maxPerCountry = SERVICE_ROLE_LIMITS[roleName];
     const isGlobalRole = GLOBAL_SERVICE_ROLES.has(roleName);
+    const allowsApplicantLinks = !ROLES_WITHOUT_APPLICANT_LINKS.has(roleName);
+    const needsProposedProfile = roleName === "club_coordinator" || roleName === "event_organizer";
+
+    if (needsProposedProfile && !input.proposedName) {
+      throw new Error(roleName === "club_coordinator" ? "Please enter the proposed club name." : "Please enter the event organizer name.");
+    }
+    if (needsProposedProfile && !input.proposedLocation) {
+      throw new Error(roleName === "club_coordinator" ? "Please enter the proposed club location." : "Please enter the organizer base location.");
+    }
+
+    const applicantAge = await getApplicantAgeFromAuth(ctx);
+    assertServiceTeamRoleAllowedForAge(applicantAge, roleName);
 
     const { data: authUserResult, error: authError } = await ctx.supabase.auth.admin.getUserById(ctx.authUserId);
     const email = authUserResult?.user?.email?.trim().toLowerCase() ?? null;
@@ -81,6 +152,15 @@ export default publicProcedure
     if (authError || !email) {
       throw new Error(authError?.message || "Could not resolve your account email.");
     }
+
+    const { data: authProfile } = await ctx.supabase
+      .from("profiles")
+      .select("profile_id, registration_id")
+      .eq("profile_id", ctx.authUserId)
+      .maybeSingle();
+    const currentAssignmentUserIds = Array.from(
+      new Set([ctx.authUserId, authProfile?.profile_id, authProfile?.registration_id].filter(Boolean))
+    );
 
     const { data: role, error: roleError } = await ctx.supabase
       .from("roles")
@@ -142,19 +222,19 @@ export default publicProcedure
     const { data: superAdminRoles, error: superAdminRolesError } = await ctx.supabase
       .from("user_role_assignments")
       .select("assignment_id, roles(role_name)")
-      .eq("user_id", ctx.authUserId)
+      .in("user_id", currentAssignmentUserIds)
       .eq("is_active", true);
 
     if (superAdminRolesError) {
       throw new Error(superAdminRolesError.message || "Could not check your current role.");
     }
 
-    const isSuperAdminUser = (superAdminRoles ?? []).some((assignment: any) => roleFromRelation(assignment) === "super_admin");
+    const isSuperAdminUser = (superAdminRoles ?? []).some((assignment: any) => isGlobalAdminRole(roleFromRelation(assignment)));
 
     const { data: activeUserRoles, error: activeUserRolesError } = await ctx.supabase
       .from("user_role_assignments")
       .select("assignment_id, roles(role_name)")
-      .eq("user_id", ctx.authUserId)
+      .in("user_id", currentAssignmentUserIds)
       .eq("is_active", true)
       .eq("is_exclusive_admin_role", true)
       .limit(1);
@@ -181,17 +261,63 @@ export default publicProcedure
       throw new Error(isGlobalRole ? "This role is already filled globally." : "This role is already filled in your country.");
     }
 
+    let organizerId: string | null = null;
+    if (roleName === "event_organizer") {
+      organizerId = await ensureEventOrganizerForUser(ctx, ctx.authUserId, {
+        organizerName: input.proposedName,
+        description: [input.proposedDescription, input.proposedLocation ? `Base location: ${input.proposedLocation}` : null]
+          .filter(Boolean)
+          .join("\n"),
+        country: countryCode,
+        isActive: false,
+      });
+    }
+
+    let clubId: string | null = null;
+    if (roleName === "club_coordinator") {
+      const { data: coordinatorId, error: coordinatorError } = await ctx.supabase.rpc(
+        "ensure_coordinator_for_profile",
+        { p_user_id: ctx.authUserId }
+      );
+
+      if (coordinatorError || !coordinatorId) {
+        throw new Error(coordinatorError?.message || "Could not create your coordinator profile.");
+      }
+
+      const { data: proposedClub, error: proposedClubError } = await ctx.supabase
+        .from("clubs")
+        .insert({
+          club_name: input.proposedName,
+          description: input.proposedDescription,
+          location: input.proposedLocation,
+          country: countryCode,
+          coordinator_id: String(coordinatorId),
+          is_active: false,
+        })
+        .select("club_id")
+        .maybeSingle();
+
+      if (proposedClubError || !proposedClub?.club_id) {
+        throw new Error(proposedClubError?.message || "Could not create the proposed club profile.");
+      }
+
+      clubId = String(proposedClub.club_id);
+    }
+
     const { data: invite, error: inviteError } = await ctx.supabase
       .from("admin_invites")
       .insert({
         email,
         role_id: role.role_id,
-        country_code: isGlobalRole ? null : countryCode,
-        club_id: null,
-        organizer_id: null,
-        applicant_website_url: isGlobalRole ? input.websiteUrl : null,
-        applicant_linkedin_url: isGlobalRole ? input.linkedinUrl : null,
-        applicant_social_url: isGlobalRole ? input.socialUrl : null,
+        country_code: isGlobalRole || roleName === "event_organizer" || roleName === "club_coordinator" ? null : countryCode,
+        club_id: clubId,
+        organizer_id: organizerId,
+        applicant_website_url: allowsApplicantLinks ? input.websiteUrl : null,
+        applicant_linkedin_url: allowsApplicantLinks ? input.linkedinUrl : null,
+        applicant_social_url: allowsApplicantLinks ? input.socialUrl : null,
+        applicant_statement: input.applicantStatement,
+        applicant_contact_consent: input.contactConsent,
+        applicant_contact_instructions: input.contactConsent ? input.contactInstructions : null,
         invited_by: null,
         status: "pending",
       })

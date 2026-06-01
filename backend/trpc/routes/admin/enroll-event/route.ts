@@ -17,6 +17,25 @@ function normalizeEventEntry(entry?: string | null): "free" | "club_approved" | 
   return "free";
 }
 
+async function ensureEventCapacity(ctx: any, eventId: string, participantLimit?: number | null) {
+  if (typeof participantLimit !== "number" || !Number.isFinite(participantLimit)) {
+    return;
+  }
+
+  const { count, error } = await ctx.supabase
+    .from("events_participants")
+    .select("event_participant_id", { count: "exact", head: true })
+    .eq("event_id", eventId);
+
+  if (error) {
+    throw new Error(error.message || "Could not verify event participant limit.");
+  }
+
+  if ((count ?? 0) >= participantLimit) {
+    throw new Error("This event has reached its participant limit.");
+  }
+}
+
 export default publicProcedure
   .input(
     z.object({
@@ -210,7 +229,7 @@ export default publicProcedure
 
     const { data: event } = await ctx.supabase
       .from("events")
-      .select("event_id, country, country_code, is_virtual, entry, payment_details, organizer_payment_link, runnation_payment_link_enabled, registration_closes_at")
+      .select("event_id, country, country_code, is_virtual, entry, payment_details, organizer_payment_link, runnation_payment_link_enabled, registration_closes_at, participant_limit")
       .eq("event_id", input.eventId)
       .maybeSingle();
 
@@ -273,6 +292,7 @@ export default publicProcedure
     }
 
     const entryMode = normalizeEventEntry(event.entry);
+    await ensureEventCapacity(ctx, input.eventId, event.participant_limit);
 
     if (entryMode === "free") {
       const { data, error } = await ctx.supabase
@@ -339,3 +359,4 @@ export default publicProcedure
       enrollment: data,
     };
   });
+

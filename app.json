@@ -17,9 +17,9 @@
       "supportsTablet": false,
       "bundleIdentifier": "app.rork.runnation-app",
       "infoPlist": {
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Allow $(PRODUCT_NAME) to use your location.",
-        "NSLocationAlwaysUsageDescription": "Allow $(PRODUCT_NAME) to use your location.",
-        "NSLocationWhenInUseUsageDescription": "Allow $(PRODUCT_NAME) to use your location.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Allow $(PRODUCT_NAME) to keep tracking your workout distance while the screen is locked.",
+        "NSLocationAlwaysUsageDescription": "Allow $(PRODUCT_NAME) to keep tracking your workout distance while the screen is locked.",
+        "NSLocationWhenInUseUsageDescription": "Allow $(PRODUCT_NAME) to track your workout route and distance while recording.",
         "UIBackgroundModes": [
           "location"
         ],
@@ -57,6 +57,15 @@
     },
     "plugins": [
       [
+        "expo-location",
+        {
+          "isAndroidBackgroundLocationEnabled": true,
+          "isIosBackgroundLocationEnabled": true,
+          "locationAlwaysAndWhenInUsePermission": "Allow RunNation to keep tracking your workout distance while the screen is locked.",
+          "locationWhenInUsePermission": "Allow RunNation to track your workout route and distance while recording."
+        }
+      ],
+      [
         "expo-router",
         {
           "origin": "https://rork.com/"
@@ -86,7 +95,10 @@
           "configureAndroidBackup": true,
           "faceIDPermission": "Allow $(PRODUCT_NAME) to access your Face ID biometric data."
         }
-      ]
+      ],
+      "expo-font",
+      "expo-sharing",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

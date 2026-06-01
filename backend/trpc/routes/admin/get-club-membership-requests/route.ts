@@ -32,7 +32,7 @@ export default publicProcedure.query(async ({ ctx }) => {
     .filter((role) => (role.roleName === "country_admin" || role.roleName === "country_coordinator") && role.countryCode)
     .map((role) => role.countryCode as string);
   const countryAdminCodes = actor.roles
-    .filter((role) => role.roleName === "country_admin" && role.countryCode)
+    .filter((role) => (role.roleName === "country_admin" || role.roleName === "country_coordinator") && role.countryCode)
     .map((role) => role.countryCode as string);
 
   const { data: countries } = await ctx.supabase
@@ -129,3 +129,4 @@ export default publicProcedure.query(async ({ ctx }) => {
       };
     });
 });
+

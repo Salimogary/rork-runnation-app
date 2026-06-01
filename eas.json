@@ -1,0 +1,29 @@
+{
+  "cli": {
+    "version": ">= 13.0.0"
+  },
+  "build": {
+    "preview": {
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://runnation-backend.onrender.com",
+        "EXPO_PUBLIC_API_URL_PROD": "https://runnation-backend.onrender.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://mbbjijvxmwluubkzgkpl.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1iYmppanZ4bXdsdXVia3pna3BsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIwMjMzMjEsImV4cCI6MjA3NzU5OTMyMX0.Hpy30sfwABdmEIb67M7nABhCeESmnL8m33Nmi0cJnV4"
+      }
+    },
+    "production": {
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://runnation-backend.onrender.com",
+        "EXPO_PUBLIC_API_URL_PROD": "https://runnation-backend.onrender.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://mbbjijvxmwluubkzgkpl.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1iYmppanZ4bXdsdXVia3pna3BsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIwMjMzMjEsImV4cCI6MjA3NzU5OTMyMX0.Hpy30sfwABdmEIb67M7nABhCeESmnL8m33Nmi0cJnV4"
+      }
+    }
+  }
+}

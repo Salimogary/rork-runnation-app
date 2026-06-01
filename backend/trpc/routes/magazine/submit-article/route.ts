@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ensureActionCooldown, ensureNoRecentDuplicateText } from "../../../abuse";
 import { publicProcedure } from "../../../create-context";
+import { uploadMagazineImage } from "../../../magazine-image";
 import { requireRegistrationOwner } from "../../../rbac";
 
 const MAGAZINE_BUCKET = "magazine";
@@ -25,15 +26,17 @@ export default publicProcedure
     z.object({
       registrationId: z.string().min(1),
       authorName: z.string().trim().min(2).max(80),
-      email: z.string().trim().email(),
+      email: z.string().trim().email().nullable().optional(),
       title: z.string().trim().min(6).max(140),
       category: z.string().trim().min(2).max(60),
-      pitch: z.string().trim().min(20).max(700),
+      pitch: z.string().trim().max(700).nullable().optional(),
       body: z
         .string()
         .trim()
         .min(1),
       externalLink: z.string().trim().url().nullable().optional(),
+      photoBase64: z.string().nullable().optional(),
+      photoMimeType: z.string().trim().nullable().optional(),
       attachmentBase64: z.string().nullable(),
       attachmentName: z.string().trim().nullable(),
       attachmentType: z.string().trim().nullable(),
@@ -112,10 +115,10 @@ export default publicProcedure
         registration_id: input.registrationId,
         profile_id: profile?.profile_id ?? ctx.authUserId,
         author_name: input.authorName.trim(),
-        email: input.email.trim().toLowerCase(),
+        email: input.email?.trim().toLowerCase() || null,
         title: input.title.trim(),
         category: input.category.trim(),
-        pitch: input.pitch.trim(),
+        pitch: input.pitch?.trim() || input.body.trim().slice(0, 700),
         body: input.body.trim(),
         external_link: input.externalLink?.trim() || null,
         attachment_url: attachmentUrl,
@@ -126,6 +129,25 @@ export default publicProcedure
 
     if (error || !data) {
       throw new Error(error?.message || "Could not submit your story right now.");
+    }
+
+    if (input.photoBase64) {
+      const photoUrl = await uploadMagazineImage(
+        ctx,
+        "article-submissions",
+        String(data.submission_id),
+        input.photoBase64,
+        input.photoMimeType
+      );
+
+      const { error: photoUpdateError } = await ctx.supabase
+        .from("magazine_article_submissions")
+        .update({ magazine_photo_url: photoUrl })
+        .eq("submission_id", data.submission_id);
+
+      if (photoUpdateError) {
+        throw new Error(photoUpdateError.message || "Story submitted, but the photo could not be attached.");
+      }
     }
 
     return data;

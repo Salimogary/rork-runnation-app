@@ -31,6 +31,7 @@ export default publicProcedure
     const actor = await requireAdminPermission(ctx, {
       allowSuperAdmin: true,
       allowCountryAdmin: true,
+      allowCountryCoordinator: true,
       countryCode: event.country_code ?? null,
     });
 
@@ -93,3 +94,4 @@ export default publicProcedure
       event: updatedEvent,
     };
   });
+

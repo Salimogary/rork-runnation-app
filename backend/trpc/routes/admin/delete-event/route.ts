@@ -26,6 +26,7 @@ export default publicProcedure
     const actor = await requireAdminPermission(ctx, {
       allowSuperAdmin: true,
       allowCountryAdmin: true,
+      allowSpecialClubCoordinator: true,
       allowEventOrganizer: true,
       countryCode: event.country_code ?? null,
     });
@@ -38,7 +39,8 @@ export default publicProcedure
       !actor.isSuperAdmin &&
       !actor.isCountryAdmin &&
       !actor.isCountryCoordinator &&
-      !actor.isClubCoordinator;
+      !actor.isClubCoordinator &&
+      !actor.isSpecialClubCoordinator;
 
     if (hasOrganizerOnlyAccess && (!event.organizer || !organizerScopes.includes(event.organizer))) {
       throw new Error("You can only delete rejected events from your own organizer profile.");
@@ -87,3 +89,5 @@ export default publicProcedure
 
     return { success: true, eventId: input.eventId };
   });
+
+

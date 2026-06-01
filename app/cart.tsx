@@ -131,7 +131,7 @@ export default function CartScreen() {
           </View>
           <Text style={[styles.emptyTitle, { color: themeColors.text }]}>Your cart is empty</Text>
           <Text style={[styles.emptySubtext, { color: themeColors.textSecondary }]}>
-            Browse the shop and add items you'd like to purchase
+            Browse the shop and add items you would like to purchase
           </Text>
           <TouchableOpacity
             style={styles.continueShopping}

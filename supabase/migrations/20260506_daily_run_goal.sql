@@ -33,4 +33,3 @@ create policy "Users can update their daily run goals"
   for update
   using (auth.uid() = registration_id)
   with check (auth.uid() = registration_id);
-

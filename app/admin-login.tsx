@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -14,6 +14,8 @@ import { useRouter } from 'expo-router';
 import { Shield, Lock, Mail } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { getServerClient } from '@/lib/server-client';
+import { useAuth } from '@/contexts/AuthContext';
+import { hasAdminPortalAccess, type RoleSession } from '@/lib/role-session';
 
 type AdminScreenMode = 'login' | 'requestReset';
 
@@ -24,6 +26,14 @@ export default function AdminLoginScreen() {
   const [resetEmail, setResetEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
+  const { user, roleSession, isLoading: isAuthLoading, isRoleSessionLoading } = useAuth();
+  const signedInAdmin = user && hasAdminPortalAccess(roleSession);
+
+  useEffect(() => {
+    if (!isAuthLoading && !isRoleSessionLoading && signedInAdmin) {
+      router.replace('/admin' as any);
+    }
+  }, [isAuthLoading, isRoleSessionLoading, router, signedInAdmin]);
 
   const showMessage = (title: string, message: string, onClose?: () => void) => {
     if (Platform.OS !== 'web') {
@@ -46,7 +56,7 @@ export default function AdminLoginScreen() {
   const handleLogin = async () => {
     const normalizedEmail = email.trim().toLowerCase();
 
-    if (!normalizedEmail || !password.trim()) {
+    if (!normalizedEmail || !password) {
       showMessage('Required Fields', 'Please enter both email and password.');
       return;
     }
@@ -68,7 +78,7 @@ export default function AdminLoginScreen() {
         username: null,
       });
 
-      if (!roleSession.hasAdminAccess) {
+      if (!hasAdminPortalAccess(roleSession as RoleSession)) {
         await supabase.auth.signOut();
         showMessage('Access Denied', 'This account is signed in, but it does not have admin access.');
         return;
@@ -119,6 +129,16 @@ export default function AdminLoginScreen() {
       setIsLoading(false);
     }
   };
+
+  if (isAuthLoading || isRoleSessionLoading || signedInAdmin) {
+    return (
+      <View style={styles.checkingContainer}>
+        <Shield size={48} color="#10b981" strokeWidth={2} />
+        <Text style={styles.checkingTitle}>Opening Admin Portal</Text>
+        <Text style={styles.checkingText}>Checking your signed-in account...</Text>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -244,6 +264,25 @@ export default function AdminLoginScreen() {
 }
 
 const styles = StyleSheet.create({
+  checkingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f9fafb',
+    padding: 24,
+  },
+  checkingTitle: {
+    marginTop: 16,
+    fontSize: 22,
+    fontWeight: '800' as const,
+    color: '#111827',
+  },
+  checkingText: {
+    marginTop: 8,
+    fontSize: 15,
+    color: '#6b7280',
+    textAlign: 'center',
+  },
   container: {
     flex: 1,
     backgroundColor: '#f9fafb',

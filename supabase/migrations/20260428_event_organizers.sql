@@ -42,6 +42,9 @@ alter table public.user_role_assignments
   drop constraint if exists user_role_assignments_club_country_check;
 
 alter table public.user_role_assignments
+  drop constraint if exists user_role_assignments_scope_check;
+
+alter table public.user_role_assignments
   add constraint user_role_assignments_scope_check check (
     ((case when country_code is not null then 1 else 0 end) +
      (case when club_id is not null then 1 else 0 end) +
@@ -96,7 +99,7 @@ begin
     return false;
   end if;
 
-  if v_role_name = 'club_coordinator' and p_club_id is null then
+  if v_role_name = 'club_coordinator' and p_club_id is null and p_country_code is null then
     return false;
   end if;
 
@@ -174,7 +177,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select public.has_role(p_user_id, 'event_organizer', null, null, p_organizer_id);
+  select public.has_role(p_user_id, 'event_organizer'::text, null::text, null::uuid, p_organizer_id);
 $$;
 
 create or replace function public.can_manage_role_assignment(

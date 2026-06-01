@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
 import { logAdminAction, requireAdminPermission } from "../../../rbac";
+import { canAccessMagazineRow, getScopedMagazineAccess } from "../magazine-scope";
 
 async function publishLiveMagazineEntry(ctx: any, sourceTable: string, sourceId: string, payload: Record<string, unknown>) {
   const { data: existing, error: lookupError } = await ctx.supabase
@@ -35,6 +36,10 @@ async function publishLiveMagazineEntry(ctx: any, sourceTable: string, sourceId:
   }
 }
 
+function isLiveMagazinePageConstraintError(error: any): boolean {
+  return String(error?.message || error || "").includes("live_magazine_page_check");
+}
+
 export default publicProcedure
   .input(
     z.object({
@@ -48,6 +53,8 @@ export default publicProcedure
       allowCountryAdmin: true,
       allowCountryCoordinator: true,
       allowClubCoordinator: true,
+      allowSpecialClubCoordinator: true,
+      allowMagazineEditor: true,
     });
 
     const { data: pictorial, error } = await ctx.supabase
@@ -63,6 +70,11 @@ export default publicProcedure
 
     if (error || !pictorial) {
       throw new Error(error?.message || "Could not update event pictorial.");
+    }
+
+    const scope = await getScopedMagazineAccess(ctx, actor);
+    if (!canAccessMagazineRow(pictorial, scope)) {
+      throw new Error("You can only review pictorial submissions linked to your own club or organizer profile.");
     }
 
     if (input.status === "accepted") {
@@ -82,7 +94,14 @@ export default publicProcedure
           updated_at: new Date().toISOString(),
         });
       } catch (publishError: any) {
-        throw new Error(publishError?.message || "Pictorial accepted, but publishing to live magazine failed.");
+        if (isLiveMagazinePageConstraintError(publishError)) {
+          console.warn(
+            "[Magazine] Pictorial accepted but live_magazine page constraint needs migration:",
+            publishError?.message || publishError
+          );
+        } else {
+          throw new Error(publishError?.message || "Pictorial accepted, but publishing to live magazine failed.");
+        }
       }
     }
 
@@ -94,4 +113,5 @@ export default publicProcedure
 
     return { success: true };
   });
+
 

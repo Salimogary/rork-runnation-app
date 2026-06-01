@@ -9,6 +9,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { getServerClient } from "@/lib/server-client";
 
+const MAGAZINE_IMAGE_ASPECT: [number, number] = [16, 9];
+
 async function readImageAsBase64(uri: string): Promise<string> {
   if (Platform.OS === "web") {
     const response = await fetch(uri);
@@ -41,6 +43,7 @@ export default function PictorialSubmitScreen() {
   const [eventDate, setEventDate] = useState("");
   const [caption, setCaption] = useState("");
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [photoBase64, setPhotoBase64] = useState<string | null>(null);
   const [mimeType, setMimeType] = useState("image/jpeg");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -63,12 +66,14 @@ export default function PictorialSubmitScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: "images" as any,
       allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.82,
+      aspect: MAGAZINE_IMAGE_ASPECT,
+      quality: 0.9,
+      base64: true,
     });
 
     if (!result.canceled && result.assets[0]) {
       setPhotoUri(result.assets[0].uri);
+      setPhotoBase64(result.assets[0].base64 || null);
       setMimeType(result.assets[0].mimeType || "image/jpeg");
     }
   };
@@ -81,7 +86,7 @@ export default function PictorialSubmitScreen() {
 
     setIsSubmitting(true);
     try {
-      const imageBase64 = await readImageAsBase64(photoUri);
+      const imageBase64 = photoBase64 || await readImageAsBase64(photoUri);
       await getServerClient().magazine.submitPictorial.mutate({
         registrationId,
         eventName,

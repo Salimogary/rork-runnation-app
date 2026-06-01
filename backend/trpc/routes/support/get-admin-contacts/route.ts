@@ -13,6 +13,7 @@ function normalizeCountryCode(country?: string | null) {
 function roleLabel(roleName: string) {
   switch (roleName) {
     case "super_admin":
+    case "global_admin":
       return "Global Admin";
     case "country_admin":
       return "Country Admin";
@@ -25,11 +26,17 @@ function roleLabel(roleName: string) {
   }
 }
 
-const SUPPORT_ROLE_NAMES = new Set(["super_admin", "country_admin", "country_coordinator"]);
+const SUPPORT_ROLE_NAMES = new Set(["super_admin", "global_admin", "country_admin", "country_coordinator"]);
+
+function isGlobalAdminRole(roleName: string | null | undefined): boolean {
+  const normalized = roleName?.trim().toLowerCase();
+  return normalized === "super_admin" || normalized === "global_admin";
+}
 
 function supportRolePriority(roleName: string) {
   switch (roleName) {
     case "super_admin":
+    case "global_admin":
       return 0;
     case "country_admin":
       return 1;
@@ -173,7 +180,7 @@ export default publicProcedure.query(async ({ ctx }) => {
       const fallbackName = [registration?.first_name, registration?.other_names].filter(Boolean).join(" ").trim();
       const displayName = profile?.display_name || fallbackName || profile?.username || "RunNation Admin";
       const effectiveCountryCode =
-        assignment.roleName === "super_admin"
+        isGlobalAdminRole(assignment.roleName)
           ? null
           : normalizeCountryCode(assignment.countryCode || registration?.country);
 
@@ -182,7 +189,7 @@ export default publicProcedure.query(async ({ ctx }) => {
         roleName: assignment.roleName,
         roleLabel: roleLabel(assignment.roleName),
         countryCode: effectiveCountryCode,
-        countryLabel: assignment.roleName === "super_admin" ? "All Countries" : effectiveCountryCode || registration?.country || "Unspecified",
+        countryLabel: isGlobalAdminRole(assignment.roleName) ? "All Countries" : effectiveCountryCode || registration?.country || "Unspecified",
         name: displayName,
         phone: contact?.full_phone ? String(contact.full_phone) : contact?.phone ? String(contact.phone) : null,
         email: contact?.email ? String(contact.email) : null,
@@ -195,7 +202,7 @@ export default publicProcedure.query(async ({ ctx }) => {
       return `${a.countryLabel} ${a.name}`.localeCompare(`${b.countryLabel} ${b.name}`);
     });
 
-  const globalAdmin = contactsResult.find((contact) => contact.roleName === "super_admin") ?? null;
+  const globalAdmin = contactsResult.find((contact) => isGlobalAdminRole(contact.roleName)) ?? null;
   const countryAdmin = actorCountryCode
     ? contactsResult.find(
         (contact) =>

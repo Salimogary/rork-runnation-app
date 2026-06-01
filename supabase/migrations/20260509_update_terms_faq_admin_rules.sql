@@ -34,7 +34,7 @@ where lower(question) = lower('Why does my profile completion matter?');
 
 update public.faq_entries
 set
-  answer = 'No, most users can hold only one active admin or service role at a time. A normal user role may exist beside one approved admin/service role. Super Admins are exempt where needed for setup and operations.',
+  answer = 'No, most users can hold only one active admin or service role at a time. A normal user role may exist beside one approved admin/service role. Global Admins are exempt where needed for setup and operations.',
   display_order = 170,
   is_active = true,
   updated_at = now()

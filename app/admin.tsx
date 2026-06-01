@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   StyleSheet,
   View,
@@ -11,19 +11,30 @@ import {
   Image,
   Platform,
   Linking,
+  Clipboard,
+  Share,
 } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { trpc } from "@/lib/trpc";
-import { ADMIN_TERMS_VERSION, getAdminTermsDocReference, getAdminTermsRoleLabel, getAdminTermsSections, type AdminTermsRole } from "@/lib/admin-terms";
-import { Package, ChevronRight, Edit, X, ClipboardCheck, LogOut, CheckCircle, XCircle, Calendar, Plus, Users, Download, ShoppingBag, Dumbbell, UserPlus, Upload, Activity, Star, Printer, Truck, MessageSquare, Archive, Trash2, AlertTriangle, ArrowLeft, BookOpen, Camera, FileText, ShieldAlert, Globe2, MapPin } from "lucide-react-native";
+import type { AdminTermsRole } from "@/lib/admin-terms";
+import { Package, ChevronRight, Edit, X, ClipboardCheck, LogOut, CheckCircle, XCircle, Calendar, Plus, Users, Download, ShoppingBag, Dumbbell, UserPlus, Upload, Activity, Star, Printer, Truck, MessageSquare, Archive, Trash2, AlertTriangle, ArrowLeft, BookOpen, Camera, FileText, ShieldAlert, Globe2, MapPin, CreditCard, MessageCircle, Save, Building2 } from "lucide-react-native";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { hasAdminPortalAccess } from "@/lib/role-session";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as DocumentPicker from "expo-document-picker";
 import { decode as decodeBase64 } from "base64-arraybuffer";
 import { formatCountryList, formatCountryName } from "@/constants/country-utils";
+
+function getRoleRequestLinks(request: PendingRoleRequest) {
+  return [
+    { label: "Website", url: request.websiteUrl },
+    { label: "LinkedIn", url: request.linkedinUrl },
+    { label: "Social", url: request.socialUrl },
+  ].filter((link): link is { label: string; url: string } => Boolean(link.url));
+}
 
 type AdminTab =
   | "orders"
@@ -31,20 +42,29 @@ type AdminTab =
   | "approvals"
   | "events"
   | "enrollments"
+  | "payments"
+  | "whatsapp"
+  | "clubAdmin"
   | "clubRequests"
   | "activityUploads"
   | "externalActivities"
   | "ratings"
   | "suggestions"
   | "magazine"
+  | "myArticles"
   | "adminTerms"
   | "roles"
   | "dataHealth"
   | "auditLog"
+  | "milestones"
+  | "resign"
   | "moderation"
+  | "reports"
+  | "myTeam"
   | "archive";
 
 type AuditLogUserType = "all" | "country_admin" | "country_coordinator" | "club_coordinator";
+type ClubRequestStatusFilter = "pending" | "approved" | "rejected";
 
 interface AuditLogEntry {
   id: string;
@@ -74,15 +94,51 @@ type ManageableRoleName =
   | "golden_age_runners_club_coordinator"
   | "treadmill_runners_club_coordinator"
   | "para_runners_club_coordinator"
+  | "smartfit_club_coordinator"
+  | "magazine_editor"
+  | "chat_room_administrator"
   | "magazine_columnist_fitness_coach"
   | "magazine_columnist_sports_journalist"
   | "magazine_columnist_motivation_speaker";
-type AssignableRoleName = "country_admin" | "country_coordinator" | "club_coordinator" | "event_organizer";
+type AssignableRoleName = "country_coordinator" | "club_coordinator" | "event_organizer";
 type EventEntryMode = "free" | "club_approved" | "paid";
 type EventTypeMode = "same_day" | "recurring" | "multiday";
 type EventRecurrenceFrequency = "weekly" | "monthly";
 type EventMonthlyMode = "day_of_month" | "weekend";
-type AdminMenuScopeGroup = "global" | "country" | "club";
+type AdminMenuPurposeGroup = "approvals" | "reporting" | "administration" | "operations";
+type MagazineCreatePage = "News" | "Events" | "Community" | "Columns" | "Gallery";
+type MagazineReviewStatusFilter = "pending" | "accepted" | "rejected";
+
+const MEDAL_DISTANCE_OPTIONS_KM = [3, 5, 10, 21.1, 42.2];
+
+const GLOBAL_ROLE_ACCESS_NAMES = new Set<ManageableRoleName>([
+  "country_admin",
+  "junior_runners_club_coordinator",
+  "golden_age_runners_club_coordinator",
+  "treadmill_runners_club_coordinator",
+  "para_runners_club_coordinator",
+  "smartfit_club_coordinator",
+  "magazine_editor",
+  "chat_room_administrator",
+  "magazine_columnist_fitness_coach",
+  "magazine_columnist_sports_journalist",
+  "magazine_columnist_motivation_speaker",
+]);
+
+const SPECIAL_CLUB_ROLE_CLUB_NAMES: Partial<Record<ManageableRoleName, string>> = {
+  junior_runners_club_coordinator: "Junior Runners Club",
+  golden_age_runners_club_coordinator: "Golden Age Runners Club",
+  treadmill_runners_club_coordinator: "Treadmill Runners Club",
+  para_runners_club_coordinator: "Para Runners Club",
+  smartfit_club_coordinator: "SmartFit Club",
+};
+
+const MAGAZINE_CREATE_PAGES: MagazineCreatePage[] = ["News", "Events", "Community", "Columns", "Gallery"];
+const MAGAZINE_REVIEW_STATUS_TABS: Array<{ key: MagazineReviewStatusFilter; label: string }> = [
+  { key: "pending", label: "Pending" },
+  { key: "accepted", label: "Accepted" },
+  { key: "rejected", label: "Rejected" },
+];
 
 const RUN_DAY_OPTIONS = [
   { value: 1, label: "Mon" },
@@ -119,6 +175,9 @@ interface PendingRoleRequest {
   websiteUrl: string | null;
   linkedinUrl: string | null;
   socialUrl: string | null;
+  applicantStatement: string | null;
+  contactConsent: boolean;
+  contactInstructions: string | null;
   status: string;
   createdAt: string;
   expiresAt: string | null;
@@ -141,6 +200,28 @@ interface ActiveRoleAssignment {
   assignedByName: string | null;
   hasAcceptedTerms: boolean;
   termsAcceptedAt: string | null;
+}
+
+interface MyTeamMember {
+  assignmentId: number;
+  userId: string;
+  name: string;
+  username: string | null;
+  email: string | null;
+  roleName: ManageableRoleName | string;
+  countryCode: string | null;
+  countryName: string | null;
+  userCountryCode: string | null;
+  userCountryName: string | null;
+  clubName: string | null;
+  organizerName: string | null;
+  websiteUrl: string | null;
+  linkedinUrl: string | null;
+  socialUrl: string | null;
+  applicantStatement: string | null;
+  contactConsent: boolean;
+  contactInstructions: string | null;
+  assignedAt: string;
 }
 
 interface RoleLookupCountry {
@@ -227,6 +308,38 @@ function getRepairActions(entry: AccountLinkHealthEntry): Array<{ key: AccountRe
   return actions;
 }
 
+function getAccountHealthRecommendation(issueCode: string): string {
+  switch (issueCode) {
+    case "missing_profile":
+      return "Create/repair profile, or consider auth account deletion if it is unused.";
+    case "missing_registration":
+      return "Relink the profile to a registration before the user continues.";
+    case "missing_contact":
+      return "Create the missing contact row from the auth email.";
+    case "registration_email_unverified":
+    case "contact_email_unverified":
+      return "Mark verified for trusted Google/Apple sign-ins.";
+    case "email_mismatch":
+      return "Confirm the correct login email, then update contact details.";
+    case "username_mismatch":
+      return "Sync username values between profile and registration.";
+    case "orphan_profile":
+      return "Delete orphan profile or recreate the missing auth user if needed.";
+    case "unlinked_registration":
+      return "Invite user to sign in or link this registration to an auth profile.";
+    case "uuid_pk_missing_default":
+      return "Add a UUID default generator migration for this primary key.";
+    default:
+      return "Review the affected accounts and apply the safest repair.";
+  }
+}
+
+function getCountryFlag(countryCode?: string | null): string {
+  const code = String(countryCode || "").trim().toUpperCase();
+  if (code.length !== 2) return "";
+  return String.fromCodePoint(...[...code].map((char) => 127397 + char.charCodeAt(0)));
+}
+
 function toDateInputValue(date: Date): string {
   return date.toISOString().split("T")[0];
 }
@@ -258,7 +371,25 @@ interface ChatModerationReport {
     dismissed_reports: number;
     is_banned: boolean;
     ban_reason: string | null;
+    suspended_until: string | null;
+    suspension_status: string | null;
   } | null;
+}
+
+interface DeletedChatLog {
+  logId: number | string;
+  createdAt: string;
+  contentType: string;
+  contentId: string | null;
+  deletionSource: string;
+  deletedByRole: string;
+  deletedByName: string;
+  deletedByUsername: string | null;
+  ownerName: string | null;
+  ownerUsername: string | null;
+  ownerRegistrationId: string | null;
+  contentPreview: string;
+  hadPhoto: boolean;
 }
 
 function formatDisplayDateInput(value: string): string {
@@ -361,6 +492,10 @@ interface PendingActivity {
   time_entered: string;
   photo_path: string;
   photoUrl?: string | null;
+  username?: string | null;
+  runnerName?: string | null;
+  isTreadmillClubMember?: boolean;
+  treadmillClubMember?: "Y" | "N" | string;
   status: string;
   admin_notes: string | null;
   created_at: string;
@@ -392,10 +527,116 @@ interface ClubMembershipRequest {
   } | null;
 }
 
+interface ClubDeletionClub {
+  clubId: string;
+  clubName: string;
+  country: string | null;
+  location: string | null;
+  memberCount: number;
+  inactiveFlag?: boolean;
+  inactiveReason?: string | null;
+  canRequestDeletion: boolean;
+}
+
+interface ClubDeletionRequest {
+  requestId: string;
+  clubId: string;
+  clubName: string;
+  country: string | null;
+  requestedBy: string;
+  reason: string;
+  status: string;
+  eligibleAt: string;
+  actionedBy: string | null;
+  actionedAt: string | null;
+  createdAt: string;
+}
+
+interface ClubPaymentMember {
+  registrationId: string;
+  name: string;
+  username: string | null;
+  sex: string | null;
+  status: "unpaid" | "pending" | "paid" | "waived";
+  amountPaid: number;
+  paidAt: string | null;
+  notes: string | null;
+}
+
+interface ClubPaymentItem {
+  paymentId: string;
+  clubId: string;
+  clubName: string;
+  title: string;
+  description: string | null;
+  amount: number;
+  currency: string;
+  dueDate: string | null;
+  isActive: boolean;
+  createdAt: string;
+  members: ClubPaymentMember[];
+  totals: {
+    members: number;
+    paid: number;
+    unpaid: number;
+    pending: number;
+    waived: number;
+    collected: number;
+  };
+}
+
+interface ClubPaymentClub {
+  clubId: string;
+  clubName: string;
+  country: string | null;
+}
+
+interface ClubPayoutRequest {
+  requestId: string;
+  clubId: string;
+  clubName: string;
+  amount: number;
+  currency: string;
+  destinationType: "bank" | "mobile_money";
+  destinationDetails: string;
+  status: string;
+  createdAt: string;
+}
+
+interface ClubWhatsappAdminClub {
+  clubId: string;
+  clubName: string;
+  country: string | null;
+}
+
+interface ClubWhatsappAdminLink {
+  linkId: string;
+  clubId: string;
+  clubName: string;
+  link: string;
+}
+
+interface AdminWhatsappGlobalLink {
+  linkType: "service_team" | "admins";
+  link: string;
+  updatedAt: string | null;
+}
+
+type WhatsappSection = "club" | "service_team" | "admins";
+
+interface AdminMilestoneRow {
+  key: string;
+  category: string;
+  milestone: string;
+  threshold?: number;
+  milestoneDate: string | null;
+  note?: string | null;
+}
+
 const EVENT_POSTER_ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif"] as const;
 
 function detectMimeTypeFromBase64(base64: string): string | null {
-  const normalized = base64.trim();
+  const normalized = normalizeImageBase64(base64);
   if (normalized.startsWith("/9j/")) return "image/jpeg";
   if (normalized.startsWith("iVBORw0KGgo")) return "image/png";
   if (normalized.startsWith("UklGR")) return "image/webp";
@@ -403,6 +644,21 @@ function detectMimeTypeFromBase64(base64: string): string | null {
     return "image/avif";
   }
   return null;
+}
+
+function normalizeImageBase64(value: string): string {
+  return value
+    .trim()
+    .replace(/^data:[^;]+;base64,/i, "")
+    .replace(/\s/g, "");
+}
+
+function isMagazineImageUrl(value?: string | null): boolean {
+  return /\.(jpe?g|png|webp)(\?|#|$)/i.test(String(value || "").trim());
+}
+
+function getMagazineImageUrl(...values: Array<string | null | undefined>): string | null {
+  return values.find((value): value is string => isMagazineImageUrl(value)) ?? null;
 }
 
 function resolveEventPosterMimeType(uri: string, mimeType?: string | null): string | null {
@@ -458,6 +714,45 @@ async function encodeEventPosterForUpload(
   return {
     base64,
     mimeType: resolvedMimeType,
+  };
+}
+
+async function encodeMagazineArticlePhotoForUpload(
+  uri: string,
+  mimeType?: string | null
+): Promise<{ base64: string; mimeType: string }> {
+  let base64 = "";
+  if (Platform.OS === "web") {
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Could not read the selected magazine photo."));
+      reader.readAsDataURL(blob);
+    });
+    base64 = normalizeImageBase64(dataUrl);
+  } else {
+    base64 = normalizeImageBase64(
+      await FileSystem.readAsStringAsync(uri, {
+        encoding: "base64",
+      })
+    );
+  }
+
+  const detectedMimeType = detectMimeTypeFromBase64(base64);
+  if (!base64 || !detectedMimeType || !["image/jpeg", "image/png", "image/webp"].includes(detectedMimeType)) {
+    throw new Error("Could not read the selected magazine photo as a JPG, PNG, or WEBP image.");
+  }
+
+  const providedMimeType = String(mimeType || "").trim().toLowerCase();
+  if (providedMimeType && ["image/jpeg", "image/png", "image/webp"].includes(providedMimeType) && providedMimeType !== detectedMimeType) {
+    throw new Error("The selected magazine photo type did not match the image file bytes.");
+  }
+
+  return {
+    base64,
+    mimeType: detectedMimeType,
   };
 }
 
@@ -557,10 +852,11 @@ async function uploadEventPosterDirect(params: {
 
 export default function AdminScreen() {
   const router = useRouter();
-  const { roleSession, user } = useAuth();
+  const { roleSession, user, isLoading: isAuthLoading, isRoleSessionLoading, refreshRoleSession } = useAuth();
   const [activeTab, setActiveTab] = useState<AdminTab | null>(null);
-  const [eventsSubTab, setEventsSubTab] = useState<"calendar" | "participants">("calendar");
+  const [eventApprovalTab, setEventApprovalTab] = useState<"pending" | "approved" | "closed">("pending");
   const [selectedOrganizerFilter, setSelectedOrganizerFilter] = useState<string>("all");
+  const [showEventOrganizerFilterModal, setShowEventOrganizerFilterModal] = useState<boolean>(false);
   const [selectedEventId, setSelectedEventId] = useState<string>("");
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
@@ -580,6 +876,7 @@ export default function AdminScreen() {
   const [registrationClosesAt, setRegistrationClosesAt] = useState<string>("");
   const [eventCountry, setEventCountry] = useState<string>("");
   const [eventOrganizerId, setEventOrganizerId] = useState<string>("");
+  const [eventLocation, setEventLocation] = useState<string>("");
   const [eventTypeMode, setEventTypeMode] = useState<EventTypeMode>("same_day");
   const [eventRecurrenceWeekday, setEventRecurrenceWeekday] = useState<number>(3);
   const [eventRecurrenceFrequency, setEventRecurrenceFrequency] = useState<EventRecurrenceFrequency>("weekly");
@@ -594,6 +891,8 @@ export default function AdminScreen() {
   const [eventPaymentDetails, setEventPaymentDetails] = useState<string>("");
   const [eventOrganizerPaymentLink, setEventOrganizerPaymentLink] = useState<string>("");
   const [eventRunNationPaymentLinkEnabled, setEventRunNationPaymentLinkEnabled] = useState<boolean>(false);
+  const [eventParticipantLimitEnabled, setEventParticipantLimitEnabled] = useState<boolean>(false);
+  const [eventParticipantLimit, setEventParticipantLimit] = useState<string>("");
   const [eventMagazineArticleTitle, setEventMagazineArticleTitle] = useState<string>("");
   const [eventMagazineArticleBody, setEventMagazineArticleBody] = useState<string>("");
   const [eventMagazineWriterName, setEventMagazineWriterName] = useState<string>("");
@@ -609,10 +908,15 @@ export default function AdminScreen() {
   const [eventPosterMarkedForRemoval, setEventPosterMarkedForRemoval] = useState<boolean>(false);
   const [eventMagazinePhotoAsset, setEventMagazinePhotoAsset] = useState<{
     uri: string;
+    base64?: string | null;
     mimeType?: string | null;
   } | null>(null);
   const [eventMagazinePhotoPreview, setEventMagazinePhotoPreview] = useState<string | null>(null);
+  const [selectedEventPreview, setSelectedEventPreview] = useState<any | null>(null);
+  const [selectedPosterPreview, setSelectedPosterPreview] = useState<{ url: string; title: string } | null>(null);
   const [eventMinimumDistanceEnabled, setEventMinimumDistanceEnabled] = useState<boolean>(false);
+  const [eventMedalDistances, setEventMedalDistances] = useState<number[]>([]);
+  const [eventCustomMedalDistance, setEventCustomMedalDistance] = useState<string>("");
   const [medalMinDailyDistance, setMedalMinDailyDistance] = useState<string>("");
   const [medalMinCumulativeDistance, setMedalMinCumulativeDistance] = useState<string>("");
   const [medalDateStart, setMedalDateStart] = useState<string>("");
@@ -625,62 +929,182 @@ export default function AdminScreen() {
   const [isDownloadingAuditLog, setIsDownloadingAuditLog] = useState<boolean>(false);
   const [adminTermsAcceptedChecked, setAdminTermsAcceptedChecked] = useState<boolean>(false);
   const [showRoleModal, setShowRoleModal] = useState<boolean>(false);
+  const [roleAccessTab, setRoleAccessTab] = useState<"pending" | "active">("pending");
   const [selectedMagazinePreview, setSelectedMagazinePreview] = useState<any | null>(null);
+  const [selectedMagazineEditTarget, setSelectedMagazineEditTarget] = useState<any | null>(null);
+  const [magazineEditTitle, setMagazineEditTitle] = useState("");
+  const [magazineEditAuthor, setMagazineEditAuthor] = useState("");
+  const [magazineEditCategory, setMagazineEditCategory] = useState("");
+  const [magazineEditPitch, setMagazineEditPitch] = useState("");
+  const [magazineEditBody, setMagazineEditBody] = useState("");
+  const [magazineEditExternalLink, setMagazineEditExternalLink] = useState("");
+  const [magazineEditEventDate, setMagazineEditEventDate] = useState("");
+  const [magazineEditPhotoAsset, setMagazineEditPhotoAsset] = useState<{
+    uri: string;
+    base64?: string | null;
+    mimeType?: string | null;
+  } | null>(null);
+  const [magazineEditPhotoPreview, setMagazineEditPhotoPreview] = useState<string | null>(null);
+  const [isPreparingMagazineEditPhoto, setIsPreparingMagazineEditPhoto] = useState(false);
+  const [magazineMode, setMagazineMode] = useState<"create" | "edit">("edit");
+  const [magazineReviewStatusFilter, setMagazineReviewStatusFilter] = useState<MagazineReviewStatusFilter>("pending");
+  const [magazineDateSort, setMagazineDateSort] = useState<"newest" | "oldest">("newest");
+  const [newsTitle, setNewsTitle] = useState<string>("");
+  const [newsAuthor, setNewsAuthor] = useState<string>("");
+  const [newsBody, setNewsBody] = useState<string>("");
+  const [newsExternalLink, setNewsExternalLink] = useState<string>("");
+  const [newsPage, setNewsPage] = useState<MagazineCreatePage>("News");
+  const [newsPhotoAsset, setNewsPhotoAsset] = useState<{
+    uri: string;
+    base64?: string | null;
+    mimeType?: string | null;
+  } | null>(null);
+  const [newsPhotoPreview, setNewsPhotoPreview] = useState<string | null>(null);
   const [editingRoleAssignment, setEditingRoleAssignment] = useState<ActiveRoleAssignment | null>(null);
   const [roleRequestEmail, setRoleRequestEmail] = useState<string>("");
-  const [selectedRoleName, setSelectedRoleName] = useState<AssignableRoleName>("country_admin");
+  const [selectedRoleName, setSelectedRoleName] = useState<AssignableRoleName>("country_coordinator");
   const [selectedRoleCountryCode, setSelectedRoleCountryCode] = useState<string>("");
   const [selectedRoleClubId, setSelectedRoleClubId] = useState<string>("");
+  const [selectedPaymentClubId, setSelectedPaymentClubId] = useState<string>("");
+  const [newPaymentTitle, setNewPaymentTitle] = useState<string>("");
+  const [newPaymentAmount, setNewPaymentAmount] = useState<string>("");
+  const [newPaymentCurrency, setNewPaymentCurrency] = useState<string>("UGX");
+  const [newPaymentDueDate, setNewPaymentDueDate] = useState<string>("");
+  const [newPaymentDescription, setNewPaymentDescription] = useState<string>("");
+  const [payoutAmount, setPayoutAmount] = useState<string>("");
+  const [payoutDestinationType, setPayoutDestinationType] = useState<"bank" | "mobile_money">("mobile_money");
+  const [payoutDestinationDetails, setPayoutDestinationDetails] = useState<string>("");
+  const [selectedWhatsappClubId, setSelectedWhatsappClubId] = useState<string>("");
+  const [whatsappSection, setWhatsappSection] = useState<WhatsappSection>("club");
+  const [whatsappLinkInput, setWhatsappLinkInput] = useState<string>("");
+  const [serviceTeamWhatsappInput, setServiceTeamWhatsappInput] = useState<string>("");
+  const [adminWhatsappInput, setAdminWhatsappInput] = useState<string>("");
+  const [clubRequestStatusFilter, setClubRequestStatusFilter] = useState<ClubRequestStatusFilter>("pending");
+  const [clubRequestCountryFilter, setClubRequestCountryFilter] = useState<string>("all");
+  const [clubProfileName, setClubProfileName] = useState<string>("");
+  const [clubProfileLocation, setClubProfileLocation] = useState<string>("");
+  const [clubProfileDescription, setClubProfileDescription] = useState<string>("");
+  const [clubProfilePresenceTowns, setClubProfilePresenceTowns] = useState<string>("");
+  const [adminProfileName, setAdminProfileName] = useState<string>("");
+  const [adminProfileLocation, setAdminProfileLocation] = useState<string>("");
+  const [adminProfileDescription, setAdminProfileDescription] = useState<string>("");
+  const [adminProfilePresenceTowns, setAdminProfilePresenceTowns] = useState<string>("");
+  const [resignationReason, setResignationReason] = useState<string>("");
+  const [clubDeletionReasonById, setClubDeletionReasonById] = useState<Record<string, string>>({});
+  const [milestoneDateInputs, setMilestoneDateInputs] = useState<Record<string, string>>({});
+  const [isExportingMilestones, setIsExportingMilestones] = useState(false);
+  const [selectedReportEventId, setSelectedReportEventId] = useState<string>("");
+  const [isExportingClubStatus, setIsExportingClubStatus] = useState(false);
+  const [isExportingEventResults, setIsExportingEventResults] = useState(false);
 
   const queryClient = useQueryClient();
-  const hasRoleBasedAccess = roleSession.hasAdminAccess;
-  const isSuperAdmin = roleSession.isSuperAdmin;
+  const hasRoleBasedAccess = hasAdminPortalAccess(roleSession);
+  const isSuperAdmin =
+    roleSession.isSuperAdmin ||
+    roleSession.roles.some((role) => {
+      const roleName = role.roleName.trim().toLowerCase();
+      return roleName === "super_admin" || roleName === "global_admin";
+    });
   const isCountryAdmin = roleSession.isCountryAdmin;
   const isCountryCoordinator = roleSession.isCountryCoordinator;
   const isClubCoordinator = roleSession.isClubCoordinator;
+  const isSpecialClubCoordinator = roleSession.isSpecialClubCoordinator;
   const isEventOrganizer = roleSession.isEventOrganizer;
+  const isMagazineEditor = roleSession.isMagazineEditor;
+  const isMagazineColumnist = roleSession.isMagazineColumnist;
+  const isFitnessCoachColumnist = roleSession.roles.some((role) => role.roleName === "magazine_columnist_fitness_coach");
+  const isChatRoomAdministrator = roleSession.isChatRoomAdministrator;
+  const isJuniorRunnersCoordinator = roleSession.roles.some((role) => role.roleName === "junior_runners_club_coordinator");
+  const isGoldenAgeCoordinator = roleSession.roles.some((role) => role.roleName === "golden_age_runners_club_coordinator");
+  const isTreadmillCoordinator = roleSession.roles.some((role) => role.roleName === "treadmill_runners_club_coordinator");
+  const isParaRunnersCoordinator = roleSession.roles.some((role) => role.roleName === "para_runners_club_coordinator");
+  const isSmartFitCoordinator = roleSession.roles.some((role) => role.roleName === "smartfit_club_coordinator");
+  const pendingClubSetupRole = roleSession.roles.find((role) => role.roleName === "club_coordinator" && role.countryCode && !role.clubId);
+  const needsClubProfileSetup = isClubCoordinator && Boolean(pendingClubSetupRole) && roleSession.clubCoordinatorScopes.length === 0;
   const isAuthenticated = hasRoleBasedAccess;
-  const isChecking = false;
+  const isChecking = isAuthLoading || isRoleSessionLoading;
   const { data: countryList = [] } = trpc.auth.getCountries.useQuery();
   const canUseProtectedAdminRoutes = hasRoleBasedAccess;
-  const protectedTabs: AdminTab[] = ["orders", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "moderation", "adminTerms", "roles", "dataHealth", "auditLog"];
+  const canUseEventAdminRoutes =
+    isSuperAdmin ||
+    isCountryAdmin ||
+    isCountryCoordinator ||
+    isClubCoordinator ||
+    isSpecialClubCoordinator ||
+    isEventOrganizer;
+  const protectedTabs: AdminTab[] = ["orders", "events", "enrollments", "payments", "whatsapp", "clubAdmin", "clubRequests", "activityUploads", "externalActivities", "moderation", "adminTerms", "roles", "dataHealth", "auditLog", "milestones", "reports", "myTeam", "myArticles"];
 
   const allowedTabs = useMemo<AdminTab[]>(() => {
     if (isSuperAdmin) {
-      return ["orders", "stock", "approvals", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "ratings", "suggestions", "magazine", "moderation", "adminTerms", "roles", "dataHealth", "auditLog", "archive"];
+      return ["orders", "stock", "approvals", "events", "enrollments", "payments", "whatsapp", "clubAdmin", "clubRequests", "activityUploads", "externalActivities", "ratings", "suggestions", "magazine", "moderation", "reports", "myTeam", "adminTerms", "roles", "dataHealth", "auditLog", "milestones", "archive"];
     }
     if (isCountryAdmin) {
-      return ["orders", "stock", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "magazine", "moderation", "adminTerms"];
+      return ["orders", "stock", "events", "enrollments", "payments", "whatsapp", "clubAdmin", "clubRequests", "activityUploads", "externalActivities", "magazine", "reports", "adminTerms", "resign"];
     }
     if (isCountryCoordinator) {
-      return ["approvals", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "magazine", "moderation", "adminTerms"];
+      return ["orders", "stock", "approvals", "events", "enrollments", "payments", "whatsapp", "clubAdmin", "clubRequests", "activityUploads", "externalActivities", "magazine", "reports", "myTeam", "adminTerms", "resign"];
     }
     if (isClubCoordinator) {
-      return ["approvals", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "magazine", "moderation", "adminTerms"];
+      if (needsClubProfileSetup) {
+        return ["clubAdmin", "adminTerms", "resign"];
+      }
+      return ["approvals", "events", "enrollments", "payments", "whatsapp", "clubAdmin", "clubRequests", "activityUploads", "externalActivities", "magazine", "reports", "adminTerms", "resign"];
+    }
+    if (isSpecialClubCoordinator) {
+      return isTreadmillCoordinator
+        ? ["approvals", "events", "whatsapp", "magazine", "reports", "adminTerms", "resign"]
+        : ["events", "externalActivities", "whatsapp", "magazine", "reports", "adminTerms", "resign"];
     }
     if (isEventOrganizer) {
-      return ["events", "enrollments", "adminTerms"];
+      return ["clubAdmin", "events", "enrollments", "reports", "adminTerms", "resign"];
+    }
+    if (isMagazineEditor) {
+      return ["magazine", "myTeam", "adminTerms", "resign"];
+    }
+    if (isMagazineColumnist) {
+      return ["myArticles", "magazine", "adminTerms", "resign"];
+    }
+    if (isChatRoomAdministrator) {
+      return ["moderation", "adminTerms", "resign"];
     }
     return [];
-  }, [isSuperAdmin, isCountryAdmin, isCountryCoordinator, isClubCoordinator, isEventOrganizer]);
+  }, [isSuperAdmin, isCountryAdmin, isCountryCoordinator, isClubCoordinator, needsClubProfileSetup, isSpecialClubCoordinator, isTreadmillCoordinator, isEventOrganizer, isMagazineEditor, isMagazineColumnist, isChatRoomAdministrator]);
 
   const adminRoleLabel = useMemo(() => {
   if (isSuperAdmin) return "Global Admin";
     if (isCountryAdmin) return "Country Admin";
     if (isCountryCoordinator) return "Country Coordinator";
     if (isClubCoordinator) return "Club Coordinator";
+    if (isJuniorRunnersCoordinator) return "Junior Runners Club Coordinator";
+    if (isGoldenAgeCoordinator) return "Golden Age Runners Club Coordinator";
+    if (isTreadmillCoordinator) return "Treadmill Runners Club Coordinator";
+    if (isParaRunnersCoordinator) return "Para Runners Club Coordinator";
+    if (isSmartFitCoordinator) return "SmartFit Club Coordinator";
+    if (isSpecialClubCoordinator) return "Club Coordinator";
     if (isEventOrganizer) return "Event Organizer";
+    if (isMagazineEditor) return "Magazine Editor";
+    if (isFitnessCoachColumnist) return "Fitness Coach";
+    if (isMagazineColumnist) return "Magazine Columnist";
+    if (isChatRoomAdministrator) return "Chat Room Administrator";
     return "Role-Based Admin";
-  }, [isSuperAdmin, isCountryAdmin, isCountryCoordinator, isClubCoordinator, isEventOrganizer]);
+  }, [isSuperAdmin, isCountryAdmin, isCountryCoordinator, isClubCoordinator, isJuniorRunnersCoordinator, isGoldenAgeCoordinator, isTreadmillCoordinator, isParaRunnersCoordinator, isSmartFitCoordinator, isSpecialClubCoordinator, isEventOrganizer, isMagazineEditor, isFitnessCoachColumnist, isMagazineColumnist, isChatRoomAdministrator]);
 
   const adminTermsRole = useMemo<AdminTermsRole>(() => {
     if (isSuperAdmin) return "global_admin";
     if (isCountryAdmin) return "country_admin";
     if (isCountryCoordinator) return "country_coordinator";
     if (isClubCoordinator) return "club_coordinator";
+    if (isJuniorRunnersCoordinator) return "junior_runners_club_coordinator";
+    if (isGoldenAgeCoordinator) return "golden_age_runners_club_coordinator";
+    if (isTreadmillCoordinator) return "treadmill_runners_club_coordinator";
+    if (isParaRunnersCoordinator) return "para_runners_club_coordinator";
+    if (isSmartFitCoordinator) return "smartfit_club_coordinator";
+    if (isSpecialClubCoordinator) return "special_club_coordinator";
+    if (isMagazineEditor) return "magazine_editor";
+    if (isMagazineColumnist) return "magazine_columnist";
+    if (isChatRoomAdministrator) return "chat_room_administrator";
     return "event_organizer";
-  }, [isSuperAdmin, isCountryAdmin, isCountryCoordinator, isClubCoordinator]);
-  const adminTermsDocs = useMemo(() => getAdminTermsDocReference(adminTermsRole), [adminTermsRole]);
+  }, [isSuperAdmin, isCountryAdmin, isCountryCoordinator, isClubCoordinator, isJuniorRunnersCoordinator, isGoldenAgeCoordinator, isTreadmillCoordinator, isParaRunnersCoordinator, isSmartFitCoordinator, isSpecialClubCoordinator, isEventOrganizer, isMagazineEditor, isMagazineColumnist, isChatRoomAdministrator]);
 
   const { data: stockProducts, isLoading: stockLoading, error: stockError } = useQuery<any[]>({
     queryKey: ["catalogue"],
@@ -696,22 +1120,19 @@ export default function AdminScreen() {
   });
 
   useEffect(() => {
+    if (isChecking) {
+      return;
+    }
     if (!user || !hasRoleBasedAccess) {
       router.replace("/admin-login" as any);
     }
-  }, [hasRoleBasedAccess, router, user]);
+  }, [hasRoleBasedAccess, isChecking, router, user]);
 
   useEffect(() => {
     if (activeTab && !allowedTabs.includes(activeTab)) {
       setActiveTab(null);
     }
   }, [activeTab, allowedTabs]);
-
-  useEffect(() => {
-    if (isEventOrganizer && eventsSubTab === "participants") {
-      setEventsSubTab("calendar");
-    }
-  }, [eventsSubTab, isEventOrganizer]);
 
   const handleLogout = () => {
     const confirmLogout = async () => {
@@ -742,7 +1163,7 @@ export default function AdminScreen() {
   const { data: events, isLoading: eventsLoading, error: eventsError, refetch: refetchEvents } = trpc.admin.getEvents.useQuery(
     undefined,
     { 
-      enabled: canUseProtectedAdminRoutes,
+      enabled: canUseProtectedAdminRoutes && canUseEventAdminRoutes && (activeTab === "events" || activeTab === "reports" || activeTab === "enrollments"),
       retry: 1,
       refetchOnMount: true,
     }
@@ -752,6 +1173,24 @@ export default function AdminScreen() {
     enabled: canUseProtectedAdminRoutes && activeTab === "events",
     refetchOnMount: true,
   });
+
+  const {
+    data: adminProfile,
+    isLoading: adminProfileLoading,
+    error: adminProfileError,
+    refetch: refetchAdminProfile,
+  } = trpc.admin.getAdminProfile.useQuery(undefined, {
+    enabled: canUseProtectedAdminRoutes && activeTab === "clubAdmin",
+    refetchOnMount: true,
+  });
+
+  useEffect(() => {
+    if (!adminProfile) return;
+    setAdminProfileName(adminProfile.name || "");
+    setAdminProfileLocation(adminProfile.location || "");
+    setAdminProfileDescription(adminProfile.description || "");
+    setAdminProfilePresenceTowns((adminProfile.presenceTowns || []).join(", "));
+  }, [adminProfile]);
 
   const { data: enrollments, isLoading: enrollmentsLoading, error: enrollmentsError, refetch: refetchEnrollments } = trpc.admin.getEnrollments.useQuery(
     { eventId: undefined },
@@ -764,7 +1203,30 @@ export default function AdminScreen() {
   const { data: participants, isLoading: participantsLoading, error: participantsError, refetch: refetchParticipants } = trpc.admin.getParticipants.useQuery(
     { eventId: selectedEventId },
     { 
-      enabled: canUseProtectedAdminRoutes && activeTab === "events" && eventsSubTab === "participants" && !!selectedEventId,
+      enabled: false,
+      refetchOnMount: true,
+    }
+  );
+
+  const {
+    data: clubStatusReport,
+    isLoading: clubStatusReportLoading,
+    error: clubStatusReportError,
+    refetch: refetchClubStatusReport,
+  } = trpc.admin.getClubStatusReport.useQuery(undefined, {
+    enabled: canUseProtectedAdminRoutes && activeTab === "reports" && (isClubCoordinator || isSpecialClubCoordinator || isSuperAdmin || isCountryAdmin || isCountryCoordinator),
+    refetchOnMount: true,
+  });
+
+  const {
+    data: eventResultsReport,
+    isLoading: eventResultsReportLoading,
+    error: eventResultsReportError,
+    refetch: refetchEventResultsReport,
+  } = trpc.admin.getEventResultsReport.useQuery(
+    { eventId: selectedReportEventId },
+    {
+      enabled: canUseProtectedAdminRoutes && activeTab === "reports" && !!selectedReportEventId,
       refetchOnMount: true,
     }
   );
@@ -806,6 +1268,8 @@ export default function AdminScreen() {
     registration_id: string;
     suggestion: string;
     created_at: string;
+    name?: string;
+    country?: string | null;
   }
 
   interface InactiveUser {
@@ -987,7 +1451,33 @@ export default function AdminScreen() {
         console.error('Error fetching suggestions:', error);
         throw error;
       }
-      return data || [];
+      const rows = data || [];
+      const registrationIds = Array.from(new Set(rows.map((item) => item.registration_id).filter(Boolean)));
+      const { data: registrations, error: registrationsError } = registrationIds.length > 0
+        ? await supabase
+            .from('registrations')
+            .select('registration_id, first_name, other_names, username, country')
+            .in('registration_id', registrationIds)
+        : { data: [], error: null };
+
+      if (registrationsError) {
+        console.warn('Could not enrich suggestions with registration data:', registrationsError.message);
+      }
+
+      const registrationById = new Map((registrations || []).map((registration: any) => [registration.registration_id, registration]));
+      return rows.map((item) => {
+        const registration = registrationById.get(item.registration_id);
+        const name = registration
+          ? [registration.first_name, registration.other_names].filter(Boolean).join(' ').trim() ||
+            registration.username ||
+            item.registration_id
+          : item.registration_id;
+        return {
+          ...item,
+          name,
+          country: registration?.country ?? null,
+        };
+      });
     },
     enabled: isAuthenticated && activeTab === 'suggestions',
   });
@@ -1035,7 +1525,15 @@ export default function AdminScreen() {
   const { data: magazineSubmissions = [], isLoading: magazineSubmissionsLoading } = trpc.admin.getMagazineSubmissions.useQuery(
     undefined,
     {
-      enabled: canUseProtectedAdminRoutes && activeTab === "magazine",
+      enabled: canUseProtectedAdminRoutes && activeTab === "magazine" && !isMagazineColumnist,
+      refetchOnMount: true,
+    }
+  );
+
+  const { data: myMagazineArticles = [], isLoading: myMagazineArticlesLoading } = trpc.admin.getMyMagazineArticles.useQuery(
+    undefined,
+    {
+      enabled: canUseProtectedAdminRoutes && activeTab === "myArticles",
       refetchOnMount: true,
     }
   );
@@ -1043,7 +1541,7 @@ export default function AdminScreen() {
   const { data: magazinePictorials = [], isLoading: magazinePictorialsLoading } = trpc.admin.getMagazinePictorials.useQuery(
     undefined,
     {
-      enabled: canUseProtectedAdminRoutes && activeTab === "magazine",
+      enabled: canUseProtectedAdminRoutes && activeTab === "magazine" && !isMagazineColumnist,
       refetchOnMount: true,
     }
   );
@@ -1057,9 +1555,19 @@ export default function AdminScreen() {
     refetchOnMount: true,
   });
 
+  const {
+    data: deletedChatLogs = [],
+    isLoading: deletedChatLogsLoading,
+    refetch: refetchDeletedChatLogs,
+  } = trpc.admin.getDeletedChatLogs.useQuery(undefined, {
+    enabled: canUseProtectedAdminRoutes && activeTab === "moderation",
+    refetchOnMount: true,
+  });
+
   const reviewChatReportMutation = trpc.admin.reviewChatReport.useMutation({
     onSuccess: () => {
       void refetchChatReports();
+      void refetchDeletedChatLogs();
       Alert.alert("Updated", "Chat report reviewed.");
     },
     onError: (error: any) => {
@@ -1079,6 +1587,35 @@ export default function AdminScreen() {
       refetchOnMount: true,
     }
   );
+
+  const {
+    data: clubPaymentsData,
+    isLoading: clubPaymentsLoading,
+    error: clubPaymentsError,
+    refetch: refetchClubPayments,
+  } = trpc.admin.getClubPayments.useQuery(undefined, {
+    enabled: canUseProtectedAdminRoutes && activeTab === "payments",
+    refetchOnMount: true,
+  });
+
+  const {
+    data: clubWhatsappData,
+    isLoading: clubWhatsappLoading,
+    error: clubWhatsappError,
+    refetch: refetchClubWhatsappLinks,
+  } = trpc.admin.getClubWhatsappLinks.useQuery(undefined, {
+    enabled: canUseProtectedAdminRoutes && activeTab === "whatsapp",
+    refetchOnMount: true,
+  });
+  const {
+    data: clubDeletionData,
+    isLoading: clubDeletionLoading,
+    error: clubDeletionError,
+    refetch: refetchClubDeletionManagement,
+  } = trpc.admin.getClubDeletionManagement.useQuery(undefined, {
+    enabled: canUseProtectedAdminRoutes && activeTab === "clubAdmin",
+    refetchOnMount: true,
+  });
 
   const {
     data: auditLogs = [],
@@ -1108,12 +1645,31 @@ export default function AdminScreen() {
   });
 
   const {
+    data: myTeamData,
+    isLoading: myTeamLoading,
+    error: myTeamError,
+    refetch: refetchMyTeam,
+  } = trpc.admin.getMyTeam.useQuery(undefined, {
+    enabled: canUseProtectedAdminRoutes && activeTab === "myTeam",
+    refetchOnMount: true,
+  });
+
+  const {
     data: accountLinkHealthData,
     isLoading: accountLinkHealthLoading,
     error: accountLinkHealthError,
     refetch: refetchAccountLinkHealth,
   } = trpc.admin.getAccountLinkHealth.useQuery(undefined, {
     enabled: canUseProtectedAdminRoutes && isSuperAdmin && activeTab === "dataHealth",
+    refetchOnMount: true,
+  });
+  const {
+    data: milestonesData,
+    isLoading: milestonesLoading,
+    error: milestonesError,
+    refetch: refetchMilestones,
+  } = trpc.admin.getMilestones.useQuery(undefined, {
+    enabled: canUseProtectedAdminRoutes && isSuperAdmin && activeTab === "milestones",
     refetchOnMount: true,
   });
 
@@ -1126,6 +1682,53 @@ export default function AdminScreen() {
     enabled: canUseProtectedAdminRoutes,
     refetchOnMount: true,
   });
+
+  const {
+    data: adminTermsContent,
+    isLoading: adminTermsContentLoading,
+    error: adminTermsContentError,
+    refetch: refetchAdminTermsContent,
+  } = trpc.admin.getAdminTermsContent.useQuery(
+    { role: adminTermsRole },
+    {
+      enabled: canUseProtectedAdminRoutes,
+      refetchOnMount: true,
+    }
+  );
+
+  const requestRoleResignationMutation = trpc.admin.requestRoleResignation.useMutation({
+    onSuccess: (result) => {
+      setResignationReason("");
+      Alert.alert("Submitted", result.message || "Your resignation request is pending.");
+    },
+    onError: (error) => {
+      Alert.alert("Resignation Error", error.message || "Could not submit your resignation request.");
+    },
+  });
+
+  const upsertMilestoneMutation = trpc.admin.upsertMilestone.useMutation({
+    onSuccess: () => {
+      void refetchMilestones();
+      Alert.alert("Saved", "Milestone date saved.");
+    },
+    onError: (error) => {
+      Alert.alert("Milestone Error", error.message || "Could not save milestone date.");
+    },
+  });
+
+  const milestoneCompletion = useMemo(() => {
+    const calculatedRows = (milestonesData?.calculated ?? []) as AdminMilestoneRow[];
+    const manualRows = (milestonesData?.manual ?? []) as AdminMilestoneRow[];
+    const calculatedCompleted = calculatedRows.filter((row) => isMilestoneReached(row.milestoneDate)).length;
+    const manualCompleted = manualRows.filter((row) => {
+      const currentDate = (milestoneDateInputs[row.key] ?? row.milestoneDate ?? "").trim();
+      return isMilestoneReached(currentDate);
+    }).length;
+    const total = calculatedRows.length + manualRows.length;
+    const completed = calculatedCompleted + manualCompleted;
+    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+    return { completed, total, percentage };
+  }, [milestoneDateInputs, milestonesData?.calculated, milestonesData?.manual]);
 
   const acceptAdminTermsMutation = trpc.admin.acceptAdminTerms.useMutation({
     onSuccess: () => {
@@ -1164,7 +1767,10 @@ export default function AdminScreen() {
   const approveRoleRequestMutation = trpc.admin.approveRoleRequest.useMutation({
     onSuccess: () => {
       void refetchRoleManagement();
-      Alert.alert("Approved", "The role request has been accepted.");
+      Alert.alert(
+        "Approved",
+        "The role request has been accepted. If this request included applicant notes or links, delete or clear them from storage when they are no longer needed."
+      );
     },
     onError: (error) => {
       Alert.alert("Error", error.message || "Could not approve the role request.");
@@ -1203,23 +1809,465 @@ export default function AdminScreen() {
     },
   });
 
+  const createClubPaymentMutation = trpc.admin.createClubPayment.useMutation({
+    onSuccess: () => {
+      void refetchClubPayments();
+      setNewPaymentTitle("");
+      setNewPaymentAmount("");
+      setNewPaymentDueDate("");
+      setNewPaymentDescription("");
+      Alert.alert("Saved", "Club payment item created.");
+    },
+    onError: (error) => {
+      Alert.alert("Payment Error", error.message || "Could not create the payment item.");
+    },
+  });
+
+  const updateClubPaymentRecordMutation = trpc.admin.updateClubPaymentRecord.useMutation({
+    onSuccess: () => {
+      void refetchClubPayments();
+    },
+    onError: (error) => {
+      Alert.alert("Payment Error", error.message || "Could not update the member payment status.");
+    },
+  });
+
+  const requestClubPayoutMutation = trpc.admin.requestClubPayout.useMutation({
+    onSuccess: () => {
+      void refetchClubPayments();
+      setPayoutAmount("");
+      setPayoutDestinationDetails("");
+      Alert.alert("Requested", "Payout request sent to RunNation for review.");
+    },
+    onError: (error) => {
+      Alert.alert("Payout Error", error.message || "Could not request the payout.");
+    },
+  });
+
+  const upsertClubWhatsappLinkMutation = trpc.admin.upsertClubWhatsappLink.useMutation({
+    onSuccess: () => {
+      void refetchClubWhatsappLinks();
+      Alert.alert("Saved", "Club WhatsApp group link updated.");
+    },
+    onError: (error) => {
+      Alert.alert("WhatsApp Link Error", error.message || "Could not save the WhatsApp group link.");
+    },
+  });
+
+  const deleteClubWhatsappLinkMutation = trpc.admin.deleteClubWhatsappLink.useMutation({
+    onSuccess: () => {
+      void refetchClubWhatsappLinks();
+      setWhatsappLinkInput("");
+      Alert.alert("Deleted", "Club WhatsApp group link removed.");
+    },
+    onError: (error) => {
+      Alert.alert("WhatsApp Link Error", error.message || "Could not delete the WhatsApp group link.");
+    },
+  });
+
+  const upsertAdminWhatsappLinkMutation = trpc.admin.upsertAdminWhatsappLink.useMutation({
+    onSuccess: () => {
+      void refetchClubWhatsappLinks();
+      Alert.alert("Saved", "WhatsApp group link updated.");
+    },
+    onError: (error) => {
+      Alert.alert("WhatsApp Link Error", error.message || "Could not save the WhatsApp group link.");
+    },
+  });
+
+  const deleteAdminWhatsappLinkMutation = trpc.admin.deleteAdminWhatsappLink.useMutation({
+    onSuccess: () => {
+      void refetchClubWhatsappLinks();
+      Alert.alert("Deleted", "WhatsApp group link removed.");
+    },
+    onError: (error) => {
+      Alert.alert("WhatsApp Link Error", error.message || "Could not delete the WhatsApp group link.");
+    },
+  });
+
+  const requestClubDeletionMutation = trpc.admin.requestClubDeletion.useMutation({
+    onSuccess: (result) => {
+      setClubDeletionReasonById({});
+      void refetchClubDeletionManagement();
+      void refetchClubStatusReport();
+      Alert.alert("Club deletion", result.message || "Club deletion request submitted.");
+    },
+    onError: (error) => {
+      Alert.alert("Club Deletion Error", error.message || "Could not request club deletion.");
+    },
+  });
+
+  const reviewClubDeletionMutation = trpc.admin.reviewClubDeletion.useMutation({
+    onSuccess: () => {
+      void refetchClubDeletionManagement();
+      Alert.alert("Saved", "Club deletion request updated.");
+    },
+    onError: (error) => {
+      Alert.alert("Club Deletion Error", error.message || "Could not update club deletion request.");
+    },
+  });
+
   const pendingRoleRequests = (roleManagementData?.pendingRequests ?? []) as PendingRoleRequest[];
   const pendingRoleRequestCount = pendingRoleRequests.filter((request) => request.status === "pending").length;
+  const visiblePendingRoleRequests = pendingRoleRequests.filter((request) => request.status === "pending");
   const activeRoleAssignments = (roleManagementData?.activeAssignments ?? []) as ActiveRoleAssignment[];
+  const myTeamMembers = (myTeamData?.members ?? []) as MyTeamMember[];
   const roleCountries = (roleManagementData?.countries ?? []) as RoleLookupCountry[];
   const roleClubs = (roleManagementData?.clubs ?? []) as RoleLookupClub[];
   const roleOrganizers = (roleManagementData?.organizers ?? []) as RoleLookupOrganizer[];
   const accountLinkHealthSummary = (accountLinkHealthData?.summary ?? null) as AccountLinkHealthSummary | null;
   const accountLinkHealthIssues = (accountLinkHealthData?.issues ?? []) as AccountLinkHealthEntry[];
+  const accountHealthGroups = Object.values(
+    accountLinkHealthIssues.reduce((groups, entry) => {
+      entry.issues.forEach((issue) => {
+        if (!groups[issue.code]) {
+          groups[issue.code] = {
+            code: issue.code,
+            message: issue.message,
+            severity: entry.severity,
+            recommendation: getAccountHealthRecommendation(issue.code),
+            count: 0,
+          };
+        }
+        groups[issue.code].count += 1;
+        if (entry.severity === "critical") {
+          groups[issue.code].severity = "critical";
+        }
+      });
+      return groups;
+    }, {} as Record<string, { code: string; message: string; severity: "critical" | "warning"; recommendation: string; count: number }>)
+  ).sort((a, b) => {
+    if (a.severity !== b.severity) return a.severity === "critical" ? -1 : 1;
+    return b.count - a.count;
+  });
+  const clubPaymentClubs = (clubPaymentsData?.clubs ?? []) as ClubPaymentClub[];
+  const clubPaymentItems = (clubPaymentsData?.paymentItems ?? []) as ClubPaymentItem[];
+  const clubPayoutRequests = (clubPaymentsData?.withdrawals ?? []) as ClubPayoutRequest[];
+  const clubPaymentSummary = clubPaymentsData?.summary ?? { collected: 0, requested: 0, available: 0 };
+  const activePaymentClubId = selectedPaymentClubId || clubPaymentClubs[0]?.clubId || "";
+  const activePaymentClub = clubPaymentClubs.find((club) => club.clubId === activePaymentClubId) ?? clubPaymentClubs[0] ?? null;
+  const visibleClubPaymentItems = activePaymentClubId
+    ? clubPaymentItems.filter((payment) => payment.clubId === activePaymentClubId)
+    : clubPaymentItems;
+  const visiblePayoutRequests = activePaymentClubId
+    ? clubPayoutRequests.filter((request) => request.clubId === activePaymentClubId)
+    : clubPayoutRequests;
+  const clubWhatsappClubs = (clubWhatsappData?.clubs ?? []) as ClubWhatsappAdminClub[];
+  const clubWhatsappLinks = (clubWhatsappData?.links ?? []) as ClubWhatsappAdminLink[];
+  const adminWhatsappGlobalLinks = (clubWhatsappData?.globalLinks ?? []) as AdminWhatsappGlobalLink[];
+  const clubDeletionClubs = (clubDeletionData?.clubs ?? []) as ClubDeletionClub[];
+  const clubDeletionRequests = (clubDeletionData?.deletionRequests ?? []) as ClubDeletionRequest[];
+  const pendingClubDeletionRequests = clubDeletionRequests.filter((request) => request.status === "pending");
+  const clubStatusSummaries = ((clubStatusReport?.clubSummaries ?? []) as any[]);
+  const inactiveClubSummaries = clubStatusSummaries.filter((club) => club.inactiveFlag);
+  const activeWhatsappClubId = selectedWhatsappClubId || clubWhatsappClubs[0]?.clubId || "";
+  const activeWhatsappClub = clubWhatsappClubs.find((club) => club.clubId === activeWhatsappClubId) ?? clubWhatsappClubs[0] ?? null;
+  const activeWhatsappLink = clubWhatsappLinks.find((link) => link.clubId === activeWhatsappClubId) ?? null;
+  const serviceTeamWhatsappLink = adminWhatsappGlobalLinks.find((link) => link.linkType === "service_team") ?? null;
+  const adminWhatsappLink = adminWhatsappGlobalLinks.find((link) => link.linkType === "admins") ?? null;
+  const whatsappSections = useMemo(() => ([
+    clubWhatsappClubs.length > 0 ? { key: "club" as const, label: "Club" } : null,
+    { key: "service_team" as const, label: "Service Team" },
+    (isSuperAdmin || isCountryAdmin || isCountryCoordinator) ? { key: "admins" as const, label: "Admins" } : null,
+  ].filter(Boolean)) as { key: WhatsappSection; label: string }[], [clubWhatsappClubs.length, isCountryAdmin, isCountryCoordinator, isSuperAdmin]);
   const hasAcceptedAdminTerms = !!adminTermsStatus?.hasAcceptedCurrentVersion;
   const mustAcceptAdminTerms = hasRoleBasedAccess && !adminTermsStatusLoading && !hasAcceptedAdminTerms;
+  const clubRequestCountries = Array.from(
+    new Map(
+      (clubMembershipRequests as ClubMembershipRequest[])
+        .map((request) => {
+          const code =
+            request.request_type === "start_club" || request.request_type === "event_organizer"
+              ? request.proposed_country
+              : request.member?.country;
+          return code ? [code, formatCountryName(code) || code] : null;
+        })
+        .filter(Boolean) as Array<[string, string]>
+    ).entries()
+  ).sort((a, b) => a[1].localeCompare(b[1]));
+  const visibleClubMembershipRequests = (clubMembershipRequests as ClubMembershipRequest[]).filter((request) => {
+    const status = (request.status ?? "pending") as ClubRequestStatusFilter;
+    const code =
+      request.request_type === "start_club" || request.request_type === "event_organizer"
+        ? request.proposed_country
+        : request.member?.country;
+    return status === clubRequestStatusFilter && (clubRequestCountryFilter === "all" || code === clubRequestCountryFilter);
+  });
+  const sortMagazineRowsByDate = useCallback((rows: any[]) => (
+    [...rows].sort((a, b) => {
+      const aTime = new Date(a.created_at || a.event_date || 0).getTime();
+      const bTime = new Date(b.created_at || b.event_date || 0).getTime();
+      return magazineDateSort === "newest" ? bTime - aTime : aTime - bTime;
+    })
+  ), [magazineDateSort]);
+  const getMagazineStatusPriority = useCallback((status: string | null | undefined) => {
+    const normalized = String(status || "").trim().toLowerCase();
+    if (normalized === "submitted") return 0;
+    if (normalized === "pending") return 1;
+    if (normalized === "accepted") return 2;
+    if (normalized === "rejected") return 3;
+    return 4;
+  }, []);
+  const getMagazineReviewStatusGroup = useCallback((status: string | null | undefined): MagazineReviewStatusFilter => {
+    const normalized = String(status || "").trim().toLowerCase();
+    if (normalized === "accepted") return "accepted";
+    if (normalized === "rejected") return "rejected";
+    return "pending";
+  }, []);
+  const sortedMagazineReviewRows = useMemo(() => {
+    const rows = [
+      ...(magazinePictorials as any[]).map((item) => ({ type: "pictorial" as const, ...item })),
+      ...(magazineSubmissions as any[]).map((item) => ({ type: "article" as const, ...item })),
+    ];
+
+    return rows.sort((a, b) => {
+      const statusDiff = getMagazineStatusPriority(a.status) - getMagazineStatusPriority(b.status);
+      if (statusDiff !== 0) return statusDiff;
+      const aTime = new Date(a.created_at || a.event_date || 0).getTime();
+      const bTime = new Date(b.created_at || b.event_date || 0).getTime();
+      return bTime - aTime;
+    });
+  }, [getMagazineStatusPriority, magazinePictorials, magazineSubmissions]);
+  const magazineReviewStatusCounts = useMemo(() => {
+    const counts: Record<MagazineReviewStatusFilter, number> = { pending: 0, accepted: 0, rejected: 0 };
+    sortedMagazineReviewRows.forEach((row) => {
+      counts[getMagazineReviewStatusGroup(row.status)] += 1;
+    });
+    return counts;
+  }, [getMagazineReviewStatusGroup, sortedMagazineReviewRows]);
+  const visibleMagazineReviewRows = useMemo(
+    () => sortedMagazineReviewRows.filter((row) => getMagazineReviewStatusGroup(row.status) === magazineReviewStatusFilter),
+    [getMagazineReviewStatusGroup, magazineReviewStatusFilter, sortedMagazineReviewRows]
+  );
+  const sortedMyMagazineArticles = useMemo(() => sortMagazineRowsByDate(myMagazineArticles as any[]), [myMagazineArticles, sortMagazineRowsByDate]);
+
+  const getRoleRequestScope = useCallback((request: PendingRoleRequest) => {
+    if (GLOBAL_ROLE_ACCESS_NAMES.has(request.roleName)) {
+      return "Global";
+    }
+    return request.countryName || formatCountryName(request.countryCode) || request.countryCode || "No country";
+  }, []);
+
+  const getRoleRequestClubCompany = useCallback((request: PendingRoleRequest) => {
+    const specialClubName = SPECIAL_CLUB_ROLE_CLUB_NAMES[request.roleName];
+    if (specialClubName) return specialClubName;
+    if (request.roleName === "club_coordinator") return request.clubName || request.clubId || "No club";
+    if (request.roleName === "event_organizer") return request.organizerName || "Create organizer";
+    if (GLOBAL_ROLE_ACCESS_NAMES.has(request.roleName)) return "Global";
+    return request.clubName || request.organizerName || "-";
+  }, []);
+
+  const isGlobalRoleAccess = useCallback((roleName: ManageableRoleName) => (
+    GLOBAL_ROLE_ACCESS_NAMES.has(roleName)
+  ), []);
+
+  const getRoleAssignmentClubCompany = useCallback((assignment: ActiveRoleAssignment) => {
+    const specialClubName = SPECIAL_CLUB_ROLE_CLUB_NAMES[assignment.roleName];
+    if (specialClubName) return specialClubName;
+    if (isGlobalRoleAccess(assignment.roleName)) return "Global";
+    if (assignment.roleName === "club_coordinator") return assignment.clubName || assignment.clubId || "No club";
+    if (assignment.roleName === "event_organizer") return assignment.organizerName || assignment.organizerId || "No company";
+    return assignment.clubName || assignment.organizerName || "-";
+  }, [isGlobalRoleAccess]);
+
+  const getRoleAssignmentJurisdiction = useCallback((assignment: ActiveRoleAssignment) => {
+    if (isGlobalRoleAccess(assignment.roleName)) return "Global";
+    return assignment.countryName || formatCountryName(assignment.countryCode) || assignment.countryCode || "No country";
+  }, [isGlobalRoleAccess]);
+
+  const getRoleAssignmentTermsStatus = useCallback((assignment: ActiveRoleAssignment) => (
+    assignment.hasAcceptedTerms ? "Accepted" : "Pending"
+  ), []);
+
+  useEffect(() => {
+    if (activeTab === "whatsapp") {
+      setWhatsappLinkInput(activeWhatsappLink?.link ?? "");
+    }
+  }, [activeTab, activeWhatsappClubId, activeWhatsappLink?.link]);
+
+  useEffect(() => {
+    if (activeTab === "whatsapp" && !whatsappSections.some((section) => section.key === whatsappSection)) {
+      setWhatsappSection(whatsappSections[0]?.key ?? "service_team");
+    }
+  }, [activeTab, whatsappSection, whatsappSections]);
+
+  useEffect(() => {
+    if (activeTab === "whatsapp") {
+      setServiceTeamWhatsappInput(serviceTeamWhatsappLink?.link ?? "");
+      setAdminWhatsappInput(adminWhatsappLink?.link ?? "");
+    }
+  }, [activeTab, serviceTeamWhatsappLink?.link, adminWhatsappLink?.link]);
+
+  useEffect(() => {
+    if (activeTab !== "milestones") return;
+    const manualRows = ((milestonesData?.manual ?? []) as AdminMilestoneRow[]);
+    setMilestoneDateInputs(
+      manualRows.reduce((next, row) => {
+        next[row.key] = row.milestoneDate || "";
+        return next;
+      }, {} as Record<string, string>)
+    );
+  }, [activeTab, milestonesData?.manual]);
 
   function resetRoleModal() {
     setEditingRoleAssignment(null);
     setRoleRequestEmail("");
-    setSelectedRoleName("country_admin");
+    setSelectedRoleName("country_coordinator");
     setSelectedRoleCountryCode("");
     setSelectedRoleClubId("");
+  }
+
+  function formatMoney(amount: number, currency = "UGX"): string {
+    return `${currency} ${Number(amount || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+  }
+
+  function handleCreateClubPayment() {
+    const amount = Number(newPaymentAmount.replace(/,/g, ""));
+    if (!activePaymentClubId) {
+      Alert.alert("Select Club", "Choose the club this payment belongs to.");
+      return;
+    }
+    if (!newPaymentTitle.trim()) {
+      Alert.alert("Payment Name", "Enter a payment name such as Annual Membership.");
+      return;
+    }
+    if (!Number.isFinite(amount) || amount < 0) {
+      Alert.alert("Amount", "Enter a valid payment amount.");
+      return;
+    }
+
+    createClubPaymentMutation.mutate({
+      clubId: activePaymentClubId,
+      title: newPaymentTitle.trim(),
+      amount,
+      currency: (newPaymentCurrency.trim() || "UGX").toUpperCase(),
+      dueDate: newPaymentDueDate.trim() || null,
+      description: newPaymentDescription.trim() || null,
+    });
+  }
+
+  function handleRequestClubPayout() {
+    const amount = Number(payoutAmount.replace(/,/g, ""));
+    if (!activePaymentClubId) {
+      Alert.alert("Select Club", "Choose the club requesting a payout.");
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      Alert.alert("Amount", "Enter a valid payout amount.");
+      return;
+    }
+    if (!payoutDestinationDetails.trim()) {
+      Alert.alert("Destination", "Enter the club bank or mobile money details.");
+      return;
+    }
+
+    requestClubPayoutMutation.mutate({
+      clubId: activePaymentClubId,
+      amount,
+      currency: "UGX",
+      destinationType: payoutDestinationType,
+      destinationDetails: payoutDestinationDetails.trim(),
+    });
+  }
+
+  function handleSaveWhatsappLink() {
+    if (!activeWhatsappClubId) {
+      Alert.alert("Select Club", "Choose the club this WhatsApp group belongs to.");
+      return;
+    }
+    if (!whatsappLinkInput.trim()) {
+      Alert.alert("WhatsApp Link", "Paste the club WhatsApp group invite link.");
+      return;
+    }
+
+    upsertClubWhatsappLinkMutation.mutate({
+      clubId: activeWhatsappClubId,
+      link: whatsappLinkInput.trim(),
+    });
+  }
+
+  function handleDeleteWhatsappLink() {
+    if (!activeWhatsappClubId) return;
+    deleteClubWhatsappLinkMutation.mutate({ clubId: activeWhatsappClubId });
+  }
+
+  function handleSaveAdminWhatsappLink(linkType: "service_team" | "admins") {
+    const link = linkType === "service_team" ? serviceTeamWhatsappInput.trim() : adminWhatsappInput.trim();
+    if (!link) {
+      Alert.alert("WhatsApp Link", "Paste the WhatsApp group invite link.");
+      return;
+    }
+    upsertAdminWhatsappLinkMutation.mutate({ linkType, link });
+  }
+
+  function handleDeleteAdminWhatsappLink(linkType: "service_team" | "admins") {
+    deleteAdminWhatsappLinkMutation.mutate({ linkType });
+  }
+
+  function handleCopyWhatsappLink(link: string) {
+    Clipboard.setString(link);
+    Alert.alert("Copied", "WhatsApp link copied.");
+  }
+
+  async function handleOpenWhatsappLink(link: string) {
+    const canOpen = await Linking.canOpenURL(link);
+    if (!canOpen) {
+      Alert.alert("Cannot Open Link", "This WhatsApp link is not available on this device.");
+      return;
+    }
+    await Linking.openURL(link);
+  }
+
+  function handleSaveMilestone(row: AdminMilestoneRow) {
+    const milestoneDate = (milestoneDateInputs[row.key] || "").trim();
+    if (milestoneDate && !/^\d{4}-\d{2}-\d{2}$/.test(milestoneDate)) {
+      Alert.alert("Date Format", "Use YYYY-MM-DD for milestone dates.");
+      return;
+    }
+    upsertMilestoneMutation.mutate({
+      milestoneKey: row.key,
+      milestoneDate: milestoneDate || null,
+      note: row.note ?? null,
+    });
+  }
+
+  function getMilestoneDateLabel(value?: string | null) {
+    if (value === "soon") return "[soon]";
+    return value || "Not reached";
+  }
+
+  function handleRequestChatSuspension(report: ChatModerationReport) {
+    const defaultDate = report.offenderFlags?.suspended_until
+      ? toDateInputValue(new Date(report.offenderFlags.suspended_until))
+      : toDateInputValue(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+    const submitSuspension = (dateText: string | null | undefined) => {
+      const suspensionUntil = String(dateText || "").trim();
+      if (!suspensionUntil) return;
+      reviewChatReportMutation.mutate({
+        reportId: report.reportId,
+        action: "ban_user",
+        suspensionUntil,
+        adminNotes: `${isSuperAdmin ? "User suspended" : "Suspension requested"} for @${report.reportedUsername || "reported user"} until ${suspensionUntil}.`,
+      });
+    };
+
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      submitSuspension(window.prompt("Suspension end date (YYYY-MM-DD)", defaultDate));
+      return;
+    }
+
+    Alert.alert(
+      isSuperAdmin ? "Suspend chat access?" : "Request chat suspension?",
+      `This removes the reported content and ${isSuperAdmin ? "suspends" : "requests suspension for"} @${report.reportedUsername || "this user"} until ${defaultDate}.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: isSuperAdmin ? "Suspend" : "Request", style: "destructive", onPress: () => submitSuspension(defaultDate) },
+      ]
+    );
+  }
+
+  function isMilestoneReached(value?: string | null) {
+    return Boolean(value && value !== "soon");
   }
 
   function getRoleDisplayName(roleName: ManageableRoleName): string {
@@ -1235,19 +2283,25 @@ export default function AdminScreen() {
       case "shop_manager":
         return "Shop Manager";
       case "junior_runners_club_coordinator":
-        return "Junior Runners Club Coordinator";
+        return "Club Coordinator";
       case "golden_age_runners_club_coordinator":
-        return "Golden Age Runners Club Coordinator";
+        return "Club Coordinator";
       case "treadmill_runners_club_coordinator":
-        return "Treadmill Runners Club Coordinator";
+        return "Club Coordinator";
       case "para_runners_club_coordinator":
-        return "Para Runners Club Coordinator";
+        return "Club Coordinator";
+      case "smartfit_club_coordinator":
+        return "Club Coordinator";
+      case "magazine_editor":
+        return "Magazine Editor";
+      case "chat_room_administrator":
+        return "Chat Room Administrator";
       case "magazine_columnist_fitness_coach":
         return "Magazine Columnist (Fitness Coach)";
       case "magazine_columnist_sports_journalist":
         return "Magazine Columnist (Sports Journalist)";
       case "magazine_columnist_motivation_speaker":
-        return "Magazine Columnist (Motivation Speaker)";
+        return "Magazine Columnist (Empowerment Coach)";
       default:
         return roleName;
     }
@@ -1319,7 +2373,7 @@ export default function AdminScreen() {
     }
     setEditingRoleAssignment(assignment);
     setRoleRequestEmail(assignment.username ?? assignment.userName);
-    setSelectedRoleName(assignment.roleName);
+    setSelectedRoleName(assignment.roleName === "country_admin" ? "country_coordinator" : assignment.roleName);
     setSelectedRoleCountryCode(assignment.countryCode ?? "");
     setSelectedRoleClubId(assignment.clubId ?? "");
     setShowRoleModal(true);
@@ -1333,6 +2387,9 @@ export default function AdminScreen() {
       }
     } else if (selectedRoleName !== "event_organizer" && !selectedRoleCountryCode.trim()) {
       Alert.alert("Missing Country", "Please choose a country for this country-scoped role.");
+      return;
+    } else if (!editingRoleAssignment && selectedRoleName === "event_organizer" && !selectedRoleCountryCode.trim()) {
+      Alert.alert("Missing Country", "Please choose a country for this event organizer request.");
       return;
     }
 
@@ -1358,7 +2415,7 @@ export default function AdminScreen() {
       email: roleRequestEmail.trim(),
       roleName: selectedRoleName,
       countryCode:
-        selectedRoleName === "club_coordinator" || selectedRoleName === "event_organizer"
+        selectedRoleName === "club_coordinator"
           ? null
           : selectedRoleCountryCode.trim().toUpperCase(),
       clubId: selectedRoleName === "club_coordinator" ? selectedRoleClubId : null,
@@ -1373,6 +2430,24 @@ export default function AdminScreen() {
     }
     return list.filter((event) => (event.organizer || "") === selectedOrganizerFilter);
   }, [events, selectedOrganizerFilter]);
+
+  const displayedAdminEvents = useMemo(() => {
+    return filteredAdminEvents.filter((event) => {
+      const status = String(event.approval_status || "approved").toLowerCase();
+      const endValue = event.ends_at || event.endsAt || event.starts_at || event.startsAt;
+      const endDate = endValue ? String(endValue).slice(0, 10) : "";
+      const isClosed = Boolean(endDate && endDate < new Date().toISOString().slice(0, 10));
+      if (eventApprovalTab === "closed") return isClosed;
+      if (isClosed) return false;
+      return eventApprovalTab === "approved" ? status === "approved" : status !== "approved";
+    });
+  }, [eventApprovalTab, filteredAdminEvents]);
+
+  const usesScopedEventWorkspace =
+    (isClubCoordinator || isSpecialClubCoordinator || isEventOrganizer) &&
+    !isSuperAdmin &&
+    !isCountryAdmin &&
+    !isCountryCoordinator;
 
   const organizerEventCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1395,6 +2470,32 @@ export default function AdminScreen() {
     };
   }, [events]);
 
+  const selectedOrganizerFilterLabel = useMemo(() => {
+    if (selectedOrganizerFilter === "all") return `All (${organizerEventCounts.total})`;
+    if (selectedOrganizerFilter === "clubs") return `Clubs (${organizerEventCounts.clubOwnedCount})`;
+    const organizer = (eventOrganizers as EventOrganizerRecord[]).find(
+      (item) => item.organizer_id === selectedOrganizerFilter
+    );
+    const count = organizer ? organizerEventCounts.organizerCounts.get(organizer.organizer_id) ?? 0 : 0;
+    return organizer ? `${organizer.organizer_name} (${count})` : "Organizer";
+  }, [eventOrganizers, organizerEventCounts, selectedOrganizerFilter]);
+
+  const completedReportEvents = useMemo(() => {
+    const today = new Date();
+    return ((events as any[]) || []).filter((event) => {
+      const endValue = event.ends_at || event.endsAt || event.starts_at || event.startsAt;
+      if (!endValue) return false;
+      return new Date(endValue) < today;
+    });
+  }, [events]);
+
+  useEffect(() => {
+    if (activeTab !== "reports") return;
+    if (!selectedReportEventId && completedReportEvents.length > 0) {
+      setSelectedReportEventId(completedReportEvents[0].event_id || completedReportEvents[0].eventId || "");
+    }
+  }, [activeTab, completedReportEvents, selectedReportEventId]);
+
   useEffect(() => {
     if (mustAcceptAdminTerms) {
       setActiveTab("adminTerms");
@@ -1408,6 +2509,7 @@ export default function AdminScreen() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [["admin", "getMagazineSubmissions"]] });
       void queryClient.invalidateQueries({ queryKey: [["admin", "getEvents"]] });
+      void queryClient.invalidateQueries({ queryKey: [["magazine", "getArticles"]] });
       Alert.alert("Updated", "Magazine submission updated.");
     },
     onError: (error: any) => {
@@ -1421,13 +2523,14 @@ export default function AdminScreen() {
       Alert.alert("Deleted", "Magazine submission deleted.");
     },
     onError: (error: any) => {
-      Alert.alert("Global Admin Required", error.message || "Only global admins can delete magazine submissions.");
+      Alert.alert("Magazine Access Required", error.message || "Only Global Admins or Magazine Editors can delete magazine submissions.");
     },
   });
 
   const updateMagazinePictorialStatusMutation = trpc.admin.updateMagazinePictorialStatus.useMutation({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [["admin", "getMagazinePictorials"]] });
+      void queryClient.invalidateQueries({ queryKey: [["magazine", "getArticles"]] });
       Alert.alert("Updated", "Event pictorial updated.");
     },
     onError: (error: any) => {
@@ -1451,7 +2554,78 @@ export default function AdminScreen() {
       Alert.alert("Deleted", "Event pictorial deleted.");
     },
     onError: (error: any) => {
-      Alert.alert("Global Admin Required", error.message || "Only global admins can delete pictorials.");
+      Alert.alert("Magazine Access Required", error.message || "Only Global Admins or Magazine Editors can delete pictorials.");
+    },
+  });
+
+  const createMagazineNewsMutation = trpc.admin.createMagazineNewsArticle.useMutation({
+    onSuccess: (result) => {
+      setNewsTitle("");
+      setNewsAuthor("");
+      setNewsBody("");
+      setNewsExternalLink("");
+      setNewsPage("News");
+      setNewsPhotoAsset(null);
+      setNewsPhotoPreview(null);
+      if (!isMagazineColumnist) {
+        setMagazineMode("edit");
+      }
+      void queryClient.invalidateQueries({ queryKey: [["admin", "getMagazineSubmissions"]] });
+      void queryClient.invalidateQueries({ queryKey: [["admin", "getMyMagazineArticles"]] });
+      Alert.alert(
+        result.status === "accepted" ? "Published" : "Submitted",
+        result.status === "accepted"
+          ? "News article created and published."
+          : "Article submitted for Global Admin approval."
+      );
+    },
+    onError: (error) => {
+      Alert.alert("News Article Error", error.message || "Could not create the news article.");
+    },
+  });
+
+  const createClubProfileMutation = trpc.admin.createClubProfile.useMutation({
+    onSuccess: async (result) => {
+      setClubProfileName("");
+      setClubProfileLocation("");
+      setClubProfileDescription("");
+      setClubProfilePresenceTowns("");
+      await refreshRoleSession();
+      void refetchClubDeletionManagement();
+      void queryClient.invalidateQueries({ queryKey: [["admin", "getClubDeletionManagement"]] });
+      Alert.alert("Club Created", `${result.clubName} is now connected to your Club Coordinator role.`);
+    },
+    onError: (error) => {
+      Alert.alert("Club Profile Error", error.message || "Could not create the club profile.");
+    },
+  });
+
+  const updateAdminProfileMutation = trpc.admin.updateAdminProfile.useMutation({
+    onSuccess: async () => {
+      await refetchAdminProfile();
+      void queryClient.invalidateQueries({ queryKey: [["admin", "getClubDeletionManagement"]] });
+      void queryClient.invalidateQueries({ queryKey: [["admin", "getEventOrganizers"]] });
+      Alert.alert("Profile Saved", "Your club/organization details were updated.");
+    },
+    onError: (error) => {
+      Alert.alert("Profile Error", error.message || "Could not update the profile details.");
+    },
+  });
+
+  const updateMagazineEntryMutation = trpc.admin.updateMagazineEntry.useMutation({
+    onSuccess: () => {
+      setSelectedMagazineEditTarget(null);
+      setMagazineEditPhotoAsset(null);
+      setMagazineEditPhotoPreview(null);
+      setIsPreparingMagazineEditPhoto(false);
+      void queryClient.invalidateQueries({ queryKey: [["admin", "getMagazineSubmissions"]] });
+      void queryClient.invalidateQueries({ queryKey: [["admin", "getMagazinePictorials"]] });
+      void queryClient.invalidateQueries({ queryKey: [["magazine", "getArticles"]] });
+      Alert.alert("Saved", "Magazine entry updated.");
+    },
+    onError: (error) => {
+      setIsPreparingMagazineEditPhoto(false);
+      Alert.alert("Edit Error", error.message || "Could not update the magazine entry.");
     },
   });
 
@@ -1702,6 +2876,7 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
       `Date: ${new Date(order.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`,
       '',
       '--- DELIVER TO ---',
+      `Name: ${order.customer_name || order.delivery_name || 'N/A'}`,
       `Phone: ${order.phone_number || 'N/A'}`,
       `Address: ${order.delivery_address || 'N/A'}`,
       ...(orderCountry ? [`Country: ${orderCountry}`] : []),
@@ -1741,6 +2916,7 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
             <div class="header">DELIVERY STICKER</div>
             <div class="order-id">Order #${(order.order_id || '').substring(0, 8)} &bull; ${new Date(order.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
             <div class="section-title">Deliver To</div>
+            <div class="field"><span class="field-label">Name:</span> ${order.customer_name || order.delivery_name || 'N/A'}</div>
             <div class="field"><span class="field-label">Phone:</span> ${order.phone_number || 'N/A'}</div>
             <div class="field"><span class="field-label">Address:</span> ${order.delivery_address || 'N/A'}</div>
             ${orderCountry ? `<div class="field"><span class="field-label">Country:</span> ${orderCountry}</div>` : ''}
@@ -1762,6 +2938,37 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
         [{ text: 'OK' }]
       );
     }
+  };
+
+  const handleShareSticker = async (order: any) => {
+    const items = order.items || [];
+    const itemLines = items.map((item: any) => `${item.name}${item.size ? ` (${item.size})` : ""} x${item.qty}`).join("\n");
+    const orderCountry = formatCountryName(order.country || order.country_code);
+    const stickerContent = [
+      "DELIVERY STICKER",
+      `Order #: ${(order.order_id || "").substring(0, 8)}`,
+      `Name: ${order.customer_name || order.delivery_name || "N/A"}`,
+      `Phone: ${order.phone_number || "N/A"}`,
+      `Address: ${order.delivery_address || "N/A"}`,
+      ...(orderCountry ? [`Country: ${orderCountry}`] : []),
+      `Delivery time: ${order.delivery_time_slots || "N/A"}`,
+      "",
+      "Items:",
+      itemLines || "No items",
+      "",
+      `TOTAL: ugx.${(order.total_amount || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
+    ].join("\n");
+
+    if (Platform.OS === "web" && typeof navigator !== "undefined" && navigator.clipboard) {
+      await navigator.clipboard.writeText(stickerContent);
+      Alert.alert("Copied", "Delivery sticker text copied. You can paste it to the delivery person or printer app.");
+      return;
+    }
+
+    await Share.share({
+      title: "Delivery Sticker",
+      message: stickerContent,
+    });
   };
 
   const handleUpdateStock = (product: any) => {
@@ -1794,6 +3001,7 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     setRegistrationClosesAt("");
     setEventCountry("");
     setEventOrganizerId(isEventOrganizer ? roleSession.eventOrganizerScopes[0] ?? "" : "");
+    setEventLocation("");
     setEventTypeMode("same_day");
     setEventRecurrenceWeekday(3);
     setEventRecurrenceFrequency("weekly");
@@ -1808,6 +3016,8 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     setEventPaymentDetails("");
     setEventOrganizerPaymentLink("");
     setEventRunNationPaymentLinkEnabled(false);
+    setEventParticipantLimitEnabled(false);
+    setEventParticipantLimit("");
     setEventMagazineArticleTitle("");
     setEventMagazineArticleBody("");
     setEventMagazineWriterName("");
@@ -1818,6 +3028,8 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     setEventMagazinePhotoAsset(null);
     setEventMagazinePhotoPreview(null);
     setEventMinimumDistanceEnabled(false);
+    setEventMedalDistances([]);
+    setEventCustomMedalDistance("");
     setMedalMinDailyDistance("");
     setMedalMinCumulativeDistance("");
     setMedalDateStart("");
@@ -1827,6 +3039,24 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
   const handleOpenAddEvent = () => {
     resetEventModal();
     setShowEventModal(true);
+  };
+
+  const toggleEventMedalDistance = (distance: number) => {
+    setEventMedalDistances((current) => {
+      const exists = current.some((value) => Math.abs(value - distance) < 0.001);
+      const next = exists ? current.filter((value) => Math.abs(value - distance) >= 0.001) : [...current, distance];
+      return next.sort((a, b) => a - b);
+    });
+  };
+
+  const addCustomEventMedalDistance = () => {
+    const distance = Number.parseFloat(eventCustomMedalDistance.replace(/,/g, ".").trim());
+    if (!Number.isFinite(distance) || distance <= 0) {
+      Alert.alert("Invalid Distance", "Please enter a distance greater than 0 km.");
+      return;
+    }
+    toggleEventMedalDistance(Number(distance.toFixed(2)));
+    setEventCustomMedalDistance("");
   };
 
   const selectedEventOrganizer = useMemo(() => {
@@ -1848,7 +3078,7 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
   }, [countryList, eventCountry, selectedEventOrganizer?.country]);
 
   const handleAddEvent = async () => {
-    const requiresEndDate = eventTypeMode !== "recurring";
+    const requiresEndDate = eventTypeMode === "multiday";
     if (!eventName.trim() || !startsAt.trim() || !registrationClosesAt.trim() || (requiresEndDate && !endsAt.trim())) {
       Alert.alert(
         "Missing Details",
@@ -1864,6 +3094,10 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     }
     if (!eventOrganizerId) {
       Alert.alert("Missing Organizer", "Please choose the event organizer for this event.");
+      return;
+    }
+    if (!eventIsVirtual && !eventLocation.trim()) {
+      Alert.alert("Missing Location", "Please enter the race start/finish location.");
       return;
     }
     if (eventEntry === "paid" && !eventPaymentDetails.trim()) {
@@ -1883,23 +3117,27 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
       return;
     }
     if (!eventPosterPreview && !eventPosterAsset?.uri) {
-      Alert.alert("Missing Event Photo", "Please add the event photo for the event listing.");
+      Alert.alert("Missing Event Poster", "Please add the event poster for the event listing.");
       return;
     }
-    if (!eventMagazinePhotoPreview && !eventMagazinePhotoAsset?.uri) {
+    const isEditingEvent = Boolean(editingEventId);
+    const shouldSubmitMagazineStory =
+      !isEditingEvent || Boolean(eventMagazinePhotoAsset?.uri || eventMagazineArticleBody.trim());
+
+    if (shouldSubmitMagazineStory && !eventMagazinePhotoPreview && !eventMagazinePhotoAsset?.uri) {
       Alert.alert("Missing Magazine Photo", "Please add a separate magazine photo for the event story.");
       return;
     }
-    if (!eventMagazineArticleTitle.trim()) {
+    if (shouldSubmitMagazineStory && !eventMagazineArticleTitle.trim()) {
       Alert.alert("Missing Magazine Article", "Please add a magazine article title for this event.");
       return;
     }
-    if (!eventMagazineWriterName.trim()) {
+    if (shouldSubmitMagazineStory && !eventMagazineWriterName.trim()) {
       Alert.alert("Missing Writer Name", "Please add the writer's name for the magazine article.");
       return;
     }
     const articleWordCount = countWords(eventMagazineArticleBody);
-    if (articleWordCount < 200 || articleWordCount > 300) {
+    if (shouldSubmitMagazineStory && (articleWordCount < 200 || articleWordCount > 300)) {
       Alert.alert("Magazine Article Length", "Please upload a magazine article body between 200 and 300 words.");
       return;
     }
@@ -1913,8 +3151,29 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
       Alert.alert("Invalid Entry Fee", "Please enter a valid numeric fee for this paid event.");
       return;
     }
+    const numericParticipantLimit = eventParticipantLimitEnabled
+      ? Number.parseInt(eventParticipantLimit.replace(/,/g, "").trim(), 10)
+      : null;
+    if (
+      eventParticipantLimitEnabled &&
+      (!Number.isFinite(numericParticipantLimit) || Number(numericParticipantLimit) <= 0)
+    ) {
+      Alert.alert("Invalid Participant Limit", "Please enter a whole number greater than 0.");
+      return;
+    }
+    const normalizedMedalDistances = eventHasMedal
+      ? Array.from(new Set(eventMedalDistances.map((distance) => Number(distance.toFixed(2)))))
+          .filter((distance) => Number.isFinite(distance) && distance > 0)
+          .sort((a, b) => a - b)
+      : [];
+    if (eventHasMedal && normalizedMedalDistances.length === 0) {
+      Alert.alert("Medal Distances", "Please choose at least one event distance for the medal categories.");
+      return;
+    }
 
     let directPosterLink: string | null | undefined = undefined;
+    let posterBase64: string | null = null;
+    let posterMimeType: string | null = null;
     const currentPosterPath = extractPosterStoragePath(eventPosterPreview);
     const shouldNormalizeExistingPoster =
       Boolean(
@@ -1927,12 +3186,17 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
       );
     if (eventPosterAsset?.uri) {
       try {
-        const targetEventId = editingEventId || getNextEventId(events as any[] | undefined);
-        directPosterLink = await uploadEventPosterDirect({
-          eventId: targetEventId,
-          uri: eventPosterAsset.uri,
-          mimeType: eventPosterAsset.mimeType,
-        });
+        if (editingEventId) {
+          directPosterLink = await uploadEventPosterDirect({
+            eventId: editingEventId,
+            uri: eventPosterAsset.uri,
+            mimeType: eventPosterAsset.mimeType,
+          });
+        } else {
+          const posterPayload = await encodeEventPosterForUpload(eventPosterAsset.uri, eventPosterAsset.mimeType);
+          posterBase64 = posterPayload.base64;
+          posterMimeType = posterPayload.mimeType;
+        }
       } catch (error: any) {
         Alert.alert("Poster Error", error?.message || "Could not prepare the selected poster.");
         return;
@@ -1945,7 +3209,7 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     let magazinePhotoMimeType: string | null = null;
     if (eventMagazinePhotoAsset?.uri) {
       try {
-        const magazinePhotoPayload = await encodeEventPosterForUpload(
+        const magazinePhotoPayload = await encodeMagazineArticlePhotoForUpload(
           eventMagazinePhotoAsset.uri,
           eventMagazinePhotoAsset.mimeType
         );
@@ -1959,24 +3223,25 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
 
     const recurrenceFrequency = eventTypeMode === "recurring" ? eventRecurrenceFrequency : null;
     const normalizedStartsAt = toApiDate(startsAt);
-    const normalizedEndsAt = eventTypeMode === "recurring" ? normalizedStartsAt : toApiDate(endsAt);
+    const normalizedEndsAt = eventTypeMode === "multiday" ? toApiDate(endsAt) : normalizedStartsAt;
     const normalizedRegistrationClosesAt = toApiDate(registrationClosesAt);
-    const numericMinDailyDistance = eventMinimumDistanceEnabled
+    const medalDistanceRuleEnabled = eventHasMedal && eventMinimumDistanceEnabled;
+    const numericMinDailyDistance = medalDistanceRuleEnabled
       ? Number.parseFloat(medalMinDailyDistance.replace(/,/g, "").trim())
       : undefined;
     const numericMinCumulativeDistance =
-      eventMinimumDistanceEnabled && eventTypeMode === "multiday"
+      medalDistanceRuleEnabled && eventTypeMode === "multiday"
         ? Number.parseFloat(medalMinCumulativeDistance.replace(/,/g, "").trim())
         : undefined;
     if (
-      eventMinimumDistanceEnabled &&
+      medalDistanceRuleEnabled &&
       (!Number.isFinite(numericMinDailyDistance) || Number(numericMinDailyDistance) <= 0)
     ) {
       Alert.alert("Minimum Distance", "Please enter a valid minimum daily distance in km.");
       return;
     }
     if (
-      eventMinimumDistanceEnabled &&
+      medalDistanceRuleEnabled &&
       eventTypeMode === "multiday" &&
       (!Number.isFinite(numericMinCumulativeDistance) || Number(numericMinCumulativeDistance) <= 0)
     ) {
@@ -2011,26 +3276,33 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
           ? eventRecurrenceWeekOfMonth
           : null,
       organizerId: eventOrganizerId || null,
+      eventLocation: eventIsVirtual ? null : eventLocation.trim(),
       isVirtual: eventIsVirtual,
       entry: eventEntry,
       entryFee: eventEntry === "paid" ? numericEntryFee : undefined,
-      hasMedal: false,
+      hasMedal: eventHasMedal,
+      availableDistancesKm: normalizedMedalDistances,
       paymentDetails: eventEntry === "paid" ? eventPaymentDetails.trim() || undefined : undefined,
       organizerPaymentLink: eventEntry === "paid" ? eventOrganizerPaymentLink.trim() || undefined : undefined,
       runnationPaymentLinkEnabled: eventEntry === "paid" && eventRunNationPaymentLinkEnabled,
+      participantLimit: eventParticipantLimitEnabled ? numericParticipantLimit : null,
       posterLink: directPosterLink ?? (shouldNormalizeExistingPoster ? eventPosterPreview : undefined),
       clearPoster: eventPosterMarkedForRemoval && !eventPosterAsset,
-      posterBase64: null,
-      posterMimeType: null,
-      magazineArticleTitle: eventMagazineArticleTitle.trim(),
-      magazineArticleBody: eventMagazineArticleBody.trim(),
-      magazineWriterName: eventMagazineWriterName.trim(),
-      magazinePhotoLink: eventMagazinePhotoAsset ? undefined : eventMagazinePhotoPreview ?? undefined,
-      magazinePhotoBase64,
-      magazinePhotoMimeType,
-      medalMinDailyDistance: eventMinimumDistanceEnabled ? numericMinDailyDistance : undefined,
+      posterBase64,
+      posterMimeType,
+      ...(shouldSubmitMagazineStory
+        ? {
+            magazineArticleTitle: eventMagazineArticleTitle.trim(),
+            magazineArticleBody: eventMagazineArticleBody.trim(),
+            magazineWriterName: eventMagazineWriterName.trim(),
+            magazinePhotoLink: eventMagazinePhotoAsset ? undefined : eventMagazinePhotoPreview ?? undefined,
+            magazinePhotoBase64,
+            magazinePhotoMimeType,
+          }
+        : {}),
+      medalMinDailyDistance: medalDistanceRuleEnabled ? numericMinDailyDistance : undefined,
       medalMinCumulativeDistance:
-        eventMinimumDistanceEnabled && eventTypeMode === "multiday" ? numericMinCumulativeDistance : undefined,
+        medalDistanceRuleEnabled && eventTypeMode === "multiday" ? numericMinCumulativeDistance : undefined,
     };
 
     if (editingEventId) {
@@ -2041,18 +3313,29 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
       return;
     }
 
-    addEventMutation.mutate(payload);
+    addEventMutation.mutate({
+      ...payload,
+      magazineArticleTitle: eventMagazineArticleTitle.trim(),
+      magazineArticleBody: eventMagazineArticleBody.trim(),
+      magazineWriterName: eventMagazineWriterName.trim(),
+      magazinePhotoLink: eventMagazinePhotoAsset ? undefined : eventMagazinePhotoPreview ?? undefined,
+      magazinePhotoBase64,
+      magazinePhotoMimeType,
+    });
   };
 
   const handleEditEvent = (event: any) => {
     setEditingEventId(event.event_id || event.eventId);
     setEventName(event.event_name || event.eventName || "");
-    setStartsAt(fromApiDate(event.starts_at || event.startsAt));
-    setEndsAt(fromApiDate(event.ends_at || event.endsAt));
+    const existingEventType = (event.event_type || event.eventType || (String(event.starts_at || event.startsAt).slice(0, 10) === String(event.ends_at || event.endsAt).slice(0, 10) ? "same_day" : "multiday")) as EventTypeMode;
+    const existingStartDate = fromApiDate(event.starts_at || event.startsAt);
+    setStartsAt(existingStartDate);
+    setEndsAt(existingEventType === "multiday" ? fromApiDate(event.ends_at || event.endsAt) : existingStartDate);
     setRegistrationClosesAt(fromApiDate(event.registration_closes_at || event.registrationClosesAt));
     setEventCountry(event.country || "");
     setEventOrganizerId(event.organizer || "");
-    setEventTypeMode((event.event_type || event.eventType || (String(event.starts_at || event.startsAt).slice(0, 10) === String(event.ends_at || event.endsAt).slice(0, 10) ? "same_day" : "multiday")) as EventTypeMode);
+    setEventLocation(event.event_location || event.eventLocation || "");
+    setEventTypeMode(existingEventType);
     setEventRecurrenceWeekday(Number(event.recurrence_weekday ?? event.recurrenceWeekday ?? 3));
     setEventRecurrenceFrequency((event.recurrence_frequency || event.recurrenceFrequency || "weekly") as EventRecurrenceFrequency);
     setEventRecurrenceWeekdays(
@@ -2065,7 +3348,20 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     setEventRecurrenceWeekOfMonth(Number(event.recurrence_week_of_month ?? event.recurrenceWeekOfMonth ?? 1));
     setEventIsVirtual(Boolean(event.is_virtual ?? event.isVirtual));
     setEventEntry((event.entry as EventEntryMode) || "free");
-    setEventHasMedal(false);
+    const existingMedalDistances = Array.isArray(event.available_distances_km ?? event.availableDistancesKm)
+      ? (event.available_distances_km ?? event.availableDistancesKm)
+          .map((value: any) => Number(value))
+          .filter((value: number) => Number.isFinite(value) && value > 0)
+      : [];
+    setEventHasMedal(Boolean(event.has_medal ?? event.hasMedal));
+    setEventMedalDistances(
+      existingMedalDistances.length
+        ? Array.from<number>(new Set(existingMedalDistances.map((value: number) => Number(value.toFixed(2))))).sort((a, b) => a - b)
+        : event.has_medal || event.hasMedal
+        ? [Number(event.medal_min_daily_distance || 0)].filter((value) => value > 0)
+        : []
+    );
+    setEventCustomMedalDistance("");
     setEventEntryFee(
       event.entry_fee !== null && event.entry_fee !== undefined
         ? String(event.entry_fee)
@@ -2076,6 +3372,13 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     setEventPaymentDetails(event.payment_details || event.paymentDetails || "");
     setEventOrganizerPaymentLink(event.organizer_payment_link || event.organizerPaymentLink || "");
     setEventRunNationPaymentLinkEnabled(Boolean(event.runnation_payment_link_enabled ?? event.runnationPaymentLinkEnabled));
+    const existingParticipantLimit = event.participant_limit ?? event.participantLimit ?? null;
+    setEventParticipantLimitEnabled(existingParticipantLimit !== null && existingParticipantLimit !== undefined);
+    setEventParticipantLimit(
+      existingParticipantLimit !== null && existingParticipantLimit !== undefined
+        ? String(existingParticipantLimit)
+        : ""
+    );
     setEventMagazineArticleTitle(event.magazine_article_title || event.magazineArticleTitle || `Join ${event.event_name || event.eventName || "this RunNation event"}`);
     setEventMagazineArticleBody(event.magazine_article_body || event.magazineArticleBody || "");
     setEventMagazineWriterName(event.magazine_writer_name || event.magazineWriterName || "");
@@ -2142,7 +3445,7 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
       mediaTypes: "images" as any,
       allowsEditing: false,
       quality: 1,
-      base64: Platform.OS === "web",
+      base64: false,
     });
 
     if (result.canceled || !result.assets?.[0]) {
@@ -2151,14 +3454,9 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
 
     const asset = result.assets[0];
     try {
-      const resolvedMimeType = resolveEventPosterMimeType(asset.uri, asset.mimeType);
-      if (!resolvedMimeType) {
-        Alert.alert("Unsupported Magazine Photo", "Please choose a JPG, PNG, WEBP, or AVIF image.");
-        return;
-      }
       setEventMagazinePhotoAsset({
         uri: asset.uri,
-        mimeType: resolvedMimeType,
+        mimeType: asset.mimeType ?? null,
       });
       setEventMagazinePhotoPreview(asset.uri);
     } catch (error: any) {
@@ -2270,6 +3568,218 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
       await Linking.openURL(posterUrl);
     } catch (error: any) {
       Alert.alert("Open Poster", error?.message || "Could not open the poster URL.");
+    }
+  };
+
+  const handleCreateNewsArticle = () => {
+    const title = newsTitle.trim();
+    const authorName = newsAuthor.trim();
+    const body = newsBody.trim();
+    const externalLink = newsExternalLink.trim();
+
+    if (!title || !authorName || !body) {
+      Alert.alert("Missing News Details", "Add a title, author name, and article body.");
+      return;
+    }
+
+    const submit = (photoPayload?: { base64: string; mimeType: string }) => {
+      createMagazineNewsMutation.mutate({
+        page: isSuperAdmin ? newsPage : isMagazineColumnist ? "Columns" : "News",
+        title,
+        authorName,
+        body,
+        externalLink: externalLink || null,
+        photoBase64: photoPayload?.base64 ?? null,
+        photoMimeType: photoPayload?.mimeType ?? null,
+      });
+    };
+
+    if (!newsPhotoAsset?.uri) {
+      submit();
+      return;
+    }
+
+    encodeMagazineArticlePhotoForUpload(newsPhotoAsset.uri, newsPhotoAsset.mimeType)
+      .then(submit)
+      .catch((error: any) => {
+        Alert.alert("Photo Error", error?.message || "Could not prepare the selected article photo.");
+      });
+  };
+
+  const handlePickNewsPhoto = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: "images" as any,
+      allowsEditing: false,
+      quality: 1,
+      base64: false,
+    });
+
+    if (result.canceled || !result.assets?.[0]) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    try {
+      setNewsPhotoAsset({
+        uri: asset.uri,
+        mimeType: asset.mimeType ?? null,
+      });
+      setNewsPhotoPreview(asset.uri);
+    } catch (error: any) {
+      Alert.alert("Photo Error", error?.message || "Could not prepare the selected article photo.");
+    }
+  };
+
+  const handleRemoveNewsPhoto = () => {
+    setNewsPhotoAsset(null);
+    setNewsPhotoPreview(null);
+  };
+
+  const openMagazineEditModal = (target: any) => {
+    setSelectedMagazineEditTarget(target);
+    setMagazineEditTitle(target.type === "pictorial" ? target.event_name || "" : target.title || "");
+    setMagazineEditAuthor(target.article_writer_name || target.author_name || target.submitter_name || "");
+    setMagazineEditCategory(target.category || (target.type === "pictorial" ? "Gallery" : "Community"));
+    setMagazineEditPitch(target.pitch || "");
+    setMagazineEditBody(target.type === "pictorial" ? target.caption || "" : target.body || "");
+    setMagazineEditExternalLink(target.external_link || "");
+    setMagazineEditEventDate(target.event_date || "");
+    setMagazineEditPhotoAsset(null);
+    setIsPreparingMagazineEditPhoto(false);
+    setMagazineEditPhotoPreview(
+      target.type === "pictorial"
+        ? getMagazineImageUrl(target.photo_url, target.photo_webp_url, target.photo_avif_url)
+        : getMagazineImageUrl(target.magazine_photo_url, target.attachment_url)
+    );
+  };
+
+  const handlePickMagazineEditPhoto = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: "images" as any,
+      allowsEditing: false,
+      quality: 1,
+      base64: false,
+    });
+
+    if (result.canceled || !result.assets?.[0]) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    try {
+      setMagazineEditPhotoAsset({
+        uri: asset.uri,
+        mimeType: asset.mimeType ?? null,
+      });
+      setMagazineEditPhotoPreview(asset.uri);
+    } catch (error: any) {
+      Alert.alert("Picture Error", error?.message || "Could not prepare the selected picture.");
+    }
+  };
+
+  const handleSaveMagazineEdit = () => {
+    if (!selectedMagazineEditTarget) return;
+
+    const submit = (photoPayload?: { base64: string; mimeType: string }) => {
+      if (selectedMagazineEditTarget.type === "pictorial") {
+        updateMagazineEntryMutation.mutate({
+          type: "pictorial",
+          pictorialId: selectedMagazineEditTarget.pictorial_id,
+          eventName: magazineEditTitle.trim(),
+          caption: magazineEditBody.trim(),
+          eventDate: magazineEditEventDate.trim() || null,
+          photoBase64: photoPayload?.base64 ?? null,
+          photoMimeType: photoPayload?.mimeType ?? null,
+        });
+        return;
+      }
+
+      updateMagazineEntryMutation.mutate({
+        type: "article",
+        submissionId: selectedMagazineEditTarget.submission_id,
+        title: magazineEditTitle.trim(),
+        authorName: magazineEditAuthor.trim(),
+        category: magazineEditCategory.trim(),
+        pitch: magazineEditPitch.trim() || null,
+        body: magazineEditBody.trim(),
+        externalLink: magazineEditExternalLink.trim() || null,
+        photoBase64: photoPayload?.base64 ?? null,
+        photoMimeType: photoPayload?.mimeType ?? null,
+      });
+    };
+
+    if (magazineEditPhotoAsset?.uri) {
+      setIsPreparingMagazineEditPhoto(true);
+      encodeMagazineArticlePhotoForUpload(magazineEditPhotoAsset.uri, magazineEditPhotoAsset.mimeType)
+        .then((photoPayload) => {
+          setIsPreparingMagazineEditPhoto(false);
+          submit(photoPayload);
+        })
+        .catch((error: any) => {
+          setIsPreparingMagazineEditPhoto(false);
+          Alert.alert("Picture Error", error?.message || "Could not prepare the selected picture.");
+        });
+      return;
+    }
+
+    submit();
+  };
+
+  const handleMagazineAction = (target: any, action: "preview" | "edit" | "accept" | "reject" | "feature" | "delete") => {
+    if (action === "preview") {
+      setSelectedMagazinePreview(target);
+      return;
+    }
+    if (action === "edit") {
+      setSelectedMagazinePreview(null);
+      openMagazineEditModal(target);
+      return;
+    }
+
+    if (target.type === "pictorial") {
+      if (action === "accept") {
+        setSelectedMagazinePreview(null);
+        updateMagazinePictorialStatusMutation.mutate({ pictorialId: target.pictorial_id, status: "accepted" });
+      } else if (action === "reject") {
+        setSelectedMagazinePreview(null);
+        updateMagazinePictorialStatusMutation.mutate({ pictorialId: target.pictorial_id, status: "rejected" });
+      } else if (action === "feature") {
+        setSelectedMagazinePreview(null);
+        setPictureOfWeekMutation.mutate({ pictorialId: target.pictorial_id, weekLabel: null });
+      } else if (action === "delete") {
+        Alert.alert("Delete Pictorial", "Delete this pictorial entry? This is available to Global Admins and Magazine Editors.", [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: () => {
+              setSelectedMagazinePreview(null);
+              deleteMagazinePictorialMutation.mutate({ pictorialId: target.pictorial_id });
+            },
+          },
+        ]);
+      }
+      return;
+    }
+
+    if (action === "accept") {
+      setSelectedMagazinePreview(null);
+      updateMagazineSubmissionStatusMutation.mutate({ submissionId: target.submission_id, status: "accepted" });
+    } else if (action === "reject") {
+      setSelectedMagazinePreview(null);
+      updateMagazineSubmissionStatusMutation.mutate({ submissionId: target.submission_id, status: "rejected" });
+    } else if (action === "delete") {
+      Alert.alert("Delete Submission", "Delete this magazine submission? This is available to Global Admins and Magazine Editors.", [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            setSelectedMagazinePreview(null);
+            deleteMagazineSubmissionMutation.mutate({ submissionId: target.submission_id });
+          },
+        },
+      ]);
     }
   };
 
@@ -2461,6 +3971,151 @@ const getStatusLabel = (status: string) => {
     return `"${text.replace(/"/g, '""')}"`;
   };
 
+  const exportCsvFile = async (fileName: string, csvContent: string, dialogTitle: string) => {
+    if (Platform.OS === "web") {
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    const { File: FSFile, Paths: FSPaths } = await import("expo-file-system/next");
+    const file = new FSFile(FSPaths.cache, fileName);
+    file.write(csvContent);
+    const sharingModule = await import("expo-sharing");
+    await sharingModule.shareAsync(file.uri, {
+      mimeType: "text/csv",
+      dialogTitle,
+      UTI: "public.comma-separated-values-text",
+    });
+  };
+
+  const handleExportMilestones = async () => {
+    const calculatedRows = ((milestonesData?.calculated ?? []) as AdminMilestoneRow[]).map((row) => ({
+      ...row,
+      source: "Calculated",
+      exportDate: row.milestoneDate === "soon" ? "" : row.milestoneDate || "",
+      exportStatus: row.milestoneDate === "soon" ? "Soon" : row.milestoneDate ? "Reached" : "Pending",
+    }));
+    const manualRows = ((milestonesData?.manual ?? []) as AdminMilestoneRow[]).map((row) => ({
+      ...row,
+      source: "Manual",
+      exportDate: (milestoneDateInputs[row.key] ?? row.milestoneDate ?? "").trim(),
+      exportStatus: (milestoneDateInputs[row.key] ?? row.milestoneDate ?? "").trim() ? "Set" : "Pending",
+    }));
+    const rows = [...calculatedRows, ...manualRows];
+
+    if (rows.length === 0) {
+      Alert.alert("No Data", "There are no milestones to export.");
+      return;
+    }
+
+    setIsExportingMilestones(true);
+    try {
+      const headers = ["Source", "Category", "Milestone", "Target", "Date", "Status", "Key"];
+      const csvRows = rows.map((row) => [
+        row.source,
+        row.category,
+        row.milestone,
+        row.threshold ?? "",
+        row.exportDate,
+        row.exportStatus,
+        row.key,
+      ]);
+      const csvContent = [headers, ...csvRows]
+        .map((row) => row.map(csvEscape).join(","))
+        .join("\n");
+      await exportCsvFile(`runnation_milestones_${new Date().toISOString().slice(0, 10)}.csv`, csvContent, "Export Milestones CSV");
+    } catch (error: any) {
+      console.error("[Milestones] Export failed:", error);
+      Alert.alert("Export Error", error.message || "Could not export milestones.");
+    } finally {
+      setIsExportingMilestones(false);
+    }
+  };
+
+  const handleExportClubStatusReport = async () => {
+    const rows = (clubStatusReport?.rows ?? []) as any[];
+    if (rows.length === 0) {
+      Alert.alert("No Data", "There are no club status rows to export.");
+      return;
+    }
+
+    setIsExportingClubStatus(true);
+    try {
+      const headers = [
+        "Club",
+        "Name",
+        "Sex",
+        "Town",
+        "Sign up date",
+        "Subscription",
+        "RunNation tier",
+        "Runs (last 30 days)",
+        "Has service role",
+        "Other club membership",
+      ];
+      const csvRows = rows.map((row) => [
+        row.clubName,
+        row.name,
+        row.sex,
+        row.town,
+        row.signUpDate ? formatDate(row.signUpDate) : "",
+        row.subscription,
+        row.runNationTier,
+        row.runsLast30Days,
+        row.hasServiceRole,
+        row.otherClubMembership,
+      ]);
+      const csvContent = [headers, ...csvRows].map((row) => row.map(csvEscape).join(",")).join("\n");
+      await exportCsvFile(`club_status_${new Date().toISOString().slice(0, 10)}.csv`, csvContent, "Export Club Status CSV");
+    } catch (error: any) {
+      Alert.alert("Export Error", error.message || "Could not export club status.");
+    } finally {
+      setIsExportingClubStatus(false);
+    }
+  };
+
+  const handleExportEventResultsReport = async () => {
+    const rows = (eventResultsReport?.rows ?? []) as any[];
+    if (!selectedReportEventId) {
+      Alert.alert("Select Event", "Choose a completed event before downloading results.");
+      return;
+    }
+    if (rows.length === 0) {
+      Alert.alert("No Data", "There are no event result rows to export.");
+      return;
+    }
+
+    setIsExportingEventResults(true);
+    try {
+      const headers = ["Rank", "Name", "Sex", "Town", "Registration date", "Distance km", "Time", "Pace"];
+      const csvRows = rows.map((row) => [
+        row.rank,
+        row.name,
+        row.sex,
+        row.town,
+        row.registrationDate ? formatDate(row.registrationDate) : "",
+        row.distanceKm,
+        row.time,
+        row.pace,
+      ]);
+      const csvContent = [headers, ...csvRows].map((row) => row.map(csvEscape).join(",")).join("\n");
+      const safeEventName = String(eventResultsReport?.eventName || "event_results").replace(/[^a-z0-9]+/gi, "_").toLowerCase();
+      await exportCsvFile(`${safeEventName}_${new Date().toISOString().slice(0, 10)}.csv`, csvContent, "Export Event Results CSV");
+    } catch (error: any) {
+      Alert.alert("Export Error", error.message || "Could not export event results.");
+    } finally {
+      setIsExportingEventResults(false);
+    }
+  };
+
   const handleDownloadAuditLog = async () => {
     const entries = auditLogs as AuditLogEntry[];
 
@@ -2498,27 +4153,7 @@ const getStatusLabel = (status: string) => {
         .join("\n");
       const fileName = `audit_log_${auditUserType}_${auditStartDate}_to_${auditEndDate}.csv`;
 
-      if (Platform.OS === "web") {
-        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      } else {
-        const { File: FSFile, Paths: FSPaths } = await import("expo-file-system/next");
-        const file = new FSFile(FSPaths.cache, fileName);
-        file.write(csvContent);
-        const sharingModule = await import("expo-sharing");
-        await sharingModule.shareAsync(file.uri, {
-          mimeType: "text/csv",
-          dialogTitle: "Save Audit Log CSV",
-          UTI: "public.comma-separated-values-text",
-        });
-      }
+      await exportCsvFile(fileName, csvContent, "Save Audit Log CSV");
     } catch (error: any) {
       console.error("[AuditLog] Export failed:", error);
       Alert.alert("Export Error", error.message || "Could not export the audit log.");
@@ -2527,32 +4162,32 @@ const getStatusLabel = (status: string) => {
     }
   };
 
-  if (isChecking) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Checking authentication...</Text>
-      </View>
-    );
-  }
-
   const getTabTitle = (tab: typeof activeTab): string => {
     switch (tab) {
       case "orders": return "Orders";
       case "stock": return "Stock";
       case "approvals": return "Treadmill";
       case "events": return "Events";
-      case "enrollments": return "Enrollments";
-      case "clubRequests": return "Club & Organiser Requests";
+      case "enrollments": return "Participant Approvals";
+      case "payments": return "Club Payments";
+      case "whatsapp": return "WhatsApp Group";
+      case "clubAdmin": return isEventOrganizer && !isClubCoordinator ? "Organization Profile" : "Club Admin";
+      case "clubRequests": return "Membership Approvals";
       case "activityUploads": return "Activity Uploads";
-      case "externalActivities": return "External Activities";
+      case "externalActivities": return "Other Source Runs";
       case "ratings": return "Ratings";
       case "suggestions": return "Suggestions";
       case "magazine": return "Magazine";
+      case "myArticles": return "My Articles";
       case "adminTerms": return "Admin Terms";
       case "roles": return "Role Access";
       case "dataHealth": return "Data Health";
       case "auditLog": return "Audit Log";
+      case "milestones": return "Milestones";
+      case "resign": return "Resign";
       case "moderation": return "Chat Moderation";
+      case "reports": return "Reports";
+      case "myTeam": return "My Team";
       case "archive": return "Archive";
       default: return "Admin Dashboard";
     }
@@ -2568,18 +4203,26 @@ const getStatusLabel = (status: string) => {
     { key: "stock", label: "Stock", icon: <Package size={24} color="#10b981" /> },
     { key: "approvals", label: "Treadmill", icon: <Dumbbell size={24} color="#10b981" />, badgeCount: pendingActivities.length },
     { key: "events", label: "Events", icon: <Calendar size={24} color="#10b981" /> },
-    { key: "enrollments", label: "Enrollments", icon: <UserPlus size={24} color="#10b981" /> },
-    { key: "clubRequests", label: "Club & Organiser Requests", icon: <Users size={24} color="#10b981" />, badgeCount: pendingClubMembershipRequests.length },
+    { key: "enrollments", label: "Participant Approvals", icon: <UserPlus size={24} color="#10b981" /> },
+    { key: "payments", label: "Payments", icon: <CreditCard size={24} color="#10b981" />, badgeCount: clubPayoutRequests.filter((request) => request.status === "pending").length },
+    { key: "whatsapp", label: "WhatsApp Group", icon: <MessageCircle size={24} color="#10b981" /> },
+    { key: "clubAdmin", label: needsClubProfileSetup ? "Create Club" : isEventOrganizer && !isClubCoordinator ? "Organization Profile" : "Club Admin", icon: <Building2 size={24} color="#10b981" />, badgeCount: needsClubProfileSetup ? 1 : pendingClubDeletionRequests.length },
+    { key: "clubRequests", label: "Membership Approvals", icon: <Users size={24} color="#10b981" />, badgeCount: pendingClubMembershipRequests.length },
     { key: "activityUploads", label: "Activity Uploads", icon: <Upload size={24} color="#10b981" /> },
-    { key: "externalActivities", label: "External Activities", icon: <Activity size={24} color="#10b981" />, badgeCount: externalSubmissions?.length || 0 },
+    { key: "externalActivities", label: "Other Source Runs", icon: <Activity size={24} color="#10b981" />, badgeCount: externalSubmissions?.length || 0 },
     { key: "ratings", label: "Ratings", icon: <Star size={24} color="#10b981" />, badgeCount: appRatings.length },
     { key: "suggestions", label: "Suggestions", icon: <MessageSquare size={24} color="#10b981" />, badgeCount: suggestions.length },
     { key: "magazine", label: "Magazine", icon: <BookOpen size={24} color="#10b981" />, badgeCount: magazineSubmissions.length + magazinePictorials.length },
+    { key: "myArticles", label: "My Articles", icon: <FileText size={24} color="#10b981" />, badgeCount: myMagazineArticles.length },
     { key: "moderation", label: "Chat Reports", icon: <ShieldAlert size={24} color="#10b981" />, badgeCount: (chatReports as ChatModerationReport[]).filter((report) => report.status === "pending").length },
+    { key: "reports", label: "Reports", icon: <FileText size={24} color="#10b981" /> },
+    { key: "myTeam", label: "My Team", icon: <Users size={24} color="#10b981" /> },
     { key: "adminTerms", label: "Admin Terms", icon: <ClipboardCheck size={24} color="#10b981" /> },
     { key: "roles", label: "Roles", icon: <UserPlus size={24} color="#10b981" />, badgeCount: pendingRoleRequestCount },
     { key: "dataHealth", label: "Data Health", icon: <ShieldAlert size={24} color="#10b981" />, badgeCount: accountLinkHealthSummary?.issueCount ?? 0 },
     { key: "auditLog", label: "Audit Log", icon: <FileText size={24} color="#10b981" />, badgeCount: (auditLogs as AuditLogEntry[]).length },
+    { key: "milestones", label: "Milestones", icon: <Star size={24} color="#10b981" /> },
+    { key: "resign", label: "Resign", icon: <LogOut size={24} color="#10b981" /> },
     { key: "archive", label: "Archive", icon: <Archive size={24} color="#10b981" /> },
   ];
 
@@ -2589,8 +4232,12 @@ const getStatusLabel = (status: string) => {
         "roles",
         "dataHealth",
         "auditLog",
+        "milestones",
         "orders",
         "events",
+        "payments",
+        "whatsapp",
+        "clubAdmin",
         "stock",
         "approvals",
         "enrollments",
@@ -2598,7 +4245,8 @@ const getStatusLabel = (status: string) => {
         "activityUploads",
         "externalActivities",
         "magazine",
-        "moderation",
+        "reports",
+        "myTeam",
         "suggestions",
         "ratings",
         "adminTerms",
@@ -2609,39 +4257,85 @@ const getStatusLabel = (status: string) => {
         "stock",
         "events",
         "enrollments",
+        "payments",
+        "whatsapp",
+        "clubAdmin",
         "clubRequests",
         "activityUploads",
         "externalActivities",
         "magazine",
-        "moderation",
+        "reports",
+        "myTeam",
         "adminTerms",
+        "resign",
       ],
       country_coordinator: [
+        "orders",
+        "stock",
         "approvals",
         "events",
         "enrollments",
+        "payments",
+        "whatsapp",
+        "clubAdmin",
         "clubRequests",
         "activityUploads",
         "externalActivities",
         "magazine",
-        "moderation",
+        "reports",
+        "myTeam",
         "adminTerms",
+        "resign",
       ],
       club_coordinator: [
         "approvals",
         "events",
         "enrollments",
+        "payments",
+        "whatsapp",
+        "clubAdmin",
         "clubRequests",
         "activityUploads",
         "externalActivities",
         "magazine",
         "moderation",
+        "reports",
         "adminTerms",
+        "resign",
+      ],
+      special_club_coordinator: [
+        "events",
+        "externalActivities",
+        "whatsapp",
+        "magazine",
+        "reports",
+        "adminTerms",
+        "resign",
       ],
       event_organizer: [
+        "clubAdmin",
         "events",
         "enrollments",
+        "reports",
         "adminTerms",
+        "resign",
+      ],
+      magazine_editor: [
+        "magazine",
+        "myTeam",
+        "adminTerms",
+        "resign",
+      ],
+      magazine_columnist: [
+        "myArticles",
+        "magazine",
+        "adminTerms",
+        "resign",
+      ],
+      chat_room_administrator: [
+        "moderation",
+        "adminTerms",
+        "resign",
       ],
     };
 
@@ -2653,8 +4347,16 @@ const getStatusLabel = (status: string) => {
       ? "country_coordinator"
       : isClubCoordinator
       ? "club_coordinator"
+      : isSpecialClubCoordinator
+      ? "special_club_coordinator"
       : isEventOrganizer
       ? "event_organizer"
+      : isMagazineEditor
+      ? "magazine_editor"
+      : isMagazineColumnist
+      ? "magazine_columnist"
+      : isChatRoomAdministrator
+      ? "chat_room_administrator"
       : "super_admin";
 
     const orderedTabs = priorityByRole[roleKey] ?? [];
@@ -2674,125 +4376,734 @@ const getStatusLabel = (status: string) => {
     isCountryAdmin,
     isCountryCoordinator,
     isClubCoordinator,
+    isSpecialClubCoordinator,
     isEventOrganizer,
+    isMagazineEditor,
+    isMagazineColumnist,
+    isChatRoomAdministrator,
   ]);
 
-  const getMenuScopeGroup = (tab: AdminTab): AdminMenuScopeGroup => {
-    if (["roles", "dataHealth", "auditLog", "ratings", "suggestions", "moderation", "archive"].includes(tab)) {
-      return "global";
+  const getMenuPurposeGroup = (tab: AdminTab): AdminMenuPurposeGroup => {
+    if (["roles", "approvals", "events", "enrollments", "clubRequests", "activityUploads", "externalActivities", "magazine", "moderation"].includes(tab)) {
+      return "approvals";
     }
-    if (["orders", "stock"].includes(tab)) {
-      return "country";
+    if (["milestones", "reports", "auditLog", "dataHealth", "ratings", "archive"].includes(tab)) {
+      return "reporting";
     }
-    return "club";
+    if (["adminTerms", "suggestions", "whatsapp", "myTeam", "resign"].includes(tab)) {
+      return "administration";
+    }
+    return "operations";
   };
 
   const groupedMenuSections = useMemo(() => {
-    if (!isSuperAdmin && !isCountryAdmin) {
-      return [];
-    }
-
-    const enabledGroups: AdminMenuScopeGroup[] = isSuperAdmin
-      ? ["global", "country", "club"]
-      : ["country", "club"];
+    const enabledGroups: Array<{ key: AdminMenuPurposeGroup; title: string }> = [
+      { key: "approvals", title: "Approvals" },
+      { key: "reporting", title: "Reporting" },
+      { key: "administration", title: "Administration" },
+      { key: "operations", title: "Operations" },
+    ];
 
     return enabledGroups
       .map((group) => ({
-        key: group,
-        title: group === "global" ? "Global Admin" : group === "country" ? "Country" : "Club",
-        items: visibleMenuItems.filter((item) => getMenuScopeGroup(item.key) === group),
+        key: group.key,
+        title: group.title,
+        items: visibleMenuItems.filter((item) => getMenuPurposeGroup(item.key) === group.key),
       }))
       .filter((section) => section.items.length > 0);
-  }, [isSuperAdmin, isCountryAdmin, visibleMenuItems]);
+  }, [visibleMenuItems]);
 
-  const renderAdminTermsContent = () => (
+  if (isChecking) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingText}>Checking authentication...</Text>
+      </View>
+    );
+  }
+
+  const handleSubmitResignation = () => {
+    const reason = resignationReason.trim();
+    if (reason.length < 10) {
+      Alert.alert("Reason required", "Please give a short reason before submitting your resignation.");
+      return;
+    }
+
+    Alert.alert(
+      "Confirm resignation",
+      "Are you sure you want to resign from your admin role? This request stays pending for 12 hours for automatic actioning, unless a Global Admin actions it before then.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Submit",
+          style: "destructive",
+          onPress: () => requestRoleResignationMutation.mutate({ reason }),
+        },
+      ]
+    );
+  };
+
+  const handleRequestClubDeletion = (club: ClubDeletionClub) => {
+    const reason = (clubDeletionReasonById[club.clubId] || "").trim();
+    if (reason.length < 10) {
+      Alert.alert("Reason required", "Please give a short reason before requesting club deletion.");
+      return;
+    }
+
+    Alert.alert(
+      "Delete club?",
+      club.memberCount > 0
+        ? "This club has members, so deletion will stay pending for 12 hours and needs admin approval/actioning. Continue?"
+        : "This club has no members, so it will be deleted immediately. Continue?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Continue",
+          style: "destructive",
+          onPress: () =>
+            requestClubDeletionMutation.mutate({
+              clubId: club.clubId,
+              reason,
+              inactiveAdminDelete: Boolean(club.inactiveFlag && (isSuperAdmin || isCountryAdmin || isCountryCoordinator)),
+            }),
+        },
+      ]
+    );
+  };
+
+  const handleDeleteInactiveClub = (club: any) => {
+    Alert.alert(
+      "Delete inactive club?",
+      `${club.clubName} is flagged as inactive: ${club.inactiveReason} This action deletes the club.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () =>
+            requestClubDeletionMutation.mutate({
+              clubId: club.clubId,
+              reason: `Inactive club deletion: ${club.inactiveReason}`,
+              inactiveAdminDelete: true,
+            }),
+        },
+      ]
+    );
+  };
+
+  const handleCreateClubProfile = () => {
+    const name = clubProfileName.trim().replace(/\s+/g, " ");
+    if (name.length < 3) {
+      Alert.alert("Club Name Required", "Enter the club name before creating the club profile.");
+      return;
+    }
+
+    const presenceTowns = clubProfilePresenceTowns
+      .split(",")
+      .map((town) => town.trim().replace(/\s+/g, " "))
+      .filter(Boolean);
+
+    createClubProfileMutation.mutate({
+      clubName: name,
+      location: clubProfileLocation.trim() || null,
+      description: clubProfileDescription.trim() || null,
+      presenceTowns,
+    });
+  };
+
+  const handleSaveAdminProfile = () => {
+    if (!adminProfile) {
+      Alert.alert("Profile Unavailable", "Could not load your club/organization profile.");
+      return;
+    }
+    const name = adminProfileName.trim().replace(/\s+/g, " ");
+    if (name.length < 2) {
+      Alert.alert("Name Required", "Enter a valid club or organization name.");
+      return;
+    }
+    const presenceTowns = adminProfilePresenceTowns
+      .split(",")
+      .map((town) => town.trim().replace(/\s+/g, " "))
+      .filter(Boolean);
+
+    updateAdminProfileMutation.mutate({
+      profileType: adminProfile.type,
+      profileId: adminProfile.id,
+      name,
+      location: adminProfileLocation.trim() || null,
+      description: adminProfileDescription.trim() || null,
+      presenceTowns: adminProfile.type === "club" ? presenceTowns : [],
+    });
+  };
+
+  const renderClubAdminContent = () => (
+    <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+      {needsClubProfileSetup ? (
+        <View style={styles.auditFilterCard}>
+          <View style={styles.auditFilterHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.auditFilterTitle}>Create Club Profile</Text>
+              <Text style={styles.auditFilterSubtitle}>
+                Your Club Coordinator role is approved for {formatCountryName(pendingClubSetupRole?.countryCode ?? null) || pendingClubSetupRole?.countryCode || "your country"}. Create the club profile first so the club tools can attach to the right club.
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.label}>Club Name</Text>
+          <TextInput
+            style={styles.input}
+            value={clubProfileName}
+            onChangeText={setClubProfileName}
+            placeholder="e.g. Treadmill Runners Club"
+            placeholderTextColor="#9ca3af"
+          />
+          <Text style={styles.label}>Location</Text>
+          <TextInput
+            style={styles.input}
+            value={clubProfileLocation}
+            onChangeText={setClubProfileLocation}
+            placeholder="Town, city, or district"
+            placeholderTextColor="#9ca3af"
+          />
+          <Text style={styles.label}>Presence Towns</Text>
+          <TextInput
+            style={styles.input}
+            value={clubProfilePresenceTowns}
+            onChangeText={setClubProfilePresenceTowns}
+            placeholder="Separate towns with commas"
+            placeholderTextColor="#9ca3af"
+          />
+          <Text style={styles.label}>Portfolio Notes</Text>
+          <TextInput
+            style={[styles.input, styles.inputMultiline]}
+            value={clubProfileDescription}
+            onChangeText={setClubProfileDescription}
+            placeholder="Briefly describe the club, routes, training style, or community focus."
+            placeholderTextColor="#9ca3af"
+            multiline
+            textAlignVertical="top"
+          />
+          <TouchableOpacity
+            style={[styles.approveButton, createClubProfileMutation.isPending && styles.disabledButton]}
+            onPress={handleCreateClubProfile}
+            disabled={createClubProfileMutation.isPending}
+          >
+            <Building2 size={18} color="#fff" />
+            <Text style={styles.actionButtonText}>
+              {createClubProfileMutation.isPending ? "Creating..." : "Create Club Profile"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {needsClubProfileSetup ? null : (
+        <>
+      <View style={styles.auditFilterCard}>
+        <Text style={styles.auditFilterTitle}>
+          {adminProfile?.type === "organizer" ? "Organization Profile" : "Club Profile"}
+        </Text>
+        <Text style={styles.auditFilterSubtitle}>
+          Keep these details current. Admins and users see this identity across events, enrolments, reports, and club tools.
+        </Text>
+        {adminProfileLoading ? (
+          <Text style={styles.emptyText}>Loading profile...</Text>
+        ) : adminProfileError ? (
+          <Text style={styles.errorText}>{adminProfileError.message || "Could not load profile details."}</Text>
+        ) : !adminProfile ? (
+          <Text style={styles.emptyText}>No editable club or organization profile is connected to this role.</Text>
+        ) : (
+          <>
+            <Text style={styles.label}>{adminProfile.type === "organizer" ? "Organization Name" : "Club Name"}</Text>
+            <TextInput
+              style={styles.input}
+              value={adminProfileName}
+              onChangeText={setAdminProfileName}
+              placeholder={adminProfile.type === "organizer" ? "Organization name" : "Club name"}
+              placeholderTextColor="#9ca3af"
+            />
+            <Text style={styles.label}>{adminProfile.type === "organizer" ? "Base Location" : "Location"}</Text>
+            <TextInput
+              style={styles.input}
+              value={adminProfileLocation}
+              onChangeText={setAdminProfileLocation}
+              placeholder="Town, city, or district"
+              placeholderTextColor="#9ca3af"
+            />
+            {adminProfile.type === "club" ? (
+              <>
+                <Text style={styles.label}>Presence Towns</Text>
+                <TextInput
+                  style={styles.input}
+                  value={adminProfilePresenceTowns}
+                  onChangeText={setAdminProfilePresenceTowns}
+                  placeholder="Separate towns with commas"
+                  placeholderTextColor="#9ca3af"
+                />
+              </>
+            ) : null}
+            <Text style={styles.label}>{adminProfile.type === "organizer" ? "Organization Notes" : "Portfolio Notes"}</Text>
+            <TextInput
+              style={[styles.input, styles.inputMultiline]}
+              value={adminProfileDescription}
+              onChangeText={setAdminProfileDescription}
+              placeholder={adminProfile.type === "organizer" ? "Describe your organization, event focus, or operating area." : "Briefly describe the club, routes, training style, or community focus."}
+              placeholderTextColor="#9ca3af"
+              multiline
+              textAlignVertical="top"
+            />
+            <TouchableOpacity
+              style={[styles.approveButton, updateAdminProfileMutation.isPending && styles.disabledButton]}
+              onPress={handleSaveAdminProfile}
+              disabled={updateAdminProfileMutation.isPending}
+            >
+              <Save size={18} color="#fff" />
+              <Text style={styles.actionButtonText}>
+                {updateAdminProfileMutation.isPending ? "Saving..." : "Save Profile"}
+              </Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+
+      {isEventOrganizer && !isClubCoordinator ? null : (
+        <>
+      <View style={styles.auditFilterCard}>
+        <Text style={styles.auditFilterTitle}>Club Deletion Governance</Text>
+        <Text style={styles.auditFilterSubtitle}>
+          Club coordinators can delete clubs they created or coordinate. Empty clubs delete immediately; clubs with members stay pending for 12 hours and require admin approval/actioning.
+        </Text>
+      </View>
+
+      {clubDeletionLoading ? (
+        <View style={styles.emptyContainer}><Text style={styles.emptyText}>Loading club admin tools...</Text></View>
+      ) : clubDeletionError ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.errorText}>Error loading club admin tools</Text>
+          <Text style={styles.errorSubtext}>{clubDeletionError.message || "Could not load club deletion tools."}</Text>
+        </View>
+      ) : (
+        <>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+            <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+              <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                <View style={[styles.adminDataCell, { width: 220 }]}><Text style={styles.adminDataHeaderText}>Club</Text></View>
+                <View style={[styles.adminDataCell, { width: 130 }]}><Text style={styles.adminDataHeaderText}>Country</Text></View>
+                <View style={[styles.adminDataCell, { width: 100 }]}><Text style={styles.adminDataHeaderText}>Members</Text></View>
+                <View style={[styles.adminDataCell, { width: 300 }]}><Text style={styles.adminDataHeaderText}>Reason</Text></View>
+                <View style={[styles.adminDataCell, { width: 150 }]}><Text style={styles.adminDataHeaderText}>Actions</Text></View>
+              </View>
+              {clubDeletionClubs.map((club) => (
+                <View key={club.clubId} style={styles.adminDataRow}>
+                  <View style={[styles.adminDataCell, { width: 220 }]}>
+                    <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{club.clubName}</Text>
+                    <Text style={styles.adminDataCellMuted} numberOfLines={1}>{club.location || "No location"}</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 130 }]}><Text style={styles.adminDataCellText}>{formatCountryName(club.country) || club.country || "-"}</Text></View>
+                  <View style={[styles.adminDataCell, { width: 100 }]}><Text style={styles.adminDataCellText}>{club.memberCount}</Text></View>
+                  <View style={[styles.adminDataCell, { width: 300 }]}>
+                    <TextInput
+                      style={[styles.input, { minHeight: 38, paddingVertical: 8 }]}
+                      value={clubDeletionReasonById[club.clubId] || ""}
+                      onChangeText={(value) => setClubDeletionReasonById((current) => ({ ...current, [club.clubId]: value }))}
+                      placeholder="Reason for deletion"
+                      placeholderTextColor="#9ca3af"
+                    />
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 150 }]}>
+                    <TouchableOpacity
+                      style={[styles.adminDataActionButton, styles.adminDataActionReject, (!club.canRequestDeletion || requestClubDeletionMutation.isPending) && styles.disabledButton]}
+                      onPress={() => handleRequestClubDeletion(club)}
+                      disabled={!club.canRequestDeletion || requestClubDeletionMutation.isPending}
+                    >
+                      <Text style={styles.adminDataActionText}>{club.memberCount > 0 ? "Request" : "Delete"}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+            <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+              <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                <View style={[styles.adminDataCell, { width: 200 }]}><Text style={styles.adminDataHeaderText}>Club</Text></View>
+                <View style={[styles.adminDataCell, { width: 130 }]}><Text style={styles.adminDataHeaderText}>Requested</Text></View>
+                <View style={[styles.adminDataCell, { width: 130 }]}><Text style={styles.adminDataHeaderText}>Eligible</Text></View>
+                <View style={[styles.adminDataCell, { width: 260 }]}><Text style={styles.adminDataHeaderText}>Reason</Text></View>
+                <View style={[styles.adminDataCell, { width: 100 }]}><Text style={styles.adminDataHeaderText}>Status</Text></View>
+                <View style={[styles.adminDataCell, { width: 150 }]}><Text style={styles.adminDataHeaderText}>Actions</Text></View>
+              </View>
+              {clubDeletionRequests.map((request) => (
+                <View key={request.requestId} style={styles.adminDataRow}>
+                  <View style={[styles.adminDataCell, { width: 200 }]}><Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{request.clubName}</Text></View>
+                  <View style={[styles.adminDataCell, { width: 130 }]}><Text style={styles.adminDataCellText}>{formatDate(request.createdAt)}</Text></View>
+                  <View style={[styles.adminDataCell, { width: 130 }]}><Text style={styles.adminDataCellText}>{formatDate(request.eligibleAt)}</Text></View>
+                  <View style={[styles.adminDataCell, { width: 260 }]}><Text style={styles.adminDataCellText} numberOfLines={3}>{request.reason}</Text></View>
+                  <View style={[styles.adminDataCell, { width: 100 }]}><Text style={styles.adminDataCellText}>{request.status}</Text></View>
+                  <View style={[styles.adminDataCell, styles.adminDataActions, { width: 150 }]}>
+                    {request.status === "pending" && (isSuperAdmin || isCountryAdmin || isCountryCoordinator) ? (
+                      <>
+                        <TouchableOpacity style={[styles.adminDataActionButton, styles.adminDataActionApprove]} onPress={() => reviewClubDeletionMutation.mutate({ requestId: request.requestId, action: "approve" })}>
+                          <Text style={styles.adminDataActionText}>Approve</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.adminDataActionButton, styles.adminDataActionReject]} onPress={() => reviewClubDeletionMutation.mutate({ requestId: request.requestId, action: "reject" })}>
+                          <Text style={styles.adminDataActionText}>Reject</Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : <Text style={styles.adminDataCellMuted}>No action</Text>}
+                  </View>
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+        </>
+      )}
+        </>
+      )}
+        </>
+      )}
+    </ScrollView>
+  );
+
+  const renderResignContent = () => (
     <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
       <View style={styles.auditFilterCard}>
         <View style={styles.auditFilterHeader}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.auditFilterTitle}>Admin Terms and Conditions</Text>
-            <View style={styles.organizerTermsPill}>
-              <Text style={styles.organizerTermsPillText}>{getAdminTermsRoleLabel(adminTermsRole)}</Text>
-            </View>
+            <Text style={styles.auditFilterTitle}>Resign Admin Role</Text>
             <Text style={styles.auditFilterSubtitle}>
-              Version {ADMIN_TERMS_VERSION}
-              {adminTermsStatus?.acceptedAt ? ` • Accepted ${formatDate(adminTermsStatus.acceptedAt)}` : ""}
+              Submit a resignation request for your admin access. Global Admins cannot use this self-service flow.
             </Text>
           </View>
-          {adminTermsStatusError ? (
-            <TouchableOpacity style={styles.retryButton} onPress={() => refetchAdminTermsStatus()}>
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-          ) : null}
         </View>
-      </View>
-
-      <View style={styles.auditLogCard}>
-        <Text style={styles.auditLogAction}>Docs Reference</Text>
-        <View style={styles.auditLogDetails}>
-          <Text style={styles.auditMetadata}>Index: docs/{adminTermsDocs.indexDoc}</Text>
-          <Text style={styles.auditMetadata}>Role file: docs/{adminTermsDocs.roleDoc}</Text>
-        </View>
-      </View>
-
-      {getAdminTermsSections(adminTermsRole).map((section) => (
-        <View key={section.title} style={styles.auditLogCard}>
-          <Text style={styles.auditLogAction}>{section.title}</Text>
-          <View style={styles.auditLogDetails}>
-            {section.body.map((paragraph) => (
-              <Text key={paragraph} style={styles.auditMetadata}>
-                {paragraph}
-              </Text>
-            ))}
-          </View>
-        </View>
-      ))}
-
-      <View style={styles.auditLogCard}>
-        <Text style={styles.auditLogAction}>Acceptance</Text>
+        <Text style={styles.errorHint}>
+          After confirmation, the request stays pending for 12 hours before automatic actioning unless a Global Admin handles it earlier.
+        </Text>
+        <TextInput
+          style={[styles.input, styles.inputMultiline]}
+          value={resignationReason}
+          onChangeText={setResignationReason}
+          placeholder="Reason for resigning"
+          placeholderTextColor="#9ca3af"
+          multiline
+          textAlignVertical="top"
+        />
         <TouchableOpacity
-          style={styles.roleAcceptanceRow}
-          onPress={() => setAdminTermsAcceptedChecked((value) => !value)}
-          disabled={hasAcceptedAdminTerms}
+          style={[styles.rejectBtn, requestRoleResignationMutation.isPending && styles.disabledButton]}
+          onPress={handleSubmitResignation}
+          disabled={requestRoleResignationMutation.isPending}
         >
-          <View style={[styles.archiveCheckbox, (adminTermsAcceptedChecked || hasAcceptedAdminTerms) && styles.archiveCheckboxSelected]}>
-            {(adminTermsAcceptedChecked || hasAcceptedAdminTerms) ? <CheckCircle size={18} color="#fff" /> : null}
-          </View>
-          <Text style={styles.roleAcceptanceText}>
-            I have read and accept the RunNation Admin Terms and Conditions.
+          <LogOut size={18} color="#fff" />
+          <Text style={styles.actionBtnText}>
+            {requestRoleResignationMutation.isPending ? "Submitting..." : "Submit Resignation"}
           </Text>
         </TouchableOpacity>
-        {!hasAcceptedAdminTerms ? (
-          <View style={styles.submissionActions}>
-            <TouchableOpacity
-              style={styles.rejectButton}
-              onPress={() => {
-                setAdminTermsAcceptedChecked(false);
-                router.replace("/settings" as any);
-              }}
-            >
-              <XCircle size={18} color="#fff" />
-              <Text style={styles.actionButtonText}>Reject</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.approveButton, (!adminTermsAcceptedChecked || acceptAdminTermsMutation.isPending) && styles.disabledButton]}
-              disabled={!adminTermsAcceptedChecked || acceptAdminTermsMutation.isPending}
-              onPress={() => acceptAdminTermsMutation.mutate()}
-            >
-              <CheckCircle size={18} color="#fff" />
-              <Text style={styles.actionButtonText}>
-                {acceptAdminTermsMutation.isPending ? "Saving..." : "Accept"}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <Text style={styles.eventPosterHint}>
-            Accepted admins can continue using the portal. This acceptance is also counted in profile completion.
-          </Text>
-        )}
       </View>
     </ScrollView>
   );
+
+  const renderRoleAccessContent = () => (
+    <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.auditFilterCard}>
+          <View style={styles.auditFilterHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.auditFilterTitle}>Admin Role Access</Text>
+              <Text style={styles.auditFilterSubtitle}>Global Admin can review pending role requests and manage active role access.</Text>
+            </View>
+          </View>
+        </View>
+
+      {roleManagementLoading ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>Loading role access...</Text>
+        </View>
+      ) : roleManagementError ? (
+        <View style={styles.emptyContainer}>
+          <AlertTriangle size={56} color="#f59e0b" />
+          <Text style={styles.errorText}>Error loading role access</Text>
+          <Text style={styles.errorSubtext}>{roleManagementError?.message || "Could not load role access details."}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => refetchRoleManagement()}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.roleAccessPanel}>
+          <View style={styles.roleAccessTabs}>
+            <TouchableOpacity
+              style={[styles.roleAccessTabButton, roleAccessTab === "pending" && styles.roleAccessTabButtonActive]}
+              onPress={() => setRoleAccessTab("pending")}
+            >
+              <Text style={[styles.roleAccessTabText, roleAccessTab === "pending" && styles.roleAccessTabTextActive]}>
+                Pending ({visiblePendingRoleRequests.length})
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.roleAccessTabButton, roleAccessTab === "active" && styles.roleAccessTabButtonActive]}
+              onPress={() => setRoleAccessTab("active")}
+            >
+              <Text style={[styles.roleAccessTabText, roleAccessTab === "active" && styles.roleAccessTabTextActive]}>
+                Active ({activeRoleAssignments.length})
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {roleAccessTab === "pending" ? (
+            visiblePendingRoleRequests.length === 0 ? (
+              <View style={styles.roleAccessEmpty}>
+                <UserPlus size={30} color="#d1d5db" />
+                <Text style={styles.roleAccessEmptyTitle}>No pending requests</Text>
+                <Text style={styles.roleAccessEmptyText}>Submitted role applications will appear here for approval.</Text>
+              </View>
+            ) : (
+              <View style={styles.pendingRoleList}>
+                {visiblePendingRoleRequests.map((request) => (
+                  <View key={request.inviteId} style={styles.pendingRoleCard}>
+                    <View style={styles.pendingRoleTopRow}>
+                      <View style={styles.pendingRoleIdentity}>
+                        <Text style={styles.pendingRoleEmail} numberOfLines={2}>{request.email}</Text>
+                        <Text style={styles.pendingRoleMetaText}>{formatDate(request.createdAt)} • By {request.invitedByName || "Global Admin"}</Text>
+                      </View>
+                      <View style={styles.pendingRoleScopeBlock}>
+                        <Text style={styles.pendingRoleLabel}>Role</Text>
+                        <Text style={styles.pendingRoleValue} numberOfLines={2}>{getRoleDisplayName(request.roleName)}</Text>
+                        <Text style={styles.pendingRoleLabel}>Club/company</Text>
+                        <Text style={styles.pendingRoleValue} numberOfLines={2}>{getRoleRequestClubCompany(request)}</Text>
+                        <Text style={styles.pendingRoleLabel}>Scope</Text>
+                        <Text style={styles.pendingRoleValue} numberOfLines={2}>{getRoleRequestScope(request)}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.pendingRoleTextBox}>
+                      <Text style={styles.pendingRoleLabel}>Application details</Text>
+                      {request.applicantStatement ? (
+                        <Text style={styles.pendingRoleBodyText}>{request.applicantStatement}</Text>
+                      ) : (
+                        <Text style={styles.pendingRoleMutedText}>No applicant statement added.</Text>
+                      )}
+                      {request.contactConsent ? (
+                        <Text style={styles.pendingRoleContactText}>
+                          Contact: {request.contactInstructions || "Applicant asked to be contacted if selected"}
+                        </Text>
+                      ) : null}
+                      {getRoleRequestLinks(request).length > 0 ? (
+                        <View style={styles.pendingRoleLinks}>
+                          {getRoleRequestLinks(request).map((link) => (
+                            <View key={`${request.inviteId}-${link.label}`} style={styles.pendingRoleLinkRow}>
+                              <Text style={styles.pendingRoleLinkText} numberOfLines={1}>{link.label}: {link.url}</Text>
+                              <View style={styles.pendingRoleLinkActions}>
+                                <TouchableOpacity style={styles.pendingRoleLinkButton} onPress={() => Linking.openURL(link.url)}>
+                                  <Text style={styles.pendingRoleLinkButtonText}>Open</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={styles.pendingRoleLinkButton}
+                                  onPress={() => {
+                                    Clipboard.setString(link.url);
+                                    Alert.alert("Copied", "Link copied.");
+                                  }}
+                                >
+                                  <Text style={styles.pendingRoleLinkButtonText}>Copy</Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          ))}
+                        </View>
+                      ) : null}
+                    </View>
+
+                    <View style={styles.pendingRoleActions}>
+                      <TouchableOpacity
+                        style={[styles.pendingRoleButton, styles.roleMiniApprove]}
+                        onPress={() => approveRoleRequestMutation.mutate({ inviteId: request.inviteId })}
+                        disabled={approveRoleRequestMutation.isPending}
+                      >
+                        <CheckCircle size={14} color="#fff" />
+                        <Text style={styles.roleMiniButtonText}>Accept</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.pendingRoleButton, styles.roleMiniReject]}
+                        onPress={() => rejectRoleRequestMutation.mutate({ inviteId: request.inviteId })}
+                        disabled={rejectRoleRequestMutation.isPending}
+                      >
+                        <XCircle size={14} color="#fff" />
+                        <Text style={styles.roleMiniButtonText}>Reject</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )
+          ) : activeRoleAssignments.length === 0 ? (
+            <View style={styles.roleAccessEmpty}>
+              <Users size={30} color="#d1d5db" />
+              <Text style={styles.roleAccessEmptyTitle}>No active assignments yet</Text>
+            </View>
+          ) : (
+            <View style={styles.roleTable}>
+              <View style={[styles.roleTableRow, styles.roleTableHeader]}>
+                <Text style={[styles.roleTableHeaderText, styles.roleColUser]}>User</Text>
+                <Text style={[styles.roleTableHeaderText, styles.roleColRole]}>Role</Text>
+                <Text style={[styles.roleTableHeaderText, styles.roleColClubCompany]}>Club/Company</Text>
+                <Text style={[styles.roleTableHeaderText, styles.roleColJurisdiction]}>Jurisdiction</Text>
+                <Text style={[styles.roleTableHeaderText, styles.roleColDate]}>Date</Text>
+                <Text style={[styles.roleTableHeaderText, styles.roleColTerms]}>T&Cs</Text>
+                <Text style={[styles.roleTableHeaderText, styles.roleColActions]}>Actions</Text>
+              </View>
+              {activeRoleAssignments.map((assignment) => (
+                <View key={assignment.assignmentId} style={styles.roleTableRow}>
+                  <View style={styles.roleColUser}>
+                    <Text style={[styles.roleCellText, styles.roleCellStrong]} numberOfLines={2}>{assignment.userName}</Text>
+                  </View>
+                  <View style={styles.roleColRole}>
+                    <Text style={styles.roleCellText} numberOfLines={2}>{getRoleDisplayName(assignment.roleName)}</Text>
+                  </View>
+                  <View style={styles.roleColClubCompany}>
+                    <Text style={styles.roleCellText} numberOfLines={2}>{getRoleAssignmentClubCompany(assignment)}</Text>
+                  </View>
+                  <View style={styles.roleColJurisdiction}>
+                    <Text style={styles.roleCellText} numberOfLines={2}>{getRoleAssignmentJurisdiction(assignment)}</Text>
+                  </View>
+                  <View style={styles.roleColDate}>
+                    <Text style={styles.roleCellMuted} numberOfLines={2}>{formatDate(assignment.createdAt)}</Text>
+                  </View>
+                  <View style={styles.roleColTerms}>
+                    <Text
+                      style={[
+                        styles.roleTermsBadge,
+                        assignment.hasAcceptedTerms ? styles.roleTermsAccepted : styles.roleTermsPending,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {getRoleAssignmentTermsStatus(assignment)}
+                    </Text>
+                  </View>
+                  <View style={[styles.roleColActions, styles.roleActionCell]}>
+                    <TouchableOpacity
+                      style={[styles.roleMiniButton, styles.roleMiniRemove]}
+                      onPress={() =>
+                        Alert.alert("Remove Role Access", "Remove this role access assignment?", [
+                          { text: "Cancel", style: "cancel" },
+                          { text: "Delete", style: "destructive", onPress: () => deleteRoleAssignmentMutation.mutate({ assignmentId: assignment.assignmentId }) },
+                        ])
+                      }
+                    >
+                      <Trash2 size={12} color="#fff" />
+                      <Text style={styles.roleMiniButtonText}>Remove</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
+    </ScrollView>
+  );
+
+  const renderAdminTermsContent = () => {
+    const termsSections = adminTermsContent?.sections ?? [];
+    const termsError = adminTermsStatusError || adminTermsContentError;
+
+    return (
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.auditFilterCard}>
+          <View style={styles.auditFilterHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.auditFilterTitle}>Admin Terms and Conditions</Text>
+              <View style={styles.organizerTermsPill}>
+                <Text style={styles.organizerTermsPillText}>{adminTermsContent?.roleLabel ?? "Admin Terms"}</Text>
+              </View>
+              <Text style={styles.auditFilterSubtitle}>
+                Version {adminTermsContent?.currentVersion ?? adminTermsStatus?.currentVersion ?? "Loading"}
+                {adminTermsStatus?.acceptedAt ? ` - Accepted ${formatDate(adminTermsStatus.acceptedAt)}` : ""}
+              </Text>
+            </View>
+            {termsError ? (
+              <TouchableOpacity
+                style={styles.retryButton}
+                onPress={() => {
+                  void refetchAdminTermsStatus();
+                  void refetchAdminTermsContent();
+                }}
+              >
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
+
+        {adminTermsContentLoading ? (
+          <View style={styles.auditLogCard}>
+            <Text style={styles.auditLogAction}>Loading Terms</Text>
+            <View style={styles.auditLogDetails}>
+              <Text style={styles.auditMetadata}>Fetching the current terms from the server...</Text>
+            </View>
+          </View>
+        ) : termsError ? (
+          <View style={styles.auditLogCard}>
+            <Text style={styles.auditLogAction}>Terms Unavailable</Text>
+            <View style={styles.auditLogDetails}>
+              <Text style={styles.auditMetadata}>{termsError.message || "Could not load the current terms."}</Text>
+            </View>
+          </View>
+        ) : null}
+
+        {termsSections.map((section) => (
+          <View key={section.title} style={styles.auditLogCard}>
+            <Text style={styles.auditLogAction}>{section.title}</Text>
+            <View style={styles.auditLogDetails}>
+              {section.body.map((paragraph) => (
+                <Text key={paragraph} style={styles.auditMetadata}>
+                  {paragraph}
+                </Text>
+              ))}
+            </View>
+          </View>
+        ))}
+
+        <View style={styles.auditLogCard}>
+          <Text style={styles.auditLogAction}>Acceptance</Text>
+          <TouchableOpacity
+            style={styles.roleAcceptanceRow}
+            onPress={() => setAdminTermsAcceptedChecked((value) => !value)}
+            disabled={hasAcceptedAdminTerms}
+          >
+            <View style={[styles.archiveCheckbox, (adminTermsAcceptedChecked || hasAcceptedAdminTerms) && styles.archiveCheckboxSelected]}>
+              {(adminTermsAcceptedChecked || hasAcceptedAdminTerms) ? <CheckCircle size={18} color="#fff" /> : null}
+            </View>
+            <Text style={styles.roleAcceptanceText}>
+              I have read and accept the RunNation Admin Terms and Conditions.
+            </Text>
+          </TouchableOpacity>
+          {!hasAcceptedAdminTerms ? (
+            <View style={styles.submissionActions}>
+              <TouchableOpacity
+                style={styles.rejectButton}
+                onPress={() => {
+                  setAdminTermsAcceptedChecked(false);
+                  router.replace("/settings" as any);
+                }}
+              >
+                <XCircle size={18} color="#fff" />
+                <Text style={styles.actionButtonText}>Reject</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.approveButton, (!adminTermsAcceptedChecked || acceptAdminTermsMutation.isPending) && styles.disabledButton]}
+                disabled={!adminTermsAcceptedChecked || acceptAdminTermsMutation.isPending}
+                onPress={() => acceptAdminTermsMutation.mutate()}
+              >
+                <CheckCircle size={18} color="#fff" />
+                <Text style={styles.actionButtonText}>
+                  {acceptAdminTermsMutation.isPending ? "Saving..." : "Accept"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <Text style={styles.eventPosterHint}>
+              Accepted admins can continue using the portal. This acceptance is also counted in profile completion.
+            </Text>
+          )}
+        </View>
+      </ScrollView>
+    );
+  };
 
   if (!isAuthenticated) {
     return null;
@@ -2837,7 +5148,7 @@ const getStatusLabel = (status: string) => {
     <View style={styles.container}>
       <Stack.Screen 
         options={{ 
-          title: activeTab ? getTabTitle(activeTab) : "Admin Dashboard",
+          title: activeTab ? getTabTitle(activeTab) : isFitnessCoachColumnist ? "Fitness Coach Dashboard" : "Admin Dashboard",
           headerLeft: activeTab ? () => (
             <TouchableOpacity onPress={() => setActiveTab(null)} style={{ marginLeft: 8, padding: 4 }}>
               <ArrowLeft size={24} color="#111827" />
@@ -2865,8 +5176,20 @@ const getStatusLabel = (status: string) => {
             ? "Full platform management access is enabled across all countries."
             : isCountryAdmin
             ? "Country-scoped access is enabled for orders, stock, events, enrollments, club requests, uploads, external activity, and magazine tools."
+            : isSpecialClubCoordinator
+            ? "Special club coordinator access is enabled for special-club events, other-source run approvals, WhatsApp links, magazine tools, and admin terms."
             : isEventOrganizer
             ? "Organizer-scoped access is enabled for your assigned events, organizer-side enrollment decisions, and admin terms acceptance. Organizer-created events stay pending until Country or Global Admin approval."
+            : isMagazineEditor
+            ? "Magazine editor access is enabled for creating news articles, reviewing submissions, managing magazine entries, team visibility, and admin terms."
+            : isFitnessCoachColumnist
+            ? "Fitness Coach access is enabled for submitting fitness-column articles, reviewing your article history, previewing past submissions, and accepting admin terms."
+            : isMagazineColumnist
+            ? "Magazine columnist access is enabled for submitting approved-column articles and accepting admin terms."
+            : isChatRoomAdministrator
+            ? "Chat room administrator access is enabled for screening chat abuse reports and accepting admin terms."
+            : needsClubProfileSetup
+            ? "Club Coordinator access is approved. Create your club profile first so RunNation can connect your tools, members, payments, WhatsApp group, reports, and magazine access to the right club."
             : "Club-scoped access is enabled for treadmill, events, enrollments, club requests, uploads, external activity, and magazine tools."}
         </Text>
       </View>
@@ -2876,9 +5199,9 @@ const getStatusLabel = (status: string) => {
             key={section.key}
             style={[
               styles.menuSection,
-              section.key === "global"
+              section.key === "approvals"
                 ? styles.menuSectionGlobal
-                : section.key === "country"
+                : section.key === "reporting"
                 ? styles.menuSectionCountry
                 : styles.menuSectionClub,
             ]}
@@ -2887,9 +5210,9 @@ const getStatusLabel = (status: string) => {
               <View
                 style={[
                   styles.menuSectionAccent,
-                  section.key === "global"
+                  section.key === "approvals"
                     ? styles.menuSectionAccentGlobal
-                    : section.key === "country"
+                    : section.key === "reporting"
                     ? styles.menuSectionAccentCountry
                     : styles.menuSectionAccentClub,
                 ]}
@@ -2897,27 +5220,29 @@ const getStatusLabel = (status: string) => {
               <View
                 style={[
                   styles.menuSectionIconWrap,
-                  section.key === "global"
+                  section.key === "approvals"
                     ? styles.menuSectionIconWrapGlobal
-                    : section.key === "country"
+                    : section.key === "reporting"
                     ? styles.menuSectionIconWrapCountry
                     : styles.menuSectionIconWrapClub,
                 ]}
               >
-                {section.key === "global" ? (
-                  <Globe2 size={12} color="#334155" />
-                ) : section.key === "country" ? (
-                  <MapPin size={12} color="#9a3412" />
-                ) : (
+                {section.key === "approvals" ? (
+                  <ClipboardCheck size={12} color="#334155" />
+                ) : section.key === "reporting" ? (
+                  <FileText size={12} color="#9a3412" />
+                ) : section.key === "administration" ? (
                   <Users size={12} color="#047857" />
+                ) : (
+                  <Package size={12} color="#047857" />
                 )}
               </View>
               <Text
                 style={[
                   styles.menuSectionTitle,
-                  section.key === "global"
+                  section.key === "approvals"
                     ? styles.menuSectionTitleGlobal
-                    : section.key === "country"
+                    : section.key === "reporting"
                     ? styles.menuSectionTitleCountry
                     : styles.menuSectionTitleClub,
                 ]}
@@ -2971,199 +5296,242 @@ const getStatusLabel = (status: string) => {
       ) : activeTab === "adminTerms" ? (
         renderAdminTermsContent()
       ) : activeTab === "roles" ? (
+        renderRoleAccessContent()
+      ) : activeTab === "clubAdmin" ? (
+        renderClubAdminContent()
+      ) : activeTab === "resign" ? (
+        renderResignContent()
+      ) : activeTab === "reports" ? (
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-          <View style={styles.auditFilterCard}>
-            <View style={styles.auditFilterHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.auditFilterTitle}>Admin Role Access</Text>
-                <Text style={styles.auditFilterSubtitle}>Global Admin can review pending role requests and manage active role access.</Text>
-              </View>
-              <TouchableOpacity style={styles.downloadButton} onPress={openCreateRoleModal}>
-                <Plus size={18} color="#fff" />
-                <Text style={styles.downloadButtonText}>Add Role Access</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <View style={styles.sectionDivider}>
-            <Text style={styles.sectionTitle}>Role Requests</Text>
-          </View>
-
-          {roleManagementLoading ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>Loading role requests...</Text>
-            </View>
-          ) : roleManagementError ? (
-            <View style={styles.emptyContainer}>
-              <AlertTriangle size={56} color="#f59e0b" />
-              <Text style={styles.errorText}>Error loading role access</Text>
-              <Text style={styles.errorSubtext}>{roleManagementError.message || "Could not load role access details."}</Text>
-              <TouchableOpacity style={styles.retryButton} onPress={() => refetchRoleManagement()}>
-                <Text style={styles.retryButtonText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          ) : pendingRoleRequests.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <UserPlus size={48} color="#d1d5db" />
-              <Text style={styles.emptyText}>No pending role requests</Text>
-              <Text style={styles.emptySubtext}>Create one with Add Role Access, then approve it here.</Text>
-            </View>
-          ) : (
-            pendingRoleRequests.map((request) => (
-              <View key={request.inviteId} style={styles.auditLogCard}>
-                <View style={styles.auditLogHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.auditLogAction}>{request.email}</Text>
-                    <Text style={styles.auditLogDate}>{getRoleDisplayName(request.roleName)} • {formatDate(request.createdAt)}</Text>
-                  </View>
-                  <View style={styles.auditTypeBadge}>
-                    <Text style={styles.auditTypeText}>{request.status === "pending" ? "PENDING" : "REJECTED"}</Text>
-                  </View>
+          {(isClubCoordinator || isSpecialClubCoordinator || isSuperAdmin || isCountryAdmin || isCountryCoordinator) ? (
+            <View style={styles.auditFilterCard}>
+              <View style={styles.auditFilterHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.auditFilterTitle}>Club Status</Text>
+                  <Text style={styles.auditFilterSubtitle}>
+                    Member status for club meetings and external reporting. Subscription is blank where the club has no active fee.
+                  </Text>
                 </View>
-                <View style={styles.auditLogDetails}>
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Scope:</Text>
-                    <Text style={styles.orderValue}>
-                      {request.roleName === "club_coordinator"
-                        ? request.clubName || request.clubId || "No club"
-                        : request.roleName === "event_organizer"
-                        ? request.organizerName || "Organizer profile will be created on approval"
-                        : request.roleName.startsWith("magazine_columnist_") || request.roleName.endsWith("_runners_club_coordinator")
-                        ? "Global"
-                        : request.countryName || formatCountryName(request.countryCode) || request.countryCode || "No country"}
-                    </Text>
-                  </View>
-                  {request.websiteUrl || request.linkedinUrl || request.socialUrl ? (
-                    <View style={styles.orderDetails}>
-                      <Text style={styles.orderLabel}>Links:</Text>
-                      <View style={{ flex: 1, gap: 4 }}>
-                        {request.websiteUrl ? (
-                          <TouchableOpacity onPress={() => Linking.openURL(request.websiteUrl!)}>
-                            <Text style={styles.orderValue}>{request.websiteUrl}</Text>
-                          </TouchableOpacity>
-                        ) : null}
-                        {request.linkedinUrl ? (
-                          <TouchableOpacity onPress={() => Linking.openURL(request.linkedinUrl!)}>
-                            <Text style={styles.orderValue}>{request.linkedinUrl}</Text>
-                          </TouchableOpacity>
-                        ) : null}
-                        {request.socialUrl ? (
-                          <TouchableOpacity onPress={() => Linking.openURL(request.socialUrl!)}>
-                            <Text style={styles.orderValue}>{request.socialUrl}</Text>
-                          </TouchableOpacity>
-                        ) : null}
-                      </View>
+                <TouchableOpacity
+                  style={[styles.downloadButton, (clubStatusReportLoading || isExportingClubStatus) && styles.disabledButton]}
+                  onPress={handleExportClubStatusReport}
+                  disabled={clubStatusReportLoading || isExportingClubStatus}
+                >
+                  <Download size={18} color="#fff" />
+                  <Text style={styles.downloadButtonText}>{isExportingClubStatus ? "Preparing..." : "Download"}</Text>
+                </TouchableOpacity>
+              </View>
+
+              {clubStatusReportError ? (
+                <View style={styles.emptyContainer}>
+                  <Text style={styles.errorText}>Could not load club status</Text>
+                  <Text style={styles.errorSubtext}>{clubStatusReportError.message || "Try refreshing the report."}</Text>
+                  <TouchableOpacity style={styles.retryButton} onPress={() => refetchClubStatusReport()}>
+                    <Text style={styles.retryButtonText}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : clubStatusReportLoading ? (
+                <View style={styles.emptyContainer}>
+                  <Text style={styles.emptyText}>Loading club status...</Text>
+                </View>
+              ) : (
+                <>
+                  <View style={styles.auditFilterHeader}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.auditFilterTitle}>Inactive Club Flags</Text>
+                      <Text style={styles.auditFilterSubtitle}>
+                        Clubs are flagged after 30 days with no enrolment, 90 days with fewer than 6 members, or 180 days with fewer than 10 members.
+                      </Text>
                     </View>
-                  ) : null}
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Requested by:</Text>
-                        <Text style={styles.orderValue}>{request.invitedByName || "Global Admin"}</Text>
+                    <View style={styles.healthSeverityBadge}>
+                      <Text style={styles.healthSeverityText}>{inactiveClubSummaries.length} flagged</Text>
+                    </View>
                   </View>
-                  {request.status === "pending" ? (
-                    <View style={styles.submissionActions}>
-                      <TouchableOpacity
-                        style={styles.approveButton}
-                        onPress={() => approveRoleRequestMutation.mutate({ inviteId: request.inviteId })}
-                        disabled={approveRoleRequestMutation.isPending}
-                      >
-                        <CheckCircle size={18} color="#fff" />
-                        <Text style={styles.actionButtonText}>Accept</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.rejectButton}
-                        onPress={() => rejectRoleRequestMutation.mutate({ inviteId: request.inviteId })}
-                        disabled={rejectRoleRequestMutation.isPending}
-                      >
-                        <XCircle size={18} color="#fff" />
-                        <Text style={styles.actionButtonText}>Reject</Text>
-                      </TouchableOpacity>
+                  {inactiveClubSummaries.length === 0 ? (
+                    <View style={styles.emptyContainer}>
+                      <Text style={styles.emptyText}>No inactive clubs flagged</Text>
                     </View>
                   ) : (
-                    <Text style={styles.errorHint}>Reviewed request. No further action is available.</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+                      <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                        <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                          <View style={[styles.adminDataCell, { width: 180 }]}><Text style={styles.adminDataHeaderText}>Club</Text></View>
+                          <View style={[styles.adminDataCell, { width: 100 }]}><Text style={styles.adminDataHeaderText}>Country</Text></View>
+                          <View style={[styles.adminDataCell, { width: 90 }]}><Text style={styles.adminDataHeaderText}>Age</Text></View>
+                          <View style={[styles.adminDataCell, { width: 90 }]}><Text style={styles.adminDataHeaderText}>Members</Text></View>
+                          <View style={[styles.adminDataCell, { width: 320 }]}><Text style={styles.adminDataHeaderText}>Flag</Text></View>
+                          <View style={[styles.adminDataCell, { width: 120 }]}><Text style={styles.adminDataHeaderText}>Action</Text></View>
+                        </View>
+                        {inactiveClubSummaries.map((club) => (
+                          <View key={club.clubId} style={styles.adminDataRow}>
+                            <View style={[styles.adminDataCell, { width: 180 }]}><Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{club.clubName}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 100 }]}><Text style={styles.adminDataCellText}>{formatCountryName(club.country) || club.country || "-"}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 90 }]}><Text style={styles.adminDataCellText}>{club.ageDays}d</Text></View>
+                            <View style={[styles.adminDataCell, { width: 90 }]}><Text style={styles.adminDataCellText}>{club.memberCount}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 320 }]}><Text style={styles.adminDataCellText}>{club.inactiveReason}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 120 }]}>
+                              {(isSuperAdmin || isCountryAdmin || isCountryCoordinator) ? (
+                                <TouchableOpacity
+                                  style={[styles.adminDataActionButton, styles.adminDataActionReject, requestClubDeletionMutation.isPending && styles.disabledButton]}
+                                  onPress={() => handleDeleteInactiveClub(club)}
+                                  disabled={requestClubDeletionMutation.isPending}
+                                >
+                                  <Text style={styles.adminDataActionText}>Delete</Text>
+                                </TouchableOpacity>
+                              ) : (
+                                <Text style={styles.adminDataCellMuted}>No action</Text>
+                              )}
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    </ScrollView>
                   )}
-                </View>
-              </View>
-            ))
-          )}
 
-          <View style={styles.sectionDivider}>
-            <Text style={styles.sectionTitle}>Active Assignments</Text>
-          </View>
-
-          {activeRoleAssignments.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Users size={48} color="#d1d5db" />
-              <Text style={styles.emptyText}>No active assignments yet</Text>
+                  {!(clubStatusReport?.rows ?? []).length ? (
+                    <View style={styles.emptyContainer}>
+                      <Text style={styles.emptyText}>No club members found</Text>
+                      <Text style={styles.emptySubtext}>Approved club members will appear here.</Text>
+                    </View>
+                  ) : (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+                      <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                        <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                          <View style={[styles.adminDataCell, { width: 130 }]}><Text style={styles.adminDataHeaderText}>Club</Text></View>
+                          <View style={[styles.adminDataCell, { width: 150 }]}><Text style={styles.adminDataHeaderText}>Name</Text></View>
+                          <View style={[styles.adminDataCell, { width: 60 }]}><Text style={styles.adminDataHeaderText}>Sex</Text></View>
+                          <View style={[styles.adminDataCell, { width: 120 }]}><Text style={styles.adminDataHeaderText}>Town</Text></View>
+                          <View style={[styles.adminDataCell, { width: 100 }]}><Text style={styles.adminDataHeaderText}>Sign up</Text></View>
+                          <View style={[styles.adminDataCell, { width: 110 }]}><Text style={styles.adminDataHeaderText}>Subscription</Text></View>
+                          <View style={[styles.adminDataCell, { width: 115 }]}><Text style={styles.adminDataHeaderText}>RunNation tier</Text></View>
+                          <View style={[styles.adminDataCell, { width: 100 }]}><Text style={styles.adminDataHeaderText}>Runs 30d</Text></View>
+                          <View style={[styles.adminDataCell, { width: 95 }]}><Text style={styles.adminDataHeaderText}>Service role</Text></View>
+                          <View style={[styles.adminDataCell, { width: 115 }]}><Text style={styles.adminDataHeaderText}>Other club</Text></View>
+                        </View>
+                        {((clubStatusReport?.rows ?? []) as any[]).map((row) => (
+                          <View key={`${row.clubId}-${row.registrationId}`} style={styles.adminDataRow}>
+                            <View style={[styles.adminDataCell, { width: 130 }]}><Text style={styles.adminDataCellText} numberOfLines={2}>{row.clubName}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 150 }]}><Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{row.name}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 60 }]}><Text style={styles.adminDataCellText}>{row.sex || "-"}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 120 }]}><Text style={styles.adminDataCellText} numberOfLines={2}>{row.town || "-"}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 100 }]}><Text style={styles.adminDataCellText}>{row.signUpDate ? formatDate(row.signUpDate) : "-"}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 110 }]}>
+                              {row.subscription ? (
+                                <TouchableOpacity
+                                  style={[styles.adminDataActionButton, row.subscription === "Y" ? styles.adminDataActionApprove : styles.adminDataActionNeutral]}
+                                  onPress={() => {
+                                    setActiveTab("payments");
+                                  }}
+                                >
+                                  <Text style={styles.adminDataActionText}>{row.subscription}</Text>
+                                </TouchableOpacity>
+                              ) : (
+                                <Text style={styles.adminDataCellText}>-</Text>
+                              )}
+                            </View>
+                            <View style={[styles.adminDataCell, { width: 115 }]}><Text style={styles.adminDataCellText}>{row.runNationTier || "-"}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 100 }]}><Text style={styles.adminDataCellText}>{row.runsLast30Days}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 95 }]}><Text style={styles.adminDataCellText}>{row.hasServiceRole}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 115 }]}><Text style={styles.adminDataCellText}>{row.otherClubMembership}</Text></View>
+                          </View>
+                        ))}
+                      </View>
+                    </ScrollView>
+                  )}
+                </>
+              )}
             </View>
-          ) : (
-            activeRoleAssignments.map((assignment) => (
-              <View key={assignment.assignmentId} style={styles.auditLogCard}>
-                <View style={styles.auditLogHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.auditLogAction}>{assignment.userName}</Text>
-                    <Text style={styles.auditLogDate}>
-                      {getRoleDisplayName(assignment.roleName)}
-                      {assignment.username ? ` • @${assignment.username}` : ""}
-                    </Text>
-                  </View>
-                  <View style={styles.auditTypeBadge}>
-                    <Text style={styles.auditTypeText}>ACTIVE</Text>
-                  </View>
+          ) : null}
+
+          {isEventOrganizer || isClubCoordinator || isSpecialClubCoordinator || isSuperAdmin || isCountryAdmin || isCountryCoordinator ? (
+            <View style={styles.auditFilterCard}>
+              <View style={styles.auditFilterHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.auditFilterTitle}>Event Results</Text>
+                  <Text style={styles.auditFilterSubtitle}>
+                    Select a completed event and download participant results as CSV.
+                  </Text>
                 </View>
-                <View style={styles.auditLogDetails}>
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Scope:</Text>
-                    <Text style={styles.orderValue}>
-                      {assignment.roleName === "club_coordinator"
-                        ? assignment.clubName || assignment.clubId || "No club"
-                        : assignment.roleName === "event_organizer"
-                        ? assignment.organizerName || assignment.organizerId || "No organizer"
-                        : assignment.roleName.startsWith("magazine_columnist_") || assignment.roleName.endsWith("_runners_club_coordinator")
-                        ? "Global"
-                        : assignment.countryName || formatCountryName(assignment.countryCode) || assignment.countryCode || "No country"}
-                    </Text>
-                  </View>
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Assigned:</Text>
-                    <Text style={styles.orderValue}>{formatDate(assignment.createdAt)}</Text>
-                  </View>
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Assigned by:</Text>
-                    <Text style={styles.orderValue}>{assignment.assignedByName || "Unknown"}</Text>
-                  </View>
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Admin T&Cs:</Text>
-                    <Text style={styles.orderValue}>
-                      {assignment.hasAcceptedTerms
-                        ? `Accepted${assignment.termsAcceptedAt ? ` • ${formatDate(assignment.termsAcceptedAt)}` : ""}`
-                        : "Not accepted"}
-                    </Text>
-                  </View>
-                  <View style={styles.submissionActions}>
-                    <TouchableOpacity
-                      style={styles.downloadButton}
-                      onPress={() => openEditRoleModal(assignment)}
-                    >
-                      <Edit size={18} color="#fff" />
-                      <Text style={styles.downloadButtonText}>Edit Access</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.archiveActionBtn}
-                      onPress={() =>
-                        Alert.alert("Remove Role Access", "Remove this role access assignment?", [
-                          { text: "Cancel", style: "cancel" },
-                          { text: "Delete", style: "destructive", onPress: () => deleteRoleAssignmentMutation.mutate({ assignmentId: assignment.assignmentId }) },
-                        ])
-                      }
-                    >
-                      <Trash2 size={18} color="#fff" />
-                      <Text style={styles.archiveActionBtnText}>Remove Access</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
+                <TouchableOpacity
+                  style={[styles.downloadButton, (!selectedReportEventId || eventResultsReportLoading || isExportingEventResults) && styles.disabledButton]}
+                  onPress={handleExportEventResultsReport}
+                  disabled={!selectedReportEventId || eventResultsReportLoading || isExportingEventResults}
+                >
+                  <Download size={18} color="#fff" />
+                  <Text style={styles.downloadButtonText}>{isExportingEventResults ? "Preparing..." : "Download"}</Text>
+                </TouchableOpacity>
               </View>
-            ))
-          )}
+
+              {completedReportEvents.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                  <Text style={styles.emptyText}>No completed events yet</Text>
+                  <Text style={styles.emptySubtext}>Completed events in your scope will appear here.</Text>
+                </View>
+              ) : (
+                <>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.eventFilterScroll}>
+                    {completedReportEvents.map((event: any) => {
+                      const eventId = event.event_id || event.eventId;
+                      return (
+                        <TouchableOpacity
+                          key={eventId}
+                          style={[styles.eventFilterChip, selectedReportEventId === eventId && styles.eventFilterChipActive]}
+                          onPress={() => setSelectedReportEventId(eventId)}
+                        >
+                          <Text style={[styles.eventFilterChipText, selectedReportEventId === eventId && styles.eventFilterChipTextActive]} numberOfLines={1}>
+                            {event.event_name || event.eventName}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+
+                  {eventResultsReportError ? (
+                    <View style={styles.emptyContainer}>
+                      <Text style={styles.errorText}>Could not load event results</Text>
+                      <Text style={styles.errorSubtext}>{eventResultsReportError.message || "Try refreshing the report."}</Text>
+                      <TouchableOpacity style={styles.retryButton} onPress={() => refetchEventResultsReport()}>
+                        <Text style={styles.retryButtonText}>Retry</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : eventResultsReportLoading ? (
+                    <View style={styles.emptyContainer}>
+                      <Text style={styles.emptyText}>Loading event results...</Text>
+                    </View>
+                  ) : !(eventResultsReport?.rows ?? []).length ? (
+                    <View style={styles.emptyContainer}>
+                      <Text style={styles.emptyText}>No results for selected event</Text>
+                    </View>
+                  ) : (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+                      <View style={styles.adminDataTable}>
+                        <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                          <View style={[styles.adminDataCell, { width: 55 }]}><Text style={styles.adminDataHeaderText}>Rank</Text></View>
+                          <View style={[styles.adminDataCell, { width: 160 }]}><Text style={styles.adminDataHeaderText}>Name</Text></View>
+                          <View style={[styles.adminDataCell, { width: 55 }]}><Text style={styles.adminDataHeaderText}>Sex</Text></View>
+                          <View style={[styles.adminDataCell, { width: 120 }]}><Text style={styles.adminDataHeaderText}>Town</Text></View>
+                          <View style={[styles.adminDataCell, { width: 95 }]}><Text style={styles.adminDataHeaderText}>Distance</Text></View>
+                          <View style={[styles.adminDataCell, { width: 95 }]}><Text style={styles.adminDataHeaderText}>Time</Text></View>
+                          <View style={[styles.adminDataCell, { width: 95 }]}><Text style={styles.adminDataHeaderText}>Pace</Text></View>
+                        </View>
+                        {((eventResultsReport?.rows ?? []) as any[]).map((row) => (
+                          <View key={row.participantId} style={styles.adminDataRow}>
+                            <View style={[styles.adminDataCell, { width: 55 }]}><Text style={styles.adminDataCellText}>{row.rank}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 160 }]}><Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{row.name}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 55 }]}><Text style={styles.adminDataCellText}>{row.sex || "-"}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 120 }]}><Text style={styles.adminDataCellText} numberOfLines={2}>{row.town || "-"}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 95 }]}><Text style={styles.adminDataCellText}>{Number(row.distanceKm || 0).toFixed(2)}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 95 }]}><Text style={styles.adminDataCellText}>{row.time || "-"}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 95 }]}><Text style={styles.adminDataCellText}>{row.pace || "-"}</Text></View>
+                          </View>
+                        ))}
+                      </View>
+                    </ScrollView>
+                  )}
+                </>
+              )}
+            </View>
+          ) : null}
         </ScrollView>
       ) : activeTab === "dataHealth" ? (
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
@@ -3183,28 +5551,24 @@ const getStatusLabel = (status: string) => {
           </View>
 
           {accountLinkHealthSummary ? (
-            <View style={styles.healthSummaryGrid}>
-              <View style={styles.healthSummaryCard}>
-                <Text style={styles.healthSummaryValue}>{accountLinkHealthSummary.issueCount}</Text>
-                <Text style={styles.healthSummaryLabel}>Open issues</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+              <View style={styles.adminDataTable}>
+                <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                  {[
+                    ["Open issues", accountLinkHealthSummary.issueCount],
+                    ["Critical", accountLinkHealthSummary.criticalCount],
+                    ["Warnings", accountLinkHealthSummary.warningCount],
+                    ["Auth users", accountLinkHealthSummary.authUserCount],
+                    ["Schema", accountLinkHealthSummary.schemaIssueCount ?? 0],
+                  ].map(([label, value]) => (
+                    <View key={String(label)} style={[styles.adminDataCell, { width: 130 }]}>
+                      <Text style={styles.adminDataHeaderText}>{label}</Text>
+                      <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]}>{value}</Text>
+                    </View>
+                  ))}
+                </View>
               </View>
-              <View style={styles.healthSummaryCard}>
-                <Text style={[styles.healthSummaryValue, { color: "#dc2626" }]}>{accountLinkHealthSummary.criticalCount}</Text>
-                <Text style={styles.healthSummaryLabel}>Critical</Text>
-              </View>
-              <View style={styles.healthSummaryCard}>
-                <Text style={[styles.healthSummaryValue, { color: "#b45309" }]}>{accountLinkHealthSummary.warningCount}</Text>
-                <Text style={styles.healthSummaryLabel}>Warnings</Text>
-              </View>
-              <View style={styles.healthSummaryCard}>
-                <Text style={styles.healthSummaryValue}>{accountLinkHealthSummary.authUserCount}</Text>
-                <Text style={styles.healthSummaryLabel}>Auth users</Text>
-              </View>
-              <View style={styles.healthSummaryCard}>
-                <Text style={[styles.healthSummaryValue, { color: "#7c3aed" }]}>{accountLinkHealthSummary.schemaIssueCount ?? 0}</Text>
-                <Text style={styles.healthSummaryLabel}>Schema</Text>
-              </View>
-            </View>
+            </ScrollView>
           ) : null}
 
           {accountLinkHealthLoading ? (
@@ -3227,68 +5591,174 @@ const getStatusLabel = (status: string) => {
               <Text style={styles.emptySubtext}>Auth users, profiles, registrations, and contacts look aligned right now.</Text>
             </View>
           ) : (
-            accountLinkHealthIssues.map((entry) => {
-              const repairActions = getRepairActions(entry);
-
-              return <View key={entry.key} style={styles.auditLogCard}>
-                <View style={styles.auditLogHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.auditLogAction}>{entry.displayName || entry.authEmail || entry.registrationId || "Unknown account"}</Text>
-                    <Text style={styles.auditLogDate}>
-                      {entry.provider ? `${entry.provider === "apple" ? "Apple" : "Google"} sign-in` : "Linked account"}
-                      {entry.username ? ` • @${entry.username}` : ""}
-                    </Text>
+            <>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+                <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                  <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                    <View style={[styles.adminDataCell, { width: 260 }]}><Text style={styles.adminDataHeaderText}>Warning Group</Text></View>
+                    <View style={[styles.adminDataCell, { width: 90 }]}><Text style={styles.adminDataHeaderText}>Severity</Text></View>
+                    <View style={[styles.adminDataCell, { width: 80 }]}><Text style={styles.adminDataHeaderText}>Count</Text></View>
+                    <View style={[styles.adminDataCell, { width: 430 }]}><Text style={styles.adminDataHeaderText}>Recommendation</Text></View>
                   </View>
-                  <View style={[styles.healthSeverityBadge, entry.severity === "critical" ? styles.healthSeverityCritical : styles.healthSeverityWarning]}>
-                    <Text style={styles.healthSeverityText}>{entry.severity === "critical" ? "CRITICAL" : "WARNING"}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.auditLogDetails}>
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Auth email:</Text>
-                    <Text style={styles.orderValue}>{entry.authEmail || "No auth email"}</Text>
-                  </View>
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Contact email:</Text>
-                    <Text style={styles.orderValue}>{entry.contactEmail || "No contact email"}</Text>
-                  </View>
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Profile ID:</Text>
-                    <Text style={styles.orderValue}>{entry.profileId || "Missing"}</Text>
-                  </View>
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Registration:</Text>
-                    <Text style={styles.orderValue}>{entry.registrationId || "Missing"}</Text>
-                  </View>
-
-                  <View style={styles.healthIssueList}>
-                    {entry.issues.map((issue) => (
-                      <View key={`${entry.key}-${issue.code}`} style={styles.healthIssueRow}>
-                        <AlertTriangle size={16} color={entry.severity === "critical" ? "#dc2626" : "#b45309"} />
-                        <Text style={styles.healthIssueText}>{issue.message}</Text>
-                      </View>
-                    ))}
-                  </View>
-
-                  {repairActions.length > 0 ? (
-                    <View style={styles.submissionActions}>
-                      {repairActions.map((action) => (
-                        <TouchableOpacity
-                          key={`${entry.key}-${action.key}`}
-                          style={[styles.downloadButton, repairAccountLinkMutation.isPending && styles.disabledButton]}
-                          onPress={() => handleRepairAccountLink(entry, action.key)}
-                          disabled={repairAccountLinkMutation.isPending}
-                        >
-                          <CheckCircle size={18} color="#fff" />
-                          <Text style={styles.downloadButtonText}>{action.label}</Text>
-                        </TouchableOpacity>
-                      ))}
+                  {accountHealthGroups.map((group) => (
+                    <View key={group.code} style={styles.adminDataRow}>
+                      <View style={[styles.adminDataCell, { width: 260 }]}><Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={3}>{group.message}</Text><Text style={styles.adminDataCellMuted}>{group.code}</Text></View>
+                      <View style={[styles.adminDataCell, { width: 90 }]}><Text style={[styles.adminDataCellText, group.severity === "critical" ? styles.adminDataCellDanger : styles.adminDataCellWarning]}>{group.severity}</Text></View>
+                      <View style={[styles.adminDataCell, { width: 80 }]}><Text style={[styles.adminDataCellText, styles.adminDataCellStrong]}>{group.count}</Text></View>
+                      <View style={[styles.adminDataCell, { width: 430 }]}><Text style={styles.adminDataCellText} numberOfLines={3}>{group.recommendation}</Text></View>
                     </View>
-                  ) : null}
+                  ))}
                 </View>
+              </ScrollView>
+
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+                <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                  <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                    <View style={[styles.adminDataCell, { width: 180 }]}><Text style={styles.adminDataHeaderText}>Account</Text></View>
+                    <View style={[styles.adminDataCell, { width: 170 }]}><Text style={styles.adminDataHeaderText}>Auth Email</Text></View>
+                    <View style={[styles.adminDataCell, { width: 170 }]}><Text style={styles.adminDataHeaderText}>Contact Email</Text></View>
+                    <View style={[styles.adminDataCell, { width: 160 }]}><Text style={styles.adminDataHeaderText}>Registration</Text></View>
+                    <View style={[styles.adminDataCell, { width: 280 }]}><Text style={styles.adminDataHeaderText}>Issues</Text></View>
+                    <View style={[styles.adminDataCell, { width: 150 }]}><Text style={styles.adminDataHeaderText}>Actions</Text></View>
+                  </View>
+                  {accountLinkHealthIssues.map((entry) => {
+                    const repairActions = getRepairActions(entry);
+                    return (
+                      <View key={entry.key} style={styles.adminDataRow}>
+                        <View style={[styles.adminDataCell, { width: 180 }]}><Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{entry.displayName || entry.authEmail || entry.registrationId || "Unknown account"}</Text><Text style={styles.adminDataCellMuted} numberOfLines={1}>{entry.provider ? `${entry.provider} sign-in` : entry.username ? `@${entry.username}` : "Linked account"}</Text></View>
+                        <View style={[styles.adminDataCell, { width: 170 }]}><Text style={styles.adminDataCellText} numberOfLines={2}>{entry.authEmail || "No auth email"}</Text></View>
+                        <View style={[styles.adminDataCell, { width: 170 }]}><Text style={styles.adminDataCellText} numberOfLines={2}>{entry.contactEmail || "No contact email"}</Text></View>
+                        <View style={[styles.adminDataCell, { width: 160 }]}><Text style={styles.adminDataCellMuted} numberOfLines={2}>{entry.registrationId || "Missing"}</Text><Text style={styles.adminDataCellMuted} numberOfLines={1}>{entry.profileId || "No profile"}</Text></View>
+                        <View style={[styles.adminDataCell, { width: 280 }]}><Text style={[styles.adminDataCellText, entry.severity === "critical" ? styles.adminDataCellDanger : styles.adminDataCellWarning]}>{entry.severity === "critical" ? "CRITICAL" : "WARNING"}</Text><Text style={styles.adminDataCellText} numberOfLines={4}>{entry.issues.map((issue) => issue.message).join(" / ")}</Text></View>
+                        <View style={[styles.adminDataCell, styles.adminDataActions, { width: 150 }]}>
+                          {repairActions.length > 0 ? repairActions.map((action) => (
+                            <TouchableOpacity key={`${entry.key}-${action.key}`} style={[styles.adminDataActionButton, styles.adminDataActionApprove, repairAccountLinkMutation.isPending && styles.disabledButton]} onPress={() => handleRepairAccountLink(entry, action.key)} disabled={repairAccountLinkMutation.isPending}>
+                              <Text style={styles.adminDataActionText}>{action.label}</Text>
+                            </TouchableOpacity>
+                          )) : <Text style={styles.adminDataCellMuted}>Manual review</Text>}
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            </>
+          )}
+        </ScrollView>
+      ) : activeTab === "milestones" ? (
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.auditFilterCard}>
+            <View style={styles.auditFilterHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.auditFilterTitle}>Milestones</Text>
+                <Text style={styles.auditFilterSubtitle}>
+                  Global Admin can track dates worth celebrating as RunNation grows.
+                </Text>
               </View>
-            })
+              <View style={styles.paymentActionGroup}>
+                <TouchableOpacity style={styles.downloadButton} onPress={() => refetchMilestones()}>
+                  <Activity size={18} color="#fff" />
+                  <Text style={styles.downloadButtonText}>Refresh</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.downloadButton, isExportingMilestones && styles.disabledButton]}
+                  onPress={handleExportMilestones}
+                  disabled={isExportingMilestones}
+                >
+                  <Download size={18} color="#fff" />
+                  <Text style={styles.downloadButtonText}>{isExportingMilestones ? "Exporting..." : "Export CSV"}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.milestoneCompletionCard}>
+            <View style={styles.milestoneCompletionHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.milestoneCompletionLabel}>Overall Completion</Text>
+                <Text style={styles.milestoneCompletionMeta}>
+                  {milestoneCompletion.completed} of {milestoneCompletion.total} milestones achieved
+                </Text>
+              </View>
+              <Text style={styles.milestoneCompletionPercent}>{milestoneCompletion.percentage}%</Text>
+            </View>
+            <View style={styles.milestoneProgressTrack}>
+              <View style={[styles.milestoneProgressFill, { width: `${milestoneCompletion.percentage}%` }]} />
+            </View>
+          </View>
+
+          {milestonesLoading ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Loading milestones...</Text>
+            </View>
+          ) : milestonesError ? (
+            <View style={styles.emptyContainer}>
+              <AlertTriangle size={56} color="#f59e0b" />
+              <Text style={styles.errorText}>Could not load milestones</Text>
+              <Text style={styles.errorSubtext}>{milestonesError.message || "Try refreshing milestones."}</Text>
+            </View>
+          ) : (
+            <>
+              <Text style={styles.sectionTitle}>Calculated Milestones</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+                <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                  <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                    <View style={[styles.adminDataCell, { width: 180 }]}><Text style={styles.adminDataHeaderText}>Category</Text></View>
+                    <View style={[styles.adminDataCell, { width: 320 }]}><Text style={styles.adminDataHeaderText}>Milestone</Text></View>
+                    <View style={[styles.adminDataCell, { width: 120 }]}><Text style={styles.adminDataHeaderText}>Target</Text></View>
+                    <View style={[styles.adminDataCell, { width: 140 }]}><Text style={styles.adminDataHeaderText}>Reached Date</Text></View>
+                  </View>
+                  {((milestonesData?.calculated ?? []) as AdminMilestoneRow[]).map((row) => (
+                    <View key={row.key} style={styles.adminDataRow}>
+                      <View style={[styles.adminDataCell, { width: 180 }]}><Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{row.category}</Text></View>
+                      <View style={[styles.adminDataCell, { width: 320 }]}><Text style={styles.adminDataCellText} numberOfLines={2}>{row.milestone}</Text></View>
+                      <View style={[styles.adminDataCell, { width: 120 }]}><Text style={styles.adminDataCellText}>{row.threshold?.toLocaleString() ?? "-"}</Text></View>
+                      <View style={[styles.adminDataCell, { width: 140 }]}>
+                        <Text style={[styles.adminDataCellText, isMilestoneReached(row.milestoneDate) ? styles.adminDataCellSuccess : styles.adminDataCellMuted]}>
+                          {getMilestoneDateLabel(row.milestoneDate)}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </ScrollView>
+
+              <Text style={styles.sectionTitle}>Manual Milestones</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+                <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                  <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                    <View style={[styles.adminDataCell, { width: 160 }]}><Text style={styles.adminDataHeaderText}>Category</Text></View>
+                    <View style={[styles.adminDataCell, { width: 360 }]}><Text style={styles.adminDataHeaderText}>Milestone</Text></View>
+                    <View style={[styles.adminDataCell, { width: 180 }]}><Text style={styles.adminDataHeaderText}>Date</Text></View>
+                    <View style={[styles.adminDataCell, { width: 110 }]}><Text style={styles.adminDataHeaderText}>Action</Text></View>
+                  </View>
+                  {((milestonesData?.manual ?? []) as AdminMilestoneRow[]).map((row) => (
+                    <View key={row.key} style={styles.adminDataRow}>
+                      <View style={[styles.adminDataCell, { width: 160 }]}><Text style={[styles.adminDataCellText, styles.adminDataCellStrong]}>{row.category}</Text></View>
+                      <View style={[styles.adminDataCell, { width: 360 }]}><Text style={styles.adminDataCellText} numberOfLines={3}>{row.milestone}</Text></View>
+                      <View style={[styles.adminDataCell, { width: 180 }]}>
+                        <TextInput
+                          style={styles.adminTableInput}
+                          value={milestoneDateInputs[row.key] ?? ""}
+                          onChangeText={(value) => setMilestoneDateInputs((prev) => ({ ...prev, [row.key]: value }))}
+                          placeholder="YYYY-MM-DD"
+                          placeholderTextColor="#9ca3af"
+                        />
+                      </View>
+                      <View style={[styles.adminDataCell, styles.adminDataActions, { width: 110 }]}>
+                        <TouchableOpacity
+                          style={[styles.adminDataActionButton, styles.adminDataActionApprove, upsertMilestoneMutation.isPending && styles.disabledButton]}
+                          onPress={() => handleSaveMilestone(row)}
+                          disabled={upsertMilestoneMutation.isPending}
+                        >
+                          <Text style={styles.adminDataActionText}>Save</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </ScrollView>
+            </>
           )}
         </ScrollView>
       ) : activeTab === "auditLog" ? (
@@ -3297,7 +5767,7 @@ const getStatusLabel = (status: string) => {
             <View style={styles.auditFilterHeader}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.auditFilterTitle}>Admin Activity</Text>
-              <Text style={styles.auditFilterSubtitle}>Country Admin, Country Coordinator, and Club Coordinator actions</Text>
+              <Text style={styles.auditFilterSubtitle}>Country Coordinator and Club Coordinator actions</Text>
               </View>
               <TouchableOpacity
                 style={[styles.downloadButton, (auditLogsLoading || isDownloadingAuditLog) && styles.disabledButton]}
@@ -3337,7 +5807,6 @@ const getStatusLabel = (status: string) => {
             <View style={styles.auditSegment}>
               {[
                 { key: "all" as const, label: "All" },
-                    { key: "country_admin" as const, label: "Country Admin" },
                     { key: "country_coordinator" as const, label: "Country Coordinator" },
                     { key: "club_coordinator" as const, label: "Club Coordinator" },
               ].map((option) => (
@@ -3383,47 +5852,595 @@ const getStatusLabel = (status: string) => {
               <Text style={styles.emptySubtext}>Try another date range or user type.</Text>
             </View>
           ) : (
-            (auditLogs as AuditLogEntry[]).map((entry) => (
-              <View key={entry.id} style={styles.auditLogCard}>
-                <View style={styles.auditLogHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.auditLogAction}>{formatAuditAction(entry.actionType)}</Text>
-                    <Text style={styles.auditLogDate}>{formatDate(entry.createdAt)}</Text>
-                  </View>
-                  <View style={styles.auditTypeBadge}>
-                    <Text style={styles.auditTypeText}>{entry.actorType}</Text>
-                  </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.auditTable}>
+                <View style={[styles.auditTableRow, styles.auditTableHeader]}>
+                  <Text style={[styles.auditTableHeaderText, styles.auditColDate]}>Date</Text>
+                  <Text style={[styles.auditTableHeaderText, styles.auditColAdmin]}>Admin</Text>
+                  <Text style={[styles.auditTableHeaderText, styles.auditColType]}>Type</Text>
+                  <Text style={[styles.auditTableHeaderText, styles.auditColAction]}>Action</Text>
+                  <Text style={[styles.auditTableHeaderText, styles.auditColDetails]}>Details</Text>
                 </View>
-
-                <View style={styles.auditLogDetails}>
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Admin:</Text>
-                    <Text style={styles.orderValue}>
-                      {entry.actorName}{entry.actorUsername ? ` (@${entry.actorUsername})` : ""}
-                    </Text>
+                {(auditLogs as AuditLogEntry[]).map((entry) => (
+                  <View key={entry.id} style={styles.auditTableRow}>
+                    <View style={styles.auditColDate}>
+                      <Text style={styles.auditTableCellText} numberOfLines={2}>{formatDate(entry.createdAt)}</Text>
+                    </View>
+                    <View style={styles.auditColAdmin}>
+                      <Text style={[styles.auditTableCellText, styles.auditTableCellStrong]} numberOfLines={2}>{entry.actorName}</Text>
+                      {entry.actorUsername ? (
+                        <Text style={styles.auditTableCellMuted} numberOfLines={1}>@{entry.actorUsername}</Text>
+                      ) : null}
+                    </View>
+                    <View style={styles.auditColType}>
+                      <Text style={styles.auditTypeCellText} numberOfLines={2}>{entry.actorType}</Text>
+                    </View>
+                    <View style={styles.auditColAction}>
+                      <Text style={styles.auditTableCellText} numberOfLines={2}>{formatAuditAction(entry.actionType)}</Text>
+                    </View>
+                    <View style={styles.auditColDetails}>
+                      <Text style={styles.auditTableCellMuted} numberOfLines={3}>{getAuditMetadataSummary(entry.metadata)}</Text>
+                    </View>
                   </View>
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Scope:</Text>
-                    <Text style={styles.orderValue}>
-                      {[...formatCountryList(entry.countryCodes), ...entry.clubIds].join(", ") || "Global"}
-                    </Text>
-                  </View>
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Target:</Text>
-                    <Text style={styles.orderValue}>
-                      {entry.targetName || entry.targetUserId || formatCountryName(entry.targetCountryCode) || entry.targetCountryCode || entry.targetClubId || "Not specified"}
-                    </Text>
-                  </View>
-                  <Text style={styles.auditMetadata} numberOfLines={3}>
-                    {getAuditMetadataSummary(entry.metadata)}
-                  </Text>
+                ))}
+              </View>
+            </ScrollView>
+          )}
+        </ScrollView>
+      ) : activeTab === "whatsapp" ? (
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          {clubWhatsappLoading ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Loading WhatsApp links...</Text>
+            </View>
+          ) : clubWhatsappError ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.errorText}>Error loading WhatsApp links</Text>
+              <Text style={styles.errorSubtext}>{clubWhatsappError.message || "Could not load club WhatsApp links."}</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={() => refetchClubWhatsappLinks()}>
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <View style={styles.auditFilterCard}>
+                <Text style={styles.auditFilterTitle}>WhatsApp Groups</Text>
+                <View style={styles.eventFilterChips}>
+                  {whatsappSections.map((section) => (
+                    <TouchableOpacity
+                      key={section.key}
+                      style={[styles.eventFilterChip, whatsappSection === section.key && styles.eventFilterChipActive]}
+                      onPress={() => setWhatsappSection(section.key)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={[styles.eventFilterChipText, whatsappSection === section.key && styles.eventFilterChipTextActive]}>
+                        {section.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               </View>
-            ))
+
+              {whatsappSection === "club" ? (
+                clubWhatsappClubs.length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <MessageCircle size={64} color="#d1d5db" />
+                    <Text style={styles.emptyText}>No club WhatsApp applies</Text>
+                    <Text style={styles.emptySubtext}>Club links appear for clubs you coordinate or administer.</Text>
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.auditFilterCard}>
+                      <Text style={styles.auditFilterTitle}>Club</Text>
+                      <View style={styles.eventFilterChips}>
+                        {clubWhatsappClubs.map((club) => (
+                          <TouchableOpacity
+                            key={club.clubId}
+                            style={[styles.eventFilterChip, activeWhatsappClubId === club.clubId && styles.eventFilterChipActive]}
+                            onPress={() => {
+                              setSelectedWhatsappClubId(club.clubId);
+                              const nextLink = clubWhatsappLinks.find((link) => link.clubId === club.clubId);
+                              setWhatsappLinkInput(nextLink?.link ?? "");
+                            }}
+                            activeOpacity={0.75}
+                          >
+                            <Text style={[styles.eventFilterChipText, activeWhatsappClubId === club.clubId && styles.eventFilterChipTextActive]}>
+                              {club.clubName}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+
+                    <View style={styles.paymentPanel}>
+                      <View style={styles.paymentPanelHeader}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.paymentPanelTitle}>Club WhatsApp Group</Text>
+                          <Text style={styles.paymentPanelHint}>
+                            {activeWhatsappClub?.clubName || "Club"} members will see this as a Join WhatsApp Group button in Profile.
+                          </Text>
+                        </View>
+                      </View>
+                      <TextInput
+                        style={styles.paymentInput}
+                        placeholder="Paste WhatsApp group invite link"
+                        value={whatsappLinkInput}
+                        onChangeText={setWhatsappLinkInput}
+                        autoCapitalize="none"
+                        placeholderTextColor="#9ca3af"
+                      />
+                      {activeWhatsappLink ? (
+                        <Text style={styles.paymentStatusMeta}>Current link: {activeWhatsappLink.link}</Text>
+                      ) : (
+                        <Text style={styles.paymentStatusMeta}>No WhatsApp group link is saved for this club yet.</Text>
+                      )}
+                      <View style={styles.activityActions}>
+                        {activeWhatsappLink ? (
+                          <>
+                            <TouchableOpacity style={styles.secondaryButton} onPress={() => void handleOpenWhatsappLink(activeWhatsappLink.link)}>
+                              <Text style={styles.secondaryButtonText}>Open</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.secondaryButton} onPress={() => handleCopyWhatsappLink(activeWhatsappLink.link)}>
+                              <Text style={styles.secondaryButtonText}>Copy</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.rejectButton}
+                              disabled={deleteClubWhatsappLinkMutation.isPending}
+                              onPress={handleDeleteWhatsappLink}
+                            >
+                              <Trash2 size={18} color="#fff" />
+                              <Text style={styles.actionButtonText}>
+                                {deleteClubWhatsappLinkMutation.isPending ? "Deleting..." : "Delete Link"}
+                              </Text>
+                            </TouchableOpacity>
+                          </>
+                        ) : null}
+                        <TouchableOpacity
+                          style={[styles.approveButton, upsertClubWhatsappLinkMutation.isPending && styles.disabledButton]}
+                          disabled={upsertClubWhatsappLinkMutation.isPending}
+                          onPress={handleSaveWhatsappLink}
+                        >
+                          <Save size={18} color="#fff" />
+                          <Text style={styles.actionButtonText}>
+                            {upsertClubWhatsappLinkMutation.isPending ? "Saving..." : "Save Link"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </>
+                )
+              ) : null}
+
+              {whatsappSection === "service_team" ? (
+                <View style={styles.paymentPanel}>
+                  <View style={styles.paymentPanelHeader}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.paymentPanelTitle}>Service Team WhatsApp Group</Text>
+                      <Text style={styles.paymentPanelHint}>
+                        Managed by Global Admin. Other admins can open or copy the link only.
+                      </Text>
+                    </View>
+                  </View>
+                  {isSuperAdmin ? (
+                    <TextInput
+                      style={styles.paymentInput}
+                      placeholder="Paste Service Team WhatsApp group invite link"
+                      value={serviceTeamWhatsappInput}
+                      onChangeText={setServiceTeamWhatsappInput}
+                      autoCapitalize="none"
+                      placeholderTextColor="#9ca3af"
+                    />
+                  ) : null}
+                  {serviceTeamWhatsappLink ? (
+                    <Text style={styles.paymentStatusMeta}>Current link: {serviceTeamWhatsappLink.link}</Text>
+                  ) : (
+                    <Text style={styles.paymentStatusMeta}>No Service Team WhatsApp link is saved yet.</Text>
+                  )}
+                  <View style={styles.activityActions}>
+                    {serviceTeamWhatsappLink ? (
+                      <>
+                        <TouchableOpacity style={styles.secondaryButton} onPress={() => void handleOpenWhatsappLink(serviceTeamWhatsappLink.link)}>
+                          <Text style={styles.secondaryButtonText}>Open</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.secondaryButton} onPress={() => handleCopyWhatsappLink(serviceTeamWhatsappLink.link)}>
+                          <Text style={styles.secondaryButtonText}>Copy</Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : null}
+                    {isSuperAdmin ? (
+                      <>
+                        {serviceTeamWhatsappLink ? (
+                          <TouchableOpacity
+                            style={styles.rejectButton}
+                            disabled={deleteAdminWhatsappLinkMutation.isPending}
+                            onPress={() => handleDeleteAdminWhatsappLink("service_team")}
+                          >
+                            <Trash2 size={18} color="#fff" />
+                            <Text style={styles.actionButtonText}>Delete Link</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                        <TouchableOpacity
+                          style={[styles.approveButton, upsertAdminWhatsappLinkMutation.isPending && styles.disabledButton]}
+                          disabled={upsertAdminWhatsappLinkMutation.isPending}
+                          onPress={() => handleSaveAdminWhatsappLink("service_team")}
+                        >
+                          <Save size={18} color="#fff" />
+                          <Text style={styles.actionButtonText}>Save Link</Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : null}
+                  </View>
+                </View>
+              ) : null}
+
+              {whatsappSection === "admins" ? (
+                <View style={styles.paymentPanel}>
+                  <View style={styles.paymentPanelHeader}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.paymentPanelTitle}>Admins WhatsApp Group</Text>
+                      <Text style={styles.paymentPanelHint}>
+                        For Global Admin and Country Coordinator coordination. Managed by Global Admin.
+                      </Text>
+                    </View>
+                  </View>
+                  {isSuperAdmin ? (
+                    <TextInput
+                      style={styles.paymentInput}
+                      placeholder="Paste Admins WhatsApp group invite link"
+                      value={adminWhatsappInput}
+                      onChangeText={setAdminWhatsappInput}
+                      autoCapitalize="none"
+                      placeholderTextColor="#9ca3af"
+                    />
+                  ) : null}
+                  {adminWhatsappLink ? (
+                    <Text style={styles.paymentStatusMeta}>Current link: {adminWhatsappLink.link}</Text>
+                  ) : (
+                    <Text style={styles.paymentStatusMeta}>No Admin WhatsApp link is saved yet.</Text>
+                  )}
+                  <View style={styles.activityActions}>
+                    {adminWhatsappLink ? (
+                      <>
+                        <TouchableOpacity style={styles.secondaryButton} onPress={() => void handleOpenWhatsappLink(adminWhatsappLink.link)}>
+                          <Text style={styles.secondaryButtonText}>Open</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.secondaryButton} onPress={() => handleCopyWhatsappLink(adminWhatsappLink.link)}>
+                          <Text style={styles.secondaryButtonText}>Copy</Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : null}
+                    {isSuperAdmin ? (
+                      <>
+                        {adminWhatsappLink ? (
+                          <TouchableOpacity
+                            style={styles.rejectButton}
+                            disabled={deleteAdminWhatsappLinkMutation.isPending}
+                            onPress={() => handleDeleteAdminWhatsappLink("admins")}
+                          >
+                            <Trash2 size={18} color="#fff" />
+                            <Text style={styles.actionButtonText}>Delete Link</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                        <TouchableOpacity
+                          style={[styles.approveButton, upsertAdminWhatsappLinkMutation.isPending && styles.disabledButton]}
+                          disabled={upsertAdminWhatsappLinkMutation.isPending}
+                          onPress={() => handleSaveAdminWhatsappLink("admins")}
+                        >
+                          <Save size={18} color="#fff" />
+                          <Text style={styles.actionButtonText}>Save Link</Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : null}
+                  </View>
+                </View>
+              ) : null}
+            </>
+          )}
+        </ScrollView>
+      ) : activeTab === "payments" ? (
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          {clubPaymentsLoading ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Loading club payments...</Text>
+            </View>
+          ) : clubPaymentsError ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.errorText}>Error loading payments</Text>
+              <Text style={styles.errorSubtext}>{clubPaymentsError.message || "Could not load club collections."}</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={() => refetchClubPayments()}>
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : clubPaymentClubs.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <CreditCard size={64} color="#d1d5db" />
+              <Text style={styles.emptyText}>No clubs available</Text>
+              <Text style={styles.emptySubtext}>Club payment collections appear when your admin role is linked to a club or country.</Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.paymentSummaryGrid}>
+                <View style={styles.paymentSummaryCard}>
+                  <Text style={styles.paymentSummaryLabel}>Collected</Text>
+                  <Text style={styles.paymentSummaryNumber}>{formatMoney(Number(clubPaymentSummary.collected || 0))}</Text>
+                </View>
+                <View style={styles.paymentSummaryCard}>
+                  <Text style={styles.paymentSummaryLabel}>Requested</Text>
+                  <Text style={styles.paymentSummaryNumber}>{formatMoney(Number(clubPaymentSummary.requested || 0))}</Text>
+                </View>
+                <View style={styles.paymentSummaryCard}>
+                  <Text style={styles.paymentSummaryLabel}>Available</Text>
+                  <Text style={styles.paymentSummaryNumber}>{formatMoney(Number(clubPaymentSummary.available || 0))}</Text>
+                </View>
+              </View>
+
+              <View style={styles.auditFilterCard}>
+                <Text style={styles.auditFilterTitle}>Club</Text>
+                <View style={styles.eventFilterChips}>
+                  {clubPaymentClubs.map((club) => (
+                    <TouchableOpacity
+                      key={club.clubId}
+                      style={[styles.eventFilterChip, activePaymentClubId === club.clubId && styles.eventFilterChipActive]}
+                      onPress={() => setSelectedPaymentClubId(club.clubId)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={[styles.eventFilterChipText, activePaymentClubId === club.clubId && styles.eventFilterChipTextActive]}>
+                        {club.clubName}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.paymentPanel}>
+                <View style={styles.paymentPanelHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.paymentPanelTitle}>Create Other Payment</Text>
+                    <Text style={styles.paymentPanelHint}>For club membership fees or coordinator-created club collections.</Text>
+                  </View>
+                </View>
+                <View style={styles.paymentFormGrid}>
+                  <TextInput
+                    style={styles.paymentInput}
+                    placeholder="Payment name"
+                    value={newPaymentTitle}
+                    onChangeText={setNewPaymentTitle}
+                    placeholderTextColor="#9ca3af"
+                  />
+                  <TextInput
+                    style={styles.paymentInput}
+                    placeholder="Amount"
+                    value={newPaymentAmount}
+                    onChangeText={setNewPaymentAmount}
+                    keyboardType="numeric"
+                    placeholderTextColor="#9ca3af"
+                  />
+                  <TextInput
+                    style={styles.paymentInput}
+                    placeholder="Currency"
+                    value={newPaymentCurrency}
+                    onChangeText={setNewPaymentCurrency}
+                    autoCapitalize="characters"
+                    placeholderTextColor="#9ca3af"
+                  />
+                  <TextInput
+                    style={styles.paymentInput}
+                    placeholder="Due date YYYY-MM-DD"
+                    value={newPaymentDueDate}
+                    onChangeText={setNewPaymentDueDate}
+                    placeholderTextColor="#9ca3af"
+                  />
+                </View>
+                <TextInput
+                  style={[styles.paymentInput, styles.paymentTextArea]}
+                  placeholder="Description or payment instructions"
+                  value={newPaymentDescription}
+                  onChangeText={setNewPaymentDescription}
+                  multiline
+                  placeholderTextColor="#9ca3af"
+                />
+                <TouchableOpacity
+                  style={[styles.approveButton, createClubPaymentMutation.isPending && styles.disabledButton]}
+                  onPress={handleCreateClubPayment}
+                  disabled={createClubPaymentMutation.isPending}
+                >
+                  <Plus size={18} color="#fff" />
+                  <Text style={styles.actionButtonText}>{createClubPaymentMutation.isPending ? "Saving..." : "Create Payment"}</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.paymentPanel}>
+                <View style={styles.paymentPanelHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.paymentPanelTitle}>Club Collections Account</Text>
+                    <Text style={styles.paymentPanelHint}>Request RunNation to transfer available collections to the club account.</Text>
+                  </View>
+                </View>
+                <View style={styles.paymentFormGrid}>
+                  <TextInput
+                    style={styles.paymentInput}
+                    placeholder="Amount"
+                    value={payoutAmount}
+                    onChangeText={setPayoutAmount}
+                    keyboardType="numeric"
+                    placeholderTextColor="#9ca3af"
+                  />
+                  <View style={styles.paymentSegment}>
+                    {(["mobile_money", "bank"] as const).map((type) => (
+                      <TouchableOpacity
+                        key={type}
+                        style={[styles.paymentSegmentButton, payoutDestinationType === type && styles.paymentSegmentButtonActive]}
+                        onPress={() => setPayoutDestinationType(type)}
+                      >
+                        <Text style={[styles.paymentSegmentText, payoutDestinationType === type && styles.paymentSegmentTextActive]}>
+                          {type === "mobile_money" ? "Mobile Money" : "Bank"}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+                <TextInput
+                  style={[styles.paymentInput, styles.paymentTextArea]}
+                  placeholder="Destination details"
+                  value={payoutDestinationDetails}
+                  onChangeText={setPayoutDestinationDetails}
+                  multiline
+                  placeholderTextColor="#9ca3af"
+                />
+                <TouchableOpacity
+                  style={[styles.approveButton, requestClubPayoutMutation.isPending && styles.disabledButton]}
+                  onPress={handleRequestClubPayout}
+                  disabled={requestClubPayoutMutation.isPending}
+                >
+                  <CreditCard size={18} color="#fff" />
+                  <Text style={styles.actionButtonText}>{requestClubPayoutMutation.isPending ? "Requesting..." : "Request Transfer"}</Text>
+                </TouchableOpacity>
+              </View>
+
+              {visiblePayoutRequests.length > 0 ? (
+                <View style={styles.paymentPanel}>
+                  <Text style={styles.paymentPanelTitle}>Transfer Requests</Text>
+                  {visiblePayoutRequests.map((request) => (
+                    <View key={request.requestId} style={styles.paymentStatusRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.paymentStatusName}>{formatMoney(request.amount, request.currency)}</Text>
+                        <Text style={styles.paymentStatusMeta}>{request.destinationType === "bank" ? "Bank" : "Mobile money"} - {request.destinationDetails}</Text>
+                      </View>
+                      <View style={[styles.statusBadge, { backgroundColor: request.status === "paid" ? "#10b98120" : request.status === "rejected" ? "#ef444420" : "#f59e0b20" }]}>
+                        <Text style={[styles.statusText, { color: request.status === "paid" ? "#10b981" : request.status === "rejected" ? "#ef4444" : "#f59e0b" }]}>
+                          {request.status}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              {visibleClubPaymentItems.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                  <CreditCard size={56} color="#d1d5db" />
+                  <Text style={styles.emptyText}>No payment items yet</Text>
+                  <Text style={styles.emptySubtext}>Create a membership fee or other club collection above.</Text>
+                </View>
+              ) : (
+                visibleClubPaymentItems.map((payment) => (
+                  <View key={payment.paymentId} style={styles.paymentPanel}>
+                    <View style={styles.paymentPanelHeader}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.paymentPanelTitle}>{payment.title}</Text>
+                        <Text style={styles.paymentPanelHint}>
+                          {payment.clubName} - {formatMoney(payment.amount, payment.currency)}
+                          {payment.dueDate ? ` - Due ${payment.dueDate}` : ""}
+                        </Text>
+                      </View>
+                      <View style={styles.totalEntriesBadge}>
+                        <Text style={styles.totalEntriesText}>{payment.totals.paid}/{payment.totals.members}</Text>
+                        <Text style={styles.totalEntriesLabel}>paid</Text>
+                      </View>
+                    </View>
+                    {payment.description ? <Text style={styles.paymentDescription}>{payment.description}</Text> : null}
+                    <View style={styles.paymentStatsRow}>
+                      <Text style={styles.paymentStat}>Paid {payment.totals.paid}</Text>
+                      <Text style={styles.paymentStat}>Pending {payment.totals.pending}</Text>
+                      <Text style={styles.paymentStat}>Unpaid {payment.totals.unpaid}</Text>
+                      <Text style={styles.paymentStat}>Waived {payment.totals.waived}</Text>
+                    </View>
+                    {payment.members.length === 0 ? (
+                      <Text style={styles.emptySubtext}>No members are linked to this club yet.</Text>
+                    ) : (
+                      payment.members.map((member) => (
+                        <View key={`${payment.paymentId}-${member.registrationId}`} style={styles.paymentStatusRow}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.paymentStatusName}>{member.name}</Text>
+                            <Text style={styles.paymentStatusMeta}>
+                              {member.username ? `@${member.username} - ` : ""}{member.sex || "Sex not set"} - {formatMoney(member.amountPaid || 0, payment.currency)}
+                            </Text>
+                          </View>
+                          <View style={styles.paymentActionGroup}>
+                            <TouchableOpacity
+                              style={[styles.paymentMiniButton, member.status === "paid" && styles.paymentMiniButtonActive]}
+                              disabled={updateClubPaymentRecordMutation.isPending}
+                              onPress={() => updateClubPaymentRecordMutation.mutate({
+                                paymentId: payment.paymentId,
+                                registrationId: member.registrationId,
+                                status: "paid",
+                                amountPaid: payment.amount,
+                              })}
+                            >
+                              <Text style={[styles.paymentMiniButtonText, member.status === "paid" && styles.paymentMiniButtonTextActive]}>Paid</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.paymentMiniButton, member.status === "unpaid" && styles.paymentMiniButtonMuted]}
+                              disabled={updateClubPaymentRecordMutation.isPending}
+                              onPress={() => updateClubPaymentRecordMutation.mutate({
+                                paymentId: payment.paymentId,
+                                registrationId: member.registrationId,
+                                status: "unpaid",
+                                amountPaid: 0,
+                              })}
+                            >
+                              <Text style={styles.paymentMiniButtonText}>Unpaid</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ))
+                    )}
+                  </View>
+                ))
+              )}
+            </>
           )}
         </ScrollView>
       ) : activeTab === "clubRequests" ? (
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.auditFilterCard}>
+            <View style={styles.auditSegment}>
+              {[
+                { key: "pending" as const, label: "Pending" },
+                { key: "approved" as const, label: "Approved" },
+                { key: "rejected" as const, label: "Rejected" },
+              ].map((option) => (
+                <TouchableOpacity
+                  key={option.key}
+                  style={[
+                    styles.auditSegmentButton,
+                    clubRequestStatusFilter === option.key && styles.auditSegmentButtonActive,
+                  ]}
+                  onPress={() => setClubRequestStatusFilter(option.key)}
+                >
+                  <Text
+                    style={[
+                      styles.auditSegmentText,
+                      clubRequestStatusFilter === option.key && styles.auditSegmentTextActive,
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.eventFilterScroll}>
+              <TouchableOpacity
+                style={[styles.eventFilterChip, clubRequestCountryFilter === "all" && styles.eventFilterChipActive]}
+                onPress={() => setClubRequestCountryFilter("all")}
+              >
+                <Text style={[styles.eventFilterChipText, clubRequestCountryFilter === "all" && styles.eventFilterChipTextActive]}>
+                  All Countries
+                </Text>
+              </TouchableOpacity>
+              {clubRequestCountries.map(([code, name]) => (
+                <TouchableOpacity
+                  key={code}
+                  style={[styles.eventFilterChip, clubRequestCountryFilter === code && styles.eventFilterChipActive]}
+                  onPress={() => setClubRequestCountryFilter(code)}
+                >
+                  <Text style={[styles.eventFilterChipText, clubRequestCountryFilter === code && styles.eventFilterChipTextActive]}>
+                    {name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
           {clubMembershipRequestsLoading ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>Loading club and organiser requests...</Text>
@@ -3441,137 +6458,149 @@ const getStatusLabel = (status: string) => {
                 <Text style={styles.retryButtonText}>Retry</Text>
               </TouchableOpacity>
             </View>
-          ) : (clubMembershipRequests as ClubMembershipRequest[]).length === 0 ? (
+          ) : visibleClubMembershipRequests.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Users size={64} color="#d1d5db" />
-              <Text style={styles.emptyText}>No club or organiser requests</Text>
+              <Text style={styles.emptyText}>No matching club or organiser requests</Text>
               <Text style={styles.emptySubtext}>
-                New club memberships, club start requests, and organiser requests will appear here.
+                Change the status tab or country filter to review another group.
               </Text>
             </View>
           ) : (
-            (clubMembershipRequests as ClubMembershipRequest[]).map((request) => {
-              const memberName = [
-                request.member?.first_name,
-                request.member?.other_names,
-              ].filter(Boolean).join(" ") || request.member?.username || "Unknown member";
-              const requestStatus = request.status ?? "pending";
-
-              return (
-                <View key={request.registration_id} style={styles.orderCard}>
-                  <View style={styles.orderHeader}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.orderId}>{memberName}</Text>
-                      {request.member?.username ? (
-                        <Text style={styles.errorHint}>@{request.member.username}</Text>
-                      ) : null}
-                    </View>
-                    <View style={[styles.statusBadge, { backgroundColor: requestStatus === "approved" ? "#10b98120" : requestStatus === "rejected" ? "#ef444420" : "#f59e0b20" }]}>
-                      <Text style={[styles.statusText, { color: requestStatus === "approved" ? "#10b981" : requestStatus === "rejected" ? "#ef4444" : "#f59e0b" }]}>
-                        {requestStatus === "approved" ? "Approved" : requestStatus === "rejected" ? "Rejected" : "Pending"}
-                      </Text>
-                    </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+              <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                  <View style={[styles.adminDataCell, { width: 190 }]}>
+                    <Text style={styles.adminDataHeaderText}>User</Text>
                   </View>
-
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>
-                      {request.request_type === "start_club"
-                        ? "Proposed Club:"
-                        : request.request_type === "event_organizer"
-                        ? "Organizer Name:"
-                        : "Club:"}
-                    </Text>
-                    <Text style={styles.orderValue}>
-                      {request.proposed_club_name || request.club_name || request.club || "Not provided"}
-                    </Text>
+                  <View style={[styles.adminDataCell, { width: 190 }]}>
+                    <Text style={styles.adminDataHeaderText}>Club/Organizer</Text>
                   </View>
-
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Request Type:</Text>
-                    <Text style={styles.orderValue}>
-                      {request.request_type === "start_club"
-                        ? "Start a new club"
-                        : request.request_type === "event_organizer"
-                          ? "Event organiser request"
-                        : request.new_member === "Yes"
-                          ? "New member request"
-                          : "Existing member claim"}
-                    </Text>
+                  <View style={[styles.adminDataCell, { width: 150 }]}>
+                    <Text style={styles.adminDataHeaderText}>Request</Text>
                   </View>
-
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>
-                      {request.request_type === "start_club" ? "Country:" : "Location:"}
-                    </Text>
-                    <Text style={styles.orderValue}>
-                      {request.request_type === "start_club" || request.request_type === "event_organizer"
-                        ? formatCountryName(request.proposed_country) || request.proposed_country || "Not provided"
-                        : [request.member?.city_town_district, formatCountryName(request.member?.country)].filter(Boolean).join(", ") || "Not provided"}
-                    </Text>
+                  <View style={[styles.adminDataCell, { width: 160 }]}>
+                    <Text style={styles.adminDataHeaderText}>Location</Text>
                   </View>
-
-                  {(request.request_type === "start_club" || request.request_type === "event_organizer") && request.proposed_description ? (
-                    <View style={styles.orderDetails}>
-                      <Text style={styles.orderLabel}>Description:</Text>
-                      <Text style={styles.orderValue}>{request.proposed_description}</Text>
-                    </View>
-                  ) : null}
-
-                  {request.request_type === "event_organizer" ? (
-                    <View style={styles.orderDetails}>
-                      <Text style={styles.orderLabel}>Screening:</Text>
-                      <Text style={styles.orderValue}>Country admin review is required before organiser approval.</Text>
-                    </View>
-                  ) : null}
-
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Requested:</Text>
-                    <Text style={styles.orderValue}>
-                      {request.created_at
-                        ? new Date(request.created_at).toLocaleDateString("en-GB", {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric",
-                          })
-                        : "Not recorded"}
-                    </Text>
+                  <View style={[styles.adminDataCell, { width: 110 }]}>
+                    <Text style={styles.adminDataHeaderText}>Date</Text>
                   </View>
-
-                  {requestStatus === "pending" ? (
-                    <View style={styles.activityActions}>
-                      <TouchableOpacity
-                        style={styles.rejectBtn}
-                        disabled={updateClubMembershipRequestMutation.isPending}
-                        onPress={() =>
-                          updateClubMembershipRequestMutation.mutate({
-                            registrationId: request.registration_id,
-                            status: "rejected",
-                          })
-                        }
-                      >
-                        <XCircle size={20} color="#fff" />
-                        <Text style={styles.actionBtnText}>Reject</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.approveBtn}
-                        disabled={updateClubMembershipRequestMutation.isPending}
-                        onPress={() =>
-                          updateClubMembershipRequestMutation.mutate({
-                            registrationId: request.registration_id,
-                            status: "approved",
-                          })
-                        }
-                      >
-                        <CheckCircle size={20} color="#fff" />
-                        <Text style={styles.actionBtnText}>Approve</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <Text style={styles.errorHint}>Reviewed request. No further action is available.</Text>
-                  )}
+                  <View style={[styles.adminDataCell, { width: 100 }]}>
+                    <Text style={styles.adminDataHeaderText}>Status</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 140 }]}>
+                    <Text style={styles.adminDataHeaderText}>Actions</Text>
+                  </View>
                 </View>
-              );
-            })
+                {visibleClubMembershipRequests.map((request) => {
+                  const memberName = [
+                    request.member?.first_name,
+                    request.member?.other_names,
+                  ].filter(Boolean).join(" ") || request.member?.username || "Unknown member";
+                  const requestStatus = request.status ?? "pending";
+                  const requestLabel = request.request_type === "start_club"
+                    ? "Start club"
+                    : request.request_type === "event_organizer"
+                      ? "Event organiser"
+                      : request.new_member === "Yes"
+                        ? "New member"
+                        : "Existing claim";
+                  const locationLabel = request.request_type === "start_club" || request.request_type === "event_organizer"
+                    ? formatCountryName(request.proposed_country) || request.proposed_country || "Not provided"
+                    : [request.member?.city_town_district, formatCountryName(request.member?.country)].filter(Boolean).join(", ") || "Not provided";
+
+                  return (
+                    <View key={`${request.registration_id}-${request.request_type ?? "membership"}-${request.club_id ?? request.created_at ?? "request"}`} style={styles.adminDataRow}>
+                      <View style={[styles.adminDataCell, { width: 190 }]}>
+                        <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{memberName}</Text>
+                        {request.member?.username ? (
+                          <Text style={styles.adminDataCellMuted} numberOfLines={1}>@{request.member.username}</Text>
+                        ) : null}
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 190 }]}>
+                        <Text style={styles.adminDataCellText} numberOfLines={2}>
+                          {request.proposed_club_name || request.club_name || request.club || "Not provided"}
+                        </Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 150 }]}>
+                        <Text style={styles.adminDataCellText}>{requestLabel}</Text>
+                        {request.proposed_description ? (
+                          <Text style={styles.adminDataCellMuted} numberOfLines={2}>{request.proposed_description}</Text>
+                        ) : null}
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 160 }]}>
+                        <Text style={styles.adminDataCellText} numberOfLines={2}>{locationLabel}</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 110 }]}>
+                        <Text style={styles.adminDataCellText}>
+                          {request.created_at
+                            ? new Date(request.created_at).toLocaleDateString("en-GB", {
+                                day: "2-digit",
+                                month: "short",
+                                year: "numeric",
+                              })
+                            : "Not recorded"}
+                        </Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 100 }]}>
+                        <Text
+                          style={[
+                            styles.adminDataCellText,
+                            requestStatus === "approved"
+                              ? styles.adminDataCellSuccess
+                              : requestStatus === "rejected"
+                                ? styles.adminDataCellDanger
+                                : styles.adminDataCellWarning,
+                          ]}
+                        >
+                          {requestStatus === "approved" ? "Approved" : requestStatus === "rejected" ? "Rejected" : "Pending"}
+                        </Text>
+                      </View>
+                      <View style={[styles.adminDataCell, styles.adminDataActions, { width: 140 }]}>
+                        {requestStatus === "pending" ? (
+                          <>
+                            <TouchableOpacity
+                              style={[styles.adminDataActionButton, styles.adminDataActionApprove]}
+                              disabled={updateClubMembershipRequestMutation.isPending}
+                              onPress={() =>
+                                updateClubMembershipRequestMutation.mutate({
+                                  registrationId: request.registration_id,
+                                  clubId: request.club_id,
+                                  requestType: (request.request_type ?? "membership") as "membership" | "start_club" | "event_organizer",
+                                  createdAt: request.created_at,
+                                  status: "approved",
+                                })
+                              }
+                            >
+                              <CheckCircle size={13} color="#fff" />
+                              <Text style={styles.adminDataActionText}>Approve</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.adminDataActionButton, styles.adminDataActionReject]}
+                              disabled={updateClubMembershipRequestMutation.isPending}
+                              onPress={() =>
+                                updateClubMembershipRequestMutation.mutate({
+                                  registrationId: request.registration_id,
+                                  clubId: request.club_id,
+                                  requestType: (request.request_type ?? "membership") as "membership" | "start_club" | "event_organizer",
+                                  createdAt: request.created_at,
+                                  status: "rejected",
+                                })
+                              }
+                            >
+                              <XCircle size={13} color="#fff" />
+                              <Text style={styles.adminDataActionText}>Reject</Text>
+                            </TouchableOpacity>
+                          </>
+                        ) : (
+                          <Text style={styles.adminDataCellMuted}>Reviewed</Text>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </ScrollView>
           )}
         </ScrollView>
       ) : activeTab === "orders" ? (
@@ -3599,88 +6628,109 @@ const getStatusLabel = (status: string) => {
               <Text style={styles.emptySubtext}>Orders placed by users will appear here</Text>
             </View>
           ) : (
-            deliveryOrders.map((order: any) => {
-              const items = order.items || [];
-              return (
-                <View key={order.order_id} style={styles.orderCard}>
-                  <View style={styles.orderHeader}>
-                    <Text style={styles.orderId}>#{(order.order_id || '').substring(0, 8)}</Text>
-                    <TouchableOpacity
-                      style={[styles.statusBadge, { backgroundColor: `${getStatusColor(order.status)}20` }]}
-                      onPress={() => handleUpdateOrderStatus(order.order_id, order.status)}
-                    >
-                      <Text style={[styles.statusText, { color: getStatusColor(order.status) }]}>
-                        {getStatusLabel(order.status)}
-                      </Text>
-                      <ChevronRight size={14} color={getStatusColor(order.status)} />
-                    </TouchableOpacity>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+              <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                  <View style={[styles.adminDataCell, { width: 90 }]}>
+                    <Text style={styles.adminDataHeaderText}>Order</Text>
                   </View>
-
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Phone:</Text>
-                    <Text style={styles.orderValue}>{order.phone_number}</Text>
+                  <View style={[styles.adminDataCell, { width: 160 }]}>
+                    <Text style={styles.adminDataHeaderText}>Name</Text>
                   </View>
-
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Address:</Text>
-                    <Text style={styles.orderValue} numberOfLines={2}>
-                      {order.delivery_address}
-                    </Text>
+                  <View style={[styles.adminDataCell, { width: 120 }]}>
+                    <Text style={styles.adminDataHeaderText}>Phone</Text>
                   </View>
-
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Time Slots:</Text>
-                    <Text style={styles.orderValue} numberOfLines={2}>
-                      {order.delivery_time_slots || 'N/A'}
-                    </Text>
+                  <View style={[styles.adminDataCell, { width: 190 }]}>
+                    <Text style={styles.adminDataHeaderText}>Address</Text>
                   </View>
-
-                  {items.length > 0 && (
-                    <View style={styles.orderItemsList}>
-                      <Text style={styles.orderItemsTitle}>Items:</Text>
-                      {items.map((item: any, idx: number) => (
-                        <View key={idx} style={styles.orderItemRow}>
-                          <Text style={styles.orderItemName} numberOfLines={1}>
-                            {item.name}{item.size ? ` (${item.size})` : ''}
-                          </Text>
-                          <Text style={styles.orderItemQty}>x{item.qty}</Text>
-                          <Text style={styles.orderItemPrice}>
-                            ugx.{(item.subtotal || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Total:</Text>
-                    <Text style={styles.orderTotal}>
-                      ugx.{(order.total_amount || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}
-                    </Text>
+                  <View style={[styles.adminDataCell, { width: 130 }]}>
+                    <Text style={styles.adminDataHeaderText}>Delivery Time</Text>
                   </View>
-
-                  <View style={styles.orderDetails}>
-                    <Text style={styles.orderLabel}>Date:</Text>
-                    <Text style={styles.orderValue}>
-                      {new Date(order.created_at).toLocaleDateString("en-GB", {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                      })}
-                    </Text>
+                  <View style={[styles.adminDataCell, { width: 190 }]}>
+                    <Text style={styles.adminDataHeaderText}>Items</Text>
                   </View>
-
-                  <TouchableOpacity
-                    style={styles.printStickerBtn}
-                    onPress={() => handlePrintSticker(order)}
-                    activeOpacity={0.8}
-                  >
-                    <Printer size={18} color="#fff" />
-                    <Text style={styles.printStickerText}>Print Sticker</Text>
-                  </TouchableOpacity>
+                  <View style={[styles.adminDataCell, { width: 110 }]}>
+                    <Text style={styles.adminDataHeaderText}>Total</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 110 }]}>
+                    <Text style={styles.adminDataHeaderText}>Date</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 120 }]}>
+                    <Text style={styles.adminDataHeaderText}>Status</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 150 }]}>
+                    <Text style={styles.adminDataHeaderText}>Actions</Text>
+                  </View>
                 </View>
-              );
-            })
+                {deliveryOrders.map((order: any) => {
+                  const items = order.items || [];
+                  const itemSummary = items.map((item: any) => `${item.name}${item.size ? ` (${item.size})` : ""} x${item.qty}`).join(", ");
+                  return (
+                    <View key={order.order_id} style={styles.adminDataRow}>
+                      <View style={[styles.adminDataCell, { width: 90 }]}>
+                        <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]}>#{(order.order_id || "").substring(0, 8)}</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 160 }]}>
+                        <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>
+                          {order.customer_name || order.delivery_name || "Unknown customer"}
+                        </Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 120 }]}>
+                        <Text style={styles.adminDataCellText}>{order.phone_number || "-"}</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 190 }]}>
+                        <Text style={styles.adminDataCellText} numberOfLines={3}>{order.delivery_address || "-"}</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 130 }]}>
+                        <Text style={styles.adminDataCellText} numberOfLines={2}>{order.delivery_time_slots || "No time slot"}</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 190 }]}>
+                        <Text style={styles.adminDataCellText} numberOfLines={3}>{itemSummary || "No items"}</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 110 }]}>
+                        <Text style={[styles.adminDataCellText, styles.adminDataCellSuccess]}>
+                          ugx.{(order.total_amount || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                        </Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 110 }]}>
+                        <Text style={styles.adminDataCellText}>
+                          {new Date(order.created_at).toLocaleDateString("en-GB", {
+                            day: "2-digit",
+                            month: "short",
+                            year: "numeric",
+                          })}
+                        </Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 120 }]}>
+                        <TouchableOpacity
+                          style={[styles.adminDataActionButton, styles.adminDataActionNeutral]}
+                          onPress={() => handleUpdateOrderStatus(order.order_id, order.status)}
+                        >
+                          <Text style={styles.adminDataActionText}>{getStatusLabel(order.status)}</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <View style={[styles.adminDataCell, styles.adminDataActions, { width: 150 }]}>
+                        <TouchableOpacity
+                          style={[styles.adminDataActionButton, styles.adminDataActionPrimary]}
+                          onPress={() => handlePrintSticker(order)}
+                          activeOpacity={0.8}
+                        >
+                          <Printer size={13} color="#fff" />
+                          <Text style={styles.adminDataActionText}>Print</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.adminDataActionButton, styles.adminDataActionNeutral]}
+                          onPress={() => handleShareSticker(order)}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={styles.adminDataActionText}>Share</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </ScrollView>
           )}
         </ScrollView>
       ) : activeTab === "stock" ? (
@@ -3700,485 +6750,174 @@ const getStatusLabel = (status: string) => {
               <Text style={styles.emptyText}>No products in catalogue</Text>
             </View>
           ) : (
-            stockProducts.map((product: any) => (
-              <View key={product.catalogue_id} style={styles.stockCard}>
-                <View style={styles.stockInfo}>
-                  <Text style={styles.stockName}>{product.catalogue_item}</Text>
-                  {product.size && <Text style={styles.stockSize}>Size: {product.size}</Text>}
-                  <View style={styles.stockRow}>
-                    <Text style={styles.stockLabel}>Stock:</Text>
-                    <Text
-                      style={[
-                        styles.stockValue,
-                        (product.quantity || 0) <= 5 && styles.stockValueLow,
-                        (product.quantity || 0) === 0 && styles.stockValueOut,
-                      ]}
-                    >
-                      {product.quantity || 0} units
-                    </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+              <View style={styles.adminDataTable}>
+                <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                  <View style={[styles.adminDataCell, { width: 260 }]}>
+                    <Text style={styles.adminDataHeaderText}>Item</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 120 }]}>
+                    <Text style={styles.adminDataHeaderText}>Size</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 120 }]}>
+                    <Text style={styles.adminDataHeaderText}>Stock</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 120 }]}>
+                    <Text style={styles.adminDataHeaderText}>Actions</Text>
                   </View>
                 </View>
-                <TouchableOpacity
-                  style={styles.editButton}
-                  onPress={() => handleUpdateStock(product)}
-                >
-                  <Edit size={20} color="#10b981" />
-                </TouchableOpacity>
+                {stockProducts.map((product: any) => {
+                  const quantity = product.quantity || 0;
+                  return (
+                    <View key={product.catalogue_id} style={styles.adminDataRow}>
+                      <View style={[styles.adminDataCell, { width: 260 }]}>
+                        <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>
+                          {product.catalogue_item}
+                        </Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 120 }]}>
+                        <Text style={styles.adminDataCellText}>{product.size || "-"}</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 120 }]}>
+                        <Text
+                          style={[
+                            styles.adminDataCellText,
+                            quantity === 0
+                              ? styles.adminDataCellDanger
+                              : quantity <= 5
+                                ? styles.adminDataCellWarning
+                                : styles.adminDataCellSuccess,
+                          ]}
+                        >
+                          {quantity} units
+                        </Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 120 }]}>
+                        <TouchableOpacity
+                          style={[styles.adminDataActionButton, styles.adminDataActionPrimary]}
+                          onPress={() => handleUpdateStock(product)}
+                        >
+                          <Edit size={13} color="#fff" />
+                          <Text style={styles.adminDataActionText}>Edit</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
               </View>
-            ))
+            </ScrollView>
           )}
         </ScrollView>
       ) : activeTab === "events" ? (
         <View style={{ flex: 1 }}>
-          <View style={styles.eventsSubTabBar}>
-            <TouchableOpacity
-              style={[styles.eventsSubTab, eventsSubTab === "calendar" && styles.eventsSubTabActive]}
-              onPress={() => setEventsSubTab("calendar")}
-            >
-              <Calendar size={18} color={eventsSubTab === "calendar" ? "#10b981" : "#6b7280"} />
-              <Text style={[styles.eventsSubTabText, eventsSubTab === "calendar" && styles.eventsSubTabTextActive]}>
-                Calendar
-              </Text>
+          <View style={styles.addEventContainer}>
+            <TouchableOpacity style={styles.addEventButton} onPress={handleOpenAddEvent}>
+              <Plus size={20} color="#fff" />
+              <Text style={styles.addEventButtonText}>Create Event</Text>
             </TouchableOpacity>
-            {!isEventOrganizer ? (
+          </View>
+          <View style={styles.eventsSubTabBar}>
+            {(["pending", "approved", "closed"] as const).map((status) => (
               <TouchableOpacity
-                style={[styles.eventsSubTab, eventsSubTab === "participants" && styles.eventsSubTabActive]}
-                onPress={() => setEventsSubTab("participants")}
+                key={status}
+                style={[styles.eventsSubTab, eventApprovalTab === status && styles.eventsSubTabActive]}
+                onPress={() => setEventApprovalTab(status)}
               >
-                <Users size={18} color={eventsSubTab === "participants" ? "#10b981" : "#6b7280"} />
-                <Text style={[styles.eventsSubTabText, eventsSubTab === "participants" && styles.eventsSubTabTextActive]}>
-                  Participants
+                <Text style={[styles.eventsSubTabText, eventApprovalTab === status && styles.eventsSubTabTextActive]}>
+                  {status === "pending" ? "Pending" : status === "approved" ? "Approved" : "Closed"}
                 </Text>
               </TouchableOpacity>
-            ) : null}
+            ))}
           </View>
+          <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+            {!usesScopedEventWorkspace ? (
+              <View style={styles.auditFilterCard}>
+                <View style={styles.auditFilterHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.auditFilterTitle}>Events Table</Text>
+                    <Text style={styles.auditFilterSubtitle}>
+                      Use Preview to review details and take action.
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.auditDateRow}>
+                  <TouchableOpacity
+                    style={[styles.eventFilterChip, styles.auditDateInputWrap]}
+                    onPress={() => setShowEventOrganizerFilterModal(true)}
+                  >
+                    <Text style={styles.eventFilterChipText} numberOfLines={1}>
+                      Organizer: {selectedOrganizerFilterLabel}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null}
 
-          {eventsSubTab === "calendar" ? (
-            <View style={{ flex: 1 }}>
-              <View style={styles.addEventContainer}>
-                <TouchableOpacity
-                  style={styles.addEventButton}
-                  onPress={handleOpenAddEvent}
-                >
-                  <Plus size={20} color="#fff" />
-                  <Text style={styles.addEventButtonText}>Create Event</Text>
+            {eventsError ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.errorText}>Error loading events</Text>
+                <Text style={styles.errorSubtext}>{eventsError.message || "Could not load events."}</Text>
+                <TouchableOpacity style={styles.retryButton} onPress={() => refetchEvents()}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
                 </TouchableOpacity>
               </View>
-              <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-                <View style={styles.auditFilterCard}>
-                  <View style={styles.auditFilterHeader}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.auditFilterTitle}>Organizer Filter</Text>
-                      <Text style={styles.auditFilterSubtitle}>
-                        Narrow the event list by club-owned events or a specific independent organizer.
-                      </Text>
-                    </View>
+            ) : eventsLoading ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>Loading events...</Text>
+              </View>
+            ) : displayedAdminEvents.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Calendar size={64} color="#d1d5db" />
+                <Text style={styles.emptyText}>No {eventApprovalTab} events</Text>
+              </View>
+            ) : (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+                <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                  <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                    <View style={[styles.adminDataCell, { width: 240 }]}><Text style={styles.adminDataHeaderText}>Event</Text></View>
+                    <View style={[styles.adminDataCell, { width: 130 }]}><Text style={styles.adminDataHeaderText}>Date</Text></View>
+                    <View style={[styles.adminDataCell, { width: 150 }]}><Text style={styles.adminDataHeaderText}>Organizer</Text></View>
+                    <View style={[styles.adminDataCell, { width: 110 }]}><Text style={styles.adminDataHeaderText}>Type</Text></View>
+                    <View style={[styles.adminDataCell, { width: 110 }]}><Text style={styles.adminDataHeaderText}>Medal</Text></View>
+                    <View style={[styles.adminDataCell, { width: 120 }]}><Text style={styles.adminDataHeaderText}>Status</Text></View>
+                    <View style={[styles.adminDataCell, { width: 120 }]}><Text style={styles.adminDataHeaderText}>Magazine</Text></View>
+                    <View style={[styles.adminDataCell, { width: 105 }]}><Text style={styles.adminDataHeaderText}>Preview</Text></View>
                   </View>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.eventFilterScroll}>
-                    <TouchableOpacity
-                      style={[styles.eventFilterChip, selectedOrganizerFilter === "all" && styles.eventFilterChipActive]}
-                      onPress={() => setSelectedOrganizerFilter("all")}
-                    >
-                      <Text style={[styles.eventFilterChipText, selectedOrganizerFilter === "all" && styles.eventFilterChipTextActive]}>
-                        All ({organizerEventCounts.total})
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.eventFilterChip, selectedOrganizerFilter === "clubs" && styles.eventFilterChipActive]}
-                      onPress={() => setSelectedOrganizerFilter("clubs")}
-                    >
-                      <Text style={[styles.eventFilterChipText, selectedOrganizerFilter === "clubs" && styles.eventFilterChipTextActive]}>
-                        Clubs ({organizerEventCounts.clubOwnedCount})
-                      </Text>
-                    </TouchableOpacity>
-                    {(eventOrganizers as EventOrganizerRecord[]).map((organizer) => (
-                      <TouchableOpacity
-                        key={organizer.organizer_id}
-                        style={[
-                          styles.eventFilterChip,
-                          (organizerEventCounts.organizerCounts.get(organizer.organizer_id) ?? 0) === 0 &&
-                            styles.eventFilterChipMuted,
-                          selectedOrganizerFilter === organizer.organizer_id && styles.eventFilterChipActive,
-                        ]}
-                        onPress={() => setSelectedOrganizerFilter(organizer.organizer_id)}
-                      >
-                        <Text
-                          style={[
-                            styles.eventFilterChipText,
-                            (organizerEventCounts.organizerCounts.get(organizer.organizer_id) ?? 0) === 0 &&
-                              styles.eventFilterChipTextMuted,
-                            selectedOrganizerFilter === organizer.organizer_id && styles.eventFilterChipTextActive,
-                          ]}
-                        >
-                          {organizer.organizer_name} ({organizerEventCounts.organizerCounts.get(organizer.organizer_id) ?? 0})
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </View>
-
-                {isSuperAdmin ? (
-                  <View style={styles.auditFilterCard}>
-                    <View style={styles.auditFilterHeader}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.auditFilterTitle}>Organizer Manager</Text>
-                        <Text style={styles.auditFilterSubtitle}>
-                          Edit organizer name, description, and country for independent event managers.
-                        </Text>
-                      </View>
-                    </View>
-                    {(eventOrganizers as EventOrganizerRecord[]).length === 0 ? (
-                      <Text style={styles.eventPosterHint}>No active event organizers yet. Approve an Event Organizer role first.</Text>
-                    ) : (
-                      (eventOrganizers as EventOrganizerRecord[]).map((organizer) => (
-                        <View key={organizer.organizer_id} style={styles.orderCard}>
-                          <View style={styles.orderHeader}>
-                            <Text style={styles.orderId}>{organizer.organizer_name}</Text>
-                            <View style={{ flexDirection: "row", gap: 8 }}>
-                              <TouchableOpacity style={styles.editButton} onPress={() => openEditOrganizerModal(organizer)}>
-                                <Edit size={18} color="#2563eb" />
-                              </TouchableOpacity>
-                              <TouchableOpacity style={styles.deleteIconButton} onPress={() => handleDeactivateOrganizer(organizer)}>
-                                <Trash2 size={16} color="#b91c1c" />
-                              </TouchableOpacity>
-                            </View>
-                          </View>
-                          <View style={styles.orderDetails}>
-                            <Text style={styles.orderLabel}>Country:</Text>
-                            <Text style={styles.orderValue}>
-                              {formatCountryName(organizer.country) || organizer.country || "Unspecified"}
-                            </Text>
-                          </View>
-                          {organizer.description ? (
-                            <View style={styles.orderDetails}>
-                              <Text style={styles.orderLabel}>Notes:</Text>
-                              <Text style={styles.orderValue}>{organizer.description}</Text>
-                            </View>
-                          ) : null}
-                        </View>
-                      ))
-                    )}
-                  </View>
-                ) : null}
-
-                {eventsError ? (
-                  <View style={styles.emptyContainer}>
-                    <Text style={styles.errorText}>Error loading events</Text>
-                    <Text style={styles.errorSubtext}>
-                      {eventsError.message || "Could not load events."}
-                    </Text>
-                    <Text style={styles.errorHint}>Please refresh and try again. If the issue continues, check the events setup in Supabase.</Text>
-                    <TouchableOpacity
-                      style={styles.retryButton}
-                      onPress={() => refetchEvents()}
-                    >
-                      <Text style={styles.retryButtonText}>Retry</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : eventsLoading ? (
-                  <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyText}>Loading events...</Text>
-                  </View>
-                ) : !filteredAdminEvents || filteredAdminEvents.length === 0 ? (
-                  <View style={styles.emptyContainer}>
-                    <Calendar size={64} color="#d1d5db" />
-                    <Text style={styles.emptyText}>No matching events</Text>
-                  </View>
-                ) : (
-                  filteredAdminEvents.map((event: any) => {
+                  {displayedAdminEvents.map((event: any) => {
                     const approvalStatus = event.approval_status || "approved";
                     const magazineStatus = event.magazine_submission_status || "missing";
-                    const isOrganizerOwned = Boolean(event.organizer);
-                    const canReviewOrganizerEvent =
-                      isOrganizerOwned &&
-                      (isSuperAdmin ||
-                        (isCountryAdmin &&
-                          (!event.country_code ||
-                            roleSession.countryAdminScopes.includes(event.country_code))));
-                    const canDeleteRejectedEvent =
-                      approvalStatus === "rejected" &&
-                      isOrganizerOwned &&
-                      (canReviewOrganizerEvent ||
-                        (isEventOrganizer &&
-                          roleSession.eventOrganizerScopes.includes(event.organizer)));
-
                     return (
-                    <View key={event.event_id || event.eventId} style={styles.eventCard}>
-                      <View style={styles.eventCardHeader}>
-                        <View style={styles.eventInfo}>
-                          <Text style={styles.eventName}>{event.event_name || event.eventName}</Text>
-                          <View style={styles.eventDates}>
-                            <View style={styles.eventDateRow}>
-                              <Text style={styles.eventDateLabel}>Start:</Text>
-                              <Text style={styles.eventDateValue}>
-                                {new Date(event.starts_at || event.startsAt).toLocaleDateString("en-GB", {
-                                  day: "2-digit",
-                                  month: "short",
-                                  year: "numeric",
-                                })}
-                              </Text>
-                            </View>
-                            <View style={styles.eventDateRow}>
-                              <Text style={styles.eventDateLabel}>End:</Text>
-                              <Text style={styles.eventDateValue}>
-                                {new Date(event.ends_at || event.endsAt).toLocaleDateString("en-GB", {
-                                  day: "2-digit",
-                                  month: "short",
-                                  year: "numeric",
-                                })}
-                              </Text>
-                            </View>
-                          </View>
-                          <Text style={styles.eventMetaInline}>
-                        {[formatCountryName(event.country), getEventOrganizerLabel(event)]
-                              .filter(Boolean)
-                              .join(", ") || "No country or organizer set"}
-                          </Text>
-                          <Text style={styles.eventMetaInline}>
-                            Organizer: {getEventOrganizerLabel(event)}
-                          </Text>
-                          <View style={styles.eventConfigRow}>
-                            <Text style={styles.eventConfigChip}>{getEventEntryLabel(event.entry)}</Text>
-                            <Text style={styles.eventConfigChip}>
-                              {event.has_medal ?? event.hasMedal ? "Medal Event" : "No Medal"}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.eventConfigChip,
-                                {
-                                  color: getEventApprovalColor(approvalStatus),
-                                  borderColor: `${getEventApprovalColor(approvalStatus)}40`,
-                                  backgroundColor: `${getEventApprovalColor(approvalStatus)}12`,
-                                },
-                              ]}
-                            >
-                              {getEventApprovalLabel(approvalStatus)}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.eventConfigChip,
-                                {
-                                  color: magazineStatus === "accepted" ? "#059669" : "#f59e0b",
-                                  borderColor: magazineStatus === "accepted" ? "#05966940" : "#f59e0b40",
-                                  backgroundColor: magazineStatus === "accepted" ? "#05966912" : "#f59e0b12",
-                                },
-                              ]}
-                            >
-                              Magazine: {magazineStatus === "accepted" ? "Accepted" : magazineStatus === "missing" ? "Missing" : "Review needed"}
-                            </Text>
-                          </View>
+                      <View key={event.event_id || event.eventId} style={styles.adminDataRow}>
+                        <View style={[styles.adminDataCell, { width: 240 }]}>
+                          <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{event.event_name || event.eventName}</Text>
+                          <Text style={styles.adminDataCellMuted} numberOfLines={1}>{formatCountryName(event.country) || event.country || "No country"}</Text>
                         </View>
-                        <TouchableOpacity style={styles.editButton} onPress={() => handleEditEvent(event)}>
-                          <Edit size={18} color="#10b981" />
-                        </TouchableOpacity>
-                      </View>
-                      {event.poster_link ? (
-                        <Image source={{ uri: event.poster_link }} style={styles.adminEventPosterThumb} />
-                      ) : (
-                        <View style={styles.adminNoPosterState}>
-                          <Text style={styles.adminNoPosterText}>NO POSTER</Text>
-                        </View>
-                      )}
-                      <View style={styles.eventPosterCaptionRow}>
-                        <Text style={styles.eventPosterCaption}>
-                          {event.is_virtual ? "Virtual" : "Physical"}
-                        </Text>
-                        <Text style={styles.eventPosterCaption}>
-                          {getEventEntryLabel(event.entry)}
-                        </Text>
-                        <Text style={styles.eventPosterCaption}>
-                          {event.poster_link ? "Edit to replace poster" : "Edit to add poster"}
-                        </Text>
-                      </View>
-                      {((event.entry || event.entryType) === "paid") && (event.payment_details || event.paymentDetails) ? (
-                        <Text style={styles.eventPosterHint}>
-                          Payment details: {event.payment_details || event.paymentDetails}
-                        </Text>
-                      ) : null}
-                      {((event.entry || event.entryType) === "paid") && (event.organizer_payment_link || event.organizerPaymentLink) ? (
-                        <Text style={styles.eventPosterHint}>
-                          Payment link: {event.organizer_payment_link || event.organizerPaymentLink}
-                        </Text>
-                      ) : null}
-                      {isOrganizerOwned ? (
-                        <Text style={styles.eventPosterHint}>
-                          {approvalStatus === "approved"
-                            ? "Organizer event is approved and visible to users."
-                            : approvalStatus === "rejected"
-                              ? "Organizer event is rejected and hidden from the public event list until resubmitted."
-                              : magazineStatus === "accepted"
-                                ? "Magazine article accepted. This event is ready for Country or Global Admin approval."
-                                : "Review and accept the linked magazine article in the Magazine tile before approving this event."}
-                        </Text>
-                      ) : null}
-                      <Text style={styles.eventPosterHint}>
-                        Organizer: {getEventOrganizerLabel(event)}
-                      </Text>
-                      <Text style={styles.eventPosterHint}>
-                        Poster folder: {event.event_id || event.eventId}
-                      </Text>
-                      <Text style={styles.eventPosterHint}>
-                        Current file: {extractPosterStoragePath(event.poster_link || event.posterLink) || "No poster"}
-                      </Text>
-                      {event.poster_link ? (
-                        <TouchableOpacity
-                          style={styles.posterLinkButton}
-                          onPress={() => handleOpenPosterUrl(event.poster_link || event.posterLink)}
-                        >
-                          <FileText size={14} color="#0369a1" />
-                          <Text style={styles.posterLinkButtonText}>Open Poster URL</Text>
-                        </TouchableOpacity>
-                      ) : null}
-                      {canReviewOrganizerEvent && approvalStatus !== "approved" ? (
-                        <View style={styles.eventApprovalActions}>
-                          <TouchableOpacity
-                            style={[styles.downloadButton, styles.approveActionButton]}
-                            onPress={() =>
-                              updateEventApprovalMutation.mutate({
-                                eventId: event.event_id || event.eventId,
-                                status: "approved",
-                              })
-                            }
-                            disabled={updateEventApprovalMutation.isPending || magazineStatus !== "accepted"}
-                          >
-                            <CheckCircle size={16} color="#fff" />
-                            <Text style={styles.downloadButtonText}>
-                              {updateEventApprovalMutation.isPending
-                                ? "Saving..."
-                                : magazineStatus !== "accepted"
-                                  ? "Approve Magazine First"
-                                  : "Approve Event"}
-                            </Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[styles.downloadButton, styles.rejectActionButton]}
-                            onPress={() =>
-                              updateEventApprovalMutation.mutate({
-                                eventId: event.event_id || event.eventId,
-                                status: "rejected",
-                              })
-                            }
-                            disabled={updateEventApprovalMutation.isPending}
-                          >
-                            <XCircle size={16} color="#fff" />
-                            <Text style={styles.downloadButtonText}>
-                              {updateEventApprovalMutation.isPending ? "Saving..." : "Reject Event"}
-                            </Text>
+                        <View style={[styles.adminDataCell, { width: 130 }]}><Text style={styles.adminDataCellText}>{formatDate(event.starts_at || event.startsAt)}</Text></View>
+                        <View style={[styles.adminDataCell, { width: 150 }]}><Text style={styles.adminDataCellText} numberOfLines={2}>{getEventOrganizerLabel(event)}</Text></View>
+                        <View style={[styles.adminDataCell, { width: 110 }]}><Text style={styles.adminDataCellText}>{event.event_type || event.eventType || "same_day"}</Text></View>
+                        <View style={[styles.adminDataCell, { width: 110 }]}><Text style={styles.adminDataCellText}>{event.has_medal ?? event.hasMedal ? "Yes" : "No"}</Text></View>
+                        <View style={[styles.adminDataCell, { width: 120 }]}><Text style={[styles.adminDataCellText, approvalStatus === "approved" ? styles.adminDataCellSuccess : approvalStatus === "rejected" ? styles.adminDataCellDanger : styles.adminDataCellWarning]}>{getEventApprovalLabel(approvalStatus)}</Text></View>
+                        <View style={[styles.adminDataCell, { width: 120 }]}><Text style={[styles.adminDataCellText, magazineStatus === "accepted" ? styles.adminDataCellSuccess : styles.adminDataCellWarning]}>{magazineStatus === "missing" ? "Missing" : getStatusLabel(magazineStatus)}</Text></View>
+                        <View style={[styles.adminDataCell, styles.adminDataActions, { width: 105 }]}>
+                          <TouchableOpacity style={[styles.adminDataActionButton, styles.adminDataActionNeutral]} onPress={() => setSelectedEventPreview(event)}>
+                            <Text style={styles.adminDataActionText}>Preview</Text>
                           </TouchableOpacity>
                         </View>
-                      ) : null}
-                      {canDeleteRejectedEvent ? (
-                        <TouchableOpacity
-                          style={[styles.archiveActionBtn, { marginTop: 10 }]}
-                          onPress={() => handleDeleteRejectedEvent(event)}
-                          disabled={deleteEventMutation.isPending}
-                        >
-                          <Trash2 size={18} color="#fff" />
-                          <Text style={styles.archiveActionBtnText}>
-                            {deleteEventMutation.isPending ? "Deleting..." : "Delete Rejected Event"}
-                          </Text>
-                        </TouchableOpacity>
-                      ) : null}
-                    </View>
+                      </View>
                     );
-                  })
-                )}
+                  })}
+                </View>
               </ScrollView>
-            </View>
-          ) : (
-            <View style={{ flex: 1 }}>
-              <View style={styles.eventFilterContainer}>
-                <Text style={styles.eventFilterLabel}>Filter by Event:</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.eventFilterScroll}>
-                  {events && events.map((event: any) => (
-                    <TouchableOpacity
-                      key={event.event_id || event.eventId}
-                      style={[
-                        styles.eventFilterChip,
-                        selectedEventId === (event.event_id || event.eventId) && styles.eventFilterChipActive
-                      ]}
-                      onPress={() => setSelectedEventId(event.event_id || event.eventId)}
-                    >
-                      <Text style={[
-                        styles.eventFilterChipText,
-                        selectedEventId === (event.event_id || event.eventId) && styles.eventFilterChipTextActive
-                      ]}>
-                        {event.event_name || event.eventName}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-
-              <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-                {!selectedEventId ? (
-                  <View style={styles.emptyContainer}>
-                    <Users size={64} color="#d1d5db" />
-                    <Text style={styles.emptyText}>Select an event to view participants</Text>
-                  </View>
-                ) : participantsError ? (
-                  <View style={styles.emptyContainer}>
-                    <Text style={styles.errorText}>Error loading participants</Text>
-                    <Text style={styles.errorSubtext}>
-                      {participantsError.message || "Could not load participants."}
-                    </Text>
-                    <TouchableOpacity
-                      style={styles.retryButton}
-                      onPress={() => refetchParticipants()}
-                    >
-                      <Text style={styles.retryButtonText}>Retry</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : participantsLoading ? (
-                  <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyText}>Loading participants...</Text>
-                  </View>
-                ) : !participants || participants.length === 0 ? (
-                  <View style={styles.emptyContainer}>
-                    <Users size={64} color="#d1d5db" />
-                    <Text style={styles.emptyText}>No participants yet</Text>
-                    <Text style={styles.emptySubtext}>No one has registered for this event</Text>
-                  </View>
-                ) : (
-                  participants.map((participant: any) => (
-                    <View key={participant.ParticipantID || participant.id} style={styles.participantCard}>
-                      <View style={styles.participantInfo}>
-                        <Text style={styles.participantName}>
-                          {`${participant.user?.["First Name"] || participant.firstName || ''} ${participant.user?.["Other Names"] || participant.otherNames || ''}`.trim() || "Unknown User"}
-                        </Text>
-                        <View style={styles.participantDetails}>
-                          <View style={styles.participantDetailRow}>
-                            <Text style={styles.participantDetailLabel}>Event:</Text>
-                            <Text style={styles.participantDetailValue}>{participant.eventName}</Text>
-                          </View>
-                          {(participant.user?.Sex || participant.sex) && (
-                            <View style={styles.participantDetailRow}>
-                              <Text style={styles.participantDetailLabel}>Sex:</Text>
-                              <Text style={styles.participantDetailValue}>{participant.user?.Sex || participant.sex}</Text>
-                            </View>
-                          )}
-                          {(participant.user?.Residence || participant.residence) && (
-                            <View style={styles.participantDetailRow}>
-                              <Text style={styles.participantDetailLabel}>Residence:</Text>
-                              <Text style={styles.participantDetailValue}>{participant.user?.Residence || participant.residence}</Text>
-                            </View>
-                          )}
-                        </View>
-                      </View>
-                    </View>
-                  ))
-                )}
-              </ScrollView>
-            </View>
-          )}
+            )}
+          </ScrollView>
         </View>
       ) : activeTab === "enrollments" ? (
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
           {enrollmentsError ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.errorText}>Error loading enrollments</Text>
+              <Text style={styles.errorText}>Error loading participant approvals</Text>
               <Text style={styles.errorSubtext}>
-                {enrollmentsError.message || "Could not load enrollments."}
+                {enrollmentsError.message || "Could not load participant approvals."}
               </Text>
               <Text style={styles.errorHint}>Please refresh and try again. If the issue continues, check the enrollments setup in Supabase.</Text>
               <TouchableOpacity
@@ -4190,96 +6929,110 @@ const getStatusLabel = (status: string) => {
             </View>
           ) : enrollmentsLoading ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>Loading enrollments...</Text>
+              <Text style={styles.emptyText}>Loading participant approvals...</Text>
             </View>
           ) : !enrollments || enrollments.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Calendar size={64} color="#d1d5db" />
-              <Text style={styles.emptyText}>No enrollments yet</Text>
+              <Text style={styles.emptyText}>No participant approvals yet</Text>
             </View>
           ) : (
-            enrollments.map((enrollment: any) => {
-              const event = events?.find((e: any) => (e.event_id || e.eventId) === enrollment.event_id);
-              return (
-                <View key={enrollment.event_enrollment_id} style={styles.enrollmentCard}>
-                  <View style={styles.enrollmentHeader}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.enrollmentEvent}>{event?.event_name || event?.eventName || enrollment.event_id}</Text>
-                      <Text style={styles.enrollmentDate}>{formatDate(enrollment.enrolled_at)}</Text>
-                    </View>
-                    <Text
-                      style={[
-                        styles.enrollmentStatusBadge,
-                        { backgroundColor: getEnrollmentStatusColor(enrollment.status) },
-                      ]}
-                    >
-                      {getEnrollmentStatusLabel(enrollment.status)}
-                    </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+              <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                  <View style={[styles.adminDataCell, { width: 210 }]}>
+                    <Text style={styles.adminDataHeaderText}>Event</Text>
                   </View>
-                  <View style={styles.enrollmentDetails}>
-                    <View style={styles.enrollmentRow}>
-                      <Text style={styles.enrollmentLabel}>Name:</Text>
-                      <Text style={styles.enrollmentValue}>
-                        {enrollment.first_name} {enrollment.other_names}
-                      </Text>
-                    </View>
-                    <View style={styles.enrollmentRow}>
-                      <Text style={styles.enrollmentLabel}>Email:</Text>
-                      <Text style={styles.enrollmentValue} numberOfLines={1}>
-                        {enrollment.email}
-                      </Text>
-                    </View>
+                  <View style={[styles.adminDataCell, { width: 180 }]}>
+                    <Text style={styles.adminDataHeaderText}>User</Text>
                   </View>
-                  <View style={styles.enrollmentActions}>
-                    {enrollment.status === "awaiting_payment" ? (
-                      <TouchableOpacity
-                        style={[styles.downloadButton, styles.paymentConfirmButton]}
-                        onPress={() =>
-                          markEnrollmentPaidMutation.mutate({
-                            enrollmentId: enrollment.event_enrollment_id,
-                          })
-                        }
-                        disabled={markEnrollmentPaidMutation.isPending}
-                      >
-                        <CheckCircle size={16} color="#fff" />
-                        <Text style={styles.downloadButtonText}>
-                          {markEnrollmentPaidMutation.isPending ? "Confirming..." : "Mark Paid & Add"}
-                        </Text>
-                      </TouchableOpacity>
-                    ) : (
-                      <TouchableOpacity
-                        style={[styles.downloadButton, styles.approveActionButton]}
-                        onPress={() =>
-                          approveEnrollmentMutation.mutate({
-                            enrollmentId: enrollment.event_enrollment_id,
-                          })
-                        }
-                        disabled={approveEnrollmentMutation.isPending}
-                      >
-                        <CheckCircle size={16} color="#fff" />
-                        <Text style={styles.downloadButtonText}>
-                          {approveEnrollmentMutation.isPending ? "Approving..." : "Approve"}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                    <TouchableOpacity
-                      style={[styles.downloadButton, styles.rejectActionButton]}
-                      onPress={() =>
-                        rejectEnrollmentMutation.mutate({
-                          enrollmentId: enrollment.event_enrollment_id,
-                        })
-                      }
-                      disabled={rejectEnrollmentMutation.isPending}
-                    >
-                      <XCircle size={16} color="#fff" />
-                      <Text style={styles.downloadButtonText}>
-                        {rejectEnrollmentMutation.isPending ? "Rejecting..." : "Reject"}
-                      </Text>
-                    </TouchableOpacity>
+                  <View style={[styles.adminDataCell, { width: 210 }]}>
+                    <Text style={styles.adminDataHeaderText}>Email</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 120 }]}>
+                    <Text style={styles.adminDataHeaderText}>Date</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 130 }]}>
+                    <Text style={styles.adminDataHeaderText}>Status</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 130 }]}>
+                    <Text style={styles.adminDataHeaderText}>Actions</Text>
                   </View>
                 </View>
-              );
-            })
+                {enrollments.map((enrollment: any) => {
+                  const event = events?.find((e: any) => (e.event_id || e.eventId) === enrollment.event_id);
+                  return (
+                    <View key={enrollment.event_enrollment_id} style={styles.adminDataRow}>
+                      <View style={[styles.adminDataCell, { width: 210 }]}>
+                        <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>
+                          {event?.event_name || event?.eventName || enrollment.event_id}
+                        </Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 180 }]}>
+                        <Text style={styles.adminDataCellText} numberOfLines={2}>
+                          {enrollment.first_name} {enrollment.other_names}
+                        </Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 210 }]}>
+                        <Text style={styles.adminDataCellMuted} numberOfLines={2}>{enrollment.email}</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 120 }]}>
+                        <Text style={styles.adminDataCellText}>{formatDate(enrollment.enrolled_at)}</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 130 }]}>
+                        <Text style={[styles.adminDataCellText, styles.adminDataCellWarning]}>
+                          {getEnrollmentStatusLabel(enrollment.status)}
+                        </Text>
+                      </View>
+                      <View style={[styles.adminDataCell, styles.adminDataActions, { width: 130 }]}>
+                        {enrollment.status === "awaiting_payment" ? (
+                          <TouchableOpacity
+                            style={[styles.adminDataActionButton, styles.adminDataActionApprove]}
+                            onPress={() =>
+                              markEnrollmentPaidMutation.mutate({
+                                enrollmentId: enrollment.event_enrollment_id,
+                              })
+                            }
+                            disabled={markEnrollmentPaidMutation.isPending}
+                          >
+                            <Text style={styles.adminDataActionText}>
+                              {markEnrollmentPaidMutation.isPending ? "Saving" : "Mark Paid"}
+                            </Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <TouchableOpacity
+                            style={[styles.adminDataActionButton, styles.adminDataActionApprove]}
+                            onPress={() =>
+                              approveEnrollmentMutation.mutate({
+                                enrollmentId: enrollment.event_enrollment_id,
+                              })
+                            }
+                            disabled={approveEnrollmentMutation.isPending}
+                          >
+                            <Text style={styles.adminDataActionText}>
+                              {approveEnrollmentMutation.isPending ? "Saving" : "Approve"}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                        <TouchableOpacity
+                          style={[styles.adminDataActionButton, styles.adminDataActionReject]}
+                          onPress={() =>
+                            rejectEnrollmentMutation.mutate({
+                              enrollmentId: enrollment.event_enrollment_id,
+                            })
+                          }
+                          disabled={rejectEnrollmentMutation.isPending}
+                        >
+                          <Text style={styles.adminDataActionText}>
+                            {rejectEnrollmentMutation.isPending ? "Saving" : "Reject"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </ScrollView>
           )}
         </ScrollView>
       ) : activeTab === "activityUploads" ? (
@@ -4308,42 +7061,58 @@ const getStatusLabel = (status: string) => {
               <Text style={styles.emptyText}>No activity uploads yet</Text>
             </View>
           ) : (
-            activityUploads.map((upload: any) => (
-              <View key={upload.id} style={styles.uploadCard}>
-                <View style={styles.uploadInfo}>
-                  <Text style={styles.uploadFileName}>{upload.fileName}</Text>
-                  <View style={styles.uploadDetails}>
-                    <View style={styles.uploadDetailRow}>
-                      <Text style={styles.uploadDetailLabel}>User:</Text>
-                      <Text style={styles.uploadDetailValue}>{upload.userName}</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+              <View style={styles.adminDataTable}>
+                <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                  <View style={[styles.adminDataCell, { width: 210 }]}>
+                    <Text style={styles.adminDataHeaderText}>File</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 170 }]}>
+                    <Text style={styles.adminDataHeaderText}>User</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 210 }]}>
+                    <Text style={styles.adminDataHeaderText}>Email</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 150 }]}>
+                    <Text style={styles.adminDataHeaderText}>Uploaded</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 130 }]}>
+                    <Text style={styles.adminDataHeaderText}>Actions</Text>
+                  </View>
+                </View>
+                {activityUploads.map((upload: any) => (
+                  <View key={upload.id} style={styles.adminDataRow}>
+                    <View style={[styles.adminDataCell, { width: 210 }]}>
+                      <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{upload.fileName}</Text>
                     </View>
-                    <View style={styles.uploadDetailRow}>
-                      <Text style={styles.uploadDetailLabel}>Email:</Text>
-                      <Text style={styles.uploadDetailValue} numberOfLines={1}>{upload.email}</Text>
+                    <View style={[styles.adminDataCell, { width: 170 }]}>
+                      <Text style={styles.adminDataCellText} numberOfLines={2}>{upload.userName}</Text>
                     </View>
-                    <View style={styles.uploadDetailRow}>
-                      <Text style={styles.uploadDetailLabel}>Uploaded:</Text>
-                      <Text style={styles.uploadDetailValue}>
+                    <View style={[styles.adminDataCell, { width: 210 }]}>
+                      <Text style={styles.adminDataCellMuted} numberOfLines={2}>{upload.email}</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 150 }]}>
+                      <Text style={styles.adminDataCellText}>
                         {new Date(upload.uploadedAt).toLocaleDateString("en-GB", {
                           day: "2-digit",
                           month: "short",
                           year: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
                         })}
                       </Text>
                     </View>
+                    <View style={[styles.adminDataCell, { width: 130 }]}>
+                      <TouchableOpacity
+                        style={[styles.adminDataActionButton, styles.adminDataActionPrimary]}
+                        onPress={() => handleFileDownload(upload)}
+                      >
+                        <Download size={13} color="#fff" />
+                        <Text style={styles.adminDataActionText}>Download</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                  <TouchableOpacity
-                    style={styles.downloadButton}
-                    onPress={() => handleFileDownload(upload)}
-                  >
-                    <Download size={18} color="#fff" />
-                    <Text style={styles.downloadButtonText}>Download Upload</Text>
-                  </TouchableOpacity>
-                </View>
+                ))}
               </View>
-            ))
+            </ScrollView>
           )}
         </ScrollView>
       ) : activeTab === "ratings" ? (
@@ -4389,27 +7158,40 @@ const getStatusLabel = (status: string) => {
                 </View>
               </View>
 
-              {appRatings.map((rating) => (
-                <View key={rating.rating_id} style={styles.ratingCard}>
-                  <View style={styles.ratingCardHeader}>
-                    <View style={styles.ratingCardStars}>
-                      {[1, 2, 3, 4, 5].map((s) => (
-                        <Star
-                          key={s}
-                          size={14}
-                          color={s <= rating.rating ? '#f59e0b' : '#d1d5db'}
-                          fill={s <= rating.rating ? '#f59e0b' : 'transparent'}
-                        />
-                      ))}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+                <View style={styles.adminDataTable}>
+                  <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                    <View style={[styles.adminDataCell, { width: 160 }]}>
+                      <Text style={styles.adminDataHeaderText}>User</Text>
                     </View>
-                    <Text style={styles.ratingCardDate}>{formatDate(rating.created_at)}</Text>
+                    <View style={[styles.adminDataCell, { width: 90 }]}>
+                      <Text style={styles.adminDataHeaderText}>Rating</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 120 }]}>
+                      <Text style={styles.adminDataHeaderText}>Date</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 360 }]}>
+                      <Text style={styles.adminDataHeaderText}>Feedback</Text>
+                    </View>
                   </View>
-                  <Text style={styles.ratingCardUser}>{rating.registration_id}</Text>
-                  {rating.feedback && (
-                    <Text style={styles.ratingCardFeedback}>{rating.feedback}</Text>
-                  )}
+                  {appRatings.map((rating) => (
+                    <View key={rating.rating_id} style={styles.adminDataRow}>
+                      <View style={[styles.adminDataCell, { width: 160 }]}>
+                        <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{rating.registration_id}</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 90 }]}>
+                        <Text style={[styles.adminDataCellText, styles.adminDataCellWarning]}>{rating.rating}/5</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 120 }]}>
+                        <Text style={styles.adminDataCellText}>{formatDate(rating.created_at)}</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 360 }]}>
+                        <Text style={styles.adminDataCellText} numberOfLines={3}>{rating.feedback || "-"}</Text>
+                      </View>
+                    </View>
+                  ))}
                 </View>
-              ))}
+              </ScrollView>
             </>
           )}
         </ScrollView>
@@ -4426,20 +7208,223 @@ const getStatusLabel = (status: string) => {
               <Text style={styles.emptySubtext}>User suggestions will appear here</Text>
             </View>
           ) : (
-            suggestions.map((item) => (
-              <View key={item.suggestion_id} style={styles.suggestionCard}>
-                <View style={styles.suggestionHeader}>
-                  <Text style={styles.suggestionUser} numberOfLines={1}>{item.registration_id}</Text>
-                  <Text style={styles.suggestionDate}>{formatDate(item.created_at)}</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+              <View style={styles.adminDataTable}>
+                <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                  <View style={[styles.adminDataCell, { width: 120 }]}>
+                    <Text style={styles.adminDataHeaderText}>Date</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 150 }]}>
+                    <Text style={styles.adminDataHeaderText}>Country</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 190 }]}>
+                    <Text style={styles.adminDataHeaderText}>Name</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 460 }]}>
+                    <Text style={styles.adminDataHeaderText}>Suggestion</Text>
+                  </View>
                 </View>
-                <Text style={styles.suggestionText}>{item.suggestion}</Text>
+                {suggestions.map((item) => (
+                  <View key={item.suggestion_id} style={styles.adminDataRow}>
+                    <View style={[styles.adminDataCell, { width: 120 }]}>
+                      <Text style={styles.adminDataCellText}>{formatDate(item.created_at)}</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 150 }]}>
+                      <Text style={styles.adminDataCellText} numberOfLines={2}>{formatCountryName(item.country) || item.country || "-"}</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 190 }]}>
+                      <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{item.name || item.registration_id}</Text>
+                      <Text style={styles.adminDataCellMuted} numberOfLines={1}>{item.registration_id}</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 460 }]}>
+                      <Text style={styles.adminDataCellText} numberOfLines={4}>{item.suggestion}</Text>
+                    </View>
+                  </View>
+                ))}
               </View>
-            ))
+            </ScrollView>
+          )}
+        </ScrollView>
+      ) : activeTab === "myArticles" ? (
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.auditFilterCard}>
+            <View style={styles.auditFilterHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.auditFilterTitle}>My Articles</Text>
+                <Text style={styles.auditFilterSubtitle}>
+                  Historical fitness-column article submissions linked to your account.
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {myMagazineArticlesLoading ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Loading your articles...</Text>
+            </View>
+          ) : sortedMyMagazineArticles.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <FileText size={64} color="#d1d5db" />
+              <Text style={styles.emptyText}>No articles submitted yet</Text>
+              <Text style={styles.emptySubtext}>Your submitted fitness-column articles will appear here.</Text>
+            </View>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+              <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                  <View style={[styles.adminDataCell, { width: 130 }]}><Text style={styles.adminDataHeaderText}>Submitted</Text></View>
+                  <View style={[styles.adminDataCell, { width: 260 }]}><Text style={styles.adminDataHeaderText}>Title</Text></View>
+                  <View style={[styles.adminDataCell, { width: 150 }]}><Text style={styles.adminDataHeaderText}>Category</Text></View>
+                  <View style={[styles.adminDataCell, { width: 280 }]}><Text style={styles.adminDataHeaderText}>Preview</Text></View>
+                  <View style={[styles.adminDataCell, { width: 120 }]}><Text style={styles.adminDataHeaderText}>Status</Text></View>
+                  <View style={[styles.adminDataCell, { width: 140 }]}><Text style={styles.adminDataHeaderText}>Action</Text></View>
+                </View>
+                {sortedMyMagazineArticles.map((item: any) => (
+                  <View key={item.submission_id} style={styles.adminDataRow}>
+                    <View style={[styles.adminDataCell, { width: 130 }]}>
+                      <Text style={styles.adminDataCellText}>{formatDate(item.created_at)}</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 260 }]}>
+                      <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{item.title || "Untitled article"}</Text>
+                      <Text style={styles.adminDataCellMuted} numberOfLines={1}>{item.article_writer_name || item.author_name || "Fitness Coach"}</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 150 }]}>
+                      <Text style={styles.adminDataCellText} numberOfLines={2}>{item.category || "Columns"}</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 280 }]}>
+                      <Text style={styles.adminDataCellText} numberOfLines={3}>{item.pitch || item.body || "No preview text available."}</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 120 }]}>
+                      <Text style={[styles.adminDataCellText, item.status === "accepted" ? styles.adminDataCellSuccess : item.status === "rejected" ? styles.adminDataCellDanger : styles.adminDataCellWarning]}>
+                        {item.status || "submitted"}
+                      </Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 140 }]}>
+                      <TouchableOpacity
+                        style={[styles.adminDataActionButton, styles.adminDataActionPrimary]}
+                        onPress={() => setSelectedMagazinePreview({ type: "article", ...item })}
+                      >
+                        <Text style={styles.adminDataActionText}>Preview</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
           )}
         </ScrollView>
       ) : activeTab === "magazine" ? (
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-          {magazineSubmissionsLoading || magazinePictorialsLoading ? (
+          {(isSuperAdmin || isMagazineEditor) ? (
+            <View style={styles.roleAccessTabs}>
+              {[
+                { key: "create" as const, label: "Create" },
+                { key: "edit" as const, label: "Edit" },
+              ].map((mode) => (
+                <TouchableOpacity
+                  key={mode.key}
+                  style={[styles.roleAccessTabButton, magazineMode === mode.key && styles.roleAccessTabButtonActive]}
+                  onPress={() => setMagazineMode(mode.key)}
+                >
+                  <Text style={[styles.roleAccessTabText, magazineMode === mode.key && styles.roleAccessTabTextActive]}>
+                    {mode.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : null}
+
+          {(isSuperAdmin || isMagazineEditor || isMagazineColumnist) && (isMagazineColumnist || magazineMode === "create") ? (
+            <View style={styles.auditFilterCard}>
+              <Text style={styles.auditFilterTitle}>{isMagazineColumnist ? "Submit Column Article" : "Create News Article"}</Text>
+              <Text style={styles.auditFilterSubtitle}>
+                {isSuperAdmin
+                  ? "Global Admin articles publish directly to the selected Running Post page."
+                  : isMagazineColumnist
+                  ? "Columnist articles are submitted to the Magazine Editor and Global Admin approval workflow before publication."
+                  : "Magazine Editor news articles are submitted for Global Admin approval before publication."}
+              </Text>
+              {isSuperAdmin ? (
+                <>
+                  <Text style={styles.label}>Magazine Page</Text>
+                  <View style={styles.segmentRow}>
+                    {MAGAZINE_CREATE_PAGES.map((page) => (
+                      <TouchableOpacity
+                        key={page}
+                        style={[styles.segmentChip, newsPage === page && styles.segmentChipActive]}
+                        onPress={() => setNewsPage(page)}
+                      >
+                        <Text style={[styles.segmentChipText, newsPage === page && styles.segmentChipTextActive]}>
+                          {page}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              ) : null}
+              <Text style={styles.label}>Title</Text>
+              <TextInput
+                style={styles.input}
+                value={newsTitle}
+                onChangeText={setNewsTitle}
+                placeholder={isMagazineColumnist ? "Column article title" : "News article title"}
+                placeholderTextColor="#9ca3af"
+              />
+              <Text style={styles.label}>Author</Text>
+              <TextInput
+                style={styles.input}
+                value={newsAuthor}
+                onChangeText={setNewsAuthor}
+                placeholder="Author name"
+                placeholderTextColor="#9ca3af"
+              />
+              <Text style={styles.label}>External Link (optional)</Text>
+              <TextInput
+                style={styles.input}
+                value={newsExternalLink}
+                onChangeText={setNewsExternalLink}
+                placeholder="https://..."
+                placeholderTextColor="#9ca3af"
+                autoCapitalize="none"
+              />
+              <Text style={styles.label}>Article Photo (optional)</Text>
+              <TouchableOpacity style={styles.posterPickerButton} onPress={handlePickNewsPhoto}>
+                <Camera size={20} color="#2563eb" />
+                <Text style={styles.posterPickerButtonText}>
+                  {newsPhotoPreview ? "Change Article Photo" : "Add Article Photo"}
+                </Text>
+              </TouchableOpacity>
+              {newsPhotoPreview ? (
+                <Image source={{ uri: newsPhotoPreview }} style={styles.eventPosterPreview} />
+              ) : null}
+              {newsPhotoPreview ? (
+                <TouchableOpacity style={styles.posterRemoveButton} onPress={handleRemoveNewsPhoto}>
+                  <Trash2 size={18} color="#dc2626" />
+                  <Text style={styles.posterRemoveButtonText}>Remove Article Photo</Text>
+                </TouchableOpacity>
+              ) : null}
+              <Text style={styles.label}>Article Body</Text>
+              <TextInput
+                style={[styles.input, styles.inputMultiline]}
+                value={newsBody}
+                onChangeText={setNewsBody}
+                placeholder={isMagazineColumnist ? "Write the full column article..." : "Write the full news article..."}
+                placeholderTextColor="#9ca3af"
+                multiline
+                textAlignVertical="top"
+              />
+              <TouchableOpacity
+                style={[styles.approveButton, createMagazineNewsMutation.isPending && styles.disabledButton]}
+                disabled={createMagazineNewsMutation.isPending}
+                onPress={handleCreateNewsArticle}
+              >
+                <CheckCircle size={18} color="#fff" />
+                <Text style={styles.actionButtonText}>
+                  {createMagazineNewsMutation.isPending ? "Submitting..." : isMagazineColumnist ? "Submit Article" : "Publish News"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : magazineSubmissionsLoading || magazinePictorialsLoading ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>Loading magazine submissions...</Text>
             </View>
@@ -4457,138 +7442,209 @@ const getStatusLabel = (status: string) => {
                   {magazineSubmissions.length} article submission{magazineSubmissions.length !== 1 ? "s" : ""} / {magazinePictorials.length} pictorial{magazinePictorials.length !== 1 ? "s" : ""}
                 </Text>
               </View>
-
-              {magazinePictorials.map((item: any) => (
-                <View key={item.pictorial_id} style={styles.suggestionCard}>
-                  <View style={styles.suggestionHeader}>
-                    <Text style={styles.suggestionUser} numberOfLines={1}>{item.submitter_name} / {formatCountryName(item.country) || item.country}</Text>
-                    <Text style={styles.suggestionDate}>{formatDate(item.created_at)}</Text>
-                  </View>
-                  <Image source={{ uri: item.photo_url }} style={styles.magazinePictorialAdminImage} resizeMode="cover" />
-                  <Text style={styles.magazineSubmissionTitle}>{item.event_name}</Text>
-                  <Text style={styles.suggestionText}>{item.caption}</Text>
-                    <Text style={styles.errorHint}>
-                      {[item.club, formatCountryName(item.country) || item.country, item.event_date].filter(Boolean).join(" / ")} / Status: {item.status}
-                      {item.is_picture_of_week ? " / Picture of the Week" : ""}
-                  </Text>
+              <View style={styles.roleAccessTabs}>
+                {MAGAZINE_REVIEW_STATUS_TABS.map((tab) => (
                   <TouchableOpacity
-                    style={[styles.downloadButton, styles.magazinePreviewButton]}
-                    onPress={() => setSelectedMagazinePreview({ type: "pictorial", ...item })}
+                    key={tab.key}
+                    style={[styles.roleAccessTabButton, magazineReviewStatusFilter === tab.key && styles.roleAccessTabButtonActive]}
+                    onPress={() => setMagazineReviewStatusFilter(tab.key)}
                   >
-                    <BookOpen size={18} color="#fff" />
-                    <Text style={styles.downloadButtonText}>Preview</Text>
-                  </TouchableOpacity>
-                  <View style={styles.submissionActions}>
-                    <TouchableOpacity
-                      style={styles.approveBtn}
-                      onPress={() => updateMagazinePictorialStatusMutation.mutate({ pictorialId: item.pictorial_id, status: "accepted" })}
-                    >
-                      <CheckCircle size={18} color="#fff" />
-                      <Text style={styles.actionBtnText}>Accept</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.rejectBtn}
-                      onPress={() => updateMagazinePictorialStatusMutation.mutate({ pictorialId: item.pictorial_id, status: "rejected" })}
-                    >
-                      <XCircle size={18} color="#fff" />
-                      <Text style={styles.actionBtnText}>Reject</Text>
-                    </TouchableOpacity>
-                  </View>
-                  {(isSuperAdmin || isCountryAdmin) && (
-                    <TouchableOpacity
-                      style={styles.downloadButton}
-                      onPress={() => setPictureOfWeekMutation.mutate({ pictorialId: item.pictorial_id, weekLabel: null })}
-                    >
-                      <Camera size={18} color="#fff" />
-                      <Text style={styles.downloadButtonText}>Feature as Picture of the Week</Text>
-                    </TouchableOpacity>
-                  )}
-                  {isSuperAdmin && (
-                    <TouchableOpacity
-                      style={styles.archiveActionBtn}
-                      onPress={() =>
-      Alert.alert("Delete Pictorial", "Only global admins can delete pictorial entries. Continue?", [
-                          { text: "Cancel", style: "cancel" },
-                          {
-                            text: "Delete",
-                            style: "destructive",
-                            onPress: () => deleteMagazinePictorialMutation.mutate({ pictorialId: item.pictorial_id }),
-                          },
-                        ])
-                      }
-                    >
-                      <Trash2 size={18} color="#fff" />
-                      <Text style={styles.archiveActionBtnText}>Delete Entry</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              ))}
-
-              {magazineSubmissions.map((item: any) => (
-                <View key={item.submission_id} style={styles.suggestionCard}>
-                  <View style={styles.suggestionHeader}>
-                    <Text style={styles.suggestionUser} numberOfLines={1}>
-                      {item.article_writer_name || item.author_name} / {item.category}
+                    <Text style={[styles.roleAccessTabText, magazineReviewStatusFilter === tab.key && styles.roleAccessTabTextActive]}>
+                      {tab.label} ({magazineReviewStatusCounts[tab.key]})
                     </Text>
-                    <Text style={styles.suggestionDate}>{formatDate(item.created_at)}</Text>
-                  </View>
-                  <Text style={styles.magazineSubmissionTitle}>{item.title}</Text>
-                  <Text style={styles.suggestionText}>{item.pitch}</Text>
-                  {!!item.event_id && (
-                    <Text style={styles.errorHint}>Linked event: {item.event_id}</Text>
-                  )}
-                  {!!item.attachment_name && (
-                    <Text style={styles.errorHint}>Attachment: {item.attachment_name}</Text>
-                  )}
-                  <Text style={styles.errorHint}>Status: {item.status} / {item.email}</Text>
-                  <TouchableOpacity
-                    style={[styles.downloadButton, styles.magazinePreviewButton]}
-                    onPress={() => setSelectedMagazinePreview({ type: "article", ...item })}
-                  >
-                    <BookOpen size={18} color="#fff" />
-                    <Text style={styles.downloadButtonText}>Preview</Text>
                   </TouchableOpacity>
-                  <View style={styles.submissionActions}>
-                    <TouchableOpacity
-                      style={styles.approveBtn}
-                      onPress={() => updateMagazineSubmissionStatusMutation.mutate({ submissionId: item.submission_id, status: "accepted" })}
-                    >
-                      <CheckCircle size={18} color="#fff" />
-                      <Text style={styles.actionBtnText}>Accept</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.rejectBtn}
-                      onPress={() => updateMagazineSubmissionStatusMutation.mutate({ submissionId: item.submission_id, status: "rejected" })}
-                    >
-                      <XCircle size={18} color="#fff" />
-                      <Text style={styles.actionBtnText}>Reject</Text>
-                    </TouchableOpacity>
-                  </View>
-                  {isSuperAdmin && (
-                    <TouchableOpacity
-                      style={styles.archiveActionBtn}
-                      onPress={() =>
-      Alert.alert("Delete Submission", "Only global admins can delete magazine submissions. Continue?", [
-                          { text: "Cancel", style: "cancel" },
-                          {
-                            text: "Delete",
-                            style: "destructive",
-                            onPress: () => deleteMagazineSubmissionMutation.mutate({ submissionId: item.submission_id }),
-                          },
-                        ])
-                      }
-                    >
-                      <Trash2 size={18} color="#fff" />
-                      <Text style={styles.archiveActionBtnText}>Delete Entry</Text>
-                    </TouchableOpacity>
-                  )}
+                ))}
+              </View>
+              {visibleMagazineReviewRows.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                  <BookOpen size={48} color="#d1d5db" />
+                  <Text style={styles.emptyText}>No {magazineReviewStatusFilter} magazine entries</Text>
+                  <Text style={styles.emptySubtext}>Switch tabs to view the other review queues.</Text>
                 </View>
-              ))}
+              ) : (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+                  <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                    <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                      <View style={[styles.adminDataCell, { width: 90 }]}>
+                        <Text style={styles.adminDataHeaderText}>Destination</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 170 }]}>
+                        <Text style={styles.adminDataHeaderText}>Submitter</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 220 }]}>
+                        <Text style={styles.adminDataHeaderText}>Title/Event</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 250 }]}>
+                        <Text style={styles.adminDataHeaderText}>Pitch/Caption</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 120 }]}>
+                        <Text style={styles.adminDataHeaderText}>Status</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 120 }]}>
+                        <Text style={styles.adminDataHeaderText}>Date</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 160 }]}>
+                        <Text style={styles.adminDataHeaderText}>Preview</Text>
+                      </View>
+                  </View>
+                    {visibleMagazineReviewRows.map((item: any) => {
+                      const isPictorial = item.type === "pictorial";
+                      return (
+                        <View key={isPictorial ? item.pictorial_id : item.submission_id} style={styles.adminDataRow}>
+                          <View style={[styles.adminDataCell, { width: 90 }]}>
+                            <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]}>
+                              {isPictorial ? "Gallery" : item.category || "Columns"}
+                            </Text>
+                          </View>
+                          <View style={[styles.adminDataCell, { width: 170 }]}>
+                            <Text style={styles.adminDataCellText} numberOfLines={2}>
+                              {isPictorial ? item.submitter_name : item.article_writer_name || item.author_name}
+                            </Text>
+                            <Text style={styles.adminDataCellMuted} numberOfLines={1}>
+                              {isPictorial ? formatCountryName(item.country) || item.country : item.email}
+                            </Text>
+                          </View>
+                          <View style={[styles.adminDataCell, { width: 220 }]}>
+                            <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>
+                              {isPictorial ? item.event_name : item.title}
+                            </Text>
+                            <Text style={styles.adminDataCellMuted} numberOfLines={1}>
+                              {isPictorial
+                                ? [item.club, item.event_date].filter(Boolean).join(" / ")
+                                : [item.category, item.event_id ? `Event: ${item.event_id}` : null].filter(Boolean).join(" / ")}
+                            </Text>
+                          </View>
+                          <View style={[styles.adminDataCell, { width: 250 }]}>
+                            <Text style={styles.adminDataCellText} numberOfLines={4}>{isPictorial ? item.caption : item.pitch}</Text>
+                            {!isPictorial && item.attachment_name ? <Text style={styles.adminDataCellMuted} numberOfLines={1}>Attachment: {item.attachment_name}</Text> : null}
+                          </View>
+                          <View style={[styles.adminDataCell, { width: 120 }]}>
+                            <Text style={[styles.adminDataCellText, item.status === "accepted" ? styles.adminDataCellSuccess : item.status === "rejected" ? styles.adminDataCellDanger : styles.adminDataCellWarning]}>
+                              {item.status}{isPictorial && item.is_picture_of_week ? " / POW" : ""}
+                            </Text>
+                          </View>
+                          <View style={[styles.adminDataCell, { width: 120 }]}>
+                            <Text style={styles.adminDataCellText}>{formatDate(item.created_at)}</Text>
+                          </View>
+                          <View style={[styles.adminDataCell, { width: 160 }]}>
+                            <TouchableOpacity
+                              style={[styles.adminDataActionButton, styles.adminDataActionPrimary]}
+                              onPress={() => setSelectedMagazinePreview({ ...item })}
+                            >
+                              <Text style={styles.adminDataActionText}>Preview</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+              )}
             </>
+          )}
+        </ScrollView>
+      ) : activeTab === "myTeam" ? (
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.auditFilterCard}>
+            <View style={styles.auditFilterHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.auditFilterTitle}>My Team</Text>
+                <Text style={styles.auditFilterSubtitle}>People whose work is connected to your admin role, including their role application links where available.</Text>
+              </View>
+              <TouchableOpacity style={styles.retryButton} onPress={() => refetchMyTeam()}>
+                <Text style={styles.retryButtonText}>Refresh</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {myTeamLoading ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Loading team...</Text>
+            </View>
+          ) : myTeamError ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.errorText}>Could not load team</Text>
+              <Text style={styles.errorSubtext}>{myTeamError.message}</Text>
+            </View>
+          ) : myTeamMembers.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Users size={64} color="#d1d5db" />
+              <Text style={styles.emptyText}>No team members yet</Text>
+              <Text style={styles.emptySubtext}>Approved roles connected to your scope will appear here.</Text>
+            </View>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+              <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                  <View style={[styles.adminDataCell, { width: 180 }]}><Text style={styles.adminDataHeaderText}>Person</Text></View>
+                  <View style={[styles.adminDataCell, { width: 150 }]}><Text style={styles.adminDataHeaderText}>Country</Text></View>
+                  <View style={[styles.adminDataCell, { width: 220 }]}><Text style={styles.adminDataHeaderText}>Role</Text></View>
+                  <View style={[styles.adminDataCell, { width: 260 }]}><Text style={styles.adminDataHeaderText}>Name</Text></View>
+                  <View style={[styles.adminDataCell, { width: 230 }]}><Text style={styles.adminDataHeaderText}>Links</Text></View>
+                  <View style={[styles.adminDataCell, { width: 190 }]}><Text style={styles.adminDataHeaderText}>Contact</Text></View>
+                </View>
+                {myTeamMembers.map((member) => {
+                  const links = [
+                    { label: "Website", url: member.websiteUrl },
+                    { label: "LinkedIn", url: member.linkedinUrl },
+                    { label: "Social", url: member.socialUrl },
+                  ].filter((link): link is { label: string; url: string } => Boolean(link.url));
+                  const memberFlag = getCountryFlag(member.userCountryCode);
+                  const memberCountryLabel = member.userCountryName || formatCountryName(member.userCountryCode) || member.userCountryCode || null;
+
+                  return (
+                    <View key={`${member.assignmentId}-${member.userId}`} style={styles.adminDataRow}>
+                      <View style={[styles.adminDataCell, { width: 180 }]}>
+                        <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{member.name}</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 150 }]}>
+                        <View style={styles.myTeamPersonRow}>
+                          {memberFlag ? (
+                            <Text style={styles.myTeamFlagText} accessibilityLabel={memberCountryLabel || "Country flag"}>
+                              {memberFlag}
+                            </Text>
+                          ) : null}
+                          <Text style={[styles.adminDataCellText, styles.myTeamPersonName]} numberOfLines={2}>
+                            {memberCountryLabel || "Not set"}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 220 }]}>
+                        <Text style={styles.adminDataCellText} numberOfLines={2}>{getRoleDisplayName(member.roleName as ManageableRoleName)}</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 260 }]}>
+                        <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={3}>
+                          {member.clubName || member.organizerName || "-"}
+                        </Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 230 }]}>
+                        {links.length ? links.map((link) => (
+                          <TouchableOpacity key={link.label} style={styles.pendingRoleLinkButton} onPress={() => Linking.openURL(link.url)}>
+                            <Text style={styles.pendingRoleLinkText}>{link.label}</Text>
+                          </TouchableOpacity>
+                        )) : <Text style={styles.adminDataCellMuted}>No links</Text>}
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 190 }]}>
+                        <Text style={styles.adminDataCellText} numberOfLines={2}>{member.contactConsent ? "Contact allowed" : "No contact consent"}</Text>
+                        {member.contactInstructions ? <Text style={styles.adminDataCellMuted} numberOfLines={2}>{member.contactInstructions}</Text> : null}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </ScrollView>
           )}
         </ScrollView>
       ) : activeTab === "moderation" ? (
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.auditFilterCard}>
+            <View style={styles.auditFilterHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.auditFilterTitle}>Chat Reports</Text>
+                <Text style={styles.auditFilterSubtitle}>Review complaints without exposing backend post IDs to normal users.</Text>
+              </View>
+            </View>
+          </View>
           {chatReportsLoading ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>Loading chat reports...</Text>
@@ -4600,77 +7656,163 @@ const getStatusLabel = (status: string) => {
               <Text style={styles.emptySubtext}>Reports for abusive or unsafe chat content will appear here.</Text>
             </View>
           ) : (
-            (chatReports as ChatModerationReport[]).map((report) => (
-              <View key={report.reportId} style={styles.suggestionCard}>
-                <View style={styles.suggestionHeader}>
-                  <Text style={styles.suggestionUser} numberOfLines={1}>
-                    {report.reasonCategory.toUpperCase()} / {report.status}
-                  </Text>
-                  <Text style={styles.suggestionDate}>{formatDate(report.createdAt)}</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+              <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                  <View style={[styles.adminDataCell, { width: 120 }]}>
+                    <Text style={styles.adminDataHeaderText}>Date</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 120 }]}>
+                    <Text style={styles.adminDataHeaderText}>Reason</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 160 }]}>
+                    <Text style={styles.adminDataHeaderText}>Reported</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 160 }]}>
+                    <Text style={styles.adminDataHeaderText}>Reporter</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 260 }]}>
+                    <Text style={styles.adminDataHeaderText}>Description</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 110 }]}>
+                    <Text style={styles.adminDataHeaderText}>Status</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 160 }]}>
+                    <Text style={styles.adminDataHeaderText}>Actions</Text>
+                  </View>
                 </View>
-                <Text style={styles.magazineSubmissionTitle}>
-                  Reported: {report.reportedName || report.reportedUsername || report.reportedRegistrationId || "Unknown user"}
-                </Text>
-                <Text style={styles.errorHint}>
-                  Reporter: {report.reporterName || report.reporterRegistrationId}
-                </Text>
-                <Text style={styles.errorHint}>
-                  {[report.postId ? `Post: ${report.postId}` : null, report.commentId ? `Comment: ${report.commentId}` : null, report.reportedCountry ? formatCountryName(report.reportedCountry) || report.reportedCountry : null].filter(Boolean).join(" / ")}
-                </Text>
-                <Text style={styles.suggestionText}>{report.description}</Text>
-                {report.offenderFlags ? (
-                  <Text style={styles.errorHint}>
-                    Flags: {report.offenderFlags.confirmed_flags} confirmed / {report.offenderFlags.dismissed_reports} dismissed
-                    {report.offenderFlags.is_banned ? " / BANNED" : ""}
-                  </Text>
-                ) : null}
-                {report.screenshotUrl ? (
-                  <>
-                    <Image source={{ uri: report.screenshotUrl }} style={styles.magazinePictorialAdminImage} resizeMode="cover" />
-                    <TouchableOpacity style={[styles.downloadButton, styles.magazinePreviewButton]} onPress={() => Linking.openURL(report.screenshotUrl!)}>
-                      <FileText size={18} color="#fff" />
-                      <Text style={styles.downloadButtonText}>Open Screenshot</Text>
-                    </TouchableOpacity>
-                  </>
-                ) : null}
-                {report.status === "pending" ? (
-                  <>
-                    <View style={styles.submissionActions}>
-                      <TouchableOpacity
-                        style={styles.approveBtn}
-                        onPress={() => reviewChatReportMutation.mutate({ reportId: report.reportId, action: "remove_content", adminNotes: "Content removed after moderation review." })}
-                      >
-                        <Trash2 size={18} color="#fff" />
-                        <Text style={styles.actionBtnText}>Remove Content</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.rejectBtn}
-                        onPress={() => reviewChatReportMutation.mutate({ reportId: report.reportId, action: "dismiss", adminNotes: "Report dismissed after review." })}
-                      >
-                        <XCircle size={18} color="#fff" />
-                        <Text style={styles.actionBtnText}>Dismiss</Text>
-                      </TouchableOpacity>
+                {(chatReports as ChatModerationReport[]).map((report) => (
+                  <View key={report.reportId} style={styles.adminDataRow}>
+                    <View style={[styles.adminDataCell, { width: 120 }]}>
+                      <Text style={styles.adminDataCellText}>{formatDate(report.createdAt)}</Text>
                     </View>
-                    <TouchableOpacity
-                      style={styles.archiveActionBtn}
-                      onPress={() =>
-                        Alert.alert("Ban user?", "This removes the reported content and blocks the user from posting or commenting in chat.", [
-                          { text: "Cancel", style: "cancel" },
-                          {
-                            text: "Ban User",
-                            style: "destructive",
-                            onPress: () => reviewChatReportMutation.mutate({ reportId: report.reportId, action: "ban_user", adminNotes: "User banned after chat moderation review." }),
-                          },
-                        ])
-                      }
-                    >
-                      <ShieldAlert size={18} color="#fff" />
-                      <Text style={styles.archiveActionBtnText}>Ban User</Text>
-                    </TouchableOpacity>
-                  </>
-                ) : null}
+                    <View style={[styles.adminDataCell, { width: 120 }]}>
+                      <Text style={[styles.adminDataCellText, styles.adminDataCellWarning]} numberOfLines={2}>{report.reasonCategory}</Text>
+                      {report.screenshotUrl ? (
+                        <TouchableOpacity onPress={() => Linking.openURL(report.screenshotUrl!)}>
+                          <Text style={[styles.adminDataCellMuted, { color: "#2563eb" }]}>Open screenshot</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 160 }]}>
+                      <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>
+                        {report.reportedName || report.reportedUsername || report.reportedRegistrationId || "Unknown user"}
+                      </Text>
+                      <Text style={styles.adminDataCellMuted} numberOfLines={1}>
+                        {[report.postId ? `Post: ${report.postId}` : null, report.commentId ? `Comment: ${report.commentId}` : null].filter(Boolean).join(" / ")}
+                      </Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 160 }]}>
+                      <Text style={styles.adminDataCellText} numberOfLines={2}>{report.reporterName || report.reporterRegistrationId}</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 260 }]}>
+                      <Text style={styles.adminDataCellText} numberOfLines={4}>{report.description}</Text>
+                      {report.offenderFlags ? (
+                        <Text style={styles.adminDataCellMuted} numberOfLines={2}>
+                          Flags: {report.offenderFlags.confirmed_flags} confirmed / {report.offenderFlags.dismissed_reports} dismissed
+                          {report.offenderFlags.is_banned ? " / BANNED" : ""}
+                          {report.offenderFlags.suspension_status === "pending" ? " / SUSPENSION PENDING" : ""}
+                          {report.offenderFlags.suspended_until ? ` / Until ${formatDate(report.offenderFlags.suspended_until)}` : ""}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 110 }]}>
+                      <Text style={[styles.adminDataCellText, report.status === "pending" ? styles.adminDataCellWarning : styles.adminDataCellSuccess]}>
+                        {report.status}
+                      </Text>
+                    </View>
+                    <View style={[styles.adminDataCell, styles.adminDataActions, { width: 160 }]}>
+                      {report.status === "pending" ? (
+                        <>
+                          <TouchableOpacity
+                            style={[styles.adminDataActionButton, styles.adminDataActionApprove]}
+                            onPress={() => reviewChatReportMutation.mutate({ reportId: report.reportId, action: "remove_content", adminNotes: "Content removed after moderation review." })}
+                          >
+                            <Text style={styles.adminDataActionText}>Remove</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.adminDataActionButton, styles.adminDataActionReject]}
+                            onPress={() => reviewChatReportMutation.mutate({ reportId: report.reportId, action: "dismiss", adminNotes: "Report dismissed after review." })}
+                          >
+                            <Text style={styles.adminDataActionText}>Dismiss</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.adminDataActionButton, styles.adminDataActionNeutral]}
+                            onPress={() => handleRequestChatSuspension(report)}
+                          >
+                            <Text style={styles.adminDataActionText}>{isSuperAdmin ? "Suspend" : "Req. Suspend"}</Text>
+                          </TouchableOpacity>
+                        </>
+                      ) : report.offenderFlags?.suspension_status === "pending" && isSuperAdmin ? (
+                        <TouchableOpacity
+                          style={[styles.adminDataActionButton, styles.adminDataActionNeutral]}
+                          onPress={() => handleRequestChatSuspension(report)}
+                        >
+                          <Text style={styles.adminDataActionText}>Approve Suspension</Text>
+                        </TouchableOpacity>
+                      ) : (
+                        <Text style={styles.adminDataCellMuted}>Reviewed</Text>
+                      )}
+                    </View>
+                  </View>
+                ))}
               </View>
-            ))
+            </ScrollView>
+          )}
+
+          <View style={styles.auditFilterCard}>
+            <View style={styles.auditFilterHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.auditFilterTitle}>Deleted Chat Log</Text>
+                <Text style={styles.auditFilterSubtitle}>Posts and comments deleted by Global Admin or Chat Room Admin.</Text>
+              </View>
+              <TouchableOpacity style={styles.retryButton} onPress={() => refetchDeletedChatLogs()}>
+                <Text style={styles.retryButtonText}>Refresh</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {deletedChatLogsLoading ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Loading deleted chat log...</Text>
+            </View>
+          ) : (deletedChatLogs as DeletedChatLog[]).length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Trash2 size={48} color="#d1d5db" />
+              <Text style={styles.emptyText}>No deleted chat log yet</Text>
+              <Text style={styles.emptySubtext}>Admin deletions will appear here.</Text>
+            </View>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+              <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                  <View style={[styles.adminDataCell, { width: 120 }]}><Text style={styles.adminDataHeaderText}>Date</Text></View>
+                  <View style={[styles.adminDataCell, { width: 100 }]}><Text style={styles.adminDataHeaderText}>Type</Text></View>
+                  <View style={[styles.adminDataCell, { width: 190 }]}><Text style={styles.adminDataHeaderText}>Deleted By</Text></View>
+                  <View style={[styles.adminDataCell, { width: 180 }]}><Text style={styles.adminDataHeaderText}>Owner</Text></View>
+                  <View style={[styles.adminDataCell, { width: 130 }]}><Text style={styles.adminDataHeaderText}>Source</Text></View>
+                  <View style={[styles.adminDataCell, { width: 320 }]}><Text style={styles.adminDataHeaderText}>Deleted Content</Text></View>
+                </View>
+                {(deletedChatLogs as DeletedChatLog[]).map((log) => (
+                  <View key={String(log.logId)} style={styles.adminDataRow}>
+                    <View style={[styles.adminDataCell, { width: 120 }]}><Text style={styles.adminDataCellText}>{formatDate(log.createdAt)}</Text></View>
+                    <View style={[styles.adminDataCell, { width: 100 }]}><Text style={styles.adminDataCellText}>{log.contentType}</Text></View>
+                    <View style={[styles.adminDataCell, { width: 190 }]}>
+                      <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{log.deletedByName}</Text>
+                      <Text style={styles.adminDataCellMuted} numberOfLines={1}>{log.deletedByRole}</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 180 }]}>
+                      <Text style={styles.adminDataCellText} numberOfLines={2}>{log.ownerName || log.ownerUsername || "Unknown user"}</Text>
+                      {log.ownerUsername ? <Text style={styles.adminDataCellMuted} numberOfLines={1}>@{log.ownerUsername}</Text> : null}
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 130 }]}><Text style={styles.adminDataCellText} numberOfLines={2}>{log.deletionSource}</Text></View>
+                    <View style={[styles.adminDataCell, { width: 320 }]}>
+                      <Text style={styles.adminDataCellText} numberOfLines={4}>{log.contentPreview || (log.hadPhoto ? "Photo post" : "No preview captured")}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
           )}
         </ScrollView>
       ) : activeTab === "archive" ? (
@@ -4791,84 +7933,90 @@ const getStatusLabel = (status: string) => {
               <Text style={styles.emptySubtext}>Users can submit historical activities via the Activity tab</Text>
             </View>
           ) : (
-            externalSubmissions.map((dateGroup: any, index: number) => (
-              <View key={`${dateGroup.activityDate}-${index}`} style={styles.dateGroupCard}>
-                <View style={styles.dateGroupHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.dateGroupDate}>{formatDate(dateGroup.activityDate)}</Text>
-                    <Text style={styles.dateGroupSubtext}>{dateGroup.users.length} {dateGroup.users.length === 1 ? 'user' : 'users'}</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+              <View style={[styles.adminDataTable, styles.adminDataTableWide]}>
+                <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                  <View style={[styles.adminDataCell, { width: 120 }]}>
+                    <Text style={styles.adminDataHeaderText}>Date</Text>
                   </View>
-                  <View style={styles.totalEntriesBadge}>
-                    <Text style={styles.totalEntriesText}>{dateGroup.totalEntries}</Text>
-                    <Text style={styles.totalEntriesLabel}>entries</Text>
+                  <View style={[styles.adminDataCell, { width: 160 }]}>
+                    <Text style={styles.adminDataHeaderText}>User</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 140 }]}>
+                    <Text style={styles.adminDataHeaderText}>Source</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 120 }]}>
+                    <Text style={styles.adminDataHeaderText}>Exercise</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 110 }]}>
+                    <Text style={styles.adminDataHeaderText}>Distance</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 110 }]}>
+                    <Text style={styles.adminDataHeaderText}>Duration</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 120 }]}>
+                    <Text style={styles.adminDataHeaderText}>Evidence</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 140 }]}>
+                    <Text style={styles.adminDataHeaderText}>Actions</Text>
                   </View>
                 </View>
-                
-                <View style={styles.usersList}>
-                  {dateGroup.users.map((user: any, userIndex: number) => (
-                    <View key={`${user.registrationId}-${userIndex}`} style={styles.externalUserCard}>
-                      <View style={styles.userRow}>
-                        <View style={styles.userInfo}>
-                          <Text style={styles.userRowId}>{user.registrationId}</Text>
-                          <Text style={styles.userRowName}>{user.userName}</Text>
+                {externalSubmissions.flatMap((dateGroup: any, index: number) =>
+                  dateGroup.users.flatMap((user: any, userIndex: number) =>
+                    (user.submissions || []).map((submission: any) => (
+                      <View key={`${dateGroup.activityDate}-${index}-${user.registrationId}-${userIndex}-${submission.submissionId}`} style={styles.adminDataRow}>
+                        <View style={[styles.adminDataCell, { width: 120 }]}>
+                          <Text style={styles.adminDataCellText}>{formatDate(dateGroup.activityDate)}</Text>
                         </View>
-                        <View style={styles.userCountBadge}>
-                          <Text style={styles.userCountText}>{user.activityCount}</Text>
+                        <View style={[styles.adminDataCell, { width: 160 }]}>
+                          <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{user.userName}</Text>
+                          <Text style={styles.adminDataCellMuted} numberOfLines={1}>{user.registrationId}</Text>
+                        </View>
+                        <View style={[styles.adminDataCell, { width: 140 }]}>
+                          <Text style={styles.adminDataCellText} numberOfLines={2}>
+                            {submission.sourceLabel || (submission.sourceType === "smart_watch" ? "Smart Watch" : "Sports App")}
+                          </Text>
+                        </View>
+                        <View style={[styles.adminDataCell, { width: 120 }]}>
+                          <Text style={styles.adminDataCellText}>{submission.exerciseType}</Text>
+                        </View>
+                        <View style={[styles.adminDataCell, { width: 110 }]}>
+                          <Text style={styles.adminDataCellText}>{Number(submission.distanceKm || 0).toFixed(2)} km</Text>
+                        </View>
+                        <View style={[styles.adminDataCell, { width: 110 }]}>
+                          <Text style={styles.adminDataCellText}>{submission.duration}</Text>
+                        </View>
+                        <View style={[styles.adminDataCell, { width: 120 }]}>
+                          {submission.evidenceUrl ? (
+                            <TouchableOpacity onPress={() => Linking.openURL(submission.evidenceUrl)}>
+                              <Text style={[styles.adminDataCellText, { color: "#2563eb", fontWeight: "800" as const }]}>Open</Text>
+                            </TouchableOpacity>
+                          ) : (
+                            <Text style={styles.adminDataCellMuted}>No evidence</Text>
+                          )}
+                        </View>
+                        <View style={[styles.adminDataCell, styles.adminDataActions, { width: 140 }]}>
+                          <TouchableOpacity
+                            style={[styles.adminDataActionButton, styles.adminDataActionApprove]}
+                            onPress={() => approveExternalSubmissionMutation.mutate({ submissionId: submission.submissionId })}
+                            disabled={approveExternalSubmissionMutation.isPending || rejectExternalSubmissionMutation.isPending}
+                          >
+                            <Text style={styles.adminDataActionText}>Approve</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.adminDataActionButton, styles.adminDataActionReject]}
+                            onPress={() => rejectExternalSubmissionMutation.mutate({ submissionId: submission.submissionId })}
+                            disabled={approveExternalSubmissionMutation.isPending || rejectExternalSubmissionMutation.isPending}
+                          >
+                            <Text style={styles.adminDataActionText}>Reject</Text>
+                          </TouchableOpacity>
                         </View>
                       </View>
-                      {(user.submissions || []).map((submission: any) => (
-                        <View key={submission.submissionId} style={styles.externalSubmissionCard}>
-                          <View style={styles.externalSubmissionHeader}>
-                            <View style={{ flex: 1 }}>
-                              <Text style={styles.externalSubmissionTitle}>
-                                {submission.sourceLabel || (submission.sourceType === "smart_watch" ? "Smart Watch" : "Sports App")}
-                              </Text>
-                              <Text style={styles.externalSubmissionMeta}>
-                                {submission.exerciseType} • {Number(submission.distanceKm || 0).toFixed(2)} km • {submission.duration}
-                              </Text>
-                            </View>
-                            {submission.evidenceUrl ? (
-                              <TouchableOpacity
-                                style={styles.externalEvidenceButton}
-                                onPress={() => Linking.openURL(submission.evidenceUrl)}
-                                activeOpacity={0.75}
-                              >
-                                <Text style={styles.externalEvidenceButtonText}>Evidence</Text>
-                              </TouchableOpacity>
-                            ) : (
-                              <Text style={styles.externalNoEvidenceText}>No evidence</Text>
-                            )}
-                          </View>
-                          {submission.evidenceUrl ? (
-                            <TouchableOpacity onPress={() => Linking.openURL(submission.evidenceUrl)} activeOpacity={0.8}>
-                              <Image source={{ uri: submission.evidenceUrl }} style={styles.externalEvidenceThumb} />
-                            </TouchableOpacity>
-                          ) : null}
-                          <View style={styles.externalActionRow}>
-                            <TouchableOpacity
-                              style={[styles.externalActionButton, styles.externalApproveButton]}
-                              onPress={() => approveExternalSubmissionMutation.mutate({ submissionId: submission.submissionId })}
-                              disabled={approveExternalSubmissionMutation.isPending || rejectExternalSubmissionMutation.isPending}
-                            >
-                              <CheckCircle size={16} color="#fff" />
-                              <Text style={styles.externalActionButtonText}>Approve</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={[styles.externalActionButton, styles.externalRejectButton]}
-                              onPress={() => rejectExternalSubmissionMutation.mutate({ submissionId: submission.submissionId })}
-                              disabled={approveExternalSubmissionMutation.isPending || rejectExternalSubmissionMutation.isPending}
-                            >
-                              <XCircle size={16} color="#fff" />
-                              <Text style={styles.externalActionButtonText}>Reject</Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                  ))}
-                </View>
+                    ))
+                  )
+                )}
               </View>
-            ))
+            </ScrollView>
           )}
         </ScrollView>
       ) : (
@@ -4893,30 +8041,75 @@ const getStatusLabel = (status: string) => {
               <Text style={styles.emptyText}>No pending approvals</Text>
             </View>
           ) : (
-            pendingActivities.map((activity) => (
-              <TouchableOpacity
-                key={activity.pending_activity_id}
-                style={styles.activityCard}
-                onPress={() => {
-                  setSelectedActivity(activity);
-                  setShowActivityModal(true);
-                }}
-              >
-                <View style={styles.activityInfo}>
-                  <Text style={styles.activityType}>{activity.exercise_type}</Text>
-                  <Text style={styles.activityDate}>{formatDate(activity.created_at)}</Text>
-                  <View style={styles.activityStats}>
-                    <Text style={styles.activityStat}>
-                      {activity.distance_entered.toFixed(2)} {activity.distance_unit}
-                    </Text>
-                    <Text style={styles.activityStat}>
-                      {formatTimeInterval(activity.time_entered)}
-                    </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adminDataTableScroll}>
+              <View style={styles.adminDataTable}>
+                <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                  <View style={[styles.adminDataCell, { width: 160 }]}>
+                    <Text style={styles.adminDataHeaderText}>Exercise</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 170 }]}>
+                    <Text style={styles.adminDataHeaderText}>User</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 150 }]}>
+                    <Text style={styles.adminDataHeaderText}>T.Club Member</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 120 }]}>
+                    <Text style={styles.adminDataHeaderText}>Date</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 120 }]}>
+                    <Text style={styles.adminDataHeaderText}>Distance</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 120 }]}>
+                    <Text style={styles.adminDataHeaderText}>Time</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 110 }]}>
+                    <Text style={styles.adminDataHeaderText}>Actions</Text>
                   </View>
                 </View>
-                <ChevronRight size={20} color="#6b7280" />
-              </TouchableOpacity>
-            ))
+                {pendingActivities.map((activity) => (
+                  <View key={activity.pending_activity_id} style={styles.adminDataRow}>
+                    <View style={[styles.adminDataCell, { width: 160 }]}>
+                      <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>{activity.exercise_type}</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 170 }]}>
+                      <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={1}>
+                        {activity.runnerName || activity.registration_id}
+                      </Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 150 }]}>
+                      <Text style={[
+                        styles.adminDataCellText,
+                        activity.isTreadmillClubMember ? styles.adminDataCellSuccess : styles.adminDataCellWarning,
+                      ]}>
+                        {activity.treadmillClubMember || (activity.isTreadmillClubMember ? "Y" : "N")}
+                      </Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 120 }]}>
+                      <Text style={styles.adminDataCellText}>{formatDate(activity.created_at)}</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 120 }]}>
+                      <Text style={styles.adminDataCellText}>
+                        {activity.distance_entered.toFixed(2)} {activity.distance_unit}
+                      </Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 120 }]}>
+                      <Text style={styles.adminDataCellText}>{formatTimeInterval(activity.time_entered)}</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { width: 110 }]}>
+                      <TouchableOpacity
+                        style={[styles.adminDataActionButton, styles.adminDataActionPrimary]}
+                        onPress={() => {
+                          setSelectedActivity(activity);
+                          setShowActivityModal(true);
+                        }}
+                      >
+                        <Text style={styles.adminDataActionText}>Review</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
           )}
         </ScrollView>
       )}
@@ -5035,6 +8228,17 @@ const getStatusLabel = (status: string) => {
 
                   <View style={styles.detailRow}>
                     <View style={styles.detailSection}>
+                      <Text style={styles.detailLabel}>User</Text>
+                      <Text style={styles.detailValue}>{selectedActivity.runnerName || selectedActivity.registration_id}</Text>
+                    </View>
+                    <View style={styles.detailSection}>
+                      <Text style={styles.detailLabel}>Member of Treadmill Club</Text>
+                      <Text style={styles.detailValue}>{selectedActivity.treadmillClubMember || (selectedActivity.isTreadmillClubMember ? "Y" : "N")}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.detailRow}>
+                    <View style={styles.detailSection}>
                       <Text style={styles.detailLabel}>Distance</Text>
                       <Text style={styles.detailValue}>{selectedActivity.distance_entered.toFixed(2)} {selectedActivity.distance_unit}</Text>
                     </View>
@@ -5066,9 +8270,20 @@ const getStatusLabel = (status: string) => {
                     <Text style={styles.actionBtnText}>Reject</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={styles.approveBtn}
+                    style={[
+                      styles.approveBtn,
+                      (
+                        approveMutation.isPending ||
+                        (!selectedActivity.isTreadmillClubMember && !(isSuperAdmin || isCountryCoordinator)) ||
+                        (selectedActivity.isTreadmillClubMember && !(isSuperAdmin || isCountryCoordinator || isTreadmillCoordinator))
+                      ) && styles.disabledButton,
+                    ]}
                     onPress={() => approveMutation.mutate({ pendingActivityId: selectedActivity.pending_activity_id })}
-                    disabled={approveMutation.isPending}
+                    disabled={
+                      approveMutation.isPending ||
+                      (!selectedActivity.isTreadmillClubMember && !(isSuperAdmin || isCountryCoordinator)) ||
+                      (selectedActivity.isTreadmillClubMember && !(isSuperAdmin || isCountryCoordinator || isTreadmillCoordinator))
+                    }
                   >
                     <CheckCircle size={22} color="#fff" />
                     <Text style={styles.actionBtnText}>Approve</Text>
@@ -5111,7 +8326,6 @@ const getStatusLabel = (status: string) => {
                 <Text style={styles.inputLabel}>Role</Text>
                 <View style={styles.auditSegment}>
                   {([
-                    { key: "country_admin" as const, label: "Country Admin" },
                     { key: "country_coordinator" as const, label: "Country Coordinator" },
                     { key: "club_coordinator" as const, label: "Club Coordinator" },
                     { key: "event_organizer" as const, label: "Event Organizer" },
@@ -5124,7 +8338,6 @@ const getStatusLabel = (status: string) => {
                         if (option.key === "club_coordinator") {
                           setSelectedRoleCountryCode("");
                         } else if (option.key === "event_organizer") {
-                          setSelectedRoleCountryCode("");
                           setSelectedRoleClubId("");
                         } else {
                           setSelectedRoleClubId("");
@@ -5158,9 +8371,34 @@ const getStatusLabel = (status: string) => {
                 </View>
               ) : selectedRoleName === "event_organizer" ? (
                 <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Organizer Scope</Text>
+                  <Text style={styles.inputLabel}>Invite Country</Text>
+                  {!editingRoleAssignment ? (
+                    <>
+                      <TextInput
+                        style={styles.textInput}
+                        value={selectedRoleCountryCode}
+                        onChangeText={setSelectedRoleCountryCode}
+                        placeholder="UG"
+                        autoCapitalize="characters"
+                        maxLength={2}
+                      />
+                      <View style={styles.roleChipWrap}>
+                        {roleCountries.map((country) => (
+                          <TouchableOpacity
+                            key={country.code}
+                            style={[styles.roleChip, selectedRoleCountryCode.toUpperCase() === country.code && styles.roleChipActive]}
+                            onPress={() => setSelectedRoleCountryCode(country.code)}
+                          >
+                            <Text style={[styles.roleChipText, selectedRoleCountryCode.toUpperCase() === country.code && styles.roleChipTextActive]}>
+                              {country.name} ({country.code})
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </>
+                  ) : null}
                   <Text style={styles.eventPosterHint}>
-                    An organizer profile will be created automatically for the user after approval. This role is limited to organizer-owned events and organizer-scoped enrollment handling.
+                    An organizer profile will be created automatically for the user after approval. New requests need a country so country-scoped admins can review them.
                   </Text>
                 </View>
               ) : (
@@ -5257,6 +8495,239 @@ const getStatusLabel = (status: string) => {
         </View>
       </Modal>
 
+      <Modal
+        visible={showEventOrganizerFilterModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowEventOrganizerFilterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.activityModalContent, styles.magazinePreviewModalContent]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Filter Organizer</Text>
+              <TouchableOpacity onPress={() => setShowEventOrganizerFilterModal(false)}>
+                <X size={24} color="#6b7280" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.activityModalBody}>
+              {[
+                { id: "all", label: `All (${organizerEventCounts.total})`, muted: false },
+                { id: "clubs", label: `Clubs (${organizerEventCounts.clubOwnedCount})`, muted: organizerEventCounts.clubOwnedCount === 0 },
+                ...(eventOrganizers as EventOrganizerRecord[]).map((organizer) => {
+                  const count = organizerEventCounts.organizerCounts.get(organizer.organizer_id) ?? 0;
+                  return {
+                    id: organizer.organizer_id,
+                    label: `${organizer.organizer_name} (${count})`,
+                    muted: count === 0,
+                  };
+                }),
+              ].map((option) => (
+                <TouchableOpacity
+                  key={option.id}
+                  style={[
+                    styles.eventFilterChip,
+                    { marginBottom: 8, alignSelf: "stretch" },
+                    option.muted && styles.eventFilterChipMuted,
+                    selectedOrganizerFilter === option.id && styles.eventFilterChipActive,
+                  ]}
+                  onPress={() => {
+                    setSelectedOrganizerFilter(option.id);
+                    setShowEventOrganizerFilterModal(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.eventFilterChipText,
+                      option.muted && styles.eventFilterChipTextMuted,
+                      selectedOrganizerFilter === option.id && styles.eventFilterChipTextActive,
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!selectedEventPreview}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedEventPreview(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.activityModalContent, styles.magazinePreviewModalContent]}>
+            {selectedEventPreview ? (
+              <>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Event Preview</Text>
+                  <TouchableOpacity onPress={() => setSelectedEventPreview(null)}>
+                    <X size={24} color="#6b7280" />
+                  </TouchableOpacity>
+                </View>
+                <ScrollView style={{ maxHeight: 520 }}>
+                  {selectedEventPreview.poster_link || selectedEventPreview.posterLink ? (
+                    <Image
+                      source={{ uri: selectedEventPreview.poster_link || selectedEventPreview.posterLink }}
+                      style={styles.magazinePreviewImage}
+                      resizeMode="contain"
+                    />
+                  ) : null}
+                  <Text style={styles.magazinePreviewTitle}>
+                    {selectedEventPreview.event_name || selectedEventPreview.eventName || "Untitled event"}
+                  </Text>
+                  <Text style={styles.magazinePreviewMeta}>
+                    {[
+                      selectedEventPreview.event_type || selectedEventPreview.eventType || "same_day",
+                      getEventOrganizerLabel(selectedEventPreview),
+                      getEventApprovalLabel(selectedEventPreview.approval_status || "pending"),
+                    ].filter(Boolean).join(" / ")}
+                  </Text>
+                  <Text style={styles.magazinePreviewBody}>
+                    {[
+                      `Start: ${formatDate(selectedEventPreview.starts_at || selectedEventPreview.startsAt)}`,
+                      `End: ${formatDate(selectedEventPreview.ends_at || selectedEventPreview.endsAt)}`,
+                      `Registration closes: ${formatDate(selectedEventPreview.registration_closes_at || selectedEventPreview.registrationClosesAt)}`,
+                      `Entry: ${getEventEntryLabel(selectedEventPreview.entry || selectedEventPreview.entryType)}`,
+                      `Location: ${selectedEventPreview.event_location || selectedEventPreview.eventLocation || (selectedEventPreview.is_virtual ? "Virtual" : "-")}`,
+                      `Magazine: ${selectedEventPreview.magazine_submission_status || "missing"}`,
+                    ].join("\n")}
+                  </Text>
+                  <View style={styles.eventApprovalActions}>
+                    <TouchableOpacity
+                      style={[styles.downloadButton, styles.adminDataActionPrimary]}
+                      onPress={() => {
+                        const event = selectedEventPreview;
+                        setSelectedEventPreview(null);
+                        handleEditEvent(event);
+                      }}
+                    >
+                      <Edit size={16} color="#fff" />
+                      <Text style={styles.downloadButtonText}>Edit Event</Text>
+                    </TouchableOpacity>
+                    {(selectedEventPreview.poster_link || selectedEventPreview.posterLink) ? (
+                      <TouchableOpacity
+                        style={[styles.downloadButton, styles.adminDataActionNeutral]}
+                        onPress={() =>
+                          setSelectedPosterPreview({
+                            url: selectedEventPreview.poster_link || selectedEventPreview.posterLink,
+                            title: selectedEventPreview.event_name || selectedEventPreview.eventName || "Event poster",
+                          })
+                        }
+                      >
+                        <Camera size={16} color="#fff" />
+                        <Text style={styles.downloadButtonText}>Preview Poster</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                  {(() => {
+                    const event = selectedEventPreview;
+                    const approvalStatus = event.approval_status || "approved";
+                    const magazineStatus = event.magazine_submission_status || "missing";
+                    const isOrganizerOwned = Boolean(event.organizer);
+                    const canReviewOrganizerEvent =
+                      isOrganizerOwned &&
+                      (isSuperAdmin ||
+                        (isCountryAdmin && (!event.country_code || roleSession.countryAdminScopes.includes(event.country_code))) ||
+                        (isCountryCoordinator && (!event.country_code || roleSession.countryCoordinatorScopes.includes(event.country_code))));
+                    const canDeleteRejectedEvent =
+                      approvalStatus === "rejected" &&
+                      isOrganizerOwned &&
+                      (canReviewOrganizerEvent ||
+                        (isEventOrganizer && roleSession.eventOrganizerScopes.includes(event.organizer)));
+
+                    return (
+                      <>
+                        {canReviewOrganizerEvent && approvalStatus !== "approved" ? (
+                          <View style={styles.eventApprovalActions}>
+                            <TouchableOpacity
+                              style={[styles.downloadButton, styles.approveActionButton]}
+                              onPress={() =>
+                                updateEventApprovalMutation.mutate({
+                                  eventId: event.event_id || event.eventId,
+                                  status: "approved",
+                                })
+                              }
+                              disabled={updateEventApprovalMutation.isPending || magazineStatus !== "accepted"}
+                            >
+                              <CheckCircle size={16} color="#fff" />
+                              <Text style={styles.downloadButtonText}>
+                                {updateEventApprovalMutation.isPending
+                                  ? "Saving..."
+                                  : magazineStatus !== "accepted"
+                                  ? "Approve Magazine First"
+                                  : "Approve Event"}
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.downloadButton, styles.rejectActionButton]}
+                              onPress={() =>
+                                updateEventApprovalMutation.mutate({
+                                  eventId: event.event_id || event.eventId,
+                                  status: "rejected",
+                                })
+                              }
+                              disabled={updateEventApprovalMutation.isPending}
+                            >
+                              <XCircle size={16} color="#fff" />
+                              <Text style={styles.downloadButtonText}>
+                                {updateEventApprovalMutation.isPending ? "Saving..." : "Reject Event"}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : null}
+                        {canDeleteRejectedEvent ? (
+                          <TouchableOpacity
+                            style={[styles.archiveActionBtn, { marginTop: 10 }]}
+                            onPress={() => handleDeleteRejectedEvent(event)}
+                            disabled={deleteEventMutation.isPending}
+                          >
+                            <Trash2 size={18} color="#fff" />
+                            <Text style={styles.archiveActionBtnText}>
+                              {deleteEventMutation.isPending ? "Deleting..." : "Delete Rejected Event"}
+                            </Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </>
+                    );
+                  })()}
+                </ScrollView>
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!selectedPosterPreview}
+        animationType="fade"
+        onRequestClose={() => setSelectedPosterPreview(null)}
+      >
+        <View style={styles.posterFullscreen}>
+          <View style={styles.posterFullscreenHeader}>
+            <Text style={styles.posterFullscreenTitle} numberOfLines={1}>
+              {selectedPosterPreview?.title || "Event poster"}
+            </Text>
+            <TouchableOpacity
+              style={styles.posterFullscreenClose}
+              onPress={() => setSelectedPosterPreview(null)}
+            >
+              <X size={26} color="#fff" />
+            </TouchableOpacity>
+          </View>
+          {selectedPosterPreview?.url ? (
+            <Image
+              source={{ uri: selectedPosterPreview.url }}
+              style={styles.posterFullscreenImage}
+              resizeMode="contain"
+            />
+          ) : null}
+        </View>
+      </Modal>
+
       <Modal visible={showEventModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, styles.eventModalContent]}>
@@ -5287,7 +8758,13 @@ const getStatusLabel = (status: string) => {
                 <TextInput
                   style={styles.input}
                   value={startsAt}
-                  onChangeText={(value) => setStartsAt(formatDisplayDateInput(value))}
+                  onChangeText={(value) => {
+                    const formatted = formatDisplayDateInput(value);
+                    setStartsAt(formatted);
+                    if (eventTypeMode !== "multiday") {
+                      setEndsAt(formatted);
+                    }
+                  }}
                   placeholder="DD-MM-YYYY"
                   keyboardType="number-pad"
                   placeholderTextColor="#9ca3af"
@@ -5320,7 +8797,12 @@ const getStatusLabel = (status: string) => {
                     <TouchableOpacity
                       key={value}
                       style={[styles.segmentChip, eventTypeMode === value && styles.segmentChipActive]}
-                      onPress={() => setEventTypeMode(value)}
+                      onPress={() => {
+                        setEventTypeMode(value);
+                        if (value !== "multiday") {
+                          setEndsAt(startsAt);
+                        }
+                      }}
                     >
                       <Text
                         style={[styles.segmentChipText, eventTypeMode === value && styles.segmentChipTextActive]}
@@ -5332,7 +8814,11 @@ const getStatusLabel = (status: string) => {
                 </View>
               </View>
 
-              {eventTypeMode === "recurring" ? (
+              {eventTypeMode === "same_day" ? (
+                <Text style={[styles.eventPosterHint, styles.formGroup]}>
+                  Same day events use the start date as the event end date.
+                </Text>
+              ) : eventTypeMode === "recurring" ? (
                 <View style={styles.formGroup}>
                   <Text style={styles.label}>Repeats</Text>
                   <View style={styles.segmentRow}>
@@ -5495,6 +8981,22 @@ const getStatusLabel = (status: string) => {
                 </Text>
               </TouchableOpacity>
 
+              {!eventIsVirtual && (
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Start / Finish Location</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={eventLocation}
+                    onChangeText={setEventLocation}
+                    placeholder="e.g., Kyambogo University Sports Ground"
+                    placeholderTextColor="#9ca3af"
+                  />
+                  <Text style={styles.eventPosterHint}>
+                    This is the specific race place shown in Events list view.
+                  </Text>
+                </View>
+              )}
+
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Entry Type</Text>
                 <View style={styles.segmentRow}>
@@ -5592,6 +9094,121 @@ const getStatusLabel = (status: string) => {
               ) : null}
 
               <View style={styles.formGroup}>
+                <Text style={styles.label}>Number of Participants</Text>
+                <View style={styles.segmentRow}>
+                  {([
+                    [false, "Unlimited"],
+                    [true, "Limited"],
+                  ] as Array<[boolean, string]>).map(([value, label]) => (
+                    <TouchableOpacity
+                      key={label}
+                      style={[styles.segmentChip, eventParticipantLimitEnabled === value && styles.segmentChipActive]}
+                      onPress={() => setEventParticipantLimitEnabled(value)}
+                    >
+                      <Text
+                        style={[
+                          styles.segmentChipText,
+                          eventParticipantLimitEnabled === value && styles.segmentChipTextActive,
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {eventParticipantLimitEnabled ? (
+                  <TextInput
+                    style={styles.input}
+                    value={eventParticipantLimit}
+                    onChangeText={setEventParticipantLimit}
+                    placeholder="e.g., 100"
+                    placeholderTextColor="#9ca3af"
+                    keyboardType="numeric"
+                  />
+                ) : null}
+                <Text style={styles.eventPosterHint}>
+                  Limited events disable the Participate button once the target number is reached.
+                </Text>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Medal</Text>
+                <View style={styles.segmentRow}>
+                  {([
+                    [false, "No Medal"],
+                    [true, "Medal Event"],
+                  ] as Array<[boolean, string]>).map(([value, label]) => (
+                    <TouchableOpacity
+                      key={label}
+                      style={[styles.segmentChip, eventHasMedal === value && styles.segmentChipActive]}
+                      onPress={() => {
+                        setEventHasMedal(value);
+                        if (!value) {
+                          setEventMinimumDistanceEnabled(false);
+                          setEventMedalDistances([]);
+                          setEventCustomMedalDistance("");
+                        }
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.segmentChipText,
+                          eventHasMedal === value && styles.segmentChipTextActive,
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {eventHasMedal ? (
+                  <>
+                    <Text style={[styles.label, styles.recurringSubLabel]}>Available Distances</Text>
+                    <View style={styles.compactChipRow}>
+                      {MEDAL_DISTANCE_OPTIONS_KM.map((distance) => {
+                        const selected = eventMedalDistances.some((value) => Math.abs(value - distance) < 0.001);
+                        return (
+                          <TouchableOpacity
+                            key={distance}
+                            style={[styles.compactChip, selected && styles.roleChipActive]}
+                            onPress={() => toggleEventMedalDistance(distance)}
+                          >
+                            <Text style={[styles.compactChipText, selected && styles.roleChipTextActive]}>
+                              {distance}K
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                    <View style={styles.formRow}>
+                      <View style={styles.formGroupHalf}>
+                        <TextInput
+                          style={styles.input}
+                          value={eventCustomMedalDistance}
+                          onChangeText={setEventCustomMedalDistance}
+                          placeholder="Other km"
+                          placeholderTextColor="#9ca3af"
+                          keyboardType="numeric"
+                        />
+                      </View>
+                      <TouchableOpacity style={[styles.confirmButton, styles.formGroupHalf]} onPress={addCustomEventMedalDistance}>
+                        <Text style={styles.confirmButtonText}>Add Distance</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {eventMedalDistances.length ? (
+                      <Text style={styles.eventPosterHint}>
+                        Categories: {eventMedalDistances.map((distance) => `${distance}K`).join(", ")}
+                      </Text>
+                    ) : null}
+                  </>
+                ) : null}
+                <Text style={styles.eventPosterHint}>
+                  Distance categories define the event medal categories. Awarding still depends on the approved runner distance.
+                </Text>
+              </View>
+
+              {eventHasMedal ? (
+              <View style={styles.formGroup}>
                 <Text style={styles.label}>Minimum Distance Rule</Text>
                 <TouchableOpacity
                   style={[styles.statusOption, eventMinimumDistanceEnabled && styles.statusOptionSelected]}
@@ -5640,24 +9257,25 @@ const getStatusLabel = (status: string) => {
                   When on, only runners who meet the distance requirement appear under Finishers.
                 </Text>
               </View>
+              ) : null}
 
               <View style={styles.formGroup}>
-                <Text style={styles.label}>Event Photo</Text>
+                <Text style={styles.label}>Event Poster</Text>
                 <TouchableOpacity style={styles.posterPickerButton} onPress={handlePickEventPoster}>
                   <Camera size={18} color="#10b981" />
                   <Text style={styles.posterPickerButtonText}>
-                    {eventPosterPreview ? "Change Event Photo" : "Add Event Photo"}
+                    {eventPosterPreview ? "Change Event Poster" : "Add Event Poster"}
                   </Text>
                 </TouchableOpacity>
                 {eventPosterPreview ? (
                   <Image source={{ uri: eventPosterPreview }} style={styles.eventPosterPreview} />
                 ) : (
                   <View style={styles.posterPlaceholder}>
-                    <Text style={styles.posterPlaceholderText}>No event photo selected</Text>
+                    <Text style={styles.posterPlaceholderText}>No event poster selected</Text>
                   </View>
                 )}
                 <Text style={styles.eventPosterHint}>
-                  This photo appears on the event listing and event details.
+                  This poster appears on the event listing and event details.
                 </Text>
                 {eventPosterMarkedForRemoval ? (
                   <Text style={styles.posterPendingHint}>
@@ -5666,20 +9284,20 @@ const getStatusLabel = (status: string) => {
                 ) : null}
                 {!eventPosterAsset && eventPosterPreview?.startsWith("http") && !isStandardPosterStoragePath(extractPosterStoragePath(eventPosterPreview)) ? (
                   <Text style={styles.posterPendingHint}>
-                    Saving this event will rename the current event photo to the standard event photo file name.
+                    Saving this event will rename the current event poster to the standard event poster file name.
                   </Text>
                 ) : null}
                 {eventPosterPreview ? (
                   <TouchableOpacity style={styles.posterLinkButton} onPress={() => handleOpenPosterUrl(eventPosterPreview)}>
                     <FileText size={14} color="#0369a1" />
-                    <Text style={styles.posterLinkButtonText}>Open Event Photo URL</Text>
+                    <Text style={styles.posterLinkButtonText}>Open Event Poster URL</Text>
                   </TouchableOpacity>
                 ) : null}
                 {(eventPosterPreview || eventPosterMarkedForRemoval) && (
                   <TouchableOpacity style={styles.posterRemoveButton} onPress={handleRemoveEventPoster}>
                     <Trash2 size={16} color="#b91c1c" />
                     <Text style={styles.posterRemoveButtonText}>
-                      {eventPosterMarkedForRemoval ? "Event photo will be removed on save" : "Remove Event Photo"}
+                      {eventPosterMarkedForRemoval ? "Event poster will be removed on save" : "Remove Event Poster"}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -5737,7 +9355,7 @@ const getStatusLabel = (status: string) => {
               </View>
 
               <View style={styles.formGroup}>
-                <Text style={styles.label}>Writer's Name</Text>
+                <Text style={styles.label}>Writer Name</Text>
                 <TextInput
                   style={styles.input}
                   value={eventMagazineWriterName}
@@ -5791,6 +9409,81 @@ const getStatusLabel = (status: string) => {
       </Modal>
 
       <Modal
+        visible={!!selectedMagazineEditTarget}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setSelectedMagazineEditTarget(null);
+          setIsPreparingMagazineEditPhoto(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.activityModalContent, styles.magazinePreviewModalContent]}>
+            {selectedMagazineEditTarget ? (
+              <>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Edit Magazine Entry</Text>
+                  <TouchableOpacity onPress={() => {
+                    setSelectedMagazineEditTarget(null);
+                    setIsPreparingMagazineEditPhoto(false);
+                  }}>
+                    <X size={24} color="#6b7280" />
+                  </TouchableOpacity>
+                </View>
+                <ScrollView style={styles.activityModalBody}>
+                  <Text style={styles.label}>{selectedMagazineEditTarget.type === "pictorial" ? "Event/Gallery Title" : "Title"}</Text>
+                  <TextInput style={styles.input} value={magazineEditTitle} onChangeText={setMagazineEditTitle} />
+                  {selectedMagazineEditTarget.type === "article" ? (
+                    <>
+                      <Text style={styles.label}>Author</Text>
+                      <TextInput style={styles.input} value={magazineEditAuthor} onChangeText={setMagazineEditAuthor} />
+                      <Text style={styles.label}>Category/Page</Text>
+                      <TextInput style={styles.input} value={magazineEditCategory} onChangeText={setMagazineEditCategory} />
+                      <Text style={styles.label}>Pitch</Text>
+                      <TextInput style={[styles.input, styles.inputMultiline]} value={magazineEditPitch} onChangeText={setMagazineEditPitch} multiline textAlignVertical="top" />
+                      <Text style={styles.label}>External Link</Text>
+                      <TextInput style={styles.input} value={magazineEditExternalLink} onChangeText={setMagazineEditExternalLink} autoCapitalize="none" />
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.label}>Event Date</Text>
+                      <TextInput style={styles.input} value={magazineEditEventDate} onChangeText={setMagazineEditEventDate} placeholder="YYYY-MM-DD" placeholderTextColor="#9ca3af" />
+                    </>
+                  )}
+                  <Text style={styles.label}>Picture</Text>
+                  <TouchableOpacity style={styles.posterPickerButton} onPress={handlePickMagazineEditPhoto}>
+                    <Camera size={20} color="#2563eb" />
+                    <Text style={styles.posterPickerButtonText}>
+                      {magazineEditPhotoPreview ? "Change Picture" : "Add Picture"}
+                    </Text>
+                  </TouchableOpacity>
+                  {magazineEditPhotoPreview ? (
+                    <Image source={{ uri: magazineEditPhotoPreview }} style={styles.eventPosterPreview} />
+                  ) : null}
+                  {magazineEditPhotoPreview && !magazineEditPhotoAsset ? (
+                    <TouchableOpacity style={styles.posterLinkButton} onPress={() => handleOpenPosterUrl(magazineEditPhotoPreview)}>
+                      <Download size={16} color="#0369a1" />
+                      <Text style={styles.posterLinkButtonText}>Open Current Picture</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  <Text style={styles.label}>{selectedMagazineEditTarget.type === "pictorial" ? "Caption" : "Body"}</Text>
+                  <TextInput style={[styles.input, styles.inputMultiline]} value={magazineEditBody} onChangeText={setMagazineEditBody} multiline textAlignVertical="top" />
+                  <TouchableOpacity
+                    style={[styles.approveButton, (updateMagazineEntryMutation.isPending || isPreparingMagazineEditPhoto) && styles.disabledButton]}
+                    disabled={updateMagazineEntryMutation.isPending || isPreparingMagazineEditPhoto}
+                    onPress={handleSaveMagazineEdit}
+                  >
+                    <Save size={18} color="#fff" />
+                    <Text style={styles.actionButtonText}>{updateMagazineEntryMutation.isPending || isPreparingMagazineEditPhoto ? "Saving..." : "Save Changes"}</Text>
+                  </TouchableOpacity>
+                </ScrollView>
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={!!selectedMagazinePreview}
         transparent
         animationType="fade"
@@ -5809,9 +9502,9 @@ const getStatusLabel = (status: string) => {
                 <ScrollView style={styles.activityModalBody}>
                   {selectedMagazinePreview.type === "pictorial" ? (
                     <>
-                      {selectedMagazinePreview.photo_url ? (
+                      {getMagazineImageUrl(selectedMagazinePreview.photo_url, selectedMagazinePreview.photo_webp_url, selectedMagazinePreview.photo_avif_url) ? (
                         <Image
-                          source={{ uri: selectedMagazinePreview.photo_url }}
+                          source={{ uri: getMagazineImageUrl(selectedMagazinePreview.photo_url, selectedMagazinePreview.photo_webp_url, selectedMagazinePreview.photo_avif_url) as string }}
                           style={styles.magazinePreviewImage}
                           resizeMode="cover"
                         />
@@ -5833,9 +9526,9 @@ const getStatusLabel = (status: string) => {
                     </>
                   ) : (
                     <>
-                      {(selectedMagazinePreview.magazine_photo_url || selectedMagazinePreview.attachment_url) ? (
+                      {getMagazineImageUrl(selectedMagazinePreview.magazine_photo_url, selectedMagazinePreview.attachment_url) ? (
                         <Image
-                          source={{ uri: selectedMagazinePreview.magazine_photo_url || selectedMagazinePreview.attachment_url }}
+                          source={{ uri: getMagazineImageUrl(selectedMagazinePreview.magazine_photo_url, selectedMagazinePreview.attachment_url) as string }}
                           style={styles.magazinePreviewImage}
                           resizeMode="cover"
                         />
@@ -5864,6 +9557,27 @@ const getStatusLabel = (status: string) => {
                       </Text>
                     </>
                   )}
+                  <View style={styles.magazineActionMenu}>
+                    <TouchableOpacity style={[styles.magazineActionMenuButton, styles.adminDataActionNeutral]} onPress={() => handleMagazineAction(selectedMagazinePreview, "edit")}>
+                      <Text style={styles.actionButtonText}>Edit</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.magazineActionMenuButton, styles.adminDataActionApprove]} onPress={() => handleMagazineAction(selectedMagazinePreview, "accept")}>
+                      <Text style={styles.actionButtonText}>Accept</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.magazineActionMenuButton, styles.adminDataActionReject]} onPress={() => handleMagazineAction(selectedMagazinePreview, "reject")}>
+                      <Text style={styles.actionButtonText}>Reject</Text>
+                    </TouchableOpacity>
+                    {selectedMagazinePreview.type === "pictorial" && (isSuperAdmin || isCountryAdmin || isMagazineEditor) ? (
+                      <TouchableOpacity style={[styles.magazineActionMenuButton, styles.adminDataActionNeutral]} onPress={() => handleMagazineAction(selectedMagazinePreview, "feature")}>
+                        <Text style={styles.actionButtonText}>Feature</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {(isSuperAdmin || isMagazineEditor) ? (
+                      <TouchableOpacity style={[styles.magazineActionMenuButton, styles.adminDataActionReject]} onPress={() => handleMagazineAction(selectedMagazinePreview, "delete")}>
+                        <Text style={styles.actionButtonText}>Delete</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
                 </ScrollView>
               </>
             ) : null}
@@ -6148,6 +9862,118 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
     gap: 12,
+  },
+  adminDataTableScroll: {
+    flexGrow: 0,
+  },
+  adminDataTable: {
+    minWidth: 760,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  adminDataTableWide: {
+    minWidth: 980,
+  },
+  adminDataRow: {
+    flexDirection: "row",
+    minHeight: 46,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+  },
+  adminDataHeader: {
+    minHeight: 34,
+    backgroundColor: "#f3f4f6",
+  },
+  adminDataCell: {
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    justifyContent: "center",
+    borderRightWidth: 1,
+    borderRightColor: "#f3f4f6",
+  },
+  adminDataHeaderText: {
+    fontSize: 9,
+    fontWeight: "800" as const,
+    color: "#4b5563",
+    textTransform: "uppercase" as const,
+  },
+  adminDataCellText: {
+    fontSize: 11,
+    lineHeight: 15,
+    color: "#111827",
+  },
+  adminDataCellStrong: {
+    fontWeight: "800" as const,
+  },
+  adminDataCellMuted: {
+    fontSize: 10,
+    lineHeight: 14,
+    color: "#6b7280",
+  },
+  myTeamPersonRow: {
+    flexDirection: "row" as const,
+    alignItems: "flex-start" as const,
+    gap: 5,
+  },
+  myTeamFlagText: {
+    fontSize: 14,
+    lineHeight: 16,
+  },
+  myTeamPersonName: {
+    flex: 1,
+  },
+  adminDataCellSuccess: {
+    color: "#059669",
+    fontWeight: "800" as const,
+  },
+  adminDataCellWarning: {
+    color: "#d97706",
+    fontWeight: "800" as const,
+  },
+  adminDataCellDanger: {
+    color: "#dc2626",
+    fontWeight: "800" as const,
+  },
+  adminDataActions: {
+    gap: 5,
+  },
+  adminDataActionButton: {
+    minHeight: 28,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 4,
+  },
+  adminDataActionPrimary: {
+    backgroundColor: "#2563eb",
+  },
+  adminDataActionApprove: {
+    backgroundColor: "#16a34a",
+  },
+  adminDataActionReject: {
+    backgroundColor: "#dc2626",
+  },
+  adminDataActionNeutral: {
+    backgroundColor: "#4b5563",
+  },
+  adminDataActionText: {
+    fontSize: 10,
+    fontWeight: "800" as const,
+    color: "#fff",
+  },
+  magazineActionMenu: {
+    gap: 10,
+  },
+  magazineActionMenuButton: {
+    minHeight: 44,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
   },
   emptyContainer: {
     flex: 1,
@@ -6569,6 +10395,45 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#bfdbfe",
   },
+  posterButtonRow: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 8,
+    alignItems: "center" as const,
+  },
+  posterFullscreen: {
+    flex: 1,
+    backgroundColor: "#000",
+  },
+  posterFullscreenHeader: {
+    minHeight: 64,
+    paddingTop: 16,
+    paddingHorizontal: 16,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    gap: 12,
+    backgroundColor: "#000",
+  },
+  posterFullscreenTitle: {
+    flex: 1,
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "800" as const,
+  },
+  posterFullscreenClose: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    backgroundColor: "#111827",
+  },
+  posterFullscreenImage: {
+    flex: 1,
+    width: "100%",
+    backgroundColor: "#000",
+  },
   posterLinkButtonText: {
     fontSize: 12,
     fontWeight: "700" as const,
@@ -6749,6 +10614,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 12,
     minHeight: 48,
+  },
+  secondaryButton: {
+    flex: 1,
+    minWidth: 96,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#eef2ff",
+    borderWidth: 1,
+    borderColor: "#c7d2fe",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    minHeight: 48,
+  },
+  secondaryButtonText: {
+    fontSize: 14,
+    fontWeight: "800" as const,
+    color: "#1d4ed8",
   },
   actionButtonText: {
     fontSize: 15,
@@ -7044,6 +10927,11 @@ const styles = StyleSheet.create({
   eventFilterScroll: {
     flexGrow: 0,
   },
+  eventFilterChips: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 8,
+  },
   eventFilterChip: {
     backgroundColor: "#f3f4f6",
     paddingVertical: 8,
@@ -7234,6 +11122,46 @@ const styles = StyleSheet.create({
     color: "#6b7280",
     marginTop: 3,
   },
+  milestoneCompletionCard: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#d1fae5",
+    gap: 10,
+  },
+  milestoneCompletionHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 12,
+  },
+  milestoneCompletionLabel: {
+    fontSize: 13,
+    fontWeight: "800" as const,
+    color: "#064e3b",
+    textTransform: "uppercase" as const,
+  },
+  milestoneCompletionMeta: {
+    marginTop: 2,
+    fontSize: 12,
+    color: "#047857",
+  },
+  milestoneCompletionPercent: {
+    fontSize: 28,
+    fontWeight: "900" as const,
+    color: "#059669",
+  },
+  milestoneProgressTrack: {
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: "#ecfdf5",
+    overflow: "hidden" as const,
+  },
+  milestoneProgressFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: "#10b981",
+  },
   auditDateRow: {
     flexDirection: "row" as const,
     flexWrap: "wrap" as const,
@@ -7400,6 +11328,380 @@ const styles = StyleSheet.create({
   },
   auditLogDetails: {
     gap: 8,
+  },
+  auditTable: {
+    minWidth: 640,
+    width: "100%" as const,
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    overflow: "hidden" as const,
+  },
+  auditTableRow: {
+    flexDirection: "row" as const,
+    alignItems: "stretch" as const,
+    borderTopWidth: 1,
+    borderTopColor: "#e5e7eb",
+    minHeight: 44,
+  },
+  auditTableHeader: {
+    backgroundColor: "#f9fafb",
+    minHeight: 30,
+    borderTopWidth: 0,
+  },
+  auditTableHeaderText: {
+    fontSize: 9,
+    fontWeight: "900" as const,
+    color: "#6b7280",
+    textTransform: "uppercase" as const,
+    paddingHorizontal: 5,
+    paddingVertical: 7,
+  },
+  auditTableCellText: {
+    fontSize: 10,
+    lineHeight: 13,
+    color: "#111827",
+    paddingHorizontal: 5,
+    paddingVertical: 7,
+  },
+  auditTableCellStrong: {
+    fontWeight: "900" as const,
+  },
+  auditTableCellMuted: {
+    fontSize: 9,
+    lineHeight: 12,
+    color: "#6b7280",
+    paddingHorizontal: 5,
+    paddingVertical: 7,
+  },
+  auditTypeCellText: {
+    fontSize: 9,
+    lineHeight: 12,
+    fontWeight: "900" as const,
+    color: "#047857",
+    paddingHorizontal: 5,
+    paddingVertical: 7,
+  },
+  auditColDate: {
+    width: 86,
+    justifyContent: "center" as const,
+  },
+  auditColAdmin: {
+    width: 132,
+    justifyContent: "center" as const,
+  },
+  auditColType: {
+    width: 104,
+    justifyContent: "center" as const,
+  },
+  auditColAction: {
+    width: 134,
+    justifyContent: "center" as const,
+  },
+  auditColDetails: {
+    width: 184,
+    justifyContent: "center" as const,
+  },
+  roleAccessPanel: {
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    overflow: "hidden" as const,
+    marginBottom: 12,
+  },
+  roleAccessTabs: {
+    flexDirection: "row" as const,
+    backgroundColor: "#f3f4f6",
+    padding: 4,
+    gap: 4,
+  },
+  roleAccessTabButton: {
+    flex: 1,
+    paddingVertical: 7,
+    borderRadius: 6,
+    alignItems: "center" as const,
+  },
+  roleAccessTabButtonActive: {
+    backgroundColor: "#111827",
+  },
+  roleAccessTabText: {
+    fontSize: 11,
+    fontWeight: "800" as const,
+    color: "#6b7280",
+  },
+  roleAccessTabTextActive: {
+    color: "#fff",
+  },
+  roleTable: {
+    width: "100%" as const,
+  },
+  pendingRoleList: {
+    padding: 8,
+    gap: 10,
+  },
+  pendingRoleCard: {
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    padding: 10,
+    gap: 8,
+  },
+  pendingRoleTopRow: {
+    flexDirection: "row" as const,
+    gap: 10,
+  },
+  pendingRoleIdentity: {
+    flex: 1.15,
+    minWidth: 0,
+  },
+  pendingRoleScopeBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  pendingRoleEmail: {
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: "900" as const,
+    color: "#111827",
+  },
+  pendingRoleMetaText: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: "700" as const,
+    color: "#6b7280",
+    marginTop: 3,
+  },
+  pendingRoleLabel: {
+    fontSize: 9,
+    lineHeight: 12,
+    fontWeight: "900" as const,
+    color: "#6b7280",
+    textTransform: "uppercase" as const,
+  },
+  pendingRoleValue: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: "800" as const,
+    color: "#111827",
+    marginBottom: 3,
+  },
+  pendingRoleTextBox: {
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 7,
+    backgroundColor: "#f9fafb",
+    paddingHorizontal: 9,
+    paddingVertical: 8,
+    minHeight: 76,
+  },
+  pendingRoleBodyText: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: "#111827",
+    marginTop: 4,
+  },
+  pendingRoleMutedText: {
+    fontSize: 11,
+    lineHeight: 15,
+    color: "#6b7280",
+    marginTop: 4,
+  },
+  pendingRoleContactText: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "800" as const,
+    color: "#047857",
+    marginTop: 6,
+  },
+  pendingRoleLinks: {
+    gap: 6,
+    marginTop: 8,
+  },
+  pendingRoleLinkRow: {
+    borderTopWidth: 1,
+    borderTopColor: "#e5e7eb",
+    paddingTop: 6,
+    gap: 5,
+  },
+  pendingRoleLinkText: {
+    fontSize: 11,
+    lineHeight: 15,
+    color: "#374151",
+  },
+  pendingRoleLinkActions: {
+    flexDirection: "row" as const,
+    gap: 6,
+  },
+  pendingRoleLinkButton: {
+    minHeight: 26,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    backgroundColor: "#e0f2fe",
+  },
+  pendingRoleLinkButtonText: {
+    fontSize: 11,
+    fontWeight: "900" as const,
+    color: "#0369a1",
+  },
+  pendingRoleActions: {
+    flexDirection: "row" as const,
+    gap: 8,
+  },
+  pendingRoleButton: {
+    flex: 1,
+    minHeight: 34,
+    borderRadius: 7,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 5,
+  },
+  roleTableRow: {
+    flexDirection: "row" as const,
+    alignItems: "stretch" as const,
+    borderTopWidth: 1,
+    borderTopColor: "#e5e7eb",
+    minHeight: 44,
+  },
+  roleTableHeader: {
+    backgroundColor: "#f9fafb",
+    minHeight: 30,
+    borderTopWidth: 0,
+  },
+  roleTableHeaderText: {
+    fontSize: 9,
+    fontWeight: "900" as const,
+    color: "#6b7280",
+    textTransform: "uppercase" as const,
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+  },
+  roleCellText: {
+    fontSize: 10,
+    lineHeight: 13,
+    color: "#111827",
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+  },
+  roleCellMuted: {
+    fontSize: 9,
+    lineHeight: 12,
+    color: "#6b7280",
+    paddingHorizontal: 4,
+  },
+  roleCellStrong: {
+    fontWeight: "800" as const,
+  },
+  roleColUser: {
+    flex: 1.25,
+    justifyContent: "center" as const,
+  },
+  roleColRole: {
+    flex: 1.55,
+    justifyContent: "center" as const,
+  },
+  roleColScope: {
+    flex: 1,
+    justifyContent: "center" as const,
+  },
+  roleColClubCompany: {
+    flex: 0.95,
+    justifyContent: "center" as const,
+  },
+  roleColJurisdiction: {
+    flex: 0.85,
+    justifyContent: "center" as const,
+  },
+  roleColDate: {
+    flex: 0.52,
+    justifyContent: "center" as const,
+  },
+  roleColTerms: {
+    flex: 0.52,
+    justifyContent: "center" as const,
+    paddingHorizontal: 3,
+  },
+  roleColMeta: {
+    flex: 1,
+    justifyContent: "center" as const,
+    paddingHorizontal: 4,
+    paddingVertical: 5,
+  },
+  roleColActions: {
+    flex: 0.75,
+    justifyContent: "center" as const,
+  },
+  roleTermsBadge: {
+    fontSize: 8,
+    lineHeight: 12,
+    fontWeight: "900" as const,
+    textAlign: "center" as const,
+    borderRadius: 5,
+    paddingHorizontal: 4,
+    paddingVertical: 3,
+    overflow: "hidden" as const,
+  },
+  roleTermsAccepted: {
+    color: "#047857",
+    backgroundColor: "#d1fae5",
+  },
+  roleTermsPending: {
+    color: "#92400e",
+    backgroundColor: "#fef3c7",
+  },
+  roleActionCell: {
+    gap: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 5,
+  },
+  roleMiniButton: {
+    minHeight: 22,
+    borderRadius: 5,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 2,
+    paddingHorizontal: 3,
+  },
+  roleMiniApprove: {
+    backgroundColor: "#16a34a",
+  },
+  roleMiniReject: {
+    backgroundColor: "#dc2626",
+  },
+  roleMiniEdit: {
+    backgroundColor: "#2563eb",
+  },
+  roleMiniRemove: {
+    backgroundColor: "#991b1b",
+  },
+  roleMiniButtonText: {
+    color: "#fff",
+    fontSize: 8,
+    fontWeight: "800" as const,
+  },
+  roleAccessEmpty: {
+    alignItems: "center" as const,
+    paddingVertical: 18,
+    paddingHorizontal: 8,
+    gap: 4,
+    borderTopWidth: 1,
+    borderTopColor: "#e5e7eb",
+  },
+  roleAccessEmptyTitle: {
+    fontSize: 12,
+    fontWeight: "800" as const,
+    color: "#111827",
+  },
+  roleAccessEmptyText: {
+    fontSize: 10,
+    color: "#6b7280",
+    textAlign: "center" as const,
   },
   healthIssueList: {
     gap: 8,
@@ -7685,6 +11987,17 @@ const styles = StyleSheet.create({
     color: "#6b7280",
     paddingTop: 8,
   },
+  adminTableInput: {
+    minHeight: 34,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 12,
+    color: "#111827",
+    backgroundColor: "#fff",
+  },
   ratingSummaryCard: {
     backgroundColor: "#fff",
     borderRadius: 16,
@@ -7830,6 +12143,170 @@ const styles = StyleSheet.create({
     color: "#10b981",
     minWidth: 80,
     textAlign: "right" as const,
+  },
+  paymentSummaryGrid: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 12,
+  },
+  paymentSummaryCard: {
+    flex: 1,
+    minWidth: 150,
+    backgroundColor: "#ecfdf5",
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#a7f3d0",
+  },
+  paymentSummaryLabel: {
+    fontSize: 12,
+    fontWeight: "700" as const,
+    color: "#047857",
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  paymentSummaryNumber: {
+    fontSize: 19,
+    fontWeight: "800" as const,
+    color: "#064e3b",
+  },
+  paymentPanel: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    gap: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  paymentPanelHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    gap: 12,
+  },
+  paymentPanelTitle: {
+    fontSize: 17,
+    fontWeight: "800" as const,
+    color: "#111827",
+  },
+  paymentPanelHint: {
+    fontSize: 13,
+    color: "#6b7280",
+    lineHeight: 19,
+    marginTop: 2,
+  },
+  paymentFormGrid: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 10,
+  },
+  paymentInput: {
+    flex: 1,
+    minWidth: 160,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    fontSize: 14,
+    color: "#111827",
+    backgroundColor: "#fff",
+  },
+  paymentTextArea: {
+    minHeight: 78,
+    textAlignVertical: "top" as const,
+  },
+  paymentSegment: {
+    flex: 1,
+    minWidth: 190,
+    flexDirection: "row" as const,
+    backgroundColor: "#f3f4f6",
+    borderRadius: 10,
+    padding: 4,
+  },
+  paymentSegmentButton: {
+    flex: 1,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  paymentSegmentButtonActive: {
+    backgroundColor: "#fff",
+  },
+  paymentSegmentText: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+    color: "#6b7280",
+  },
+  paymentSegmentTextActive: {
+    color: "#10b981",
+  },
+  paymentDescription: {
+    fontSize: 14,
+    color: "#374151",
+    lineHeight: 21,
+  },
+  paymentStatsRow: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 8,
+  },
+  paymentStat: {
+    fontSize: 12,
+    fontWeight: "700" as const,
+    color: "#047857",
+    backgroundColor: "#ecfdf5",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  paymentStatusRow: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#f3f4f6",
+    paddingTop: 12,
+  },
+  paymentStatusName: {
+    fontSize: 15,
+    fontWeight: "800" as const,
+    color: "#111827",
+  },
+  paymentStatusMeta: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: 2,
+  },
+  paymentActionGroup: {
+    flexDirection: "row" as const,
+    gap: 8,
+  },
+  paymentMiniButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: "#f3f4f6",
+  },
+  paymentMiniButtonActive: {
+    backgroundColor: "#10b981",
+  },
+  paymentMiniButtonMuted: {
+    backgroundColor: "#fee2e2",
+  },
+  paymentMiniButtonText: {
+    fontSize: 12,
+    fontWeight: "800" as const,
+    color: "#374151",
+  },
+  paymentMiniButtonTextActive: {
+    color: "#fff",
   },
   printStickerBtn: {
     flexDirection: "row" as const,

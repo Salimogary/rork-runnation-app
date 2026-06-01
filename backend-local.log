@@ -1,0 +1,7 @@
+
+> runnation-backend@1.0.0 dev
+> ts-node-dev server.ts
+
+[INFO] 16:28:00 ts-node-dev ver. 2.0.0 (using ts-node ver. 10.9.2, typescript ver. 5.9.3)
+◇ injected env (8) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+🚀 Server running on http://0.0.0.0:3000

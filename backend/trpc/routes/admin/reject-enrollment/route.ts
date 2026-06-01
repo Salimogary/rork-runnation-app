@@ -14,6 +14,7 @@ export default publicProcedure
       allowCountryAdmin: true,
       allowCountryCoordinator: true,
       allowClubCoordinator: true,
+      allowSpecialClubCoordinator: true,
       allowEventOrganizer: true,
     });
 
@@ -43,7 +44,8 @@ export default publicProcedure
       !actor.isSuperAdmin &&
       !actor.isCountryAdmin &&
       !actor.isCountryCoordinator &&
-      !actor.isClubCoordinator;
+      !actor.isClubCoordinator &&
+      !actor.isSpecialClubCoordinator;
 
     if (isOrganizerOnly) {
       const { data: event, error: eventError } = await ctx.supabase
@@ -85,4 +87,6 @@ export default publicProcedure
     console.log('[rejectEnrollment] Enrollment rejected successfully');
     return { success: true };
   });
+
+
 

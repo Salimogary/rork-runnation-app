@@ -71,6 +71,7 @@ create table public.events (
   ends_at date null,
   medal_min_daily_distance double precision null,
   medal_min_cumulative_distance double precision null,
+  available_distances_km double precision[] not null default '{}'::double precision[],
   medal_date_start date null,
   medal_date_end date null,
   constraint Events_pkey primary key (event_id)

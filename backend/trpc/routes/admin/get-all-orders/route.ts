@@ -26,3 +26,4 @@ export default publicProcedure.query(async ({ ctx }) => {
 
   return data || [];
 });
+

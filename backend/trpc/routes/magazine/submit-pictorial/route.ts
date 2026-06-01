@@ -47,7 +47,8 @@ export default publicProcedure
         .from("club_membership_request")
         .select("club")
         .eq("registration_id", input.registrationId)
-        .maybeSingle(),
+        .order("created_at", { ascending: true })
+        .limit(1),
       ctx.supabase
         .from("profiles")
         .select("profile_id, display_name, username, country")
@@ -62,7 +63,9 @@ export default publicProcedure
 
     const registration = registrationRes.data as any;
     const contact = contactRes.data as any;
-    const clubMembership = clubMembershipRes.data as any;
+    const clubMembership = Array.isArray(clubMembershipRes.data)
+      ? clubMembershipRes.data[0]
+      : clubMembershipRes.data as any;
     const profile = (profileByRegistrationRes.data || profileByAuthRes.data) as any;
     const fullName = [registration?.first_name, registration?.other_names].filter(Boolean).join(" ").trim();
     const submitterName =

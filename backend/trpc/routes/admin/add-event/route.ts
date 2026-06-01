@@ -1,9 +1,9 @@
 import { publicProcedure } from "../../../create-context";
 import { z } from "zod";
 import { logAdminAction, requireAdminPermission } from "../../../rbac";
+import { uploadMagazineImage } from "../../../magazine-image";
 
 const EVENT_POSTER_BUCKET = "event_poster";
-const MAGAZINE_BUCKET = "magazine";
 const EVENT_POSTER_ALLOWED_MIME_TYPES = new Set([
   "image/jpeg",
   "image/png",
@@ -60,58 +60,8 @@ async function clearExistingPosterFiles(supabase: StorageCapableSupabase, eventI
   }
 }
 
-function getPhotoFileExtension(mimeType: string): string {
-  if (mimeType.includes("png")) return "png";
-  if (mimeType.includes("webp")) return "webp";
-  if (mimeType.includes("avif")) return "avif";
-  return "jpg";
-}
-
-async function uploadMagazinePhoto(supabase: any, eventId: string, base64: string, mimeType?: string | null) {
-  const resolvedMimeType = detectPosterMimeType(base64) || mimeType || "image/jpeg";
-  if (!EVENT_POSTER_ALLOWED_MIME_TYPES.has(resolvedMimeType)) {
-    throw new Error("Unsupported magazine photo type.");
-  }
-
-  const folderPath = `article-submissions/events/${eventId}`;
-  const { data: existingFiles } = await supabase.storage
-    .from(MAGAZINE_BUCKET)
-    .list(folderPath, {
-      limit: 100,
-      sortBy: { column: "name", order: "asc" },
-    });
-
-  const pathsToRemove = (existingFiles || [])
-    .filter((file: any) => String(file.name || "").startsWith("magazine-photo."))
-    .map((file: any) => `${folderPath}/${file.name}`);
-
-  if (pathsToRemove.length > 0) {
-    await supabase.storage.from(MAGAZINE_BUCKET).remove(pathsToRemove);
-  }
-
-  const filePath = `${folderPath}/magazine-photo.${getPhotoFileExtension(resolvedMimeType)}`;
-  const photoBytes = decodePosterBase64(base64);
-  if (!photoBytes.length) {
-    throw new Error("Magazine photo upload was empty.");
-  }
-
-  const { data: uploadData, error: uploadError } = await supabase.storage
-    .from(MAGAZINE_BUCKET)
-    .upload(filePath, photoBytes, {
-      contentType: resolvedMimeType,
-      cacheControl: "3600",
-      upsert: true,
-    });
-
-  if (uploadError || !uploadData) {
-    throw new Error(uploadError?.message || "Failed to upload magazine photo.");
-  }
-
-  const { data: publicData } = supabase.storage
-    .from(MAGAZINE_BUCKET)
-    .getPublicUrl(uploadData.path);
-
-  return publicData.publicUrl ? `${publicData.publicUrl}?v=${Date.now()}` : null;
+async function uploadMagazinePhoto(ctx: any, eventId: string, base64: string, mimeType?: string | null) {
+  return uploadMagazineImage(ctx, "article-submissions/events", eventId, base64, mimeType);
 }
 
 function normalizeCountryCode(country?: string | null) {
@@ -173,12 +123,61 @@ function countWords(value: string): number {
   return value.trim().split(/\s+/).filter(Boolean).length;
 }
 
+function normalizeDateOnly(value: string): string {
+  const raw = value.trim();
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const displayMatch = raw.match(/^(\d{2})[/-](\d{2})[/-](\d{4})$/);
+  const match = isoMatch
+    ? [isoMatch[1], isoMatch[2], isoMatch[3]]
+    : displayMatch
+    ? [displayMatch[3], displayMatch[2], displayMatch[1]]
+    : null;
+
+  if (!match) return raw.slice(0, 10);
+  const [yearText, monthText, dayText] = match;
+  return `${yearText}-${monthText}-${dayText}`;
+}
+
+function isValidDateOnly(dateOnly: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return false;
+  const [year, month, day] = dateOnly.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+}
+
+function normalizeAvailableDistances(values?: number[] | null): number[] {
+  const distances = (values ?? [])
+    .map((value) => Number(Number(value).toFixed(2)))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  return Array.from(new Set(distances)).sort((a, b) => a - b);
+}
+
+async function allocateNextEventId(ctx: any): Promise<string> {
+  const { data, error } = await ctx.supabase
+    .from("events")
+    .select("event_id");
+
+  if (error) {
+    console.error("Error fetching event ids:", error);
+    throw new Error(error.message || "Failed to allocate event id");
+  }
+
+  const maxNumericId = (data ?? []).reduce((max: number, event: any) => {
+    const match = String(event.event_id || "").trim().match(/^E(\d+)$/i);
+    if (!match) return max;
+    const value = Number.parseInt(match[1], 10);
+    return Number.isFinite(value) ? Math.max(max, value) : max;
+  }, 0);
+
+  return `E${maxNumericId + 1}`;
+}
+
 const addEventInput = z.object({
-  eventName: z.string(),
-  startsAt: z.string(),
-  endsAt: z.string(),
-  registrationClosesAt: z.string().optional().nullable(),
-  eventType: z.enum(["same_day", "recurring", "multiday"]).optional(),
+  eventName: z.string().trim().min(1, "Event name is required."),
+  startsAt: z.string().trim().min(1, "Start date is required."),
+  endsAt: z.string().trim().min(1, "End date is required."),
+  registrationClosesAt: z.string().trim().min(1, "Registration close date is required."),
+  eventType: z.enum(["same_day", "recurring", "multiday"]),
   recurrenceFrequency: z.enum(["weekly", "monthly"]).optional().nullable(),
   recurrenceWeekday: z.number().int().min(0).max(6).optional().nullable(),
   recurrenceWeekdays: z.array(z.number().int().min(0).max(6)).optional().nullable(),
@@ -188,13 +187,16 @@ const addEventInput = z.object({
   country: z.string().optional(),
   club: z.string().optional(),
   organizerId: z.string().uuid().optional().nullable(),
+  eventLocation: z.string().optional().nullable(),
   isVirtual: z.boolean().optional(),
   entry: z.enum(["free", "club_approved", "paid"]).optional(),
   entryFee: z.number().nonnegative().optional(),
   hasMedal: z.boolean().optional(),
+  availableDistancesKm: z.array(z.number().positive()).optional(),
   paymentDetails: z.string().optional(),
   organizerPaymentLink: z.string().optional().nullable(),
   runnationPaymentLinkEnabled: z.boolean().optional(),
+  participantLimit: z.number().int().positive().nullable().optional(),
   medalMinDailyDistance: z.number().optional(),
   medalMinCumulativeDistance: z.number().optional(),
   medalDateStart: z.string().optional(),
@@ -217,26 +219,11 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
     allowCountryAdmin: true,
     allowCountryCoordinator: true,
     allowClubCoordinator: true,
+    allowSpecialClubCoordinator: true,
     allowEventOrganizer: true,
   });
 
-  const { data: existingEvents, error: fetchError } = await ctx.supabase
-    .from("events")
-    .select('event_id')
-    .order('event_id', { ascending: false })
-    .limit(1);
-
-  if (fetchError) {
-    console.error("Error fetching last event:", fetchError);
-    throw new Error(fetchError.message || "Failed to fetch last event");
-  }
-
-  let nextEventId = "E1";
-  if (existingEvents && existingEvents.length > 0) {
-    const lastId = existingEvents[0].event_id;
-    const numericPart = parseInt(lastId.substring(1), 10);
-    nextEventId = `E${numericPart + 1}`;
-  }
+  const nextEventId = await allocateNextEventId(ctx);
 
   let posterLink: string | null = null;
   if (input.posterLink) {
@@ -281,15 +268,22 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
     actor.isEventOrganizer &&
     !actor.isSuperAdmin &&
     !actor.isCountryAdmin &&
-    !actor.isCountryCoordinator &&
-    !actor.isClubCoordinator;
+      !actor.isCountryCoordinator &&
+    !actor.isClubCoordinator &&
+    !actor.isSpecialClubCoordinator;
   const normalizedOrganizerId = hasOrganizerOnlyAccess
     ? organizerScopes[0] ?? null
     : input.organizerId ?? null;
   const normalizedClub = normalizedOrganizerId ? null : input.club?.trim() || null;
+  const normalizedEventLocation = input.isVirtual === true ? "Virtual" : input.eventLocation?.trim() || null;
   const normalizedEntry = input.entry ?? "free";
-  const normalizedRegistrationClosesAt = input.registrationClosesAt?.trim() || null;
-  const normalizedEventType = input.eventType ?? (input.startsAt.slice(0, 10) === input.endsAt.slice(0, 10) ? "same_day" : "multiday");
+  const normalizedEventType = input.eventType;
+  const normalizedRegistrationClosesAt = normalizeDateOnly(input.registrationClosesAt);
+  const normalizedStartsAt = normalizeDateOnly(input.startsAt);
+  const normalizedEndsAt =
+    normalizedEventType === "same_day" || normalizedEventType === "recurring"
+      ? normalizedStartsAt
+      : normalizeDateOnly(input.endsAt);
   const normalizedRecurrenceFrequency = normalizedEventType === "recurring" ? input.recurrenceFrequency ?? "weekly" : null;
   const normalizedRecurrenceWeekdays =
     normalizedEventType === "recurring" && normalizedRecurrenceFrequency === "weekly"
@@ -316,10 +310,16 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
   const normalizedOrganizerPaymentLink = input.organizerPaymentLink?.trim() || null;
   const normalizedEntryFee =
     normalizedEntry === "paid" && typeof input.entryFee === "number" ? Number(input.entryFee.toFixed(2)) : null;
+  const normalizedParticipantLimit =
+    typeof input.participantLimit === "number" ? input.participantLimit : null;
+  const normalizedHasMedal = input.hasMedal === true;
+  const normalizedAvailableDistances = normalizedHasMedal
+    ? normalizeAvailableDistances(input.availableDistancesKm)
+    : [];
   const normalizedMinDailyDistance =
-    typeof input.medalMinDailyDistance === "number" ? Number(input.medalMinDailyDistance.toFixed(2)) : null;
+    normalizedHasMedal && typeof input.medalMinDailyDistance === "number" ? Number(input.medalMinDailyDistance.toFixed(2)) : null;
   const normalizedMinCumulativeDistance =
-    normalizedEventType === "multiday" && typeof input.medalMinCumulativeDistance === "number"
+    normalizedHasMedal && normalizedEventType === "multiday" && typeof input.medalMinCumulativeDistance === "number"
       ? Number(input.medalMinCumulativeDistance.toFixed(2))
       : null;
   const articleWordCount = countWords(input.magazineArticleBody);
@@ -327,8 +327,24 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
   const approvedAt = null;
   const approvedBy = null;
 
+  if (!isValidDateOnly(normalizedStartsAt) || !isValidDateOnly(normalizedEndsAt) || !isValidDateOnly(normalizedRegistrationClosesAt)) {
+    throw new Error("Please provide valid event dates.");
+  }
+
+  if (normalizedEndsAt < normalizedStartsAt) {
+    throw new Error("The event end date cannot be before the start date.");
+  }
+
+  if (normalizedRegistrationClosesAt > normalizedEndsAt) {
+    throw new Error("Registration close date cannot be after the event end date.");
+  }
+
   if (normalizedEntry === "paid" && (normalizedEntryFee === null || Number.isNaN(normalizedEntryFee))) {
     throw new Error("Please provide an entry fee for paid events.");
+  }
+
+  if (normalizedHasMedal && normalizedAvailableDistances.length === 0) {
+    throw new Error("Please choose at least one medal distance category.");
   }
 
   if (
@@ -374,6 +390,10 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
     throw new Error("Please choose a club or an event organizer for this event.");
   }
 
+  if (input.isVirtual !== true && !normalizedEventLocation) {
+    throw new Error("Please enter the event start/finish location.");
+  }
+
   if (hasOrganizerOnlyAccess && !normalizedOrganizerId) {
     throw new Error("Your organizer profile is not ready yet.");
   }
@@ -412,7 +432,7 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
 
   let magazinePhotoLink = input.magazinePhotoLink || null;
   if (input.magazinePhotoBase64) {
-    magazinePhotoLink = await uploadMagazinePhoto(ctx.supabase, nextEventId, input.magazinePhotoBase64, input.magazinePhotoMimeType);
+    magazinePhotoLink = await uploadMagazinePhoto(ctx, nextEventId, input.magazinePhotoBase64, input.magazinePhotoMimeType);
   }
 
   if (!magazinePhotoLink) {
@@ -424,13 +444,17 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
   resolvedCountryCode = resolvedCountryRecord.countryCode;
   resolvedCurrencyCode = resolvedCountryRecord.currencyCode;
 
+  if (!resolvedCountry || !resolvedCountryCode) {
+    throw new Error("Please choose the event country.");
+  }
+
   const { data, error } = await ctx.supabase
     .from("events")
     .insert({
       "event_id": nextEventId,
       "event_name": input.eventName,
-      "starts_at": input.startsAt,
-      "ends_at": input.endsAt,
+      "starts_at": normalizedStartsAt,
+      "ends_at": normalizedEndsAt,
       "registration_closes_at": normalizedRegistrationClosesAt,
       "event_type": normalizedEventType,
       "recurrence_frequency": normalizedRecurrenceFrequency,
@@ -443,13 +467,16 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
       "country_code": resolvedCountryCode,
       "currency_code": normalizedEntry === "paid" ? resolvedCurrencyCode : null,
       "organizer": normalizedOrganizerId,
+      "event_location": normalizedEventLocation,
       "is_virtual": input.isVirtual === true,
       "entry": normalizedEntry,
       "entry_fee": normalizedEntry === "paid" ? normalizedEntryFee : null,
-      "has_medal": input.hasMedal === true,
+      "has_medal": normalizedHasMedal,
+      "available_distances_km": normalizedAvailableDistances,
       "payment_details": normalizedEntry === "paid" ? normalizedPaymentDetails : null,
       "organizer_payment_link": normalizedEntry === "paid" ? normalizedOrganizerPaymentLink : null,
       "runnation_payment_link_enabled": normalizedEntry === "paid" && input.runnationPaymentLinkEnabled === true,
+      "participant_limit": normalizedParticipantLimit,
       "approval_status": approvalStatus,
       "approved_at": approvedAt,
       "approved_by": approvedBy,
@@ -526,12 +553,15 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
       organizerName,
       registrationClosesAt: normalizedRegistrationClosesAt,
       isVirtual: input.isVirtual === true,
+      eventLocation: normalizedEventLocation,
       entry: normalizedEntry,
       entryFee: normalizedEntry === "paid" ? normalizedEntryFee : null,
-      hasMedal: input.hasMedal === true,
+      hasMedal: normalizedHasMedal,
+      availableDistancesKm: normalizedAvailableDistances,
       paymentDetails: normalizedEntry === "paid" ? normalizedPaymentDetails : null,
       organizerPaymentLink: normalizedEntry === "paid" ? normalizedOrganizerPaymentLink : null,
       runnationPaymentLinkEnabled: normalizedEntry === "paid" && input.runnationPaymentLinkEnabled === true,
+      participantLimit: normalizedParticipantLimit,
       approvalStatus,
       posterLink,
       magazineArticleTitle: input.magazineArticleTitle.trim(),
@@ -542,4 +572,6 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
 
   return data?.[0];
 });
+
+
 

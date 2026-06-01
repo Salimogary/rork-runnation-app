@@ -36,7 +36,7 @@ For a disposable staging database where you want a near-clean slate:
 
 If you want loginable QA users, create a few auth users in Supabase Auth and then update their `profiles.legacy_registration_id` to one of the seeded registrations:
 
-- `00000000-0000-0000-0000-000000000101` - Uganda super-admin style dataset
+- `00000000-0000-0000-0000-000000000101` - Uganda Global Admin style dataset
 - `00000000-0000-0000-0000-000000000102` - Uganda runner
 - `00000000-0000-0000-0000-000000000103` - Kenya coordinator dataset
 - `00000000-0000-0000-0000-000000000104` - Kenya runner

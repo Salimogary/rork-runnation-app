@@ -20,9 +20,7 @@ async function resolveScreenshotUrl(supabase: any, path?: string | null) {
 export default publicProcedure.query(async ({ ctx }) => {
   await requireAdminPermission(ctx, {
     allowSuperAdmin: true,
-    allowCountryAdmin: true,
-    allowCountryCoordinator: true,
-    allowClubCoordinator: true,
+    allowChatRoomAdministrator: true,
   });
 
   const { data, error } = await ctx.supabase
@@ -65,7 +63,7 @@ export default publicProcedure.query(async ({ ctx }) => {
   const { data: flags } = registrationIds.length
     ? await ctx.supabase
         .from("user_moderation_flags")
-        .select("registration_id, confirmed_flags, dismissed_reports, is_banned, ban_reason")
+        .select("registration_id, confirmed_flags, dismissed_reports, is_banned, ban_reason, suspended_until, suspension_status")
         .in("registration_id", registrationIds)
     : { data: [] };
 
@@ -98,3 +96,4 @@ export default publicProcedure.query(async ({ ctx }) => {
     })
   );
 });
+

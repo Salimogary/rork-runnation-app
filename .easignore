@@ -1,0 +1,15 @@
+node_modules/
+.expo/
+.git/
+.idea/
+*.apk
+runnation-*.png
+smoke-*.png
+Screenshot*.jpg
+Screenshot*.jpeg
+Screenshot*.png
+*.log
+*.tmp
+core
+dist/
+web-build/

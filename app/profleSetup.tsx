@@ -19,7 +19,7 @@ import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Fingerprint, Camera, Check, ChevronRight, Target, Users, UserPlus, UserCheck, PlusCircle, X, MapPin, Globe, ChevronLeft, Phone, Mail, Eye, EyeOff, Apple, Calendar } from 'lucide-react-native';
+import { Fingerprint, Camera, Check, ChevronRight, Target, Users, UserPlus, UserCheck, PlusCircle, X, MapPin, Globe, ChevronLeft, Phone, Mail, Eye, EyeOff, Apple, Calendar, Ruler, Scale } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@/contexts/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -29,13 +29,17 @@ import { Picker } from '@react-native-picker/picker';
 import { getServerClient } from '@/lib/server-client';
 import { supabase } from '@/lib/supabase';
 import { WORLD_COUNTRIES } from '@/constants/countries';
-import { filterVisibleClubsForAge, getAgeFromDob, isAtLeastRunNationAge } from '@/utils/specialClubs';
+import { clubMatchesTown, filterVisibleClubsForAge, getAgeFromDob, isAtLeastRunNationAge } from '@/utils/specialClubs';
+import { useDistanceUnit } from '@/contexts/DistanceUnitContext';
+import { useWeightUnit } from '@/contexts/WeightUnitContext';
 
 WebBrowser.maybeCompleteAuthSession();
 
 
 type ScreenMode = 'login' | 'create' | 'forgot' | 'fullRegistration';
-type RegistrationStep = 1 | 2 | 3 | 4;
+type RegistrationStep = 1 | 2 | 3 | 4 | 5;
+type DistancePreference = 'kilometers' | 'miles';
+type WeightPreference = 'kg' | 'lbs';
 
 interface RegistrationData {
   firstName: string;
@@ -48,6 +52,12 @@ interface RegistrationData {
   weightTarget: string;
   weightMonths: string;
   country: string;
+  hasDisability: boolean;
+  paraUsesEquipment: boolean;
+  paraEquipmentType: string;
+  paraEquipmentOther: string;
+  doesIndoorWorkouts: boolean;
+  hasSmartWatch: boolean;
   pin: string;
   confirmPin: string;
   photoUri?: string;
@@ -85,6 +95,7 @@ interface ClubItem {
   special_club_code?: string | null;
   age_min?: number | null;
   age_max?: number | null;
+  presence_towns?: string[] | string | null;
 }
 
 interface ProfileBundleResponse {
@@ -95,7 +106,6 @@ interface ProfileBundleResponse {
 
 type ClubChoice = 'join' | 'existing' | 'start' | 'organizer' | 'none' | null;
 const RUNNATION_APP_LINK = '';
-
 const normalizeCountryLabel = (value?: string | null) => {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -122,6 +132,12 @@ const getOAuthRedirectUrl = () => {
 };
 
 const FALLBACK_COUNTRIES = WORLD_COUNTRIES;
+const PARA_EQUIPMENT_OPTIONS = [
+  { value: "wheelchair", label: "Wheelchair" },
+  { value: "handcycle", label: "Handcycle" },
+  { value: "prosthetic_blades", label: "Prosthetic blades" },
+  { value: "other", label: "Other" },
+];
 
 const FALLBACK_GOALS: GoalItem[] = [
   { goal_id: 1, goal: 'Improve fitness' },
@@ -129,8 +145,14 @@ const FALLBACK_GOALS: GoalItem[] = [
   { goal_id: 3, goal: 'Build endurance' },
   { goal_id: 4, goal: 'Train for an event' },
   { goal_id: 5, goal: 'Stay consistent' },
-  { goal_id: 6, goal: 'Other' },
+  { goal_id: 6, goal: 'General Health' },
+  { goal_id: 7, goal: 'Other' },
 ];
+
+function isGeneralHealthGoal(value: string | null | undefined): boolean {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'general health' || normalized.includes('general health') || normalized.includes('health');
+}
 
 const FALLBACK_CLUBS: ClubItem[] = [
   {
@@ -184,6 +206,8 @@ export default function RegisterScreen() {
     router.replace('/(tabs)');
   };
   const { signUp, signIn, refreshRoleSession } = useAuth();
+  const { distanceUnit: savedDistanceUnit, setDistanceUnit } = useDistanceUnit();
+  const { weightUnit: savedWeightUnit, setWeightUnit } = useWeightUnit();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [pin, setPin] = useState('');
@@ -203,6 +227,12 @@ export default function RegisterScreen() {
     weightTarget: '',
     weightMonths: '',
     country: '',
+    hasDisability: false,
+    paraUsesEquipment: false,
+    paraEquipmentType: '',
+    paraEquipmentOther: '',
+    doesIndoorWorkouts: false,
+    hasSmartWatch: false,
     pin: '',
     confirmPin: '',
     photoUri: '',
@@ -233,8 +263,11 @@ export default function RegisterScreen() {
 
   const [clubs, setClubs] = useState<ClubItem[]>([]);
   const [clubsLoading, setClubsLoading] = useState(false);
-  const [selectedClubId, setSelectedClubId] = useState<string | null>(null);
+  const [selectedNormalClubId, setSelectedNormalClubId] = useState<string | null>(null);
+  const [selectedSpecialClubIds, setSelectedSpecialClubIds] = useState<string[]>([]);
   const [clubChoice, setClubChoice] = useState<ClubChoice>(null);
+  const [distancePreference, setDistancePreference] = useState<DistancePreference>(savedDistanceUnit);
+  const [weightPreference, setWeightPreference] = useState<WeightPreference>(savedWeightUnit);
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [showRegistrationPassword, setShowRegistrationPassword] = useState(false);
   const [showRegistrationConfirmPassword, setShowRegistrationConfirmPassword] = useState(false);
@@ -246,8 +279,40 @@ export default function RegisterScreen() {
     return clubs.filter((club) => normalizeCountryLabel(club.country) === userCountry);
   }, [clubs, registrationData.country]);
   const visibleClubs = useMemo(
-    () => filterVisibleClubsForAge(clubs, countryClubs, getAgeFromDob(registrationData.dob)),
-    [clubs, countryClubs, registrationData.dob]
+    () => filterVisibleClubsForAge(clubs, countryClubs, getAgeFromDob(registrationData.dob), {
+      hasDisability: registrationData.hasDisability,
+      doesIndoorWorkouts: registrationData.doesIndoorWorkouts,
+      hasSmartWatch: registrationData.hasSmartWatch,
+      hasGeneralHealthGoal: selectedGoalIds.some((goalId) => isGeneralHealthGoal(goals.find((goal) => goal.goal_id === goalId)?.goal)),
+      userCountry: registrationData.country,
+    }),
+    [
+      clubs,
+      countryClubs,
+      registrationData.dob,
+      registrationData.hasDisability,
+      registrationData.doesIndoorWorkouts,
+      registrationData.hasSmartWatch,
+      registrationData.country,
+      goals,
+      selectedGoalIds,
+    ]
+  );
+  const visibleNormalClubs = useMemo(
+    () => visibleClubs.filter((club) => !club.is_special_club && !club.special_club_code),
+    [visibleClubs]
+  );
+  const visibleSpecialClubs = useMemo(
+    () => visibleClubs.filter((club) => club.is_special_club || club.special_club_code),
+    [visibleClubs]
+  );
+  const recommendedNormalClubs = useMemo(
+    () => visibleNormalClubs.filter((club) => clubMatchesTown(club, registrationData.residence)),
+    [visibleNormalClubs, registrationData.residence]
+  );
+  const otherNormalClubs = useMemo(
+    () => visibleNormalClubs.filter((club) => !clubMatchesTown(club, registrationData.residence)),
+    [visibleNormalClubs, registrationData.residence]
   );
 
   useEffect(() => {
@@ -258,7 +323,7 @@ export default function RegisterScreen() {
   useEffect(() => {
     if (registrationStep === 3) {
       void fetchGoals();
-    } else if (registrationStep === 4) {
+    } else if (registrationStep === 5) {
       void fetchClubs();
     }
   }, [registrationStep]);
@@ -271,6 +336,14 @@ export default function RegisterScreen() {
       friction: 10,
     }).start();
   }, [registrationStep, stepAnim]);
+
+  useEffect(() => {
+    setDistancePreference(savedDistanceUnit);
+  }, [savedDistanceUnit]);
+
+  useEffect(() => {
+    setWeightPreference(savedWeightUnit);
+  }, [savedWeightUnit]);
 
   const getErrorMessage = (error: unknown, fallback: string) => {
     if (error instanceof Error && error.message) {
@@ -464,7 +537,7 @@ export default function RegisterScreen() {
   };
 
   const handleLogin = async () => {
-    if (!username.trim() || !pin.trim()) {
+    if (!username.trim() || !pin) {
       Alert.alert('Error', 'Please enter your email address and password');
       return;
     }
@@ -694,6 +767,19 @@ export default function RegisterScreen() {
       Alert.alert('Error', 'Passwords do not match');
       return;
     }
+    if (registrationData.hasDisability && registrationData.paraUsesEquipment && !registrationData.paraEquipmentType) {
+      Alert.alert('Para Equipment', 'Please choose the equipment you use.');
+      return;
+    }
+    if (
+      registrationData.hasDisability &&
+      registrationData.paraUsesEquipment &&
+      registrationData.paraEquipmentType === 'other' &&
+      !registrationData.paraEquipmentOther.trim()
+    ) {
+      Alert.alert('Para Equipment', 'Please describe the equipment you use.');
+      return;
+    }
 
     setIsLoading(true);
 
@@ -817,7 +903,7 @@ export default function RegisterScreen() {
         goals: rowsToInsert.map((row) => row.goal),
       });
 
-      console.log('[Register] Goals saved, moving to clubs');
+      console.log('[Register] Goals saved, moving to metrics');
       setRegistrationStep(4);
     } catch (err) {
       console.error('[Register] Goals save error:', err);
@@ -828,16 +914,27 @@ export default function RegisterScreen() {
   };
 
   const handleStep4Complete = async () => {
+    try {
+      setDistanceUnit(distancePreference);
+      setWeightUnit(weightPreference);
+      setRegistrationStep(5);
+    } catch (err) {
+      console.error('[Register] Metrics preference save error:', err);
+      Alert.alert('Preferences Save Failed', getErrorMessage(err, 'Something went wrong saving your measurement preferences.'));
+    }
+  };
+
+  const handleStep5Complete = async () => {
     if (!registrationId) {
-      console.error('[Register] No registrationId for step 4');
+      console.error('[Register] No registrationId for step 5');
       await AsyncStorage.setItem('hasSeenOnboarding', 'true');
       router.replace('/(tabs)');
       return;
     }
 
     if (clubChoice === 'join' || clubChoice === 'existing') {
-      if (!selectedClubId) {
-        Alert.alert('Select a Club', 'Please choose a club from the list.');
+      if (!selectedNormalClubId && selectedSpecialClubIds.length === 0) {
+        Alert.alert('Select a Club', 'Please choose a normal club, a special club, or one of each.');
         return;
       }
     }
@@ -847,14 +944,19 @@ export default function RegisterScreen() {
     try {
       let clubValue: string | null = null;
       let newMemberValue: string = 'No';
+      const selectedMembershipClubs =
+        clubChoice === 'join' || clubChoice === 'existing'
+          ? [selectedNormalClubId, ...selectedSpecialClubIds]
+              .filter(Boolean)
+              .map((clubId) => visibleClubs.find((club) => club.club_id === clubId))
+              .filter(Boolean) as ClubItem[]
+          : [];
 
       if (clubChoice === 'join') {
-        const selectedClub = visibleClubs.find(c => c.club_id === selectedClubId);
-        clubValue = selectedClub?.club_name || null;
+        clubValue = selectedMembershipClubs.map((club) => club.club_name).join(', ') || null;
         newMemberValue = 'Yes';
       } else if (clubChoice === 'existing') {
-        const selectedClub = visibleClubs.find(c => c.club_id === selectedClubId);
-        clubValue = selectedClub?.club_name || null;
+        clubValue = selectedMembershipClubs.map((club) => club.club_name).join(', ') || null;
         newMemberValue = 'No';
       } else if (clubChoice === 'start') {
         if (!clubStartRequest.clubName.trim()) {
@@ -885,36 +987,53 @@ export default function RegisterScreen() {
 
       console.log('[Register] Inserting club_membership_request:', { club: clubValue, new_member: newMemberValue });
 
-      await getServerClient().auth.saveClubMembership.mutate({
-        registrationId,
-        club: clubValue,
-        clubId: clubChoice === 'join' || clubChoice === 'existing' ? selectedClubId || null : null,
-        newMember: newMemberValue as 'Yes' | 'No',
-        requestType:
-          clubChoice === 'start'
-            ? 'start_club'
-            : clubChoice === 'organizer'
-            ? 'event_organizer'
-            : 'membership',
-        proposedClubName:
-          clubChoice === 'start'
-            ? clubStartRequest.clubName.trim()
-            : clubChoice === 'organizer'
-            ? organizerRequest.organizerName.trim()
-            : null,
-        proposedCountry:
-          clubChoice === 'start'
-            ? clubStartRequest.country.trim()
-            : clubChoice === 'organizer'
-            ? organizerRequest.country.trim()
-            : null,
-        proposedDescription:
-          clubChoice === 'start'
-            ? clubStartRequest.description.trim()
-            : clubChoice === 'organizer'
-            ? organizerRequest.description.trim()
-            : null,
-      });
+      if ((clubChoice === 'join' || clubChoice === 'existing') && selectedMembershipClubs.length > 0) {
+        await Promise.all(
+          selectedMembershipClubs.map((club) =>
+            getServerClient().auth.saveClubMembership.mutate({
+              registrationId,
+              club: club.club_name,
+              clubId: club.club_id,
+              newMember: newMemberValue as 'Yes' | 'No',
+              requestType: 'membership',
+              proposedClubName: null,
+              proposedCountry: null,
+              proposedDescription: null,
+            })
+          )
+        );
+      } else {
+        await getServerClient().auth.saveClubMembership.mutate({
+          registrationId,
+          club: clubValue,
+          clubId: null,
+          newMember: newMemberValue as 'Yes' | 'No',
+          requestType:
+            clubChoice === 'start'
+              ? 'start_club'
+              : clubChoice === 'organizer'
+              ? 'event_organizer'
+              : 'membership',
+          proposedClubName:
+            clubChoice === 'start'
+              ? clubStartRequest.clubName.trim()
+              : clubChoice === 'organizer'
+              ? organizerRequest.organizerName.trim()
+              : null,
+          proposedCountry:
+            clubChoice === 'start'
+              ? clubStartRequest.country.trim()
+              : clubChoice === 'organizer'
+              ? organizerRequest.country.trim()
+              : null,
+          proposedDescription:
+            clubChoice === 'start'
+              ? clubStartRequest.description.trim()
+              : clubChoice === 'organizer'
+              ? organizerRequest.description.trim()
+              : null,
+        });
+      }
 
       console.log('[Register] Club membership request saved');
 
@@ -939,6 +1058,8 @@ export default function RegisterScreen() {
     } else if (registrationStep === 3) {
       setRegistrationStep(4);
     } else if (registrationStep === 4) {
+      setRegistrationStep(5);
+    } else if (registrationStep === 5) {
       await goToApp();
     }
   };
@@ -951,8 +1072,23 @@ export default function RegisterScreen() {
     );
   };
 
-  const updateRegistrationField = (field: keyof RegistrationData, value: string) => {
-    setRegistrationData(prev => ({ ...prev, [field]: value }));
+  const updateRegistrationField = (field: keyof RegistrationData, value: string | boolean) => {
+    setRegistrationData(prev => {
+      const next = { ...prev, [field]: value };
+      if (field === "hasDisability" && value !== true) {
+        next.paraUsesEquipment = false;
+        next.paraEquipmentType = "";
+        next.paraEquipmentOther = "";
+      }
+      if (field === "paraUsesEquipment" && value !== true) {
+        next.paraEquipmentType = "";
+        next.paraEquipmentOther = "";
+      }
+      if (field === "paraEquipmentType" && value !== "other") {
+        next.paraEquipmentOther = "";
+      }
+      return next;
+    });
   };
 
   const updateContactField = (field: keyof ContactData, value: string) => {
@@ -1004,7 +1140,7 @@ export default function RegisterScreen() {
 
   const renderStepIndicator = () => (
     <View style={styles.stepIndicatorContainer}>
-      {[1, 2, 3, 4].map((step) => {
+      {[1, 2, 3, 4, 5].map((step) => {
         const isActive = registrationStep >= step;
         const isCurrent = registrationStep === step;
         return (
@@ -1016,7 +1152,7 @@ export default function RegisterScreen() {
                 <Text style={[styles.stepDotText, isActive && styles.stepDotTextActive]}>{step}</Text>
               )}
             </View>
-            {step < 4 && (
+            {step < 5 && (
               <View style={[styles.stepLine, registrationStep > step && styles.stepLineActive]} />
             )}
           </React.Fragment>
@@ -1030,7 +1166,8 @@ export default function RegisterScreen() {
       <Text style={[styles.stepLabel, registrationStep >= 1 && styles.stepLabelActive]}>Registration</Text>
       <Text style={[styles.stepLabel, registrationStep >= 2 && styles.stepLabelActive]}>Contacts</Text>
       <Text style={[styles.stepLabel, registrationStep >= 3 && styles.stepLabelActive]}>Your Goals</Text>
-      <Text style={[styles.stepLabel, registrationStep >= 4 && styles.stepLabelActive]}>Club</Text>
+      <Text style={[styles.stepLabel, registrationStep >= 4 && styles.stepLabelActive]}>Units</Text>
+      <Text style={[styles.stepLabel, registrationStep >= 5 && styles.stepLabelActive]}>Club</Text>
     </View>
   );
 
@@ -1067,9 +1204,48 @@ export default function RegisterScreen() {
     </View>
   );
 
+  const renderYesNoOption = (
+    label: string,
+    detail: string,
+    value: boolean,
+    onChange: (nextValue: boolean) => void
+  ) => (
+    <View style={styles.preferenceQuestion}>
+      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.preferenceQuestionDetail}>{detail}</Text>
+      <View style={styles.preferenceChoiceRow}>
+        {[
+          { label: 'No', value: false },
+          { label: 'Yes', value: true },
+        ].map((option) => {
+          const isSelected = value === option.value;
+          return (
+            <TouchableOpacity
+              key={`${label}-${option.label}`}
+              style={[styles.preferenceChoice, isSelected && styles.preferenceChoiceSelected]}
+              onPress={() => onChange(option.value)}
+              disabled={isLoading}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.preferenceChoiceText, isSelected && styles.preferenceChoiceTextSelected]}>
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+
   const renderStep1 = () => (
     <>
       <Text style={styles.formTitle}>Create Your Account</Text>
+      <View style={styles.profileCompletionNote}>
+        <Text style={styles.profileCompletionNoteTitle}>Fill every field you can</Text>
+        <Text style={styles.profileCompletionNoteText}>
+          RunNation uses these details for clubs, reports, goals, events, and eligibility, so missing fields can hide useful features.
+        </Text>
+      </View>
 
       <View style={styles.inputContainer}>
         <Text style={styles.label}>First Name *</Text>
@@ -1163,12 +1339,81 @@ export default function RegisterScreen() {
         <Text style={styles.label}>City/Town/District *</Text>
         <TextInput
           style={styles.input}
-          placeholder="Enter city/town/district"
+          placeholder="e.g Mombasa, Eldoret, Masaka"
           placeholderTextColor="#999"
           value={registrationData.residence}
           onChangeText={(text) => updateRegistrationField('residence', text)}
           editable={!isLoading}
         />
+      </View>
+
+      <View style={styles.inputContainer}>
+        {renderYesNoOption(
+          'Do you have any disability?',
+          'This controls whether Para Runners appears as a special club option.',
+          registrationData.hasDisability,
+          (value) => updateRegistrationField('hasDisability', value)
+        )}
+      </View>
+
+      {registrationData.hasDisability ? (
+        <>
+          <View style={styles.inputContainer}>
+            {renderYesNoOption(
+              'Do you use any para sports equipment?',
+              'Equipment users stay grouped inside Para club leaderboards; no-equipment para users can also appear in community leaderboards.',
+              registrationData.paraUsesEquipment,
+              (value) => updateRegistrationField('paraUsesEquipment', value)
+            )}
+          </View>
+
+          {registrationData.paraUsesEquipment ? (
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Para equipment</Text>
+              <View style={styles.pickerContainer}>
+                <Picker
+                  selectedValue={registrationData.paraEquipmentType}
+                  onValueChange={(value: string) => updateRegistrationField('paraEquipmentType', value)}
+                  style={styles.picker}
+                  enabled={!isLoading}
+                >
+                  <Picker.Item label="Select equipment" value="" />
+                  {PARA_EQUIPMENT_OPTIONS.map((option) => (
+                    <Picker.Item key={option.value} label={option.label} value={option.value} />
+                  ))}
+                </Picker>
+              </View>
+              {registrationData.paraEquipmentType === 'other' ? (
+                <TextInput
+                  style={[styles.input, { marginTop: 10 }]}
+                  placeholder="Enter equipment"
+                  placeholderTextColor="#999"
+                  value={registrationData.paraEquipmentOther}
+                  onChangeText={(text) => updateRegistrationField('paraEquipmentOther', text)}
+                  editable={!isLoading}
+                />
+              ) : null}
+            </View>
+          ) : null}
+        </>
+      ) : null}
+
+      <View style={styles.inputContainer}>
+        {renderYesNoOption(
+          'Do you do indoor workouts?',
+          'This controls whether Treadmill Runners appears as a special club option.',
+          registrationData.doesIndoorWorkouts,
+          (value) => updateRegistrationField('doesIndoorWorkouts', value)
+        )}
+      </View>
+
+      <View style={styles.inputContainer}>
+        {renderYesNoOption(
+          'Do you use a smart watch to record your workouts?',
+          'If you also choose General Health as a goal, SmartFit Club will appear as a special club option.',
+          registrationData.hasSmartWatch,
+          (value) => updateRegistrationField('hasSmartWatch', value)
+        )}
       </View>
 
       <View style={styles.inputContainer}>
@@ -1306,6 +1551,12 @@ export default function RegisterScreen() {
               weightTarget: '',
               weightMonths: '',
               country: '',
+              hasDisability: false,
+              paraUsesEquipment: false,
+              paraEquipmentType: '',
+              paraEquipmentOther: '',
+              doesIndoorWorkouts: false,
+              hasSmartWatch: false,
               pin: '',
               confirmPin: '',
               photoUri: '',
@@ -1460,7 +1711,7 @@ export default function RegisterScreen() {
             <ActivityIndicator color="#FFFFFF" />
           ) : (
             <View style={styles.buttonInner}>
-              <Text style={styles.buttonText}>{selectedGoalIds.length > 0 ? 'Next: Club Membership' : 'Skip & Continue'}</Text>
+              <Text style={styles.buttonText}>{selectedGoalIds.length > 0 ? 'Next: Units' : 'Skip & Continue'}</Text>
               <ChevronRight size={20} color="#fff" />
             </View>
           )}
@@ -1471,7 +1722,8 @@ export default function RegisterScreen() {
 
   const handleClubChoiceSelect = (choice: ClubChoice) => {
     setClubChoice(choice);
-    setSelectedClubId(null);
+    setSelectedNormalClubId(null);
+    setSelectedSpecialClubIds([]);
     if (choice === 'start') {
       setClubStartRequest((prev) => ({
         clubName: prev.clubName,
@@ -1490,6 +1742,28 @@ export default function RegisterScreen() {
       void fetchClubs();
     }
   };
+
+  const renderMetricOption = (
+    selected: boolean,
+    title: string,
+    detail: string,
+    onPress: () => void
+  ) => (
+    <TouchableOpacity
+      style={[styles.metricOptionCard, selected && styles.metricOptionCardSelected]}
+      onPress={onPress}
+      activeOpacity={0.75}
+      disabled={isLoading}
+    >
+      <View style={[styles.clubRadio, selected && styles.clubRadioSelected]}>
+        {selected && <View style={styles.clubRadioDot} />}
+      </View>
+      <View style={styles.clubChoiceTextWrap}>
+        <Text style={[styles.metricOptionTitle, selected && styles.clubDetailNameSelected]}>{title}</Text>
+        <Text style={styles.metricOptionDetail}>{detail}</Text>
+      </View>
+    </TouchableOpacity>
+  );
 
   const renderClubChoiceOptions = () => {
     const options: { key: ClubChoice; label: string; icon: React.ReactNode; desc: string }[] = [
@@ -1527,13 +1801,90 @@ export default function RegisterScreen() {
     );
   };
 
+  const renderClubListSection = (
+    title: string,
+    subtitle: string,
+    list: ClubItem[],
+    type: 'normal' | 'special'
+  ) => (
+    <View style={styles.clubGroupSection}>
+      <View style={styles.clubGroupHeader}>
+        <Text style={styles.clubGroupTitle}>{title}</Text>
+        <Text style={styles.clubGroupSubtitle}>{subtitle}</Text>
+      </View>
+      {list.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyStateText}>
+            {type === 'normal'
+              ? `No normal clubs available in ${registrationData.country || 'your country'} yet.`
+              : 'No eligible special clubs available for your profile yet.'}
+          </Text>
+        </View>
+      ) : null}
+      {list.map((club) => {
+        const isSelected = type === 'normal' ? selectedNormalClubId === club.club_id : selectedSpecialClubIds.includes(club.club_id);
+        return (
+          <TouchableOpacity
+            key={club.club_id}
+            style={[styles.clubDetailCard, isSelected && styles.clubDetailCardSelected]}
+            onPress={() => {
+              if (type === 'normal') {
+                setSelectedNormalClubId(isSelected ? null : club.club_id);
+                return;
+              }
+              setSelectedSpecialClubIds((current) =>
+                isSelected ? current.filter((clubId) => clubId !== club.club_id) : [...current, club.club_id]
+              );
+            }}
+            activeOpacity={0.7}
+            disabled={isLoading}
+          >
+            <View style={styles.clubDetailHeader}>
+              <View style={[styles.clubRadio, isSelected && styles.clubRadioSelected]}>
+                {isSelected && <View style={styles.clubRadioDot} />}
+              </View>
+              <Text style={[styles.clubDetailName, isSelected && styles.clubDetailNameSelected]}>
+                {club.club_name}
+              </Text>
+              {type === 'special' && (
+                <View style={styles.specialClubBadge}>
+                  <Text style={styles.specialClubBadgeText}>Special</Text>
+                </View>
+              )}
+            </View>
+            {(club.country || club.location) && (
+              <View style={styles.clubDetailMeta}>
+                {club.country && (
+                  <View style={styles.clubMetaRow}>
+                    <Globe size={13} color="rgba(255,255,255,0.7)" />
+                    <Text style={styles.clubMetaText}>{club.country}</Text>
+                  </View>
+                )}
+                {club.location && (
+                  <View style={styles.clubMetaRow}>
+                    <MapPin size={13} color="rgba(255,255,255,0.7)" />
+                    <Text style={styles.clubMetaText}>{club.location}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+            {club.description && (
+              <Text style={styles.clubDetailDesc}>{club.description}</Text>
+            )}
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+
   const renderClubJoinList = () => (
     <View style={styles.clubSubSection}>
-      <TouchableOpacity style={styles.clubBackBtn} onPress={() => { setClubChoice(null); setSelectedClubId(null); }}>
+      <TouchableOpacity style={styles.clubBackBtn} onPress={() => { setClubChoice(null); setSelectedNormalClubId(null); setSelectedSpecialClubIds([]); }}>
         <ChevronLeft size={18} color="#fff" />
         <Text style={styles.clubBackText}>Back to options</Text>
       </TouchableOpacity>
-      <Text style={styles.clubSubTitle}>List of clubs in your country</Text>
+      <Text style={styles.clubSubTitle}>Choose up to two clubs</Text>
+      <Text style={styles.clubSelectionHint}>Pick one normal club, one special club, or just one club from either section.</Text>
       {clubsLoading ? (
         <View style={styles.loadingRow}>
           <ActivityIndicator color="#fff" />
@@ -1541,51 +1892,9 @@ export default function RegisterScreen() {
         </View>
       ) : (
         <View style={styles.clubsList}>
-          {visibleClubs.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyStateText}>No clubs available in {registrationData.country || 'your country'} yet.</Text>
-            </View>
-          ) : null}
-          {visibleClubs.map((club) => {
-            const isSelected = selectedClubId === club.club_id;
-            return (
-              <TouchableOpacity
-                key={club.club_id}
-                style={[styles.clubDetailCard, isSelected && styles.clubDetailCardSelected]}
-                onPress={() => setSelectedClubId(isSelected ? null : club.club_id)}
-                activeOpacity={0.7}
-                disabled={isLoading}
-              >
-                <View style={styles.clubDetailHeader}>
-                  <View style={[styles.clubRadio, isSelected && styles.clubRadioSelected]}>
-                    {isSelected && <View style={styles.clubRadioDot} />}
-                  </View>
-                  <Text style={[styles.clubDetailName, isSelected && styles.clubDetailNameSelected]}>
-                    {club.club_name}
-                  </Text>
-                </View>
-                {(club.country || club.location) && (
-                  <View style={styles.clubDetailMeta}>
-                    {club.country && (
-                      <View style={styles.clubMetaRow}>
-                        <Globe size={13} color="rgba(255,255,255,0.7)" />
-                        <Text style={styles.clubMetaText}>{club.country}</Text>
-                      </View>
-                    )}
-                    {club.location && (
-                      <View style={styles.clubMetaRow}>
-                        <MapPin size={13} color="rgba(255,255,255,0.7)" />
-                        <Text style={styles.clubMetaText}>{club.location}</Text>
-                      </View>
-                    )}
-                  </View>
-                )}
-                {club.description && (
-                  <Text style={styles.clubDetailDesc}>{club.description}</Text>
-                )}
-              </TouchableOpacity>
-            );
-          })}
+          {renderClubListSection('Recommended Normal Clubs', 'Clubs active in your city/town/district.', recommendedNormalClubs, 'normal')}
+          {renderClubListSection('Other Normal Clubs', 'Other local clubs in your registered country.', otherNormalClubs, 'normal')}
+          {renderClubListSection('Special Clubs', 'Age or interest-based RunNation clubs you are eligible for.', visibleSpecialClubs, 'special')}
           <TouchableOpacity style={styles.missingClubCard} onPress={() => void shareMissingClubInvite()} activeOpacity={0.75}>
             <Text style={styles.missingClubTitle}>My club is not on this list</Text>
             <Text style={styles.missingClubText}>
@@ -1599,11 +1908,12 @@ export default function RegisterScreen() {
 
   const renderClubExistingList = () => (
     <View style={styles.clubSubSection}>
-      <TouchableOpacity style={styles.clubBackBtn} onPress={() => { setClubChoice(null); setSelectedClubId(null); }}>
+      <TouchableOpacity style={styles.clubBackBtn} onPress={() => { setClubChoice(null); setSelectedNormalClubId(null); setSelectedSpecialClubIds([]); }}>
         <ChevronLeft size={18} color="#fff" />
         <Text style={styles.clubBackText}>Back to options</Text>
       </TouchableOpacity>
-      <Text style={styles.clubSubTitle}>List of clubs in your country</Text>
+      <Text style={styles.clubSubTitle}>Choose up to two clubs</Text>
+      <Text style={styles.clubSelectionHint}>Pick one normal club, one special club, or just one club from either section.</Text>
       {clubsLoading ? (
         <View style={styles.loadingRow}>
           <ActivityIndicator color="#fff" />
@@ -1611,30 +1921,9 @@ export default function RegisterScreen() {
         </View>
       ) : (
         <View style={styles.clubsList}>
-          {visibleClubs.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyStateText}>No clubs available in {registrationData.country || 'your country'} yet.</Text>
-            </View>
-          ) : null}
-          {visibleClubs.map((club) => {
-            const isSelected = selectedClubId === club.club_id;
-            return (
-              <TouchableOpacity
-                key={club.club_id}
-                style={[styles.clubCard, isSelected && styles.clubCardSelected]}
-                onPress={() => setSelectedClubId(isSelected ? null : club.club_id)}
-                activeOpacity={0.7}
-                disabled={isLoading}
-              >
-                <View style={[styles.clubRadio, isSelected && styles.clubRadioSelected]}>
-                  {isSelected && <View style={styles.clubRadioDot} />}
-                </View>
-                <Text style={[styles.clubCardText, isSelected && styles.clubCardTextSelected]}>
-                  {club.club_name}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+          {renderClubListSection('Recommended Normal Clubs', 'Clubs active in your city/town/district.', recommendedNormalClubs, 'normal')}
+          {renderClubListSection('Other Normal Clubs', 'Other local clubs in your registered country.', otherNormalClubs, 'normal')}
+          {renderClubListSection('Special Clubs', 'Age or interest-based RunNation clubs you are eligible for.', visibleSpecialClubs, 'special')}
           <TouchableOpacity style={styles.missingClubCard} onPress={() => void shareMissingClubInvite()} activeOpacity={0.75}>
             <Text style={styles.missingClubTitle}>My club is not on this list</Text>
             <Text style={styles.missingClubText}>
@@ -1758,12 +2047,82 @@ export default function RegisterScreen() {
     </View>
   );
 
-  const renderStep4 = () => {
+  const renderStep4 = () => (
+    <>
+      <View style={styles.stepHeader}>
+        <Ruler size={32} color="#fff" />
+        <Text style={styles.formTitle}>Measurement Preferences</Text>
+        <Text style={styles.stepSubtitle}>Choose the units you want RunNation to use for distance and weight.</Text>
+      </View>
+
+      <View style={styles.metricSection}>
+        <View style={styles.metricSectionHeader}>
+          <Ruler size={18} color="#fff" />
+          <Text style={styles.metricSectionTitle}>Distance</Text>
+        </View>
+        {renderMetricOption(
+          distancePreference === 'kilometers',
+          'Kilometres',
+          'Use km for workouts, events, and distance goals.',
+          () => setDistancePreference('kilometers')
+        )}
+        {renderMetricOption(
+          distancePreference === 'miles',
+          'Miles',
+          'Use mi where the app supports distance display preferences.',
+          () => setDistancePreference('miles')
+        )}
+      </View>
+
+      <View style={styles.metricSection}>
+        <View style={styles.metricSectionHeader}>
+          <Scale size={18} color="#fff" />
+          <Text style={styles.metricSectionTitle}>Weight</Text>
+        </View>
+        {renderMetricOption(
+          weightPreference === 'kg',
+          'Kilograms',
+          'Use kg for weight entries and weight goals.',
+          () => setWeightPreference('kg')
+        )}
+        {renderMetricOption(
+          weightPreference === 'lbs',
+          'Pounds',
+          'Use lbs as your preferred weight unit.',
+          () => setWeightPreference('lbs')
+        )}
+      </View>
+
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity
+          style={[styles.button, styles.primaryButton, isLoading && styles.buttonDisabled]}
+          onPress={handleStep4Complete}
+          disabled={isLoading}
+          activeOpacity={0.8}
+        >
+          <View style={styles.buttonInner}>
+            <Text style={styles.buttonText}>Next: Club Membership</Text>
+            <ChevronRight size={20} color="#fff" />
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.textButton}
+          onPress={handleSkipStep}
+          disabled={isLoading}
+        >
+          <Text style={styles.textButtonText}>Skip for now</Text>
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+
+  const renderStep5 = () => {
     const showCompleteButton = clubChoice === 'none' ||
       clubChoice === 'start' ||
       clubChoice === 'organizer' ||
-      (clubChoice === 'join' && selectedClubId) ||
-      (clubChoice === 'existing' && selectedClubId);
+      (clubChoice === 'join' && (selectedNormalClubId || selectedSpecialClubIds.length > 0)) ||
+      (clubChoice === 'existing' && (selectedNormalClubId || selectedSpecialClubIds.length > 0));
 
     return (
       <>
@@ -1798,7 +2157,7 @@ export default function RegisterScreen() {
           {showCompleteButton && (
             <TouchableOpacity
               style={[styles.button, styles.primaryButton, isLoading && styles.buttonDisabled]}
-              onPress={handleStep4Complete}
+              onPress={handleStep5Complete}
               disabled={isLoading}
               activeOpacity={0.8}
             >
@@ -1850,7 +2209,8 @@ export default function RegisterScreen() {
                 {screenMode === 'fullRegistration' && registrationStep === 1 && 'Join the community'}
                 {screenMode === 'fullRegistration' && registrationStep === 2 && 'Secure your contacts'}
                 {screenMode === 'fullRegistration' && registrationStep === 3 && 'Almost there!'}
-                {screenMode === 'fullRegistration' && registrationStep === 4 && 'One last step!'}
+                {screenMode === 'fullRegistration' && registrationStep === 4 && 'Set your units'}
+                {screenMode === 'fullRegistration' && registrationStep === 5 && 'One last step!'}
                 {screenMode === 'forgot' && 'Reset your password'}
               </Text>
             </View>
@@ -1864,6 +2224,7 @@ export default function RegisterScreen() {
                   {registrationStep === 2 && renderStep2()}
                   {registrationStep === 3 && renderStep3()}
                   {registrationStep === 4 && renderStep4()}
+                  {registrationStep === 5 && renderStep5()}
                 </>
               ) : screenMode === 'forgot' ? (
                 <>
@@ -2355,6 +2716,26 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     textAlign: 'center',
   },
+  profileCompletionNote: {
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    padding: 12,
+    marginTop: -10,
+    marginBottom: 18,
+    gap: 4,
+  },
+  profileCompletionNoteTitle: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800' as const,
+  },
+  profileCompletionNoteText: {
+    color: 'rgba(255,255,255,0.84)',
+    fontSize: 12,
+    lineHeight: 17,
+  },
   pickerContainer: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -2567,11 +2948,37 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700' as const,
     color: '#fff',
-    marginBottom: 12,
+    marginBottom: 6,
+  },
+  clubSelectionHint: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.75)',
+    lineHeight: 17,
+    marginBottom: 14,
   },
   clubsList: {
-    gap: 10,
+    gap: 14,
     marginBottom: 16,
+  },
+  clubGroupSection: {
+    gap: 10,
+  },
+  clubGroupHeader: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.28)',
+    paddingBottom: 8,
+  },
+  clubGroupTitle: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '800' as const,
+    textTransform: 'uppercase' as const,
+  },
+  clubGroupSubtitle: {
+    color: 'rgba(255,255,255,0.68)',
+    fontSize: 12,
+    marginTop: 2,
+    lineHeight: 16,
   },
   clubCard: {
     flexDirection: 'row',
@@ -2636,6 +3043,18 @@ const styles = StyleSheet.create({
     marginLeft: 36,
     lineHeight: 18,
   },
+  specialClubBadge: {
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  specialClubBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800' as const,
+    textTransform: 'uppercase' as const,
+  },
   missingClubCard: {
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.35)',
@@ -2683,6 +3102,81 @@ const styles = StyleSheet.create({
   },
   clubCardTextSelected: {
     fontWeight: '700' as const,
+  },
+  metricSection: {
+    gap: 10,
+    marginBottom: 18,
+  },
+  metricSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  metricSectionTitle: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800' as const,
+    textTransform: 'uppercase' as const,
+  },
+  metricOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.22)',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  metricOptionCardSelected: {
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    borderColor: '#fff',
+  },
+  metricOptionTitle: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700' as const,
+  },
+  metricOptionDetail: {
+    color: 'rgba(255,255,255,0.68)',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  preferenceQuestion: {
+    gap: 8,
+  },
+  preferenceQuestionDetail: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  preferenceChoiceRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  preferenceChoice: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.24)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  preferenceChoiceSelected: {
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    borderColor: '#fff',
+  },
+  preferenceChoiceText: {
+    color: 'rgba(255,255,255,0.76)',
+    fontSize: 14,
+    fontWeight: '700' as const,
+  },
+  preferenceChoiceTextSelected: {
+    color: '#fff',
   },
   startClubCard: {
     backgroundColor: 'rgba(255,255,255,0.12)',

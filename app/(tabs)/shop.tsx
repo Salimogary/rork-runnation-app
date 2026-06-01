@@ -16,8 +16,7 @@ import * as Haptics from "expo-haptics";
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
-const ACTIVE_SHOP_COUNTRY_CODE = "UG";
-const ACTIVE_SHOP_COUNTRY_NAME = "Uganda";
+const COMING_SOON_SHOP_COUNTRY_CODES = new Set(["UG"]);
 const COUNTRY_CURRENCY: Record<string, { label: string; locale: string }> = {
   UG: { label: "UGX", locale: "en-UG" },
 };
@@ -63,7 +62,8 @@ export default function ShopScreen() {
   const profileCountry = String(profileBundle?.profile?.country || "").trim();
   const profileCountryCode = normalizeCountryCode(profileCountry);
   const hasCountry = profileCountry.length > 0;
-  const canShopInCountry = profileCountryCode === ACTIVE_SHOP_COUNTRY_CODE;
+  const isComingSoonShopCountry = COMING_SOON_SHOP_COUNTRY_CODES.has(profileCountryCode);
+  const canShopInCountry = false;
   const currency = COUNTRY_CURRENCY[profileCountryCode] ?? { label: "USD", locale: "en-US" };
 
   const { data: products, isLoading, refetch } = useQuery<CatalogueItem[]>({
@@ -290,7 +290,9 @@ export default function ShopScreen() {
           <Package size={64} color={colors.primary} />
           <Text style={[styles.emptyTitle, { color: themeColors.text }]}>Shop coming soon</Text>
           <Text style={[styles.emptySubtext, { color: themeColors.textSecondary }]}>
-            Your country is set to {profileCountry}. RunNation Shop is currently open for {ACTIVE_SHOP_COUNTRY_NAME}; more countries are coming soon.
+            {isComingSoonShopCountry
+              ? "RunNation Shop Uganda is not open yet because stock is still being prepared. Please check back soon."
+              : `Your country is set to ${profileCountry}. RunNation Shop is not open in this country yet.`}
           </Text>
         </View>
       </View>
@@ -304,7 +306,7 @@ export default function ShopScreen() {
       <View style={[styles.countryBanner, { backgroundColor: themeColors.cardBackground }]}>
         <Globe2 size={18} color={colors.primary} />
         <View style={{ flex: 1 }}>
-          <Text style={[styles.countryBannerTitle, { color: themeColors.text }]}>Shopping in {profileCountry || ACTIVE_SHOP_COUNTRY_NAME}</Text>
+          <Text style={[styles.countryBannerTitle, { color: themeColors.text }]}>Shopping in {profileCountry || "your country"}</Text>
           <Text style={[styles.countryBannerText, { color: themeColors.textSecondary }]}>Prices shown in {currency.label}</Text>
         </View>
       </View>

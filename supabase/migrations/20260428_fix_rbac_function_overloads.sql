@@ -4,12 +4,9 @@ begin;
 -- leading arguments plus trailing defaults. Calls like public.has_role(uuid, 'x')
 -- then become ambiguous because Postgres sees multiple valid candidates.
 --
--- Keep a single canonical helper set with organizer-aware scope and remove the
--- earlier narrower overloads.
-
-drop function if exists public.can_manage_role_assignment(uuid, bigint, text, uuid);
-drop function if exists public.has_role(uuid, text, text, uuid);
-drop function if exists public.validate_role_scope(bigint, text, uuid);
+-- Keep a canonical organizer-aware helper set. Do not drop earlier overloads
+-- here because live policies/functions may already depend on existing helper
+-- signatures while a partially applied migration is being repaired.
 
 create or replace function public.validate_role_scope(
   p_role_id bigint,
@@ -53,7 +50,7 @@ begin
     return false;
   end if;
 
-  if v_role_name = 'club_coordinator' and p_club_id is null then
+  if v_role_name = 'club_coordinator' and p_club_id is null and p_country_code is null then
     return false;
   end if;
 
@@ -98,7 +95,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select public.has_role(p_user_id, 'super_admin'::text);
+  select public.has_role(p_user_id, 'super_admin'::text, null::text, null::uuid, null::uuid);
 $$;
 
 create or replace function public.is_country_admin(
@@ -111,7 +108,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select public.has_role(p_user_id, 'country_admin'::text, p_country_code, null, null);
+  select public.has_role(p_user_id, 'country_admin'::text, p_country_code, null::uuid, null::uuid);
 $$;
 
 create or replace function public.is_country_coordinator(
@@ -124,7 +121,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select public.has_role(p_user_id, 'country_coordinator'::text, p_country_code, null, null);
+  select public.has_role(p_user_id, 'country_coordinator'::text, p_country_code, null::uuid, null::uuid);
 $$;
 
 create or replace function public.is_club_coordinator(
@@ -137,7 +134,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select public.has_role(p_user_id, 'club_coordinator'::text, null, p_club_id, null);
+  select public.has_role(p_user_id, 'club_coordinator'::text, null::text, p_club_id, null::uuid);
 $$;
 
 create or replace function public.is_event_organizer(
@@ -150,7 +147,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select public.has_role(p_user_id, 'event_organizer'::text, null, null, p_organizer_id);
+  select public.has_role(p_user_id, 'event_organizer'::text, null::text, null::uuid, p_organizer_id);
 $$;
 
 create or replace function public.can_manage_role_assignment(

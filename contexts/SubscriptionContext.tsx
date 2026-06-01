@@ -112,6 +112,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
     roleSession.isSuperAdmin ||
     roleSession.isCountryAdmin ||
     roleSession.isCountryCoordinator ||
+    roleSession.isSpecialClubCoordinator ||
     roleSession.isEventOrganizer;
 
   const userProfileQuery = useQuery({

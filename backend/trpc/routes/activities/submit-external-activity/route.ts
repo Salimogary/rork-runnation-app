@@ -16,8 +16,8 @@ export default publicProcedure
     z.object({
       registrationId: z.string(),
       activityDate: z.string(),
-      exerciseType: z.enum(["Run", "Walk", "Treadmill"]),
-      startTime: z.string(),
+      exerciseType: z.enum(["Run", "Walk", "Cycle", "Treadmill"]),
+      startTime: z.string().regex(/^\d{2}:\d{2}:\d{2}$/, "Start time must be in HH:MM:SS format"),
       duration: z.string().regex(/^\d{2}:\d{2}:\d{2}$/, "Duration must be in HH:MM:SS format"),
       distanceKm: z.number().positive(),
       sourceType: z.enum(["smart_watch", "other_sports_app"]).nullable().optional(),
@@ -29,6 +29,26 @@ export default publicProcedure
   .mutation(async ({ ctx, input }) => {
     try {
       await requireRegistrationOwner(ctx, input.registrationId);
+      if (["Cycle", "Run", "Walk"].includes(input.exerciseType)) {
+        const { data: registration, error: registrationError } = await ctx.supabase
+          .from("registrations")
+          .select("para_uses_equipment, para_equipment_type")
+          .eq("registration_id", input.registrationId)
+          .maybeSingle();
+
+        if (registrationError) {
+          throw new Error(registrationError.message || "Could not verify workout eligibility.");
+        }
+        const cycleOnly =
+          registration?.para_uses_equipment === true &&
+          ["wheelchair", "handcycle"].includes(String(registration?.para_equipment_type || ""));
+        if (input.exerciseType === "Cycle" && !cycleOnly) {
+          throw new Error("Cycle is available for Para Runners who use a wheelchair or handcycle.");
+        }
+        if ((input.exerciseType === "Run" || input.exerciseType === "Walk") && cycleOnly) {
+          throw new Error("Your Para equipment profile qualifies for Cycle workouts only.");
+        }
+      }
       await ensureActionCooldown(ctx, {
         table: "external_activity_submissions",
         filters: [{ column: "registration_id", value: input.registrationId }],

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
-import { requireRegistrationOwner } from "../../../rbac";
+import { getActorRoleSession, logAdminAction, requireRegistrationOwner } from "../../../rbac";
 
 const SOCIAL_BUCKET = "social_uploads";
 
@@ -34,10 +34,11 @@ export default publicProcedure
   )
   .mutation(async ({ input, ctx }) => {
     await requireRegistrationOwner(ctx, input.registrationId);
+    const actor = await getActorRoleSession(ctx);
 
     const { data: postData, error: postFetchError } = await ctx.supabase
       .from("social_posts")
-      .select("photo_url, registration_id")
+      .select("photo_url, registration_id, caption")
       .eq("social_post_id", input.postId)
       .single();
 
@@ -46,7 +47,9 @@ export default publicProcedure
     }
 
     if (postData.registration_id !== input.registrationId) {
-      throw new Error("You can only delete your own posts");
+      if (!actor.isSuperAdmin && !actor.isChatRoomAdministrator) {
+        throw new Error("You can only delete your own posts.");
+      }
     }
 
     const storagePath = extractStoragePath(postData.photo_url);
@@ -67,6 +70,22 @@ export default publicProcedure
 
     if (error) {
       throw new Error(error.message || "Failed to delete post");
+    }
+
+    if (actor.isSuperAdmin || actor.isChatRoomAdministrator) {
+      await logAdminAction(ctx, {
+        actorUserId: actor.authUserId,
+        actionType: "social_post_deleted",
+        metadata: {
+          contentType: "post",
+          contentId: input.postId,
+          ownerRegistrationId: postData.registration_id,
+          deletedByRegistrationId: input.registrationId,
+          deletedByRole: actor.isSuperAdmin ? "Global Admin" : "Chat Room Administrator",
+          contentPreview: String(postData.caption || "").slice(0, 240),
+          hadPhoto: Boolean(postData.photo_url),
+        },
+      });
     }
 
     return { success: true };

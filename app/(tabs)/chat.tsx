@@ -97,7 +97,7 @@ interface ActivityStats {
 }
 
 export default function ChatScreen() {
-  const { user, registrationId } = useAuth();
+  const { user, registrationId, roleSession } = useAuth();
   const { colors: themeColors } = useTheme();
   const { isSubscribed } = useSubscription();
   const queryClient = useQueryClient();
@@ -108,6 +108,7 @@ export default function ChatScreen() {
   const [commentDraft, setCommentDraft] = useState("");
   const [activePostReactionId, setActivePostReactionId] = useState<string | null>(null);
   const [activeCommentReactionId, setActiveCommentReactionId] = useState<string | null>(null);
+  const canModerateChat = roleSession.isSuperAdmin || roleSession.isChatRoomAdministrator;
   const [showPollComposer, setShowPollComposer] = useState(false);
   const [pollQuestion, setPollQuestion] = useState("");
   const [pollOptionA, setPollOptionA] = useState("");
@@ -729,7 +730,7 @@ export default function ChatScreen() {
                   </View>
                   <View style={styles.postHeaderRight}>
                     <Text style={styles.postTimestamp}>{formatPostTimestamp(post.created_at)}</Text>
-                    {registrationId === post.registration_id && (
+                    {(registrationId === post.registration_id || canModerateChat) && (
                       <TouchableOpacity onPress={() => handleDeletePost(post.social_post_id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                         <Trash2 size={17} color="#ef4444" />
                       </TouchableOpacity>
@@ -896,7 +897,7 @@ export default function ChatScreen() {
                       <Text style={[styles.commentAuthor, { color: themeColors.text }]}>
                         {comment.user?.first_name || comment.user?.username || "RunNation User"}
                       </Text>
-                      {comment.registration_id === registrationId ? (
+                      {comment.registration_id === registrationId || canModerateChat ? (
                         <TouchableOpacity onPress={() => deleteCommentMutation.mutate(comment.comment_id)}>
                           <Trash2 size={16} color="#ef4444" />
                         </TouchableOpacity>

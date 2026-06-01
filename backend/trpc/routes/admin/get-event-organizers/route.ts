@@ -7,6 +7,7 @@ export default publicProcedure.query(async ({ ctx }) => {
     allowCountryAdmin: true,
     allowCountryCoordinator: true,
     allowClubCoordinator: true,
+    allowSpecialClubCoordinator: true,
     allowEventOrganizer: true,
   });
 
@@ -24,8 +25,9 @@ export default publicProcedure.query(async ({ ctx }) => {
     actor.isEventOrganizer &&
     !actor.isSuperAdmin &&
     !actor.isCountryAdmin &&
-    !actor.isCountryCoordinator &&
-    !actor.isClubCoordinator;
+      !actor.isCountryCoordinator &&
+    !actor.isClubCoordinator &&
+    !actor.isSpecialClubCoordinator;
 
   if (shouldRestrictToOrganizerScope) {
     if (organizerScopes.length === 0) {
@@ -42,3 +44,5 @@ export default publicProcedure.query(async ({ ctx }) => {
 
   return data ?? [];
 });
+
+

@@ -185,13 +185,13 @@ Additional global/special roles:
 - Para Runners Club Coordinator
 - Magazine Columnist (Fitness Coach)
 - Magazine Columnist (Sports Journalist)
-- Magazine Columnist (Motivation Speaker)
+- Magazine Columnist (Empowerment Coach)
 
 Role rules:
 
 - Most users can hold only one active admin/service role at a time.
 - A basic user role can exist beside one active admin/service role.
-- Super Admins are exempt where needed for setup and operations.
+- Global Admins are exempt where needed for setup and operations.
 - Club coordinator requests use the `Create Club` action label.
 - Event organizer and club creation requests are handled through Join Service Team instead of registration.
 - Rejected role, club, organizer, event, magazine, or activity decisions remain visible to admins to prevent repeated action on the same rejected request.
@@ -247,7 +247,7 @@ The support menu order is:
 - Rate Us
 - Share App
 
-Admin terms are versioned through `ADMIN_TERMS_VERSION` in both backend and app helpers. The current version is `2026-05-09`, reflecting recent changes to recurring events, special clubs, magazine approval, imports, moderation, service-team roles, and one-role rules.
+Admin terms are versioned through `ADMIN_TERMS_VERSION` in the backend terms module and are delivered to the app through `admin.getAdminTermsContent`. The current version is `2026-05-23`, reflecting generic Mission and Values sections plus compact role-specific terms derived from each role's Admin portal responsibilities.
 
 ## Data Model Notes
 

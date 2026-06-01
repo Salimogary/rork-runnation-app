@@ -1,9 +1,9 @@
 import { publicProcedure } from "../../../create-context";
 import { z } from "zod";
 import { logAdminAction, requireAdminPermission } from "../../../rbac";
+import { uploadMagazineImage } from "../../../magazine-image";
 
 const EVENT_POSTER_BUCKET = "event_poster";
-const MAGAZINE_BUCKET = "magazine";
 const EVENT_POSTER_ALLOWED_MIME_TYPES = new Set([
   "image/jpeg",
   "image/png",
@@ -94,58 +94,8 @@ async function clearExistingPosterFiles(supabase: StorageCapableSupabase, eventI
   }
 }
 
-function getPhotoFileExtension(mimeType: string): string {
-  if (mimeType.includes("png")) return "png";
-  if (mimeType.includes("webp")) return "webp";
-  if (mimeType.includes("avif")) return "avif";
-  return "jpg";
-}
-
-async function uploadMagazinePhoto(supabase: any, eventId: string, base64: string, mimeType?: string | null) {
-  const resolvedMimeType = detectPosterMimeType(base64) || mimeType || "image/jpeg";
-  if (!EVENT_POSTER_ALLOWED_MIME_TYPES.has(resolvedMimeType)) {
-    throw new Error("Unsupported magazine photo type.");
-  }
-
-  const folderPath = `article-submissions/events/${eventId}`;
-  const { data: existingFiles } = await supabase.storage
-    .from(MAGAZINE_BUCKET)
-    .list(folderPath, {
-      limit: 100,
-      sortBy: { column: "name", order: "asc" },
-    });
-
-  const pathsToRemove = (existingFiles || [])
-    .filter((file: any) => String(file.name || "").startsWith("magazine-photo."))
-    .map((file: any) => `${folderPath}/${file.name}`);
-
-  if (pathsToRemove.length > 0) {
-    await supabase.storage.from(MAGAZINE_BUCKET).remove(pathsToRemove);
-  }
-
-  const filePath = `${folderPath}/magazine-photo.${getPhotoFileExtension(resolvedMimeType)}`;
-  const photoBytes = decodePosterBase64(base64);
-  if (!photoBytes.length) {
-    throw new Error("Magazine photo upload was empty.");
-  }
-
-  const { data: uploadData, error: uploadError } = await supabase.storage
-    .from(MAGAZINE_BUCKET)
-    .upload(filePath, photoBytes, {
-      contentType: resolvedMimeType,
-      cacheControl: "3600",
-      upsert: true,
-    });
-
-  if (uploadError || !uploadData) {
-    throw new Error(uploadError?.message || "Failed to upload magazine photo.");
-  }
-
-  const { data: publicData } = supabase.storage
-    .from(MAGAZINE_BUCKET)
-    .getPublicUrl(uploadData.path);
-
-  return publicData.publicUrl ? `${publicData.publicUrl}?v=${Date.now()}` : null;
+async function uploadMagazinePhoto(ctx: any, eventId: string, base64: string, mimeType?: string | null) {
+  return uploadMagazineImage(ctx, "article-submissions/events", eventId, base64, mimeType);
 }
 
 function normalizeCountryCode(country?: string | null) {
@@ -207,13 +157,42 @@ function countWords(value: string): number {
   return value.trim().split(/\s+/).filter(Boolean).length;
 }
 
+function normalizeDateOnly(value: string): string {
+  const raw = value.trim();
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const displayMatch = raw.match(/^(\d{2})[/-](\d{2})[/-](\d{4})$/);
+  const match = isoMatch
+    ? [isoMatch[1], isoMatch[2], isoMatch[3]]
+    : displayMatch
+    ? [displayMatch[3], displayMatch[2], displayMatch[1]]
+    : null;
+
+  if (!match) return raw.slice(0, 10);
+  const [yearText, monthText, dayText] = match;
+  return `${yearText}-${monthText}-${dayText}`;
+}
+
+function isValidDateOnly(dateOnly: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return false;
+  const [year, month, day] = dateOnly.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+}
+
+function normalizeAvailableDistances(values?: number[] | null): number[] {
+  const distances = (values ?? [])
+    .map((value) => Number(Number(value).toFixed(2)))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  return Array.from(new Set(distances)).sort((a, b) => a - b);
+}
+
 const updateEventInput = z.object({
   eventId: z.string(),
-  eventName: z.string(),
-  startsAt: z.string(),
-  endsAt: z.string(),
-  registrationClosesAt: z.string().optional().nullable(),
-  eventType: z.enum(["same_day", "recurring", "multiday"]).optional(),
+  eventName: z.string().trim().min(1, "Event name is required."),
+  startsAt: z.string().trim().min(1, "Start date is required."),
+  endsAt: z.string().trim().min(1, "End date is required."),
+  registrationClosesAt: z.string().trim().min(1, "Registration close date is required."),
+  eventType: z.enum(["same_day", "recurring", "multiday"]),
   recurrenceFrequency: z.enum(["weekly", "monthly"]).optional().nullable(),
   recurrenceWeekday: z.number().int().min(0).max(6).optional().nullable(),
   recurrenceWeekdays: z.array(z.number().int().min(0).max(6)).optional().nullable(),
@@ -223,13 +202,16 @@ const updateEventInput = z.object({
   country: z.string().optional(),
   club: z.string().optional(),
   organizerId: z.string().uuid().optional().nullable(),
+  eventLocation: z.string().optional().nullable(),
   isVirtual: z.boolean().optional(),
   entry: z.enum(["free", "club_approved", "paid"]).optional(),
   entryFee: z.number().nonnegative().optional(),
   hasMedal: z.boolean().optional(),
+  availableDistancesKm: z.array(z.number().positive()).optional(),
   paymentDetails: z.string().optional(),
   organizerPaymentLink: z.string().optional().nullable(),
   runnationPaymentLinkEnabled: z.boolean().optional(),
+  participantLimit: z.number().int().positive().nullable().optional(),
   medalMinDailyDistance: z.number().optional(),
   medalMinCumulativeDistance: z.number().optional(),
   medalDateStart: z.string().optional(),
@@ -238,9 +220,9 @@ const updateEventInput = z.object({
   posterLink: z.string().nullable().optional(),
   posterBase64: z.string().nullable().optional(),
   posterMimeType: z.string().nullable().optional(),
-  magazineArticleTitle: z.string().trim().min(6).max(140),
-  magazineArticleBody: z.string().trim().min(1).max(6000),
-  magazineWriterName: z.string().trim().min(2).max(80),
+  magazineArticleTitle: z.string().trim().min(6).max(140).optional(),
+  magazineArticleBody: z.string().trim().min(1).max(6000).optional(),
+  magazineWriterName: z.string().trim().min(2).max(80).optional(),
   magazinePhotoLink: z.string().trim().url().optional(),
   magazinePhotoBase64: z.string().nullable().optional(),
   magazinePhotoMimeType: z.string().nullable().optional(),
@@ -252,6 +234,7 @@ export default publicProcedure.input(updateEventInput).mutation(async ({ input, 
     allowCountryAdmin: true,
     allowCountryCoordinator: true,
     allowClubCoordinator: true,
+    allowSpecialClubCoordinator: true,
     allowEventOrganizer: true,
   });
 
@@ -276,8 +259,9 @@ export default publicProcedure.input(updateEventInput).mutation(async ({ input, 
     actor.isEventOrganizer &&
     !actor.isSuperAdmin &&
     !actor.isCountryAdmin &&
-    !actor.isCountryCoordinator &&
-    !actor.isClubCoordinator;
+      !actor.isCountryCoordinator &&
+    !actor.isClubCoordinator &&
+    !actor.isSpecialClubCoordinator;
 
   if (hasOrganizerOnlyAccess && (!existingEvent.organizer || !organizerScopes.includes(existingEvent.organizer))) {
     throw new Error("You can only update events owned by your organizer profile.");
@@ -353,9 +337,15 @@ export default publicProcedure.input(updateEventInput).mutation(async ({ input, 
     ? organizerScopes[0] ?? null
     : input.organizerId ?? existingEvent.organizer ?? null;
   const normalizedClub = normalizedOrganizerId ? null : input.club?.trim() || null;
+  const normalizedEventLocation = input.isVirtual === true ? "Virtual" : input.eventLocation?.trim() || null;
   const normalizedEntry = input.entry ?? "free";
-  const normalizedRegistrationClosesAt = input.registrationClosesAt?.trim() || null;
-  const normalizedEventType = input.eventType ?? (input.startsAt.slice(0, 10) === input.endsAt.slice(0, 10) ? "same_day" : "multiday");
+  const normalizedEventType = input.eventType;
+  const normalizedRegistrationClosesAt = normalizeDateOnly(input.registrationClosesAt);
+  const normalizedStartsAt = normalizeDateOnly(input.startsAt);
+  const normalizedEndsAt =
+    normalizedEventType === "same_day" || normalizedEventType === "recurring"
+      ? normalizedStartsAt
+      : normalizeDateOnly(input.endsAt);
   const normalizedRecurrenceFrequency = normalizedEventType === "recurring" ? input.recurrenceFrequency ?? "weekly" : null;
   const normalizedRecurrenceWeekdays =
     normalizedEventType === "recurring" && normalizedRecurrenceFrequency === "weekly"
@@ -382,19 +372,44 @@ export default publicProcedure.input(updateEventInput).mutation(async ({ input, 
   const normalizedOrganizerPaymentLink = input.organizerPaymentLink?.trim() || null;
   const normalizedEntryFee =
     normalizedEntry === "paid" && typeof input.entryFee === "number" ? Number(input.entryFee.toFixed(2)) : null;
+  const normalizedParticipantLimit =
+    typeof input.participantLimit === "number" ? input.participantLimit : null;
+  const normalizedHasMedal = input.hasMedal === true;
+  const normalizedAvailableDistances = normalizedHasMedal
+    ? normalizeAvailableDistances(input.availableDistancesKm)
+    : [];
   const normalizedMinDailyDistance =
-    typeof input.medalMinDailyDistance === "number" ? Number(input.medalMinDailyDistance.toFixed(2)) : null;
+    normalizedHasMedal && typeof input.medalMinDailyDistance === "number" ? Number(input.medalMinDailyDistance.toFixed(2)) : null;
   const normalizedMinCumulativeDistance =
-    normalizedEventType === "multiday" && typeof input.medalMinCumulativeDistance === "number"
+    normalizedHasMedal && normalizedEventType === "multiday" && typeof input.medalMinCumulativeDistance === "number"
       ? Number(input.medalMinCumulativeDistance.toFixed(2))
       : null;
-  const articleWordCount = countWords(input.magazineArticleBody);
+  const shouldCreateMagazineSubmission = Boolean(
+    input.magazineArticleBody?.trim() || input.magazinePhotoBase64 || input.magazinePhotoLink
+  );
+  const articleWordCount = shouldCreateMagazineSubmission ? countWords(input.magazineArticleBody || "") : 0;
   const approvalStatus = hasOrganizerOnlyAccess ? "pending" : existingEvent.approval_status || "pending";
   const approvedAt = approvalStatus === "approved" ? existingEvent.approved_at ?? null : null;
   const approvedBy = approvalStatus === "approved" ? existingEvent.approved_by ?? null : null;
 
+  if (!isValidDateOnly(normalizedStartsAt) || !isValidDateOnly(normalizedEndsAt) || !isValidDateOnly(normalizedRegistrationClosesAt)) {
+    throw new Error("Please provide valid event dates.");
+  }
+
+  if (normalizedEndsAt < normalizedStartsAt) {
+    throw new Error("The event end date cannot be before the start date.");
+  }
+
+  if (normalizedRegistrationClosesAt > normalizedEndsAt) {
+    throw new Error("Registration close date cannot be after the event end date.");
+  }
+
   if (normalizedEntry === "paid" && (normalizedEntryFee === null || Number.isNaN(normalizedEntryFee))) {
     throw new Error("Please provide an entry fee for paid events.");
+  }
+
+  if (normalizedHasMedal && normalizedAvailableDistances.length === 0) {
+    throw new Error("Please choose at least one medal distance category.");
   }
 
   if (
@@ -428,7 +443,11 @@ export default publicProcedure.input(updateEventInput).mutation(async ({ input, 
     throw new Error("Please choose the monthly weekend.");
   }
 
-  if (articleWordCount < 200 || articleWordCount > 300) {
+  if (shouldCreateMagazineSubmission && (!input.magazineArticleTitle?.trim() || !input.magazineWriterName?.trim())) {
+    throw new Error("Please provide the magazine article title and writer name.");
+  }
+
+  if (shouldCreateMagazineSubmission && (articleWordCount < 200 || articleWordCount > 300)) {
     throw new Error("Magazine article body must be between 200 and 300 words.");
   }
 
@@ -438,6 +457,10 @@ export default publicProcedure.input(updateEventInput).mutation(async ({ input, 
 
   if (!normalizedOrganizerId && !normalizedClub) {
     throw new Error("Please choose a club or an event organizer for this event.");
+  }
+
+  if (input.isVirtual !== true && !normalizedEventLocation) {
+    throw new Error("Please enter the event start/finish location.");
   }
 
   let resolvedCountry = normalizedCountry;
@@ -474,10 +497,10 @@ export default publicProcedure.input(updateEventInput).mutation(async ({ input, 
 
   let magazinePhotoLink = input.magazinePhotoLink || null;
   if (input.magazinePhotoBase64) {
-    magazinePhotoLink = await uploadMagazinePhoto(ctx.supabase, input.eventId, input.magazinePhotoBase64, input.magazinePhotoMimeType);
+    magazinePhotoLink = await uploadMagazinePhoto(ctx, input.eventId, input.magazinePhotoBase64, input.magazinePhotoMimeType);
   }
 
-  if (!magazinePhotoLink) {
+  if (shouldCreateMagazineSubmission && !magazinePhotoLink) {
     throw new Error("Please add a magazine photo for the event story.");
   }
 
@@ -486,12 +509,16 @@ export default publicProcedure.input(updateEventInput).mutation(async ({ input, 
   resolvedCountryCode = resolvedCountryRecord.countryCode;
   resolvedCurrencyCode = resolvedCountryRecord.currencyCode;
 
+  if (!resolvedCountry || !resolvedCountryCode) {
+    throw new Error("Please choose the event country.");
+  }
+
   const { data, error } = await ctx.supabase
     .from("events")
     .update({
       event_name: input.eventName,
-      starts_at: input.startsAt,
-      ends_at: input.endsAt,
+      starts_at: normalizedStartsAt,
+      ends_at: normalizedEndsAt,
       registration_closes_at: normalizedRegistrationClosesAt,
       event_type: normalizedEventType,
       recurrence_frequency: normalizedRecurrenceFrequency,
@@ -504,13 +531,16 @@ export default publicProcedure.input(updateEventInput).mutation(async ({ input, 
       country_code: resolvedCountryCode,
       currency_code: normalizedEntry === "paid" ? resolvedCurrencyCode : null,
       organizer: normalizedOrganizerId,
+      event_location: normalizedEventLocation,
       is_virtual: input.isVirtual === true,
       entry: normalizedEntry,
       entry_fee: normalizedEntry === "paid" ? normalizedEntryFee : null,
-      has_medal: input.hasMedal === true,
+      has_medal: normalizedHasMedal,
+      available_distances_km: normalizedAvailableDistances,
       payment_details: normalizedEntry === "paid" ? normalizedPaymentDetails : null,
       organizer_payment_link: normalizedEntry === "paid" ? normalizedOrganizerPaymentLink : null,
       runnation_payment_link_enabled: normalizedEntry === "paid" && input.runnationPaymentLinkEnabled === true,
+      participant_limit: normalizedParticipantLimit,
       approval_status: approvalStatus,
       approved_at: approvedAt,
       approved_by: approvedBy,
@@ -528,11 +558,12 @@ export default publicProcedure.input(updateEventInput).mutation(async ({ input, 
     throw new Error(error.message || "Failed to update event");
   }
 
+  if (shouldCreateMagazineSubmission) {
   try {
     const { data: actorUser } = actor.authUserId
       ? await ctx.supabase.auth.admin.getUserById(actor.authUserId)
       : { data: null };
-    const authorName = input.magazineWriterName.trim();
+    const authorName = input.magazineWriterName!.trim();
     const email = actorUser?.user?.email || "magazine@runnation.app";
 
     const { error: magazineInsertError } = await ctx.supabase.from("magazine_article_submissions").insert({
@@ -542,10 +573,10 @@ export default publicProcedure.input(updateEventInput).mutation(async ({ input, 
       article_writer_name: authorName,
       email,
       event_id: input.eventId,
-      title: input.magazineArticleTitle.trim(),
+      title: input.magazineArticleTitle!.trim(),
       category: "Event Preview",
       pitch: `Event preview for ${input.eventName}.`,
-      body: input.magazineArticleBody.trim(),
+      body: input.magazineArticleBody!.trim(),
       attachment_url: magazinePhotoLink,
       magazine_photo_url: magazinePhotoLink,
       status: "submitted",
@@ -561,6 +592,7 @@ export default publicProcedure.input(updateEventInput).mutation(async ({ input, 
         ? magazineError.message
         : "Could not create the linked magazine article submission."
     );
+  }
   }
 
   await logAdminAction(ctx, {
@@ -579,20 +611,25 @@ export default publicProcedure.input(updateEventInput).mutation(async ({ input, 
       organizerName,
       registrationClosesAt: normalizedRegistrationClosesAt,
       isVirtual: input.isVirtual === true,
+      eventLocation: normalizedEventLocation,
       entry: normalizedEntry,
       entryFee: normalizedEntry === "paid" ? normalizedEntryFee : null,
-      hasMedal: input.hasMedal === true,
+      hasMedal: normalizedHasMedal,
+      availableDistancesKm: normalizedAvailableDistances,
       paymentDetails: normalizedEntry === "paid" ? normalizedPaymentDetails : null,
       organizerPaymentLink: normalizedEntry === "paid" ? normalizedOrganizerPaymentLink : null,
       runnationPaymentLinkEnabled: normalizedEntry === "paid" && input.runnationPaymentLinkEnabled === true,
+      participantLimit: normalizedParticipantLimit,
       approvalStatus,
       posterLink,
-      magazineArticleTitle: input.magazineArticleTitle.trim(),
-      magazineWriterName: input.magazineWriterName.trim(),
+      magazineArticleTitle: input.magazineArticleTitle?.trim() ?? null,
+      magazineWriterName: input.magazineWriterName?.trim() ?? null,
       magazinePhotoLink,
     },
   });
 
   return data;
 });
+
+
 

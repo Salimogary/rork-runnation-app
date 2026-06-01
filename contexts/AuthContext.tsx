@@ -25,6 +25,12 @@ interface RegistrationData {
   weightTarget: string;
   weightMonths: string;
   country: string;
+  hasDisability: boolean;
+  paraUsesEquipment?: boolean;
+  paraEquipmentType?: string;
+  paraEquipmentOther?: string;
+  doesIndoorWorkouts: boolean;
+  hasSmartWatch: boolean;
   pin: string;
   confirmPin: string;
   photoUri?: string;
@@ -123,6 +129,66 @@ function mapAuthErrorMessage(message: string): string {
   return message;
 }
 
+function isInvalidRefreshTokenError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || '');
+  const normalized = message.toLowerCase();
+  return normalized.includes('invalid refresh token') || normalized.includes('refresh token not found');
+}
+
+async function purgeStoredSupabaseSession() {
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+  const projectRef = supabaseUrl.match(/^https:\/\/([^.]+)\.supabase\.co/i)?.[1];
+  const keyMatches = (key: string) =>
+    key.includes('supabase.auth.token') ||
+    (projectRef ? key.includes(`sb-${projectRef}-auth-token`) : key.includes('sb-') && key.includes('auth-token'));
+
+  try {
+    if (Platform.OS === 'web') {
+      const keys = Object.keys(localStorage).filter(keyMatches);
+      keys.forEach((key) => localStorage.removeItem(key));
+      return;
+    }
+
+    const keys = (await AsyncStorage.getAllKeys()).filter(keyMatches);
+    if (keys.length > 0) {
+      await AsyncStorage.multiRemove(keys);
+    }
+  } catch (error) {
+    console.warn(
+      '[AuthContext] Failed to purge stored Supabase session:',
+      error instanceof Error ? error.message : error
+    );
+  }
+}
+
+async function clearStaleAuthSession() {
+  try {
+    await supabase.auth.signOut({ scope: 'local' });
+  } catch (error) {
+    console.warn(
+      '[AuthContext] Failed to clear stale auth session:',
+      error instanceof Error ? error.message : error
+    );
+  }
+  await purgeStoredSupabaseSession();
+}
+
+async function getSafeSession(): Promise<Session | null> {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    return session;
+  } catch (error) {
+    if (isInvalidRefreshTokenError(error)) {
+      console.warn('[AuthContext] Clearing stale Supabase session after invalid refresh token.');
+      await clearStaleAuthSession();
+      return null;
+    }
+    throw error;
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -190,12 +256,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+        const session = await getSafeSession();
         await hydrateFromSession(session);
       } catch (error) {
         console.error('Error checking auth status:', error);
+        await hydrateFromSession(null);
       } finally {
         setIsLoading(false);
       }
@@ -228,15 +293,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refreshRoleSession = useCallback(async (): Promise<RoleSession> => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    const session = await getSafeSession();
     return hydrateFromSession(session);
   }, [hydrateFromSession]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     const cleanEmail = email.trim().toLowerCase();
-    const cleanPassword = password.trim();
+    const cleanPassword = password;
 
     try {
       if (!cleanEmail.includes('@')) {
@@ -246,6 +309,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           },
         };
       }
+
+      if (!cleanPassword) {
+        return {
+          error: {
+            message: 'Please enter your password.',
+          },
+        };
+      }
+
+      await clearStaleAuthSession();
 
       const attempts = loginAttempts[cleanEmail];
       if (attempts) {
@@ -299,9 +372,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return updated;
       });
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const session = await getSafeSession();
       await hydrateFromSession(session);
 
       return { error: null };
@@ -329,6 +400,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         dob: registrationData.dob || '',
         residence: registrationData.residence || '',
         country: registrationData.country || '',
+        hasDisability: registrationData.hasDisability === true,
+        paraUsesEquipment: registrationData.hasDisability === true && registrationData.paraUsesEquipment === true,
+        paraEquipmentType:
+          registrationData.hasDisability === true && registrationData.paraUsesEquipment === true
+            ? (registrationData.paraEquipmentType || null) as "wheelchair" | "handcycle" | "prosthetic_blades" | "other" | null
+            : null,
+        paraEquipmentOther:
+          registrationData.hasDisability === true &&
+          registrationData.paraUsesEquipment === true &&
+          registrationData.paraEquipmentType === "other"
+            ? registrationData.paraEquipmentOther || null
+            : null,
+        doesIndoorWorkouts: registrationData.doesIndoorWorkouts === true,
+        hasSmartWatch: registrationData.hasSmartWatch === true,
       });
 
       return { error: null, registrationId: newUserData.id };

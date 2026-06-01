@@ -2,7 +2,7 @@ import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, View } from "re
 import Constants from "expo-constants";
 import { Stack } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { Building2, CalendarDays, Globe2, MapPin, ShieldCheck, Store, UserRoundCheck, Users } from "lucide-react-native";
+import { Apple, Award, Building2, CalendarDays, Globe2, Play, ShieldCheck, Store, TrendingUp, UserRoundCheck, Users } from "lucide-react-native";
 import { useTheme } from "@/contexts/ThemeContext";
 import colors from "@/constants/colors";
 import { trpc } from "@/lib/trpc";
@@ -18,30 +18,29 @@ const getAppVersion = () => {
   return Constants.expoConfig?.version || "1.0.0";
 };
 
-const getLaunchDate = () => {
-  const extra = Constants.expoConfig?.extra as { appStoreLaunchDate?: string } | undefined;
-  return extra?.appStoreLaunchDate || "Coming soon";
-};
-
 export default function AboutUsScreen() {
   const { colors: themeColors, isDark } = useTheme();
   const appVersion = getAppVersion();
-  const launchDate = getLaunchDate();
   const { data: stats, isLoading } = trpc.support.getAboutStats.useQuery(undefined, {
     staleTime: 60_000,
   });
 
   const statCards = [
     { label: "Runners", value: stats?.runners, icon: Users, color: "#F97316" },
-    { label: "Clubs", value: stats?.clubs, icon: Building2, color: "#10B981" },
-    { label: "Towns", value: stats?.towns, icon: MapPin, color: "#3B82F6" },
+    { label: "Avg daily registrations", value: stats?.averageDailyRegistrations, icon: TrendingUp, color: "#3B82F6" },
     { label: "Countries", value: stats?.countries, icon: Globe2, color: "#06B6D4" },
+    { label: "Clubs", value: stats?.clubs, icon: Building2, color: "#10B981" },
+    { label: "Event organizers", value: stats?.eventOrganizers, icon: CalendarDays, color: "#EC4899" },
+    { label: "Sportswear shops", value: stats?.activeShops, icon: Store, color: "#F59E0B" },
     { label: "Age range", value: stats?.ageRange, icon: Users, color: "#14B8A6" },
     { label: "Male : Female", value: stats?.maleFemaleRatio, icon: UserRoundCheck, color: "#6366F1" },
     { label: "Admins", value: stats?.admins, icon: ShieldCheck, color: "#8B5CF6" },
-    { label: "Event organizers", value: stats?.eventOrganizers, icon: CalendarDays, color: "#EC4899" },
-    { label: "Active shops", value: stats?.activeShops, icon: Store, color: "#F59E0B" },
   ];
+  const soonBadge = (
+    <View style={styles.soonBadge}>
+      <Text style={styles.soonBadgeText}>soon</Text>
+    </View>
+  );
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: themeColors.background }]} contentContainerStyle={styles.content}>
@@ -59,26 +58,78 @@ export default function AboutUsScreen() {
 
       <View style={[styles.card, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}>
         <Text style={[styles.paragraph, { color: themeColors.text }]}>
-          RunNation is a community-powered running app that brings together everyone with a passion for running-from everyday runners and clubs to event organizers, schools, institutions, and charities using runs to raise awareness or support a cause. Whether you run for fitness, competition, connection, fundraising, or fun, you belong here. Founded by Salimo Gary, a Ugandan software developer, data scientist, and running enthusiast, RunNation was created to be one home for runners, clubs, events, shops, and communities, and continues to grow through its vibrant network of users-where runners truly belong.
+          RunNation is a community-powered running app that brings together everyone with a passion for running-from everyday runners and clubs to event organizers, schools, institutions, and charities using runs to raise awareness or support a cause. Whether you run for fitness, competition, connection, fundraising, or fun, you belong here. Founded by Salimo Gary, a Ugandan software developer, data scientist, and running enthusiast, RunNation was created to be one home for runners, clubs, events, sportswear shops, and communities, and continues to grow through its vibrant network of users-where runners truly belong.
         </Text>
       </View>
 
       <View style={styles.metaGrid}>
-        <View style={[styles.metaCard, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}>
-          <Text style={[styles.metaLabel, { color: themeColors.textSecondary }]}>Date founded</Text>
-          <Text style={[styles.metaValue, { color: themeColors.text }]}>{launchDate}</Text>
+        <View style={[styles.metaCard, { backgroundColor: isDark ? themeColors.cardBackground : "#FFF7ED", borderColor: isDark ? themeColors.border : "#FDBA74" }]}>
+          <View style={styles.metaHeaderRow}>
+            <View style={[styles.metaIconChip, { backgroundColor: isDark ? "#F9731624" : "#FFEDD5" }]}>
+              <CalendarDays size={16} color="#F97316" />
+            </View>
+            <Text style={[styles.metaLabel, { color: isDark ? "#FDBA74" : "#9A3412" }]}>Milestone dates</Text>
+          </View>
+          <Text style={[styles.metaValue, { color: themeColors.text }]}>Beta launch - 30/05/2026</Text>
+          <View style={styles.platformMilestones}>
+            <View style={styles.platformMilestoneRow}>
+              <Play size={15} color={themeColors.text} />
+              {soonBadge}
+            </View>
+            <View style={styles.platformMilestoneRow}>
+              <Apple size={15} color={themeColors.text} />
+              {soonBadge}
+            </View>
+          </View>
         </View>
-        <View style={[styles.metaCard, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}>
-          <Text style={[styles.metaLabel, { color: themeColors.textSecondary }]}>App version</Text>
+        <View style={[styles.metaCard, { backgroundColor: isDark ? themeColors.cardBackground : "#EEF2FF", borderColor: isDark ? themeColors.border : "#A5B4FC" }]}>
+          <View style={styles.metaHeaderRow}>
+            <View style={[styles.metaIconChip, { backgroundColor: isDark ? "#6366F124" : "#E0E7FF" }]}>
+              <ShieldCheck size={16} color="#6366F1" />
+            </View>
+            <Text style={[styles.metaLabel, { color: isDark ? "#A5B4FC" : "#3730A3" }]}>App version</Text>
+          </View>
           <Text style={[styles.metaValue, { color: themeColors.text }]}>{appVersion}</Text>
         </View>
-        <View style={[styles.metaCard, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}>
-          <Text style={[styles.metaLabel, { color: themeColors.textSecondary }]}>Platforms</Text>
-          <Text style={[styles.metaValue, { color: themeColors.text }]}>Android; iOS coming soon</Text>
+        <View style={[styles.metaCard, { backgroundColor: isDark ? themeColors.cardBackground : "#F0FDF4", borderColor: isDark ? themeColors.border : "#86EFAC" }]}>
+          <View style={styles.metaHeaderRow}>
+            <View style={[styles.metaIconChip, { backgroundColor: isDark ? "#16A34A24" : "#DCFCE7" }]}>
+              <Award size={16} color="#16A34A" />
+            </View>
+            <Text style={[styles.metaLabel, { color: isDark ? "#86EFAC" : "#166534" }]}>Ratings</Text>
+          </View>
+          <View style={styles.platformMilestones}>
+            <View style={styles.ratingRow}>
+              <View style={styles.platformMilestoneRow}>
+                <Play size={15} color={themeColors.text} />
+                <Text style={[styles.metaSubValue, { color: themeColors.text }]}>Google Play</Text>
+              </View>
+              {soonBadge}
+            </View>
+            <View style={styles.ratingRow}>
+              <View style={styles.platformMilestoneRow}>
+                <Apple size={15} color={themeColors.text} />
+                <Text style={[styles.metaSubValue, { color: themeColors.text }]}>Apple App Store</Text>
+              </View>
+              {soonBadge}
+            </View>
+            <View style={styles.ratingRow}>
+              <View style={styles.platformMilestoneRow}>
+                <Award size={15} color={themeColors.text} />
+                <Text style={[styles.metaSubValue, { color: themeColors.text }]}>World Athletics</Text>
+              </View>
+              {soonBadge}
+            </View>
+          </View>
         </View>
-        <View style={[styles.metaCard, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}>
-          <Text style={[styles.metaLabel, { color: themeColors.textSecondary }]}>Free trial</Text>
-          <Text style={[styles.metaValue, { color: themeColors.text }]}>90 days free</Text>
+        <View style={[styles.metaCard, { backgroundColor: isDark ? themeColors.cardBackground : "#FDF2F8", borderColor: isDark ? themeColors.border : "#F9A8D4" }]}>
+          <View style={styles.metaHeaderRow}>
+            <View style={[styles.metaIconChip, { backgroundColor: isDark ? "#EC489924" : "#FCE7F3" }]}>
+              <TrendingUp size={16} color="#EC4899" />
+            </View>
+            <Text style={[styles.metaLabel, { color: isDark ? "#F9A8D4" : "#9D174D" }]}>App trial</Text>
+          </View>
+          <Text style={[styles.metaValue, { color: themeColors.text }]}>1st Quarter (90 days)</Text>
         </View>
       </View>
 
@@ -160,22 +211,70 @@ const styles = StyleSheet.create({
   },
   metaCard: {
     width: "48%",
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: 1,
-    padding: 13,
-    minHeight: 98,
+    padding: 11,
+    minHeight: 92,
     justifyContent: "space-between",
   },
+  metaHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    marginBottom: 2,
+  },
+  metaIconChip: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   metaLabel: {
-    fontSize: 12,
-    fontWeight: "700" as const,
+    flex: 1,
+    fontSize: 10,
+    fontWeight: "900" as const,
     textTransform: "uppercase" as const,
   },
   metaValue: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "800" as const,
-    marginTop: 8,
-    lineHeight: 21,
+    marginTop: 6,
+    lineHeight: 20,
+  },
+  metaSubValue: {
+    fontSize: 12,
+    fontWeight: "800" as const,
+    lineHeight: 16,
+  },
+  platformMilestones: {
+    gap: 6,
+    marginTop: 7,
+  },
+  platformMilestoneRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  ratingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 6,
+  },
+  soonBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#f59e0b",
+    backgroundColor: "#fef3c7",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  soonBadgeText: {
+    color: "#92400e",
+    fontSize: 10,
+    fontWeight: "900" as const,
+    textTransform: "uppercase" as const,
   },
   statsHeader: {
     flexDirection: "row",

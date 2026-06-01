@@ -1,31 +1,34 @@
 # RunNation Magazine Columnist Terms and Conditions
 
-Version: `2026-05-09`
+Version: `2026-05-25`
 
-## Purpose
+## Mission
 
-- Magazine columnist access exists to support approved RunNation editorial content in The Running Post.
-- Columnist roles may include Fitness Coach, Sports Journalist, and Motivation Speaker categories.
-- Columnists must not use their role to mislead readers, advertise without approval, publish unsafe advice, or access information outside their approved editorial work.
+- RunNation exists to connect runners, clubs, organizers, families, writers, and community leaders through safe events, trusted records, inclusive clubs, responsible communication, and inspiring stories.
+- Admin access is given to protect that mission and to help the platform serve members fairly, accurately, and professionally.
 
-## Role Access
+## Values
 
-- **Magazine Columnist**: Access is limited to approved writing and editorial submissions for the assigned columnist category.
-- Columnists do not receive general admin dashboard rights unless a separate admin role is approved.
+- Integrity: Admin decisions must be honest, evidence-based, and free from favoritism, retaliation, or personal advantage.
+- Safety: Admins must protect users from abuse, unsafe content, misleading information, and careless handling of personal data.
+- Service: Admin access must be used to support runners, clubs, events, magazine contributors, and the wider RunNation community.
+- Accountability: Admin actions may be logged and reviewed, and misuse of access may lead to removal of the role or further action.
+## Copyright Disclaimer
 
-## Function Guide
+- Authors, submitters, and photo contributors are responsible for ensuring that every article, image, caption, attachment, external link, or other magazine material they submit is original, licensed, credited, or otherwise lawful to publish.
+- RunNation may review, edit, reject, remove, or publish submitted magazine material, but copyright infringement liability remains with the originating author, submitter, or contributor who provided the material.
+- Admins and editors should reject or remove magazine content when there is a credible concern that the article, picture, or supporting material may infringe another person's rights.
+## Role Terms
 
-- **Columns**: Submit original, accurate, respectful, and community-focused writing in the approved category.
-- **External Links**: Website, LinkedIn, or social links may be provided for attribution, but links must be safe, relevant, and suitable for RunNation readers.
-- **Review**: Submitted content may be edited for formatting, clarity, safety, and RunNation tone before publication.
-
-## Operational Rules
-
-- Do not copy protected work without permission or proper attribution.
-- Do not make medical, injury, nutrition, or training claims beyond your competence or without appropriate caution.
-- Do not publish abusive, hateful, pornographic, divisive, sectarian, threatening, disrespectful, or unsafe content.
-- Respect admin review decisions. Rejected content should be revised and resubmitted only through the approved process.
+- Magazine Columnist is responsible for submitting original, accurate, respectful, and community-focused editorial content in the approved columnist category.
+- Magazine Columnist must submit at least one article per week and must not submit more than five articles per week unless RunNation gives prior editorial approval.
+- Magazine Columnist topics must remain within the domain of the columnist's approved specialty, such as fitness coaching, empowerment coaching, motivation, or sports journalism.
+- Magazine Columnist assigned as Sports Journalist may write about any sports making headlines, including sports that are not directly related to running, provided the article remains accurate, lawful, respectful, and suitable for RunNation readers.
+- Magazine Columnist assigned as Sports Journalist is expected to cover sporting events, races, tournaments, charity runs, community fitness initiatives, athlete achievements, club stories, upcoming events, transfers, controversies, and wider sports culture with clear summaries, highlights, and context.
+- Magazine Columnist assigned as Sports Journalist must report fairly and responsibly, respect privacy, verify names, dates, claims, and event facts, and build professional relationships with athletes, clubs, event organizers, and sponsors without compromising editorial independence.
+- Magazine Columnist may provide website, LinkedIn, or social links only when they are safe, relevant, and suitable for RunNation readers.
+- Magazine Columnist must not copy protected work without permission or proper attribution, and must not make medical, injury, nutrition, or training claims beyond their competence.
 
 ## Acceptance
 
-- By accepting these terms, you agree to write responsibly, respect RunNation editorial standards, and accept that misuse may result in removal of columnist access.
+- By accepting, you agree to carry out Magazine Columnist responsibilities only within your assigned scope and only for legitimate RunNation work.

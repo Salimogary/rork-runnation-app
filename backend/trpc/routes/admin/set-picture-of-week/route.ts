@@ -12,7 +12,8 @@ export default publicProcedure
   .mutation(async ({ input, ctx }) => {
     const actor = await requireAdminPermission(ctx, {
       allowSuperAdmin: true,
-            allowCountryCoordinator: true,
+      allowCountryCoordinator: true,
+      allowMagazineEditor: true,
       allowClubCoordinator: false,
     });
 
@@ -52,4 +53,5 @@ export default publicProcedure
 
     return { success: true };
   });
+
 

@@ -1,6 +1,6 @@
 import { publicProcedure } from "../../../create-context";
 
-const ADMIN_ROLE_NAMES = new Set(["super_admin", "country_admin", "country_coordinator"]);
+const ADMIN_ROLE_NAMES = new Set(["super_admin", "global_admin", "country_admin", "country_coordinator"]);
 const EVENT_ORGANIZER_ROLE_NAME = "event_organizer";
 
 function getRoleName(row: any): string | null {
@@ -34,6 +34,18 @@ function formatMaleFemaleRatio(male: number, female: number): string | null {
   const malePercent = Math.round((male / total) * 100);
   const femalePercent = 100 - malePercent;
   return `${malePercent}:${femalePercent}`;
+}
+
+function formatAverageDailyRegistrations(registrations: any[]): string | null {
+  if (registrations.length === 0) return null;
+  const activeDates = new Set(
+    registrations
+      .map((row: any) => String(row.created_at || "").slice(0, 10))
+      .filter(Boolean)
+  );
+  if (activeDates.size === 0) return null;
+  const average = registrations.length / activeDates.size;
+  return average >= 10 ? average.toFixed(0) : average.toFixed(1);
 }
 
 async function getAuthUserIds(ctx: any): Promise<Set<string> | null> {
@@ -70,7 +82,7 @@ export default publicProcedure.query(async ({ ctx }) => {
   ] = await Promise.allSettled([
     ctx.supabase
       .from("registrations")
-      .select("registration_id, city_town_district, country, dob, sex"),
+      .select("registration_id, city_town_district, country, dob, sex, created_at"),
     ctx.supabase
       .from("clubs")
       .select("club_id", { count: "exact", head: true }),
@@ -151,6 +163,7 @@ export default publicProcedure.query(async ({ ctx }) => {
           ).size
         : null,
     ageRange: ages.length > 0 ? `${ages[0]}-${ages[ages.length - 1]}` : null,
+    averageDailyRegistrations: formatAverageDailyRegistrations(registrations),
     maleFemaleRatio: formatMaleFemaleRatio(maleCount, femaleCount),
     admins,
     eventOrganizers,

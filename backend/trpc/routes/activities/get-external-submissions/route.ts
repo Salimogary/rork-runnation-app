@@ -6,8 +6,9 @@ export default publicProcedure.query(async ({ ctx }) => {
   try {
     await requireAdminPermission(ctx, {
       allowSuperAdmin: true,
-            allowCountryCoordinator: true,
+      allowCountryCoordinator: true,
       allowClubCoordinator: true,
+      allowSpecialClubCoordinator: true,
     });
 
     const { data: submissions, error } = await ctx.supabase

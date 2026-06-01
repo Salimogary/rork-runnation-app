@@ -53,7 +53,15 @@ stable
 security definer
 set search_path = public
 as $$
-  select public.has_role(p_user_id, 'country_coordinator', p_country_code, null);
+  select exists (
+    select 1
+    from public.user_role_assignments ura
+    join public.roles r on r.role_id = ura.role_id
+    where ura.user_id = p_user_id
+      and ura.is_active = true
+      and r.role_name = 'country_coordinator'
+      and (p_country_code is null or ura.country_code = p_country_code)
+  );
 $$;
 
 create or replace function public.can_manage_role_assignment(
@@ -116,7 +124,13 @@ create policy "role_assignments_update_manageable"
   )
   with check (
     user_id <> auth.uid()
-    and public.can_manage_role_assignment(auth.uid(), role_id, country_code, club_id)
+    and (
+      public.is_super_admin(auth.uid())
+      or (
+        country_code is not null
+        and public.is_country_admin(auth.uid(), country_code)
+      )
+    )
   );
 
 drop policy if exists "admin_action_logs_insert_admins" on public.admin_action_logs;

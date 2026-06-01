@@ -22,8 +22,9 @@ export default publicProcedure
     try {
       await requireAdminPermission(ctx, {
         allowSuperAdmin: true,
-              allowCountryCoordinator: true,
+        allowCountryCoordinator: true,
         allowClubCoordinator: true,
+        allowSpecialClubCoordinator: true,
       });
 
       const { data: submission, error: fetchError } = await ctx.supabase
@@ -80,42 +81,47 @@ export default publicProcedure
           .eq("registration_id", submission.registration_id);
 
         if (participantEventsError) {
-          console.warn("[Approve External Submission] Could not check event matches:", participantEventsError.message);
-        } else {
-        const activityDate = getDateOnly(submission.activity_date);
-        const activityWeekday = getUtcWeekday(activityDate);
-        const matchingEventIds = (participantEvents || [])
-          .filter((row: any) => {
-            const event = Array.isArray(row.events) ? row.events[0] : row.events;
-            const eventType = event?.event_type || (getDateOnly(event?.starts_at) === getDateOnly(event?.ends_at) ? "same_day" : "multiday");
-            if (eventType === "multiday") return false;
-            const startDate = getDateOnly(event?.starts_at);
-            const endDate = getDateOnly(event?.ends_at);
-            if (startDate && activityDate < startDate) return false;
-            if (endDate && activityDate > endDate) return false;
-            if (eventType === "recurring") {
-              return event?.recurrence_weekday === null ||
-                event?.recurrence_weekday === undefined ||
-                Number(event.recurrence_weekday) === activityWeekday;
-            }
-            return startDate === activityDate;
-          })
-          .map((row: any) => row.event_id)
-          .filter(Boolean);
-
-        await Promise.all(
-          matchingEventIds.map((eventId: string) =>
-            ctx.supabase
-              .from("events_participants")
-              .update({
-                distance_km: Number(Number(submission.distance_km || 0).toFixed(2)),
-                time_seconds: timeSeconds,
-              })
-              .eq("event_id", eventId)
-              .eq("registration_id", submission.registration_id)
-          )
-        );
+          throw new Error(participantEventsError.message || "Could not check matching event registrations.");
         }
+
+          const activityDate = getDateOnly(submission.activity_date);
+          const activityWeekday = getUtcWeekday(activityDate);
+          const matchingEventIds = (participantEvents || [])
+            .filter((row: any) => {
+              const event = Array.isArray(row.events) ? row.events[0] : row.events;
+              const eventType = event?.event_type || (getDateOnly(event?.starts_at) === getDateOnly(event?.ends_at) ? "same_day" : "multiday");
+              if (eventType === "multiday") return false;
+              const startDate = getDateOnly(event?.starts_at);
+              const endDate = getDateOnly(event?.ends_at);
+              if (startDate && activityDate < startDate) return false;
+              if (endDate && activityDate > endDate) return false;
+              if (eventType === "recurring") {
+                return event?.recurrence_weekday === null ||
+                  event?.recurrence_weekday === undefined ||
+                  Number(event.recurrence_weekday) === activityWeekday;
+              }
+              return startDate === activityDate;
+            })
+            .map((row: any) => row.event_id)
+            .filter(Boolean);
+
+          const eventCreditResults = await Promise.all(
+            matchingEventIds.map((eventId: string) =>
+              ctx.supabase
+                .from("events_participants")
+                .update({
+                  distance_km: Number(Number(submission.distance_km || 0).toFixed(2)),
+                  time_seconds: timeSeconds,
+                })
+                .eq("event_id", eventId)
+                .eq("registration_id", submission.registration_id)
+            )
+          );
+
+          const failedEventCredit = eventCreditResults.find((result: any) => result.error);
+          if (failedEventCredit?.error) {
+            throw new Error(failedEventCredit.error.message || "Activity was saved, but event credit could not be updated.");
+          }
       }
 
       const { error: deleteError } = await ctx.supabase

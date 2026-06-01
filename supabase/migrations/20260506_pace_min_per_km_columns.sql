@@ -56,4 +56,3 @@ update public.social_posts
     )
 where activity_data ? 'pace_km_h'
   and not activity_data ? 'pace_min_per_km';
-

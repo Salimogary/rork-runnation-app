@@ -14,6 +14,7 @@ export default publicProcedure
       allowCountryAdmin: true,
       allowCountryCoordinator: true,
       allowClubCoordinator: true,
+      allowSpecialClubCoordinator: true,
       allowEventOrganizer: true,
     });
 
@@ -53,7 +54,8 @@ export default publicProcedure
       !actor.isSuperAdmin &&
       !actor.isCountryAdmin &&
       !actor.isCountryCoordinator &&
-      !actor.isClubCoordinator;
+      !actor.isClubCoordinator &&
+      !actor.isSpecialClubCoordinator;
 
     if (!isOrganizerOnly || enrollments.length === 0) {
       console.log('[getEnrollments] Fetched enrollments:', enrollments.length);
@@ -84,4 +86,6 @@ export default publicProcedure
     console.log('[getEnrollments] Fetched organizer-scoped enrollments:', filteredEnrollments.length);
     return filteredEnrollments;
   });
+
+
 

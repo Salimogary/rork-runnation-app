@@ -27,6 +27,12 @@ export default publicProcedure
         dob: z.string().nullable().optional(),
         city_town_district: z.string().nullable().optional(),
         country: z.string().nullable().optional(),
+        has_disability: z.boolean().nullable().optional(),
+        para_uses_equipment: z.boolean().nullable().optional(),
+        para_equipment_type: z.enum(["wheelchair", "handcycle", "prosthetic_blades", "other"]).nullable().optional(),
+        para_equipment_other: z.string().trim().max(120).nullable().optional(),
+        does_indoor_workouts: z.boolean().nullable().optional(),
+        has_smart_watch: z.boolean().nullable().optional(),
         travel_country: z.string().nullable().optional(),
         travel_country_code: z.string().nullable().optional(),
         travel_start_date: z.string().nullable().optional(),
@@ -59,6 +65,40 @@ export default publicProcedure
     if (registration.country !== undefined && !String(registration.country || "").trim()) {
       throw new Error("Nationality is required.");
     }
+    if (registration.username !== undefined) {
+      const cleanUsername = String(registration.username || "").trim().toLowerCase();
+      if (!cleanUsername) {
+        throw new Error("Username is required.");
+      }
+
+      const { data: existingUsername, error: usernameError } = await ctx.supabase
+        .from("registrations")
+        .select("registration_id")
+        .eq("username", cleanUsername)
+        .neq("registration_id", input.registrationId)
+        .maybeSingle();
+
+      if (usernameError) {
+        throw new Error(usernameError.message || "Could not check username availability.");
+      }
+      if (existingUsername) {
+        throw new Error("Username already exists");
+      }
+
+      registration.username = cleanUsername;
+    }
+    if (registration.has_disability === false || registration.has_disability === null) {
+      registration.para_uses_equipment = false;
+      registration.para_equipment_type = null;
+      registration.para_equipment_other = null;
+    } else if (registration.para_uses_equipment === false || registration.para_uses_equipment === null) {
+      registration.para_equipment_type = null;
+      registration.para_equipment_other = null;
+    } else if (registration.para_uses_equipment === true && !registration.para_equipment_type) {
+      throw new Error("Please choose the para equipment you use.");
+    } else if (registration.para_equipment_type !== "other") {
+      registration.para_equipment_other = null;
+    }
 
     if (registration.travel_start_date || registration.travel_end_date) {
       const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -82,6 +122,9 @@ export default publicProcedure
         .eq("registration_id", input.registrationId);
 
       if (regError) {
+        if (regError.code === "23505") {
+          throw new Error("Username already exists");
+        }
         throw new Error(regError.message || "Failed to update profile");
       }
     }

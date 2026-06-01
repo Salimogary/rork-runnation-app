@@ -228,3 +228,4 @@ export default publicProcedure
 
     return { success: true, message: "Profile and registration usernames are back in sync." };
   });
+

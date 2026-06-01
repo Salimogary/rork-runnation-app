@@ -22,6 +22,9 @@ export default publicProcedure
   .input(
     z.object({
       registrationId: z.string().uuid(),
+      clubId: z.string().uuid().nullable().optional(),
+      requestType: z.enum(["membership", "start_club", "event_organizer"]).optional(),
+      createdAt: z.string().nullable().optional(),
       status: z.enum(["approved", "rejected"]),
     })
   )
@@ -33,11 +36,25 @@ export default publicProcedure
       allowClubCoordinator: true,
     });
 
-    const { data: request, error: requestError } = await ctx.supabase
+    let requestQuery = ctx.supabase
       .from("club_membership_request")
       .select("*")
       .eq("registration_id", input.registrationId)
-      .maybeSingle();
+      .eq("status", "pending")
+      .eq("request_type", input.requestType ?? "membership")
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (input.clubId) {
+      requestQuery = requestQuery.eq("club_id", input.clubId);
+    } else if (input.createdAt) {
+      requestQuery = requestQuery.eq("created_at", input.createdAt);
+    } else {
+      requestQuery = requestQuery.is("club_id", null);
+    }
+
+    const { data: requestRows, error: requestError } = await requestQuery;
+    const request = requestRows?.[0] ?? null;
 
     if (requestError) {
       throw new Error(requestError.message || "Could not load membership request.");
@@ -58,7 +75,7 @@ export default publicProcedure
       .filter((role) => (role.roleName === "country_admin" || role.roleName === "country_coordinator") && role.countryCode)
       .map((role) => role.countryCode as string);
     const countryAdminCodes = actor.roles
-      .filter((role) => role.roleName === "country_admin" && role.countryCode)
+      .filter((role) => (role.roleName === "country_admin" || role.roleName === "country_coordinator") && role.countryCode)
       .map((role) => role.countryCode as string);
 
     const { data: countries } = await ctx.supabase
@@ -214,7 +231,7 @@ export default publicProcedure
       }
     }
 
-    const { error: updateError } = await ctx.supabase
+    let updateQuery = ctx.supabase
       .from("club_membership_request")
       .update({
         status: input.status,
@@ -229,7 +246,16 @@ export default publicProcedure
         reviewed_at: new Date().toISOString(),
       })
       .eq("registration_id", input.registrationId)
-      .eq("status", "pending");
+      .eq("status", "pending")
+      .eq("request_type", request.request_type ?? "membership");
+
+    if (request.club_id) {
+      updateQuery = updateQuery.eq("club_id", request.club_id);
+    } else {
+      updateQuery = updateQuery.is("club_id", null).eq("created_at", request.created_at);
+    }
+
+    const { error: updateError } = await updateQuery;
 
     if (updateError) {
       throw new Error(updateError.message || "Could not update membership request.");
@@ -260,3 +286,4 @@ export default publicProcedure
       roleAssigned: Boolean(approvedOrganizerProfileId && approvedOrganizerId),
     };
   });
+

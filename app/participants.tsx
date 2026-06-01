@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { WORLD_COUNTRIES } from "@/constants/countries";
 import { formatCountryName } from "@/constants/country-utils";
+import { getAgeFromDob } from "@/utils/specialClubs";
 
 interface Participant {
   event_id?: string;
@@ -22,9 +23,12 @@ interface Participant {
   organizerLabel?: string;
   first_name: string;
   other_names: string;
+  dob?: string | null;
   country: string;
   club: string;
   sex: string;
+  paraEquipmentGroup?: string | null;
+  paraUsesEquipment?: boolean;
   distance_km?: number | null;
   time_seconds?: number | null;
   activeDays?: number;
@@ -32,9 +36,15 @@ interface Participant {
   registration_id?: string;
 }
 
-type ResultCategory = "Finishers" | "Participants";
+type ResultCategory = "Finishers" | "Junior Athletes" | "Golden Age Athletes" | "Para Athletes" | "Participants";
 
-const RESULT_CATEGORY_ORDER: ResultCategory[] = ["Finishers", "Participants"];
+const RESULT_CATEGORY_ORDER: ResultCategory[] = [
+  "Finishers",
+  "Para Athletes",
+  "Junior Athletes",
+  "Golden Age Athletes",
+  "Participants",
+];
 
 const CATEGORY_STYLES: Record<
   ResultCategory,
@@ -54,7 +64,36 @@ const CATEGORY_STYLES: Record<
     textColor: "#B91C1C",
     accentColor: "#EF4444",
   },
+  "Junior Athletes": {
+    backgroundColor: "#FFF7ED",
+    textColor: "#C2410C",
+    accentColor: "#F97316",
+  },
+  "Golden Age Athletes": {
+    backgroundColor: "#FEFCE8",
+    textColor: "#A16207",
+    accentColor: "#EAB308",
+  },
+  "Para Athletes": {
+    backgroundColor: "#EFF6FF",
+    textColor: "#1D4ED8",
+    accentColor: "#3B82F6",
+  },
 };
+
+const PARA_EQUIPMENT_LABELS: Record<string, string> = {
+  wheelchair: "Wheelchair",
+  handcycle: "Handcycle",
+  prosthetic_blades: "Prosthetic blades",
+  other: "Other",
+};
+
+function getParaEquipmentGroup(registration: any): string | null {
+  if (registration?.has_disability !== true || registration?.para_uses_equipment !== true) return null;
+  const type = String(registration?.para_equipment_type || "").trim();
+  if (type === "other") return String(registration?.para_equipment_other || "").trim() || "Other";
+  return PARA_EQUIPMENT_LABELS[type] || "Other";
+}
 
 const countryCodeByName = new Map(
   WORLD_COUNTRIES.map((country) => [country.name.trim().toLowerCase(), country.iso_alpha2.toUpperCase()])
@@ -168,20 +207,22 @@ type ParticipantSection = {
   eventDateLabel: string;
   eventOrganizerLabel: string;
   category: ResultCategory;
+  categoryLabel: string;
   data: Participant[];
   isFirstInEvent: boolean;
 };
 
 export default function ParticipantsScreen() {
   const { user, privateMode } = useAuth();
-  const params = useLocalSearchParams<{ eventMode?: string }>();
-  const [selectedEvent, setSelectedEvent] = useState<string>("all");
+  const params = useLocalSearchParams<{ eventMode?: string; eventId?: string }>();
+  const routeEventId = String(params.eventId || "").trim();
+  const [selectedEvent, setSelectedEvent] = useState<string>(routeEventId || "all");
   const [selectedCountry, setSelectedCountry] = useState<string>("all");
   const [selectedClubOrganizer, setSelectedClubOrganizer] = useState<string>("all");
   const [selectedSex, setSelectedSex] = useState<string>("all");
   const [activeFilter, setActiveFilter] = useState<"event" | "country" | "club" | "sex" | null>(null);
   const eventMode = params.eventMode === "multiday" ? "multiday" : params.eventMode === "recurring" ? "recurring" : "same-day";
-  const screenTitle = eventMode === "multiday" ? "Multiday Events" : eventMode === "recurring" ? "Recurring Events" : "Same Day Events";
+  const screenTitle = routeEventId ? "Event Participants" : eventMode === "multiday" ? "Multiday Events" : eventMode === "recurring" ? "Recurring Events" : "Same Day Events";
   const participantLabel = eventMode === "multiday" ? "multiday" : eventMode === "recurring" ? "recurring" : "same day";
 
   const matchesEventMode = useCallback((participant: Participant) => {
@@ -189,9 +230,9 @@ export default function ParticipantsScreen() {
   }, [eventMode]);
 
   const { data: participants, isLoading, refetch } = useQuery<Participant[]>({
-    queryKey: ["event_participants_snapshot"],
+    queryKey: ["event_participants_snapshot", routeEventId || "all"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let participantsQuery = supabase
         .from("events_participants")
         .select(`
           registration_id,
@@ -199,9 +240,15 @@ export default function ParticipantsScreen() {
           time_seconds,
           event_id,
           events!events_participants_event_id_fkey(event_name, starts_at, ends_at, event_type, recurrence_weekday, recurrence_weekdays, medal_min_daily_distance, medal_min_cumulative_distance),
-          registrations!events_participants_registration_id_fkey(first_name, other_names, sex, country)
+          registrations!events_participants_registration_id_fkey(first_name, other_names, dob, sex, country, has_disability, para_uses_equipment, para_equipment_type, para_equipment_other)
         `)
         .order("event_id", { ascending: true });
+
+      if (routeEventId) {
+        participantsQuery = participantsQuery.eq("event_id", routeEventId);
+      }
+
+      const { data, error } = await participantsQuery;
 
       if (error) {
         console.error("Error fetching participants:", error.message);
@@ -214,43 +261,111 @@ export default function ParticipantsScreen() {
       const eventIds = (data || []).map((item: any) => item.event_id).filter(Boolean);
       const uniqueRegistrationIds = Array.from(new Set(registrationIds));
 
-      const { data: memberships, error: membershipsError } = await supabase
-        .from("club_members")
-        .select("registration_id, coordinator_id")
-        .in("registration_id", registrationIds);
+      let clubByRegistration = new Map<string, string>();
+      if (uniqueRegistrationIds.length > 0) {
+        const { data: memberships, error: membershipsError } = await supabase
+          .from("club_membership_request")
+          .select("registration_id, club, club_id")
+          .in("registration_id", uniqueRegistrationIds)
+          .eq("request_type", "membership")
+          .eq("status", "approved");
 
-      if (membershipsError) {
-        console.error("Error fetching participant clubs:", membershipsError.message);
-        throw new Error(membershipsError.message || "Failed to fetch participant clubs");
-      }
-
-      const coordinatorIds = Array.from(
-        new Set((memberships || []).map((membership: any) => membership.coordinator_id).filter(Boolean))
-      );
-
-      let clubByCoordinator = new Map<string, string>();
-      if (coordinatorIds.length > 0) {
-        const { data: clubs, error: clubsError } = await supabase
-          .from("clubs")
-          .select("coordinator_id, club_name")
-          .in("coordinator_id", coordinatorIds);
-
-        if (clubsError) {
-          console.error("Error fetching clubs:", clubsError.message);
-          throw new Error(clubsError.message || "Failed to fetch clubs");
+        if (membershipsError) {
+          console.error("Error fetching participant clubs:", membershipsError.message);
+          throw new Error(membershipsError.message || "Failed to fetch participant clubs");
         }
 
-        clubByCoordinator = new Map(
-          (clubs || []).map((club: any) => [club.coordinator_id, club.club_name || ""])
+        const membershipClubIds = Array.from(
+          new Set((memberships || []).map((membership: any) => membership.club_id).filter(Boolean))
         );
-      }
 
-      const clubByRegistration = new Map(
-        (memberships || []).map((membership: any) => [
-          membership.registration_id,
-          clubByCoordinator.get(membership.coordinator_id) || "",
-        ])
-      );
+        let clubById = new Map<string, { name: string; isSpecial: boolean }>();
+        if (membershipClubIds.length > 0) {
+          const { data: clubs, error: clubsError } = await supabase
+            .from("clubs")
+            .select("club_id, club_name, is_special_club, special_club_code")
+            .in("club_id", membershipClubIds);
+
+          if (clubsError) {
+            console.error("Error fetching clubs:", clubsError.message);
+            throw new Error(clubsError.message || "Failed to fetch clubs");
+          }
+
+          clubById = new Map(
+            (clubs || []).map((club: any) => [
+              club.club_id,
+              {
+                name: club.club_name || "",
+                isSpecial: club.is_special_club === true || Boolean(club.special_club_code),
+              },
+            ])
+          );
+        }
+
+        const clubsByRegistration = new Map<string, { name: string; isSpecial: boolean }[]>();
+        (memberships || []).forEach((membership: any) => {
+          const registrationId = membership.registration_id;
+          if (!registrationId) return;
+          const club = membership.club_id ? clubById.get(membership.club_id) : null;
+          const name = club?.name || membership.club || "";
+          if (!name) return;
+          if (!clubsByRegistration.has(registrationId)) {
+            clubsByRegistration.set(registrationId, []);
+          }
+          clubsByRegistration.get(registrationId)?.push({
+            name,
+            isSpecial: club?.isSpecial ?? false,
+          });
+        });
+
+        clubByRegistration = new Map(
+          Array.from(clubsByRegistration.entries()).map(([registrationId, clubRows]) => {
+            const normalClubs = clubRows.filter((club) => !club.isSpecial);
+            const visibleClubs = normalClubs.length > 0 ? normalClubs : clubRows;
+            const label = visibleClubs.map((club) => club.name).join(", ");
+            return [registrationId, label];
+          })
+        );
+
+        const { data: coordinators, error: coordinatorsError } = await supabase
+          .from("coordinators")
+          .select("coordinator_id, registration_id")
+          .in("registration_id", uniqueRegistrationIds);
+
+        if (coordinatorsError) {
+          console.error("Error fetching coordinator rows:", coordinatorsError.message);
+          throw new Error(coordinatorsError.message || "Failed to fetch coordinator rows");
+        }
+
+        const coordinatorIds = Array.from(
+          new Set((coordinators || []).map((coordinator: any) => coordinator.coordinator_id).filter(Boolean))
+        );
+
+        if (coordinatorIds.length > 0) {
+          const { data: coordinatorClubs, error: coordinatorClubsError } = await supabase
+            .from("clubs")
+            .select("coordinator_id, club_name")
+            .in("coordinator_id", coordinatorIds);
+
+          if (coordinatorClubsError) {
+            console.error("Error fetching coordinator club names:", coordinatorClubsError.message);
+            throw new Error(coordinatorClubsError.message || "Failed to fetch coordinator club names");
+          }
+
+          const clubByCoordinatorId = new Map(
+            (coordinatorClubs || []).map((club: any) => [club.coordinator_id, club.club_name || ""])
+          );
+
+          (coordinators || []).forEach((coordinator: any) => {
+            const registrationId = coordinator.registration_id;
+            if (!registrationId || clubByRegistration.get(registrationId)) return;
+            const clubName = clubByCoordinatorId.get(coordinator.coordinator_id);
+            if (clubName) {
+              clubByRegistration.set(registrationId, clubName);
+            }
+          });
+        }
+      }
 
       let activitiesByRegistration = new Map<string, any[]>();
       if (uniqueRegistrationIds.length > 0) {
@@ -364,9 +479,12 @@ export default function ParticipantsScreen() {
           organizerLabel: eventOwnerMap.get(item.event_id) || "",
           first_name: item.registrations?.first_name || "",
           other_names: item.registrations?.other_names || "",
+          dob: item.registrations?.dob || null,
           country: item.registrations?.country || "",
           club: clubByRegistration.get(item.registration_id) || "",
           sex: item.registrations?.sex || "",
+          paraEquipmentGroup: getParaEquipmentGroup(item.registrations),
+          paraUsesEquipment: item.registrations?.has_disability === true && item.registrations?.para_uses_equipment === true,
           activeDays,
           registration_id: item.registration_id,
         };
@@ -439,6 +557,10 @@ export default function ParticipantsScreen() {
     staleTime: 30000,
   });
 
+  useEffect(() => {
+    setSelectedEvent(routeEventId || "all");
+  }, [routeEventId]);
+
   const formatDuration = (seconds?: number | null) => {
     if (!seconds || seconds <= 0) return "-";
     const hrs = Math.floor(seconds / 3600);
@@ -469,8 +591,22 @@ export default function ParticipantsScreen() {
   };
 
   const getResultCategory = (participant: Participant): ResultCategory => {
+    const age = getAgeFromDob(participant.dob);
+    if (participant.paraUsesEquipment) return "Para Athletes";
+    if (age !== null && age >= 8 && age <= 15) return "Junior Athletes";
+    if (age !== null && age >= 60) return "Golden Age Athletes";
     return participant.meetsMinimumDistance ? "Finishers" : "Participants";
   };
+
+  const eventNameById = useMemo(() => {
+    const names = new Map<string, string>();
+    (participants || []).forEach((participant) => {
+      if (participant.event_id && participant.event_name) {
+        names.set(participant.event_id, participant.event_name);
+      }
+    });
+    return names;
+  }, [participants]);
 
   const eventNames = useMemo(() => {
     if (!participants) return [];
@@ -479,10 +615,10 @@ export default function ParticipantsScreen() {
       .filter(matchesEventMode)
       .filter((participant) => (privateMode && user?.id ? participant.registration_id !== user.id : true))
       .forEach((p) => {
-      if (p.event_name) names.add(p.event_name);
+        if (p.event_id && p.event_name) names.add(p.event_id);
       });
-    return Array.from(names).sort();
-  }, [matchesEventMode, participants, privateMode, user?.id]);
+    return Array.from(names).sort((a, b) => (eventNameById.get(a) || a).localeCompare(eventNameById.get(b) || b));
+  }, [eventNameById, matchesEventMode, participants, privateMode, user?.id]);
 
   const eventFilteredParticipants = useMemo(() => {
     if (!participants) return [];
@@ -491,7 +627,7 @@ export default function ParticipantsScreen() {
       filtered = filtered.filter((p) => p.registration_id !== user.id);
     }
     if (selectedEvent === "all") return filtered;
-    return filtered.filter((p) => p.event_name === selectedEvent);
+    return filtered.filter((p) => p.event_id === selectedEvent);
   }, [matchesEventMode, participants, selectedEvent, privateMode, user?.id]);
 
   const countryOptions = useMemo(() => {
@@ -557,10 +693,15 @@ export default function ParticipantsScreen() {
     filteredParticipants.forEach((participant) => {
       const eventName = participant.event_name || "Unknown Event";
       const recurringDateLabel = eventMode === "recurring" ? participant.occurrence_date || "Awaiting activity" : "";
-      const groupKey = eventMode === "recurring" ? `${eventName}__${recurringDateLabel}` : eventName;
+      const paraGroup = participant.paraUsesEquipment ? participant.paraEquipmentGroup || "Para equipment" : "";
+      const baseGroupKey = eventMode === "recurring" ? `${eventName}__${recurringDateLabel}` : eventName;
+      const groupKey = paraGroup ? `${baseGroupKey}__para__${paraGroup}` : baseGroupKey;
       if (!grouped[groupKey]) {
         grouped[groupKey] = {
           Finishers: [],
+          "Para Athletes": [],
+          "Junior Athletes": [],
+          "Golden Age Athletes": [],
           Participants: [],
         };
       }
@@ -617,8 +758,10 @@ export default function ParticipantsScreen() {
       RESULT_CATEGORY_ORDER.forEach((category) => {
         const data = categoryMap[category];
         if (!data.length) return;
-        const displayEventName = data[0]?.event_name || groupKey.split("__")[0] || "Unknown Event";
+        const groupParts = groupKey.split("__");
+        const displayEventName = data[0]?.event_name || groupParts[0] || "Unknown Event";
         const recurringDate = data[0]?.occurrence_date || null;
+        const paraEquipmentLabel = category === "Para Athletes" ? data[0]?.paraEquipmentGroup || groupParts[groupParts.length - 1] : "";
 
         sections.push({
           key: `${groupKey}-${category}`,
@@ -630,6 +773,7 @@ export default function ParticipantsScreen() {
             : formatEventDateRange(data[0]?.starts_at, data[0]?.ends_at),
           eventOrganizerLabel: data[0]?.organizerLabel || "",
           category,
+          categoryLabel: paraEquipmentLabel ? `Para Athletes - ${paraEquipmentLabel}` : category,
           data,
           isFirstInEvent,
         });
@@ -709,7 +853,15 @@ export default function ParticipantsScreen() {
       <View style={styles.container}>
         {eventNames.length > 0 && (
           <View style={styles.filterHeader}>
-            {renderFilterDropdown("event", "Event", "All Events", selectedEvent, setSelectedEvent, eventNames)}
+            {renderFilterDropdown(
+              "event",
+              "Event",
+              "All Events",
+              selectedEvent,
+              setSelectedEvent,
+              eventNames,
+              (eventId) => eventNameById.get(eventId) || eventId
+            )}
             {renderFilterDropdown("country", "Country", "All Countries", selectedCountry, setSelectedCountry, countryOptions, (country) =>
               `${getCountryFlag(country)} ${formatCountryName(country) || country}`.trim()
             )}
@@ -833,7 +985,7 @@ export default function ParticipantsScreen() {
                           { color: CATEGORY_STYLES[section.category].textColor },
                         ]}
                       >
-                        {section.category}
+                        {section.categoryLabel}
                       </Text>
                     </View>
                     <Text
@@ -910,8 +1062,8 @@ const styles = StyleSheet.create({
     textAlign: "center" as const,
   },
   participantsContainer: {
-    padding: 6,
-    paddingBottom: 24,
+    padding: 3,
+    paddingBottom: 16,
   },
   sectionHeaderWrap: {
     marginBottom: 0,
@@ -925,8 +1077,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
   },
   categoryBandLabelWrap: {
     flexDirection: "row",
@@ -951,24 +1103,24 @@ const styles = StyleSheet.create({
   tableHeader: {
     flexDirection: "row",
     backgroundColor: "#10b981",
-    paddingVertical: 6,
-    paddingHorizontal: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
   },
   tableHeaderText: {
-    fontSize: 8,
+    fontSize: 7,
     fontWeight: "700" as const,
     color: "#fff",
   },
   tableHeaderTextCenter: {
-    fontSize: 8,
+    fontSize: 7,
     fontWeight: "700" as const,
     color: "#fff",
     textAlign: "left" as const,
   },
   tableRow: {
     flexDirection: "row",
-    paddingVertical: 5,
-    paddingHorizontal: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
     borderBottomWidth: 1,
     borderBottomColor: "#f0f0f0",
     alignItems: "center",
@@ -977,9 +1129,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#fafafa",
   },
   tableCellSmall: {
-    fontSize: 8,
+    fontSize: 7,
     color: "#333",
-    lineHeight: 12,
+    lineHeight: 10,
   },
   tableCellCenter: {
     textAlign: "left" as const,
@@ -988,41 +1140,41 @@ const styles = StyleSheet.create({
     flexWrap: "wrap" as const,
   },
   numberColumn: {
-    flex: 0.72,
-    minWidth: 28,
+    flex: 0.58,
+    minWidth: 22,
   },
   nameColumn: {
-    flex: 1.75,
-    minWidth: 58,
+    flex: 1.55,
+    minWidth: 48,
   },
   clubColumn: {
-    flex: 1.5,
-    minWidth: 52,
+    flex: 1.25,
+    minWidth: 42,
     textAlign: "left" as const,
   },
   sexColumn: {
-    flex: 0.48,
-    minWidth: 20,
+    flex: 0.42,
+    minWidth: 16,
     textAlign: "left" as const,
   },
   dayColumn: {
-    flex: 0.7,
-    minWidth: 30,
+    flex: 0.55,
+    minWidth: 22,
     alignItems: "flex-start" as const,
   },
   distanceColumn: {
-    flex: 1.12,
-    minWidth: 46,
+    flex: 0.78,
+    minWidth: 32,
     textAlign: "left" as const,
   },
   timeColumn: {
-    flex: 1.18,
-    minWidth: 48,
+    flex: 1.0,
+    minWidth: 40,
     textAlign: "left" as const,
   },
   paceColumn: {
-    flex: 0.9,
-    minWidth: 40,
+    flex: 0.74,
+    minWidth: 30,
     textAlign: "left" as const,
   },
   rankCell: {
@@ -1031,8 +1183,8 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   flagText: {
-    fontSize: 9,
-    lineHeight: 12,
+    fontSize: 8,
+    lineHeight: 10,
   },
   rankText: {
     color: "#333",

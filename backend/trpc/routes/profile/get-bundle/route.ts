@@ -7,6 +7,15 @@ const DISTANCE_MILESTONES = [10, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900
 const ACTIVITY_INTERVAL = 10;
 const MAX_ACTIVITY_BADGES = 100;
 
+function normalizeClubName(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function isMissingSchemaError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("does not exist") || message.includes("schema cache") || message.includes("relation");
+}
+
 function getEarnedBadgeCount(totalDistanceKm: number, totalActivities: number): number {
   const distanceEarned = DISTANCE_MILESTONES.filter((km) => totalDistanceKm >= km).length;
   let activityEarned = 0;
@@ -17,10 +26,29 @@ function getEarnedBadgeCount(totalDistanceKm: number, totalActivities: number): 
   return distanceEarned + activityEarned;
 }
 
+async function resolveRegistrationId(ctx: { supabase: any; authUserId: string | null }, registrationId: string): Promise<string> {
+  if (!ctx.authUserId || registrationId !== ctx.authUserId) {
+    return registrationId;
+  }
+
+  const { data: profile, error } = await ctx.supabase
+    .from("profiles")
+    .select("registration_id")
+    .eq("profile_id", ctx.authUserId)
+    .maybeSingle();
+
+  if (error && !isMissingSchemaError(error)) {
+    throw new Error(error.message || "Could not resolve your profile.");
+  }
+
+  return profile?.registration_id || registrationId;
+}
+
 export default publicProcedure
   .input(z.object({ registrationId: z.string().min(1) }))
   .query(async ({ input, ctx }) => {
-    await requireRegistrationOwner(ctx, input.registrationId);
+    const registrationId = await resolveRegistrationId(ctx, input.registrationId);
+    await requireRegistrationOwner(ctx, registrationId);
 
     let socialAuthVerified = false;
     if (ctx.authUserId) {
@@ -49,19 +77,23 @@ export default publicProcedure
       enrollmentRes,
       profileRes,
     ] = await Promise.all([
-      ctx.supabase.from("registrations").select("*").eq("registration_id", input.registrationId).maybeSingle(),
-      ctx.supabase.from("contacts").select("email, country_code, phone, full_phone").eq("registration_id", input.registrationId).maybeSingle(),
-      ctx.supabase.from("user_photos").select("file_path").eq("registration_id", input.registrationId).eq("is_profile_photo", true).maybeSingle(),
-      ctx.supabase.from("activities").select("distance_km, exercise_type").eq("registration_id", input.registrationId),
+      ctx.supabase.from("registrations").select("*").eq("registration_id", registrationId).maybeSingle(),
+      ctx.supabase.from("contacts").select("email, country_code, phone, full_phone").eq("registration_id", registrationId).maybeSingle(),
+      ctx.supabase.from("user_photos").select("file_path").eq("registration_id", registrationId).eq("is_profile_photo", true).maybeSingle(),
+      ctx.supabase.from("activities").select("distance_km, exercise_type").eq("registration_id", registrationId),
       ctx.supabase.from("goals").select("goal_id, goal").order("goal_id", { ascending: true }),
-      ctx.supabase.from("user_goals").select("*").eq("registration_id", input.registrationId),
-      ctx.supabase.from("clubs").select("club_id, club_name, country, location, description, is_special_club, special_club_code, age_min, age_max").order("club_name", { ascending: true }),
-      ctx.supabase.from("club_membership_request").select("*").eq("registration_id", input.registrationId).maybeSingle(),
-      ctx.supabase.from("subscriptions").select("status, expires_at").eq("registration_id", input.registrationId).maybeSingle(),
-      ctx.supabase.from("fitness_goal").select("fitness_goal_id").eq("registration_id", input.registrationId).limit(1),
-      ctx.supabase.from("weight_target_goal").select("weight_target_goal_id").eq("registration_id", input.registrationId).limit(1),
-      ctx.supabase.from("event_enrollments").select("event_enrollment_id").eq("registration_id", input.registrationId).limit(1),
-      ctx.supabase.from("profiles").select("profile_id").eq("registration_id", input.registrationId).maybeSingle(),
+      ctx.supabase.from("user_goals").select("*").eq("registration_id", registrationId),
+      ctx.supabase.from("clubs").select("club_id, club_name, country, location, description, presence_towns, is_special_club, special_club_code, age_min, age_max").order("club_name", { ascending: true }),
+      ctx.supabase
+        .from("club_membership_request")
+        .select("*")
+        .eq("registration_id", registrationId)
+        .order("created_at", { ascending: true }),
+      ctx.supabase.from("subscriptions").select("status, expires_at").eq("registration_id", registrationId).maybeSingle(),
+      ctx.supabase.from("fitness_goal").select("fitness_goal_id").eq("registration_id", registrationId).limit(1),
+      ctx.supabase.from("weight_target_goal").select("weight_target_goal_id").eq("registration_id", registrationId).limit(1),
+      ctx.supabase.from("event_enrollments").select("event_enrollment_id").eq("registration_id", registrationId).limit(1),
+      ctx.supabase.from("profiles").select("profile_id").eq("registration_id", registrationId).maybeSingle(),
     ]);
 
     if (regRes.error || !regRes.data) {
@@ -81,7 +113,7 @@ export default publicProcedure
       email_verified: regRes.data.email_verified === true || socialAuthVerified,
     };
 
-    const validTypes = ["Run", "Walk", "Treadmill", "Tredmill"];
+    const validTypes = ["Run", "Walk", "Cycle", "Treadmill", "Tredmill"];
     const filteredActivities = (activitiesRes.data || []).filter((a: any) =>
       validTypes.includes(a.exercise_type || "")
     );
@@ -102,7 +134,49 @@ export default publicProcedure
     );
     const hasProfilePhoto = !!photoRes.data?.file_path;
     const hasGoal = (userGoalsRes.data?.length ?? 0) > 0;
-    const hasClub = !!(clubMembershipRes.data?.club && clubMembershipRes.data.club !== "");
+    const clubById = new Map((clubsRes.data ?? []).map((club: any) => [club.club_id, club]));
+    const clubByName = new Map((clubsRes.data ?? []).map((club: any) => [normalizeClubName(club.club_name), club]));
+    const clubMembershipRows = (clubMembershipRes.data || []).filter((membership: any) => {
+      if ((membership.status ?? "pending") === "rejected") return false;
+      const club = membership.club_id
+        ? clubById.get(membership.club_id)
+        : clubByName.get(normalizeClubName(membership.club));
+      const isSpecialClub = club?.is_special_club === true || Boolean(club?.special_club_code);
+      return isSpecialClub || membership.status === "approved";
+    });
+    const primaryClubMembership = clubMembershipRows[0] || null;
+    const hasClub = clubMembershipRows.some((membership: any) => membership?.club && membership.club !== "");
+    const membershipClubIds = [
+      ...new Set(
+        clubMembershipRows
+          .map((membership: any) => {
+            const club = membership.club_id
+              ? clubById.get(membership.club_id)
+              : clubByName.get(normalizeClubName(membership.club));
+            return club?.club_id ?? null;
+          })
+          .filter(Boolean)
+      ),
+    ];
+    let clubWhatsappLinks: any[] = [];
+
+    if (membershipClubIds.length > 0) {
+      const { data: whatsappRows, error: whatsappError } = await ctx.supabase
+        .from("club_whatsap_link")
+        .select("link_id, club_id, club_name, link")
+        .in("club_id", membershipClubIds);
+
+      if (whatsappError && !isMissingSchemaError(whatsappError)) {
+        throw new Error(whatsappError.message || "Could not load club WhatsApp links.");
+      }
+
+      clubWhatsappLinks = (whatsappRows ?? []).map((row: any) => ({
+        linkId: row.link_id,
+        clubId: row.club_id,
+        clubName: row.club_name,
+        link: row.link,
+      }));
+    }
     const hasFiveActivities = totalActivities >= 5;
     const hasAtLeastOneBadge = getEarnedBadgeCount(totalDistance, totalActivities) > 0;
     const sub = subscriptionRes.data;
@@ -128,7 +202,24 @@ export default publicProcedure
             await ctx.supabase
               .from("roles")
               .select("role_id")
-              .in("role_name", ["super_admin", "country_admin", "country_coordinator", "club_coordinator"])
+              .in("role_name", [
+                "super_admin",
+                "global_admin",
+                "country_admin",
+                "country_coordinator",
+                "club_coordinator",
+                "junior_runners_club_coordinator",
+                "golden_age_runners_club_coordinator",
+                "treadmill_runners_club_coordinator",
+                "para_runners_club_coordinator",
+                "smartfit_club_coordinator",
+                "event_organizer",
+                "magazine_editor",
+                "chat_room_administrator",
+                "magazine_columnist_fitness_coach",
+                "magazine_columnist_sports_journalist",
+                "magazine_columnist_motivation_speaker",
+              ])
           ).data?.map((role: any) => role.role_id) ?? [-1]),
         ctx.supabase
           .from("admin_terms_acceptances")
@@ -149,7 +240,9 @@ export default publicProcedure
       goals: goalsRes.data || [],
       userGoals: userGoalsRes.data || [],
       clubs: clubsRes.data || [],
-      clubMembership: clubMembershipRes.data || null,
+      clubMembership: primaryClubMembership,
+      clubMemberships: clubMembershipRows,
+      clubWhatsappLinks,
       completionInputs: {
         allFieldsFilled,
         hasProfilePhoto,

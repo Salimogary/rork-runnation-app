@@ -26,6 +26,11 @@ android/
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+expo-web.log
+expo-web-*.log
+rork-web.log
+rork-web.err.log
+.codex-recovery/
 
 # macOS
 .DS_Store

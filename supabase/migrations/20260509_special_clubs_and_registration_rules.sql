@@ -223,7 +223,7 @@ begin
     nullif(trim(v_display_name), ''),
     v_registration_name,
     v_email,
-    'RunNation Super Admin'
+    'RunNation Global Admin'
   );
 
   for v_column in
@@ -250,13 +250,13 @@ begin
         case when v_registration_id is not null then quote_literal(v_registration_id::text) else quote_literal(p_user_id::text) end
       when v_column.column_name ilike '%email%' then quote_literal(coalesce(v_email, 'superadmin@runnation.local'))
       when v_column.column_name ilike '%country%' then quote_literal(coalesce(v_country, 'Global'))
-      when v_column.column_name ilike '%name%' then quote_literal(coalesce(v_display_name, 'RunNation Super Admin'))
+      when v_column.column_name ilike '%name%' then quote_literal(coalesce(v_display_name, 'RunNation Global Admin'))
       when v_column.data_type = 'boolean' then 'true'
       when v_column.data_type like 'timestamp%' then 'now()'
       when v_column.data_type = 'date' then 'current_date'
       when v_column.data_type in ('integer', 'bigint', 'smallint', 'numeric', 'double precision', 'real') then '0'
       when v_column.udt_name = 'uuid' then 'gen_random_uuid()'
-      else quote_literal(coalesce(v_display_name, 'RunNation Super Admin'))
+      else quote_literal(coalesce(v_display_name, 'RunNation Global Admin'))
     end;
 
     v_values := array_append(v_values, v_value);

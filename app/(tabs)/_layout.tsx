@@ -25,6 +25,15 @@ export default function TabLayout() {
   });
 
   const lockedColor = '#C0C0C0';
+  const compactTabLabelStyle = {
+    fontSize: 10,
+    fontWeight: "700" as const,
+    includeFontPadding: false,
+  };
+  const getLockedTabLabelStyle = () => ({
+    ...compactTabLabelStyle,
+    color: lockedColor,
+  });
 
   const getTabColor = (tabName: string, color: string) => {
     if (!isSubscribed && LOCKED_TABS.includes(tabName)) {
@@ -89,6 +98,8 @@ export default function TabLayout() {
         options={{
           title: "Workout",
           tabBarIcon: ({ color }) => <Footprints color={color} size={24} />,
+          tabBarItemStyle: { flex: 0.92 },
+          tabBarLabelStyle: compactTabLabelStyle,
         }}
       />
       <Tabs.Screen
@@ -101,7 +112,8 @@ export default function TabLayout() {
               {!isSubscribed && <Lock size={10} color={lockedColor} style={{ position: 'absolute', top: -4, right: -6 }} />}
             </View>
           ),
-          tabBarLabelStyle: !isSubscribed ? { color: lockedColor } : undefined,
+          tabBarItemStyle: { flex: 0.82 },
+          tabBarLabelStyle: !isSubscribed ? getLockedTabLabelStyle() : compactTabLabelStyle,
         }}
         listeners={{
           tabPress: (e) => {
@@ -112,8 +124,10 @@ export default function TabLayout() {
       <Tabs.Screen
         name="activity"
         options={{
-          title: "Reports",
+          title: "Leaderboard",
           tabBarIcon: ({ color }) => <Users color={color} size={24} />,
+          tabBarItemStyle: { flex: 1.3 },
+          tabBarLabelStyle: compactTabLabelStyle,
         }}
       />
       <Tabs.Screen
@@ -121,6 +135,8 @@ export default function TabLayout() {
         options={{
           title: "Magazine",
           tabBarIcon: ({ color }) => <BookOpen color={color} size={24} />,
+          tabBarItemStyle: { flex: 1.02 },
+          tabBarLabelStyle: compactTabLabelStyle,
         }}
       />
       <Tabs.Screen
@@ -134,7 +150,8 @@ export default function TabLayout() {
               {!isSubscribed && <Lock size={10} color={lockedColor} style={{ position: 'absolute', top: -4, right: -6 }} />}
             </View>
           ),
-          tabBarLabelStyle: !isSubscribed ? { color: lockedColor } : undefined,
+          tabBarItemStyle: { flex: 0.78 },
+          tabBarLabelStyle: !isSubscribed ? getLockedTabLabelStyle() : compactTabLabelStyle,
         }}
         listeners={{
           tabPress: (e) => {
@@ -152,7 +169,8 @@ export default function TabLayout() {
               {!isSubscribed && <Lock size={10} color={lockedColor} style={{ position: 'absolute', top: -4, right: -6 }} />}
             </View>
           ),
-          tabBarLabelStyle: !isSubscribed ? { color: lockedColor } : undefined,
+          tabBarItemStyle: { flex: 0.78 },
+          tabBarLabelStyle: !isSubscribed ? getLockedTabLabelStyle() : compactTabLabelStyle,
         }}
         listeners={{
           tabPress: (e) => {
@@ -170,7 +188,8 @@ export default function TabLayout() {
               {!isSubscribed && <Lock size={10} color={lockedColor} style={{ position: 'absolute', top: -4, right: -6 }} />}
             </View>
           ),
-          tabBarLabelStyle: !isSubscribed ? { color: lockedColor } : undefined,
+          tabBarItemStyle: { flex: 0.88 },
+          tabBarLabelStyle: !isSubscribed ? getLockedTabLabelStyle() : compactTabLabelStyle,
         }}
         listeners={{
           tabPress: (e) => {

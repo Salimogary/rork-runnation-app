@@ -1,5 +1,10 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import {
+  getApplicantAgeFromAuth,
+  isServiceTeamMinor,
+  JUNIOR_RUNNERS_CLUB_COORDINATOR_ROLE,
+} from "../age-eligibility";
 
 const SERVICE_ROLE_DEFINITIONS = [
   {
@@ -23,8 +28,9 @@ const SERVICE_ROLE_DEFINITIONS = [
   {
     roleName: "shop_manager",
     label: "Shop Manager",
-    description: "Manage the RunNation shop presence for your country.",
+    description: "Manage the RunNation shop presence for your country. This role is temporarily paused while the online store is being prepared.",
     maxPerCountry: 1,
+    comingSoon: true,
   },
   {
     roleName: "junior_runners_club_coordinator",
@@ -51,22 +57,40 @@ const SERVICE_ROLE_DEFINITIONS = [
     maxGlobal: 1,
   },
   {
+    roleName: "smartfit_club_coordinator",
+    label: "SmartFit Club Coordinator",
+    description: "Coordinate the SmartFit Club for smart watch users tracking general health and wearable data.",
+    maxGlobal: 1,
+  },
+  {
+    roleName: "magazine_editor",
+    label: "Magazine Editor",
+    description: "Lead The Running Post editorial vision, review submissions, manage timely updates, and protect editorial quality.",
+    maxGlobal: 1,
+  },
+  {
+    roleName: "chat_room_administrator",
+    label: "Chat Room Administrator",
+    description: "Screen chat abuse reports, remove harmful posts, and request chat suspensions for Global Admin approval.",
+    maxGlobal: 1,
+  },
+  {
     roleName: "magazine_columnist_fitness_coach",
     label: "Magazine Columnist (Fitness Coach)",
     description: "Contribute practical fitness, training, recovery, and healthy running guidance to The Running Post.",
-    maxGlobal: 2,
+    maxGlobal: 1,
   },
   {
     roleName: "magazine_columnist_sports_journalist",
     label: "Magazine Columnist (Sports Journalist)",
-    description: "Write informed running news, event analysis, interviews, and community sport stories for The Running Post.",
-    maxGlobal: 2,
+    description: "Report on sports headlines, races, tournaments, athletes, clubs, charity runs, and community fitness stories for The Running Post.",
+    maxGlobal: 1,
   },
   {
     roleName: "magazine_columnist_motivation_speaker",
-    label: "Magazine Columnist (Motivation Speaker)",
-    description: "Share motivational running columns that encourage consistency, confidence, and community participation.",
-    maxGlobal: 2,
+    label: "Magazine Columnist (Empowerment Coach)",
+    description: "Share empowerment running columns that encourage consistency, confidence, and community participation.",
+    maxGlobal: 1,
   },
 ] as const;
 
@@ -77,13 +101,19 @@ function roleFromRelation(row: any): string | null {
   return roleSource?.role_name ?? null;
 }
 
+function isGlobalAdminRole(roleName: string | null | undefined): boolean {
+  const normalized = roleName?.trim().toLowerCase();
+  return normalized === "super_admin" || normalized === "global_admin";
+}
+
 function roleLabel(roleName: string) {
   const match = SERVICE_ROLE_DEFINITIONS.find((role) => role.roleName === roleName);
   if (match) return match.label;
 
   switch (roleName) {
     case "super_admin":
-      return "Super Admin";
+    case "global_admin":
+      return "Global Admin";
     case "country_admin":
       return "Country Admin";
     case "country_coordinator":
@@ -102,12 +132,18 @@ function roleLabel(roleName: string) {
       return "Treadmill Runners Club Coordinator";
     case "para_runners_club_coordinator":
       return "Para Runners Club Coordinator";
+    case "smartfit_club_coordinator":
+      return "SmartFit Club Coordinator";
+    case "magazine_editor":
+      return "Magazine Editor";
+    case "chat_room_administrator":
+      return "Chat Room Administrator";
     case "magazine_columnist_fitness_coach":
       return "Magazine Columnist (Fitness Coach)";
     case "magazine_columnist_sports_journalist":
       return "Magazine Columnist (Sports Journalist)";
     case "magazine_columnist_motivation_speaker":
-      return "Magazine Columnist (Motivation Speaker)";
+      return "Magazine Columnist (Empowerment Coach)";
     default:
       return roleName
         .split("_")
@@ -122,7 +158,7 @@ export default publicProcedure
   .query(async ({ input, ctx }) => {
     const countryCode = input.countryCode.trim().toUpperCase();
 
-    const [{ data: country }, { data: roles, error: rolesError }] = await Promise.all([
+    const [{ data: country }, { data: serviceRoleRows, error: rolesError }] = await Promise.all([
       ctx.supabase
         .from("countries")
         .select("iso_alpha2, name")
@@ -138,7 +174,7 @@ export default publicProcedure
       throw new Error(rolesError.message || "Could not load service team roles.");
     }
 
-    const roleRows = roles ?? [];
+    const roleRows = serviceRoleRows ?? [];
     const roleIds = roleRows.map((role: any) => role.role_id).filter(Boolean);
     const roleIdByName = new Map(roleRows.map((role: any) => [role.role_name, role.role_id]));
 
@@ -146,6 +182,16 @@ export default publicProcedure
       ? (await ctx.supabase.auth.admin.getUserById(ctx.authUserId)).data?.user ?? null
       : null;
     const authEmail = authUser?.email?.trim().toLowerCase() ?? null;
+    const { data: authProfile } = ctx.authUserId
+      ? await ctx.supabase
+        .from("profiles")
+        .select("profile_id, registration_id")
+        .eq("profile_id", ctx.authUserId)
+        .maybeSingle()
+      : { data: null };
+    const currentAssignmentUserIds = Array.from(
+      new Set([ctx.authUserId, authProfile?.profile_id, authProfile?.registration_id].filter(Boolean))
+    );
 
     const [assignmentsResult, currentUserAssignmentsResult, clubsResult, organizersResult, activitiesResult, invitesResult] = await Promise.all([
       roleIds.length
@@ -155,11 +201,11 @@ export default publicProcedure
             .eq("is_active", true)
             .in("role_id", roleIds)
         : Promise.resolve({ data: [], error: null }),
-      ctx.authUserId
+      currentAssignmentUserIds.length > 0
         ? ctx.supabase
             .from("user_role_assignments")
             .select("assignment_id, role_id, country_code, club_id, organizer_id, roles(role_name)")
-            .eq("user_id", ctx.authUserId)
+            .in("user_id", currentAssignmentUserIds)
             .eq("is_active", true)
         : Promise.resolve({ data: [], error: null }),
       ctx.supabase
@@ -214,11 +260,11 @@ export default publicProcedure
     const assignments = assignmentsResult.data ?? [];
     const currentUserAssignments = currentUserAssignmentsResult.data ?? [];
     const isCurrentUserSuperAdmin = currentUserAssignments.some(
-      (assignment: any) => roleFromRelation(assignment) === "super_admin"
+      (assignment: any) => isGlobalAdminRole(roleFromRelation(assignment))
     );
     const currentAssignment = isCurrentUserSuperAdmin ? null : currentUserAssignments.find((assignment: any) => {
       const roleName = roleFromRelation(assignment);
-      return roleName && roleName !== "user" && roleName !== "super_admin";
+      return roleName && roleName !== "user" && !isGlobalAdminRole(roleName);
     });
     const currentRoleName = currentAssignment ? roleFromRelation(currentAssignment) : null;
     const currentRoleCountryCode =
@@ -249,22 +295,10 @@ export default publicProcedure
         return false;
       }).length;
 
-    return {
-      countryCode,
-      countryName: country?.name ?? null,
-      existingRole: currentRoleName
-        ? {
-            roleName: currentRoleName,
-            roleLabel: roleLabel(currentRoleName),
-            countryCode: currentRoleCountryCode,
-            countryName: isGlobalRole(currentRoleName)
-              ? "Global"
-              : currentRoleCountryCode === countryCode
-                ? country?.name ?? currentRoleCountryCode
-                : currentRoleCountryCode,
-          }
-        : null,
-      roles: SERVICE_ROLE_DEFINITIONS.map((definition) => {
+    const applicantAge = await getApplicantAgeFromAuth(ctx);
+    const minorApplicant = isServiceTeamMinor(applicantAge);
+
+    const serviceRoles = SERVICE_ROLE_DEFINITIONS.map((definition) => {
         const roleId = roleIdByName.get(definition.roleName) ?? null;
 
         if (!roleId) {
@@ -284,7 +318,7 @@ export default publicProcedure
         const slotsUsed = countRoleAssignmentsInCountry(definition.roleName);
         const slotsTotal = "maxGlobal" in definition ? definition.maxGlobal : definition.maxPerCountry;
         const slotsRemaining = Math.max(slotsTotal - slotsUsed, 0);
-        const available = slotsRemaining > 0;
+        const available = slotsRemaining > 0 && !("comingSoon" in definition && definition.comingSoon);
 
         return {
           ...definition,
@@ -293,10 +327,54 @@ export default publicProcedure
           hasPendingRequest: pendingRoleIds.has(roleId),
           slotsUsed,
           slotsTotal,
-          status: pendingRoleIds.has(roleId) ? ("pending" as const) : available ? ("available" as const) : ("filled" as const),
-          statusLabel: pendingRoleIds.has(roleId) ? "Pending approval" : available ? `Available (${slotsRemaining} left)` : "Filled",
+          status: "comingSoon" in definition && definition.comingSoon
+            ? ("coming_soon" as const)
+            : pendingRoleIds.has(roleId)
+              ? ("pending" as const)
+              : available
+                ? ("available" as const)
+                : ("filled" as const),
+          statusLabel: "comingSoon" in definition && definition.comingSoon
+            ? "Coming soon"
+            : pendingRoleIds.has(roleId)
+              ? "Pending approval"
+              : available
+                ? `Available (${slotsRemaining})`
+                : "Filled",
           available: available && !pendingRoleIds.has(roleId),
         };
-      }),
+      });
+
+    const visibleRoles = minorApplicant
+      ? serviceRoles.filter((role) => role.roleName === JUNIOR_RUNNERS_CLUB_COORDINATOR_ROLE)
+      : serviceRoles;
+
+    const juniorRoleAvailable = serviceRoles.some(
+      (role) => role.roleName === JUNIOR_RUNNERS_CLUB_COORDINATOR_ROLE && role.available
+    );
+
+    return {
+      countryCode,
+      countryName: country?.name ?? null,
+      applicantAge,
+      isMinorApplicant: minorApplicant,
+      canOpenServiceTeam: currentRoleName
+        ? true
+        : minorApplicant
+          ? applicantAge !== null && juniorRoleAvailable
+          : true,
+      existingRole: currentRoleName
+        ? {
+            roleName: currentRoleName,
+            roleLabel: roleLabel(currentRoleName),
+            countryCode: currentRoleCountryCode,
+            countryName: isGlobalRole(currentRoleName)
+              ? "Global"
+              : currentRoleCountryCode === countryCode
+                ? country?.name ?? currentRoleCountryCode
+                : currentRoleCountryCode,
+          }
+        : null,
+      roles: visibleRoles,
     };
   });
