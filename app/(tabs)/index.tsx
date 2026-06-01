@@ -478,6 +478,25 @@ export default function ExerciseScreen() {
     }
   };
 
+  const ensureForegroundLocationPermission = useCallback(async () => {
+    if (Platform.OS === "web") {
+      return false;
+    }
+
+    const existingPermission = await Location.getForegroundPermissionsAsync();
+    const permission =
+      existingPermission.status === "granted"
+        ? existingPermission
+        : await Location.requestForegroundPermissionsAsync();
+
+    if (permission.status !== "granted") {
+      Alert.alert("Location Required", "Please allow location access before starting a GPS workout.");
+      return false;
+    }
+
+    return true;
+  }, []);
+
   const isValidGpsPoint = useCallback((point: LocationPoint, exerciseT: ExerciseType): boolean => {
     if (point.accuracy !== null && point.accuracy > GPS_ACCURACY_THRESHOLD) {
       console.log('[GPS Filter] Rejected: accuracy too low:', point.accuracy, 'm');
@@ -634,17 +653,23 @@ export default function ExerciseScreen() {
       handleLocationUpdate(location, exerciseT);
     };
 
-    locationSubscription.current = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.BestForNavigation,
-        distanceInterval: 5,
-        timeInterval: 3000,
-      },
-      (location) => {
-        handleLocationUpdate(location, exerciseT);
-      }
-    );
-    await startBackgroundLocationWatch(exerciseT);
+    try {
+      locationSubscription.current = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.BestForNavigation,
+          distanceInterval: 5,
+          timeInterval: 3000,
+        },
+        (location) => {
+          handleLocationUpdate(location, exerciseT);
+        }
+      );
+    } catch (error) {
+      backgroundLocationHandler = null;
+      throw error;
+    }
+
+    void startBackgroundLocationWatch(exerciseT);
   }, [handleLocationUpdate, startBackgroundLocationWatch]);
 
   useEffect(() => {
@@ -674,10 +699,9 @@ export default function ExerciseScreen() {
       return;
     }
 
-    setExerciseType(type);
-    setSelectedEventRun(eventRun);
-    setRunState("running");
-    setStartTime(new Date());
+    const hasLocationPermission = await ensureForegroundLocationPermission();
+    if (!hasLocationPermission) return;
+
     setCoords([]);
     setDistance(0);
     setDuration(0);
@@ -692,6 +716,29 @@ export default function ExerciseScreen() {
 
     console.log('[Tracking] Started', type, 'at', new Date().toISOString());
 
+    try {
+      await startLocationWatch(type);
+    } catch (error) {
+      console.error("[Tracking] Could not start GPS workout:", error);
+      Alert.alert("Workout Start Failed", "RunNation could not start GPS tracking. Please check location permission and try again.");
+      await stopBackgroundLocationWatch();
+      if (locationSubscription.current) {
+        locationSubscription.current.remove();
+        locationSubscription.current = null;
+      }
+      backgroundLocationHandler = null;
+      runningStartTimestamp.current = null;
+      setRunState("idle");
+      setExerciseType(null);
+      setSelectedEventRun(null);
+      return;
+    }
+
+    setExerciseType(type);
+    setSelectedEventRun(eventRun);
+    setRunState("running");
+    setStartTime(new Date());
+
     timerInterval.current = setInterval(() => {
       if (runningStartTimestamp.current !== null) {
         const now = Date.now();
@@ -699,9 +746,7 @@ export default function ExerciseScreen() {
         setDuration(elapsedBeforePause.current + currentSegment);
       }
     }, 1000) as any;
-
-    await startLocationWatch(type);
-  }, [canUseCycleWorkout, cycleWorkoutOnly, startLocationWatch]);
+  }, [canUseCycleWorkout, cycleWorkoutOnly, ensureForegroundLocationPermission, startLocationWatch, stopBackgroundLocationWatch]);
 
   const playCountdownCue = useCallback((value: string) => {
     if (!activityVoiceAssistantEnabled) {
