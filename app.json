@@ -97,7 +97,6 @@
         }
       ],
       "expo-font",
-      "expo-sharing",
       "expo-web-browser"
     ],
     "experiments": {
