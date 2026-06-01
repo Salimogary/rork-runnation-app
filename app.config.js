@@ -7,6 +7,13 @@ const androidMapsApiKey =
 
 const expoConfig = {
   ...appJson.expo,
+  extra: {
+    ...(appJson.expo.extra || {}),
+    eas: {
+      ...(appJson.expo.extra?.eas || {}),
+      projectId: "1d655aca-1c74-48a0-94a3-ca51f41ab4f4",
+    },
+  },
 };
 
 if (androidMapsApiKey) {
