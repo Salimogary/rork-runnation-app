@@ -1766,20 +1766,6 @@ export default function ExerciseScreen() {
                     <View style={styles.workoutWelcomeCopy}>
                       <Text style={styles.workoutWelcomeKicker}>Workout</Text>
                       <Text style={styles.workoutWelcomeTitle}>Ready to move</Text>
-                      <View style={styles.workoutWelcomeChips}>
-                        <View style={styles.workoutWelcomeChip}>
-                          <Footprints size={13} color={colors.white} />
-                          <Text style={styles.workoutWelcomeChipText}>Walk</Text>
-                        </View>
-                        <View style={styles.workoutWelcomeChip}>
-                          <Play size={13} color={colors.white} />
-                          <Text style={styles.workoutWelcomeChipText}>Run</Text>
-                        </View>
-                        <View style={styles.workoutWelcomeChip}>
-                          <Bike size={13} color={colors.white} />
-                          <Text style={styles.workoutWelcomeChipText}>Cycle</Text>
-                        </View>
-                      </View>
                     </View>
                     <View style={styles.workoutWelcomeIcon}>
                       <Activity size={28} color={colors.white} />
@@ -2793,28 +2779,6 @@ const styles = StyleSheet.create({
     fontSize: 24,
     lineHeight: 29,
     fontWeight: "900" as const,
-  },
-  workoutWelcomeChips: {
-    flexDirection: "row" as const,
-    flexWrap: "wrap" as const,
-    gap: 6,
-    marginTop: 4,
-  },
-  workoutWelcomeChip: {
-    flexDirection: "row" as const,
-    alignItems: "center" as const,
-    gap: 4,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.16)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.20)",
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-  },
-  workoutWelcomeChipText: {
-    color: colors.white,
-    fontSize: 11,
-    fontWeight: "800" as const,
   },
   workoutWelcomeIcon: {
     width: 54,

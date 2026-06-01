@@ -16,6 +16,5 @@
     "dist",
     "node_modules",
     "hono.ts"
-  ],
-  "extends": "expo/tsconfig.base"
+  ]
 }
