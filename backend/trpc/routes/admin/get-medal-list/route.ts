@@ -40,7 +40,7 @@ const getMedalList = publicProcedure
 
       const { data: events, error: eventsError } = await ctx.supabase
         .from("events")
-        .select("event_id, event_name, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
+        .select("event_id, event_name, available_distances_km, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
         .in("event_id", eventIds);
 
       if (eventsError) {

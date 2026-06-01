@@ -243,6 +243,21 @@ const minIsoDate = (a: string, b: string): string => (a <= b ? a : b);
 const getMedalBand = (distanceKm: number): (typeof MEDAL_BANDS)[number] | null =>
   MEDAL_BANDS.find((band) => distanceKm >= band.minKm) || null;
 
+const getMedalBandForCompletedDistance = (
+  completedDistanceKm: number,
+  configuredDistances?: unknown
+): (typeof MEDAL_BANDS)[number] | null => {
+  const completedDistance = Number(completedDistanceKm) || 0;
+  const distances = Array.isArray(configuredDistances)
+    ? configuredDistances
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0)
+        .sort((a, b) => b - a)
+    : [];
+  const matchedDistance = distances.find((distance) => completedDistance + 0.01 >= distance);
+  return getMedalBand(matchedDistance || completedDistance);
+};
+
 const getHealthRecommendations = (age: number | null) => {
   const stepTarget = age !== null && age >= 60 ? 2000 : 3000;
   const sleep = age !== null && age < 13
@@ -1931,7 +1946,7 @@ export default function GoalsScreen() {
 
       const { data: events, error: eventsError } = await supabase
         .from("events")
-        .select("event_id, starts_at, ends_at, has_medal, approval_status, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
+        .select("event_id, starts_at, ends_at, has_medal, approval_status, available_distances_km, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end")
         .eq("has_medal", true)
         .eq("approval_status", "approved")
         .gte("ends_at", yearStart)
@@ -1994,8 +2009,6 @@ export default function GoalsScreen() {
         const participantDistance = Number(participant.distance_km) || 0;
         const minDailyDistance = Number(event.medal_min_daily_distance) || 0;
         const minCumulativeDistance = Number(event.medal_min_cumulative_distance) || 0;
-        const band = getMedalBand(minCumulativeDistance || minDailyDistance || participantDistance);
-        if (!band) return;
 
         let totalDistance = participantDistance;
         let qualified = participantDistance > 0 && (minDailyDistance <= 0 || participantDistance >= minDailyDistance);
@@ -2015,6 +2028,9 @@ export default function GoalsScreen() {
           }
         }
         if (!qualified) return;
+
+        const band = getMedalBandForCompletedDistance(totalDistance, event.available_distances_km);
+        if (!band) return;
 
         const existing = rowsByRegistration.get(canonicalId) || { registrationId: canonicalId, totalMedals: 0, points: 0 };
         existing.totalMedals += 1;

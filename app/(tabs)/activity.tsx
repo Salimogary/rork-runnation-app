@@ -244,6 +244,22 @@ function getMedalBand(distanceKm: number): (typeof MEDAL_BANDS)[number] | null {
   return MEDAL_BANDS.find((band) => distanceKm >= band.minKm) || null;
 }
 
+function getMedalBandForCompletedDistance(
+  completedDistanceKm: number,
+  configuredDistances?: unknown
+): (typeof MEDAL_BANDS)[number] | null {
+  const completedDistance = Number(completedDistanceKm) || 0;
+  const distances = Array.isArray(configuredDistances)
+    ? configuredDistances
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0)
+        .sort((a, b) => b - a)
+    : [];
+
+  const matchedDistance = distances.find((distance) => completedDistance + 0.01 >= distance);
+  return getMedalBand(matchedDistance || completedDistance);
+}
+
 function getDateOnly(value?: string | null): string {
   return String(value || "").slice(0, 10);
 }
@@ -1794,6 +1810,7 @@ export default function ActivityScreen() {
             event_type,
             has_medal,
             approval_status,
+            available_distances_km,
             medal_min_daily_distance,
             medal_min_cumulative_distance,
             medal_date_start,
@@ -1888,9 +1905,6 @@ export default function ActivityScreen() {
           const participantDistance = Number(participant.distance_km) || 0;
           const minDailyDistance = Number(event.medal_min_daily_distance) || 0;
           const minCumulativeDistance = Number(event.medal_min_cumulative_distance) || 0;
-          const scoreDistance = minCumulativeDistance || minDailyDistance || participantDistance;
-          const band = getMedalBand(scoreDistance);
-          if (!band) return;
 
           let totalDistance = participantDistance;
           let qualified = participantDistance > 0 && (minDailyDistance <= 0 || participantDistance >= minDailyDistance);
@@ -1914,6 +1928,9 @@ export default function ActivityScreen() {
           }
 
           if (!qualified) return;
+
+          const band = getMedalBandForCompletedDistance(totalDistance, event.available_distances_km);
+          if (!band) return;
 
           const existing = rowsByRegistration.get(canonicalId) || {
             registrationId: canonicalId,
