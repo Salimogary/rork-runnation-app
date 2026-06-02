@@ -7,9 +7,31 @@ const STORAGE_KEYS = {
   LAST_PROFILE_PERCENT: 'notif_last_profile_percent',
   LAST_FITNESS_PROGRESS: 'notif_last_fitness_progress',
   LAST_WEIGHT_PROGRESS: 'notif_last_weight_progress',
+  LAST_ACTIVITY_MILESTONES: 'notif_last_activity_milestones',
+  LAST_WEIGHT_LOG_REMINDER: 'notif_last_weight_log_reminder',
+  SUBSCRIPTION_NOTIFIED_MILESTONES: 'notif_subscription_milestones',
+  PENDING_SUBSCRIPTION_REMINDER: 'notif_pending_subscription_reminder',
+  SCHEDULED_REMINDERS: 'notif_scheduled_reminders',
   NOTIFICATIONS_ENABLED: 'notif_enabled',
   TRIAL_NOTIFIED_MILESTONES: 'notif_trial_milestones',
 };
+
+type RegisteredEventReminder = {
+  eventId: string;
+  eventName: string;
+  startsAt: string | null;
+  endsAt: string | null;
+  eventType: string | null;
+  recurrenceFrequency?: string | null;
+  recurrenceWeekday?: number | null;
+  recurrenceWeekdays?: number[] | string | null;
+  recurrenceMonthlyMode?: string | null;
+  recurrenceMonthDay?: number | null;
+  recurrenceWeekOfMonth?: number | null;
+  registrationStatus?: string | null;
+};
+
+type ReminderScheduleMap = Record<string, string>;
 
 function isExpoGoAndroid(): boolean {
   return Platform.OS === "android" && Constants.appOwnership === "expo";
@@ -21,6 +43,134 @@ async function getNotificationsModule() {
   if (isExpoGoAndroid()) return null;
   const mod = await import("expo-notifications");
   return mod;
+}
+
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function toDateOnlyKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function parseDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parseWeekdays(value: RegisteredEventReminder['recurrenceWeekdays'], fallback?: number | null): number[] {
+  if (Array.isArray(value)) {
+    return value.map((day) => Number(day)).filter((day) => day >= 0 && day <= 6);
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.map((day) => Number(day)).filter((day) => day >= 0 && day <= 6);
+      }
+    } catch {
+      return value
+        .split(',')
+        .map((day) => Number(day.trim()))
+        .filter((day) => day >= 0 && day <= 6);
+    }
+  }
+  return typeof fallback === 'number' && fallback >= 0 && fallback <= 6 ? [fallback] : [];
+}
+
+function isNthWeekdayOfMonth(date: Date, weekOfMonth: number | null | undefined): boolean {
+  if (!weekOfMonth || weekOfMonth < 1) return true;
+  const dayOfMonth = date.getDate();
+  const ordinal = Math.ceil(dayOfMonth / 7);
+  return ordinal === weekOfMonth;
+}
+
+function eventOccursOnDate(event: RegisteredEventReminder, date: Date): boolean {
+  const start = parseDate(event.startsAt);
+  const end = parseDate(event.endsAt) ?? start;
+  if (!start) return false;
+
+  const targetDay = startOfDay(date);
+  const startDay = startOfDay(start);
+  const endDay = startOfDay(end ?? start);
+  const eventType = String(event.eventType || '').toLowerCase();
+
+  if (eventType === 'multiday') {
+    return targetDay >= startDay && targetDay <= endDay;
+  }
+
+  if (eventType !== 'recurring') {
+    return toDateOnlyKey(targetDay) === toDateOnlyKey(startDay);
+  }
+
+  if (targetDay < startDay || targetDay > endDay) return false;
+
+  const frequency = String(event.recurrenceFrequency || 'weekly').toLowerCase();
+  if (frequency === 'monthly') {
+    if (event.recurrenceMonthlyMode === 'weekday') {
+      const weekdays = parseWeekdays(event.recurrenceWeekdays, event.recurrenceWeekday);
+      const matchesWeekday = weekdays.length === 0 || weekdays.includes(targetDay.getDay());
+      return matchesWeekday && isNthWeekdayOfMonth(targetDay, event.recurrenceWeekOfMonth);
+    }
+    const monthDay = event.recurrenceMonthDay || startDay.getDate();
+    return targetDay.getDate() === monthDay;
+  }
+
+  const weekdays = parseWeekdays(event.recurrenceWeekdays, event.recurrenceWeekday ?? startDay.getDay());
+  return weekdays.includes(targetDay.getDay());
+}
+
+function getNextEventOccurrences(events: RegisteredEventReminder[], daysAhead = 30): Array<{ event: RegisteredEventReminder; date: Date }> {
+  const today = startOfDay(new Date());
+  const occurrences: Array<{ event: RegisteredEventReminder; date: Date }> = [];
+  for (let offset = 0; offset <= daysAhead; offset += 1) {
+    const date = addDays(today, offset);
+    for (const event of events) {
+      if (event.registrationStatus === 'pending') continue;
+      if (eventOccursOnDate(event, date)) {
+        occurrences.push({ event, date });
+      }
+    }
+  }
+  return occurrences;
+}
+
+async function scheduleLocalNotification(
+  title: string,
+  body: string,
+  triggerDate: Date,
+  data?: Record<string, unknown>
+): Promise<string | null> {
+  if (Platform.OS === 'web') return null;
+
+  const Notifications = await getNotificationsModule();
+  if (!Notifications) return null;
+
+  const enabled = await getNotificationsEnabled();
+  if (!enabled) return null;
+
+  if (triggerDate.getTime() <= Date.now()) return null;
+
+  const id = await Notifications.scheduleNotificationAsync({
+    content: {
+      title,
+      body,
+      data: data ?? {},
+      sound: 'default',
+    },
+    trigger: triggerDate,
+  } as any);
+  return id;
 }
 
 export async function setupNotifications(): Promise<boolean> {
@@ -222,6 +372,145 @@ export async function checkAndNotifyGoalProgress(
   }
 }
 
+export async function scheduleRegisteredEventReminders(
+  userId: string,
+  events: RegisteredEventReminder[],
+  reminderHour = 6,
+  reminderMinute = 30
+): Promise<void> {
+  try {
+    if (Platform.OS === 'web') return;
+
+    const Notifications = await getNotificationsModule();
+    if (!Notifications) return;
+
+    const enabled = await getNotificationsEnabled();
+    if (!enabled) return;
+
+    const storageKey = `${STORAGE_KEYS.SCHEDULED_REMINDERS}_${userId}`;
+    const stored = await AsyncStorage.getItem(storageKey);
+    const scheduled: ReminderScheduleMap = stored ? JSON.parse(stored) : {};
+    const nextScheduled: ReminderScheduleMap = {};
+    const wantedKeys = new Set<string>();
+    const occurrences = getNextEventOccurrences(events, 30);
+
+    for (const { event, date } of occurrences) {
+      const dateKey = toDateOnlyKey(date);
+      const reminderKey = `event:${event.eventId}:${dateKey}`;
+      wantedKeys.add(reminderKey);
+
+      if (scheduled[reminderKey]) {
+        nextScheduled[reminderKey] = scheduled[reminderKey];
+        continue;
+      }
+
+      const triggerDate = new Date(date);
+      triggerDate.setHours(reminderHour, reminderMinute, 0, 0);
+      if (triggerDate.getTime() <= Date.now()) continue;
+
+      const notificationId = await scheduleLocalNotification(
+        'RunNation event today',
+        `${event.eventName || 'Your event'} is today. Get ready and record your activity.`,
+        triggerDate,
+        { type: 'event_reminder', eventId: event.eventId, occurrenceDate: dateKey }
+      );
+
+      if (notificationId) {
+        nextScheduled[reminderKey] = notificationId;
+      }
+    }
+
+    for (const [key, notificationId] of Object.entries(scheduled)) {
+      if (!key.startsWith('event:') || wantedKeys.has(key)) continue;
+      try {
+        await Notifications.cancelScheduledNotificationAsync(notificationId);
+      } catch (error) {
+        console.warn('[Notifications] Could not cancel stale event reminder:', error);
+      }
+    }
+
+    await AsyncStorage.setItem(storageKey, JSON.stringify(nextScheduled));
+  } catch (error) {
+    console.error('[Notifications] Event reminder scheduling error:', error);
+  }
+}
+
+export async function checkAndNotifyWeightLogReminder(
+  userId: string,
+  hasWeightGoal: boolean,
+  latestWeightEntryDate?: string | null
+): Promise<void> {
+  try {
+    if (!hasWeightGoal) return;
+
+    const now = new Date();
+    const lastEntry = parseDate(latestWeightEntryDate);
+    const daysSinceEntry = lastEntry
+      ? Math.floor((startOfDay(now).getTime() - startOfDay(lastEntry).getTime()) / (1000 * 60 * 60 * 24))
+      : 999;
+
+    if (daysSinceEntry < 7) return;
+
+    const key = `${STORAGE_KEYS.LAST_WEIGHT_LOG_REMINDER}_${userId}`;
+    const stored = await AsyncStorage.getItem(key);
+    const lastReminder = parseDate(stored);
+    const daysSinceReminder = lastReminder
+      ? Math.floor((startOfDay(now).getTime() - startOfDay(lastReminder).getTime()) / (1000 * 60 * 60 * 24))
+      : 999;
+
+    if (daysSinceReminder < 7) return;
+
+    await sendLocalNotification(
+      'Weekly weight check-in',
+      'Log your current weight to keep your weight goal progress accurate.',
+      { type: 'weight_log_reminder' }
+    );
+    await AsyncStorage.setItem(key, now.toISOString());
+  } catch (error) {
+    console.error('[Notifications] Weight log reminder error:', error);
+  }
+}
+
+export async function checkAndNotifyActivityMilestones(
+  userId: string,
+  totalDistanceKm: number,
+  totalActivities: number
+): Promise<void> {
+  try {
+    const key = `${STORAGE_KEYS.LAST_ACTIVITY_MILESTONES}_${userId}`;
+    const stored = await AsyncStorage.getItem(key);
+    const notified = stored ? JSON.parse(stored) as string[] : [];
+    const notifiedSet = new Set(notified);
+
+    const distanceMilestones = [5, 10, 21, 42, 100, 250, 500, 1000, 2500, 5000];
+    const activityMilestones = [5, 10, 25, 50, 100, 250, 500, 1000];
+    const distanceHit = distanceMilestones.find((value) => totalDistanceKm >= value && !notifiedSet.has(`distance:${value}`));
+    const activityHit = activityMilestones.find((value) => totalActivities >= value && !notifiedSet.has(`activities:${value}`));
+
+    if (distanceHit) {
+      await sendLocalNotification(
+        'RunNation milestone reached',
+        `You have completed ${distanceHit.toLocaleString()} km on RunNation. Keep building the streak.`,
+        { type: 'activity_milestone', milestoneType: 'distance', value: distanceHit }
+      );
+      notifiedSet.add(`distance:${distanceHit}`);
+    }
+
+    if (activityHit) {
+      await sendLocalNotification(
+        'Activity milestone reached',
+        `You have recorded ${activityHit.toLocaleString()} activities on RunNation. Nice consistency.`,
+        { type: 'activity_milestone', milestoneType: 'activities', value: activityHit }
+      );
+      notifiedSet.add(`activities:${activityHit}`);
+    }
+
+    await AsyncStorage.setItem(key, JSON.stringify(Array.from(notifiedSet)));
+  } catch (error) {
+    console.error('[Notifications] Activity milestone check error:', error);
+  }
+}
+
 const TRIAL_DURATION_DAYS = 90;
 const TRIAL_NOTIFICATION_DAYS = [30, 60, 80, 85, 90];
 
@@ -286,6 +575,59 @@ export async function checkAndNotifyTrialExpiry(
     await AsyncStorage.setItem(key, JSON.stringify(notifiedMilestones));
   } catch (error) {
     console.error('[Notifications] Trial expiry check error:', error);
+  }
+}
+
+export async function checkAndNotifySubscriptionReminders(
+  userId: string,
+  subscriptionStatus: string,
+  expiresAt?: string | null
+): Promise<void> {
+  try {
+    if (subscriptionStatus === 'pending') {
+      const key = `${STORAGE_KEYS.PENDING_SUBSCRIPTION_REMINDER}_${userId}`;
+      const todayKey = toDateOnlyKey(new Date());
+      const stored = await AsyncStorage.getItem(key);
+      if (stored !== todayKey) {
+        await sendLocalNotification(
+          'Subscription payment pending',
+          'Your subscription request is still pending. Refresh your status or complete payment to unlock full access.',
+          { type: 'subscription_pending' }
+        );
+        await AsyncStorage.setItem(key, todayKey);
+      }
+      return;
+    }
+
+    if (subscriptionStatus !== 'active' || !expiresAt) return;
+
+    const expires = parseDate(expiresAt);
+    if (!expires) return;
+
+    const daysRemaining = Math.ceil((startOfDay(expires).getTime() - startOfDay(new Date()).getTime()) / (1000 * 60 * 60 * 24));
+    const milestones = [30, 14, 7, 1, 0];
+    const key = `${STORAGE_KEYS.SUBSCRIPTION_NOTIFIED_MILESTONES}_${userId}`;
+    const stored = await AsyncStorage.getItem(key);
+    const notified: string[] = stored ? JSON.parse(stored) : [];
+
+    for (const milestone of milestones) {
+      const marker = `${expiresAt}:${milestone}`;
+      if (daysRemaining <= milestone && daysRemaining >= 0 && !notified.includes(marker)) {
+        await sendLocalNotification(
+          milestone === 0 ? 'Subscription expires today' : 'Subscription renewal reminder',
+          milestone === 0
+            ? 'Your RunNation subscription expires today. Renew to keep full access.'
+            : `Your RunNation subscription expires in ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}.`,
+          { type: 'subscription_expiry', daysRemaining }
+        );
+        notified.push(marker);
+        break;
+      }
+    }
+
+    await AsyncStorage.setItem(key, JSON.stringify(notified));
+  } catch (error) {
+    console.error('[Notifications] Subscription reminder error:', error);
   }
 }
 

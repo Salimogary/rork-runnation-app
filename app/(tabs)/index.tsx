@@ -11,6 +11,7 @@ import MapView, { Circle, Polyline } from "react-native-maps";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useRouter } from "expo-router";
 import * as FileSystem from "expo-file-system/legacy";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -109,13 +110,149 @@ const MIN_DISTANCE_WALK = MIN_DISTANCE_ACTIVITY;
 const MIN_DISTANCE_RUN = MIN_DISTANCE_ACTIVITY;
 const MIN_ACTIVITY_DURATION_MINUTES = 5;
 const MAX_DAILY_ACTIVITIES = 5;
+const KM_VOICE_ANNOUNCEMENT_INTERVAL = 1;
+const AUTO_PAUSE_STATIONARY_SECONDS = 90;
+const AUTO_PAUSE_MAX_SPEED_KMH = 1.2;
+const AUTO_RESUME_MIN_SPEED_KMH = 3;
+const AUTO_RESUME_MIN_DISTANCE_KM = 0.015;
 const BACKGROUND_LOCATION_TASK = "runnation-background-location";
+const ACTIVE_WORKOUT_SESSION_KEY = "runnation_active_workout_session";
+const WORKOUT_COUNTDOWN_MS = 3200;
 
 type BackgroundLocationPayload = {
   locations?: Location.LocationObject[];
 };
 
+type PersistedWorkoutStatus = "pending" | "running" | "paused" | "finished";
+
+type PersistedWorkoutSession = {
+  id: string;
+  status: PersistedWorkoutStatus;
+  exerciseType: Exclude<ExerciseType, null>;
+  eventRun: RegisteredEventRun | null;
+  startTimeIso: string;
+  startTimestamp: number;
+  runningStartTimestamp: number | null;
+  elapsedBeforePause: number;
+  pauseStartTimestamp: number | null;
+  totalPauseDuration: number;
+  pauseDurationSeconds: number;
+  autoPaused: boolean;
+  distance: number;
+  coords: Coordinates[];
+  lastValidPoint: LocationPoint | null;
+  lastProcessedLocationTimestamp: number | null;
+  filteredPointCount: number;
+  updatedAt: number;
+};
+
 let backgroundLocationHandler: ((location: Location.LocationObject) => void) | null = null;
+
+async function getPersistedWorkoutSession(): Promise<PersistedWorkoutSession | null> {
+  try {
+    const stored = await AsyncStorage.getItem(ACTIVE_WORKOUT_SESSION_KEY);
+    if (!stored) return null;
+    return JSON.parse(stored) as PersistedWorkoutSession;
+  } catch (error) {
+    console.warn("[Workout Persistence] Could not read active workout:", error);
+    return null;
+  }
+}
+
+async function setPersistedWorkoutSession(session: PersistedWorkoutSession): Promise<void> {
+  try {
+    await AsyncStorage.setItem(ACTIVE_WORKOUT_SESSION_KEY, JSON.stringify({ ...session, updatedAt: Date.now() }));
+  } catch (error) {
+    console.warn("[Workout Persistence] Could not persist active workout:", error);
+  }
+}
+
+async function clearPersistedWorkoutSession(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(ACTIVE_WORKOUT_SESSION_KEY);
+  } catch (error) {
+    console.warn("[Workout Persistence] Could not clear active workout:", error);
+  }
+}
+
+function maxSpeedForExercise(exerciseT: ExerciseType): number {
+  if (exerciseT === "Walk") return MAX_SPEED_KMH_WALK;
+  if (exerciseT === "Cycle") return MAX_SPEED_KMH_CYCLE;
+  return MAX_SPEED_KMH_RUN;
+}
+
+function isValidPersistedPoint(session: PersistedWorkoutSession, point: LocationPoint): boolean {
+  if (point.accuracy !== null && point.accuracy > GPS_ACCURACY_THRESHOLD) return false;
+  if (!session.lastValidPoint) return true;
+
+  const dist = calculateDistance(
+    { latitude: session.lastValidPoint.latitude, longitude: session.lastValidPoint.longitude },
+    { latitude: point.latitude, longitude: point.longitude }
+  );
+  if (dist < MIN_DISTANCE_BETWEEN_POINTS) return false;
+
+  const timeDiffHours = (point.timestamp - session.lastValidPoint.timestamp) / (1000 * 3600);
+  if (timeDiffHours > 0) {
+    const speedKmh = dist / timeDiffHours;
+    return speedKmh <= maxSpeedForExercise(session.exerciseType);
+  }
+
+  return true;
+}
+
+async function processPersistedBackgroundLocation(location: Location.LocationObject): Promise<void> {
+  const session = await getPersistedWorkoutSession();
+  if (!session || (session.status === "paused" && !session.autoPaused) || session.status === "finished") return;
+  if (
+    session.lastProcessedLocationTimestamp !== null &&
+    location.timestamp <= session.lastProcessedLocationTimestamp
+  ) {
+    return;
+  }
+
+  if (session.status === "pending" && location.timestamp < session.startTimestamp) {
+    session.lastProcessedLocationTimestamp = location.timestamp;
+    await setPersistedWorkoutSession(session);
+    return;
+  }
+
+  const point: LocationPoint = {
+    latitude: location.coords.latitude,
+    longitude: location.coords.longitude,
+    accuracy: location.coords.accuracy,
+    timestamp: location.timestamp,
+  };
+
+  if (!isValidPersistedPoint(session, point)) {
+    session.filteredPointCount += 1;
+    session.lastProcessedLocationTimestamp = location.timestamp;
+    await setPersistedWorkoutSession(session);
+    return;
+  }
+
+  const coord = { latitude: point.latitude, longitude: point.longitude };
+  if (session.autoPaused) {
+    if (session.pauseStartTimestamp !== null) {
+      session.totalPauseDuration += Math.max(0, location.timestamp - session.pauseStartTimestamp);
+    }
+    session.pauseStartTimestamp = null;
+    session.runningStartTimestamp = location.timestamp;
+    session.autoPaused = false;
+  }
+
+  if (session.lastValidPoint) {
+    session.distance += calculateDistance(
+      { latitude: session.lastValidPoint.latitude, longitude: session.lastValidPoint.longitude },
+      coord
+    );
+  }
+
+  session.status = "running";
+  session.lastValidPoint = point;
+  session.lastProcessedLocationTimestamp = location.timestamp;
+  session.coords = [...session.coords, coord].slice(-5000);
+  await setPersistedWorkoutSession(session);
+}
 
 if (Platform.OS !== "web" && !TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK)) {
   TaskManager.defineTask<BackgroundLocationPayload>(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
@@ -127,6 +264,9 @@ if (Platform.OS !== "web" && !TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK
     const locations = data?.locations ?? [];
     for (const location of locations) {
       backgroundLocationHandler?.(location);
+      if (!backgroundLocationHandler) {
+        await processPersistedBackgroundLocation(location);
+      }
     }
   });
 }
@@ -242,6 +382,7 @@ export default function ExerciseScreen() {
 
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
   const timerInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeWorkoutSessionId = useRef<string | null>(null);
   const elapsedBeforePause = useRef<number>(0);
   const runningStartTimestamp = useRef<number | null>(null);
   const appState = useRef<AppStateStatus>(AppState.currentState);
@@ -252,13 +393,94 @@ export default function ExerciseScreen() {
   const filteredPointCount = useRef<number>(0);
   const lastProcessedLocationTimestamp = useRef<number | null>(null);
   const countdownTimeouts = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const lastAnnouncedKilometer = useRef<number>(0);
+  const stationaryStartTimestamp = useRef<number | null>(null);
+  const autoPaused = useRef<boolean>(false);
+  const autoPauseAnchorPoint = useRef<LocationPoint | null>(null);
+  const runStateRef = useRef<RunState>("idle");
+  const distanceRef = useRef(0);
+  const durationRef = useRef(0);
+  const pauseDurationSecondsRef = useRef(0);
+  const coordsRef = useRef<Coordinates[]>([]);
+  const exerciseTypeRef = useRef<ExerciseType>(null);
+  const selectedEventRunRef = useRef<RegisteredEventRun | null>(null);
+  const startTimeRef = useRef<Date | null>(null);
+
+  useEffect(() => {
+    runStateRef.current = runState;
+  }, [runState]);
+
+  useEffect(() => {
+    distanceRef.current = distance;
+  }, [distance]);
+
+  useEffect(() => {
+    durationRef.current = duration;
+  }, [duration]);
+
+  useEffect(() => {
+    pauseDurationSecondsRef.current = pauseDurationSeconds;
+  }, [pauseDurationSeconds]);
+
+  useEffect(() => {
+    coordsRef.current = coords;
+  }, [coords]);
+
+  useEffect(() => {
+    exerciseTypeRef.current = exerciseType;
+  }, [exerciseType]);
+
+  useEffect(() => {
+    selectedEventRunRef.current = selectedEventRun;
+  }, [selectedEventRun]);
+
+  useEffect(() => {
+    startTimeRef.current = startTime;
+  }, [startTime]);
 
   const updateDuration = useCallback(() => {
     if (runningStartTimestamp.current !== null) {
       const now = Date.now();
-      const currentSegment = Math.floor((now - runningStartTimestamp.current) / 1000);
-      setDuration(elapsedBeforePause.current + currentSegment);
+      const currentSegment = Math.max(0, Math.floor((now - runningStartTimestamp.current) / 1000));
+      const nextDuration = elapsedBeforePause.current + currentSegment;
+      durationRef.current = nextDuration;
+      setDuration(nextDuration);
     }
+  }, []);
+
+  const persistActiveWorkoutSession = useCallback(async (statusOverride?: PersistedWorkoutStatus) => {
+    const sessionId = activeWorkoutSessionId.current;
+    const currentExerciseType = exerciseTypeRef.current;
+    const currentStartTime = startTimeRef.current;
+
+    if (!sessionId || !currentExerciseType || !currentStartTime) {
+      return;
+    }
+
+    const status =
+      statusOverride ??
+      (runStateRef.current === "idle" ? "finished" : runStateRef.current === "finished" ? "finished" : runStateRef.current);
+
+    await setPersistedWorkoutSession({
+      id: sessionId,
+      status,
+      exerciseType: currentExerciseType,
+      eventRun: selectedEventRunRef.current,
+      startTimeIso: currentStartTime.toISOString(),
+      startTimestamp: currentStartTime.getTime(),
+      runningStartTimestamp: runningStartTimestamp.current,
+      elapsedBeforePause: elapsedBeforePause.current,
+      pauseStartTimestamp: pauseStartTimestamp.current,
+      totalPauseDuration: totalPauseDuration.current,
+      pauseDurationSeconds: pauseDurationSecondsRef.current,
+      autoPaused: autoPaused.current,
+      distance: distanceRef.current,
+      coords: coordsRef.current.slice(-5000),
+      lastValidPoint: lastValidPoint.current,
+      lastProcessedLocationTimestamp: lastProcessedLocationTimestamp.current,
+      filteredPointCount: filteredPointCount.current,
+      updatedAt: Date.now(),
+    });
   }, []);
 
   useEffect(() => {
@@ -269,6 +491,8 @@ export default function ExerciseScreen() {
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
         console.log('[Timer] App came to foreground, recalculating duration');
         updateDuration();
+      } else if (nextAppState.match(/inactive|background/)) {
+        void persistActiveWorkoutSession(runStateRef.current === "paused" ? "paused" : "running");
       }
       appState.current = nextAppState;
     });
@@ -285,7 +509,7 @@ export default function ExerciseScreen() {
       countdownTimeouts.current = [];
       Speech.stop();
     };
-  }, [updateDuration]);
+  }, [persistActiveWorkoutSession, updateDuration]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
@@ -457,6 +681,54 @@ export default function ExerciseScreen() {
     });
   }, [canUseCycleWorkout, cycleWorkoutOnly]);
 
+  const speakActivityMessage = useCallback((message: string) => {
+    if (!activityVoiceAssistantEnabled) {
+      return;
+    }
+
+    AccessibilityInfo.announceForAccessibility(message);
+
+    if (Platform.OS === "web") {
+      const webGlobal = globalThis as any;
+      const SpeechUtterance = webGlobal.SpeechSynthesisUtterance;
+      if (webGlobal.speechSynthesis && SpeechUtterance) {
+        webGlobal.speechSynthesis.cancel();
+        webGlobal.speechSynthesis.speak(new SpeechUtterance(message));
+      }
+      return;
+    }
+
+    Speech.stop();
+    Speech.speak(message, {
+      rate: 0.95,
+      pitch: 1,
+    });
+  }, [activityVoiceAssistantEnabled]);
+
+  const formatDurationForVoice = useCallback((seconds: number): string => {
+    const safeSeconds = Math.max(0, Math.floor(seconds));
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const secs = safeSeconds % 60;
+    if (hours > 0) {
+      return `${hours} hour${hours === 1 ? "" : "s"}, ${minutes} minute${minutes === 1 ? "" : "s"}`;
+    }
+    if (minutes > 0) {
+      return `${minutes} minute${minutes === 1 ? "" : "s"}, ${secs} second${secs === 1 ? "" : "s"}`;
+    }
+    return `${secs} second${secs === 1 ? "" : "s"}`;
+  }, []);
+
+  const formatPaceForVoice = useCallback((durationSeconds: number, distanceKm: number): string => {
+    if (durationSeconds <= 0 || distanceKm <= 0) {
+      return "pace not available";
+    }
+    const paceSeconds = Math.round(durationSeconds / distanceKm);
+    const minutes = Math.floor(paceSeconds / 60);
+    const seconds = paceSeconds % 60;
+    return `${minutes} minute${minutes === 1 ? "" : "s"} ${seconds} second${seconds === 1 ? "" : "s"} per kilometre`;
+  }, []);
+
   const requestLocationPermission = async () => {
     if (Platform.OS === 'web') {
       return;
@@ -539,7 +811,136 @@ export default function ExerciseScreen() {
     return true;
   }, []);
 
+  const startWorkoutTimer = useCallback(() => {
+    if (timerInterval.current) {
+      clearInterval(timerInterval.current);
+    }
+    timerInterval.current = setInterval(() => {
+      if (runningStartTimestamp.current !== null) {
+        const now = Date.now();
+        const currentSegment = Math.max(0, Math.floor((now - runningStartTimestamp.current) / 1000));
+        const nextDuration = elapsedBeforePause.current + currentSegment;
+        durationRef.current = nextDuration;
+        setDuration(nextDuration);
+      }
+    }, 1000) as any;
+  }, []);
+
+  const autoPauseWorkout = useCallback(() => {
+    if (autoPaused.current || runningStartTimestamp.current === null) {
+      return;
+    }
+
+    const now = Date.now();
+    elapsedBeforePause.current += Math.max(0, Math.floor((now - runningStartTimestamp.current) / 1000));
+    durationRef.current = elapsedBeforePause.current;
+    setDuration(elapsedBeforePause.current);
+    runningStartTimestamp.current = null;
+    pauseStartTimestamp.current = now;
+    autoPaused.current = true;
+    runStateRef.current = "paused";
+    setRunState("paused");
+    if (timerInterval.current) {
+      clearInterval(timerInterval.current);
+      timerInterval.current = null;
+    }
+    speakActivityMessage("Auto pause. Workout paused.");
+    void persistActiveWorkoutSession("paused");
+  }, [persistActiveWorkoutSession, speakActivityMessage]);
+
+  const autoResumeWorkout = useCallback(() => {
+    if (!autoPaused.current) {
+      return;
+    }
+
+    const now = Date.now();
+    if (pauseStartTimestamp.current !== null) {
+      totalPauseDuration.current += now - pauseStartTimestamp.current;
+    }
+    pauseStartTimestamp.current = null;
+    runningStartTimestamp.current = now;
+    autoPaused.current = false;
+    stationaryStartTimestamp.current = null;
+    autoPauseAnchorPoint.current = null;
+    isResuming.current = true;
+    runStateRef.current = "running";
+    setRunState("running");
+    startWorkoutTimer();
+    speakActivityMessage("Auto resume. Workout resumed.");
+    void persistActiveWorkoutSession("running");
+  }, [persistActiveWorkoutSession, speakActivityMessage, startWorkoutTimer]);
+
+  const evaluateAutoPause = useCallback((point: LocationPoint, movementDistanceKm: number, speedKmh: number | null) => {
+    if (runStateRef.current !== "running" && !autoPaused.current) {
+      return;
+    }
+
+    const isMoving =
+      movementDistanceKm >= AUTO_RESUME_MIN_DISTANCE_KM ||
+      (speedKmh !== null && speedKmh >= AUTO_RESUME_MIN_SPEED_KMH);
+
+    if (isMoving) {
+      stationaryStartTimestamp.current = null;
+      autoPauseAnchorPoint.current = point;
+      if (autoPaused.current) {
+        autoResumeWorkout();
+      }
+      return;
+    }
+
+    if (autoPaused.current || runStateRef.current !== "running") {
+      return;
+    }
+
+    const isStationary =
+      movementDistanceKm < AUTO_RESUME_MIN_DISTANCE_KM &&
+      (speedKmh === null || speedKmh <= AUTO_PAUSE_MAX_SPEED_KMH);
+
+    if (!isStationary) {
+      stationaryStartTimestamp.current = null;
+      autoPauseAnchorPoint.current = point;
+      return;
+    }
+
+    if (stationaryStartTimestamp.current === null) {
+      stationaryStartTimestamp.current = point.timestamp;
+      autoPauseAnchorPoint.current = point;
+      return;
+    }
+
+    const stationarySeconds = (point.timestamp - stationaryStartTimestamp.current) / 1000;
+    if (stationarySeconds >= AUTO_PAUSE_STATIONARY_SECONDS) {
+      autoPauseWorkout();
+    }
+  }, [autoPauseWorkout, autoResumeWorkout]);
+
+  const announceKilometerSplitIfNeeded = useCallback((nextDistanceKm: number) => {
+    const reachedKilometer = Math.floor(nextDistanceKm / KM_VOICE_ANNOUNCEMENT_INTERVAL);
+    if (reachedKilometer <= lastAnnouncedKilometer.current || reachedKilometer < 1) {
+      return;
+    }
+
+    lastAnnouncedKilometer.current = reachedKilometer;
+    const currentDuration =
+      runningStartTimestamp.current !== null
+        ? elapsedBeforePause.current + Math.max(0, Math.floor((Date.now() - runningStartTimestamp.current) / 1000))
+        : durationRef.current;
+    const distanceLabel = reachedKilometer === 1 ? "1 kilometre" : `${reachedKilometer} kilometres`;
+    speakActivityMessage(
+      `${distanceLabel}. Time ${formatDurationForVoice(currentDuration)}. Average pace ${formatPaceForVoice(currentDuration, nextDistanceKm)}.`
+    );
+  }, [formatDurationForVoice, formatPaceForVoice, speakActivityMessage]);
+
   const handleLocationUpdate = useCallback((location: Location.LocationObject, exerciseT: ExerciseType) => {
+    const activityStartTime = startTimeRef.current;
+    if (activityStartTime && location.timestamp < activityStartTime.getTime()) {
+      setCurrentLocation({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
+      return;
+    }
+
     if (
       lastProcessedLocationTimestamp.current !== null &&
       location.timestamp <= lastProcessedLocationTimestamp.current
@@ -562,15 +963,31 @@ export default function ExerciseScreen() {
 
     setCurrentLocation(newCoord);
 
+    if (lastValidPoint.current && (newPoint.accuracy === null || newPoint.accuracy <= GPS_ACCURACY_THRESHOLD)) {
+      const movementDistanceKm = calculateDistance(
+        { latitude: lastValidPoint.current.latitude, longitude: lastValidPoint.current.longitude },
+        newCoord
+      );
+      const movementHours = (newPoint.timestamp - lastValidPoint.current.timestamp) / (1000 * 3600);
+      const speedKmh = movementHours > 0 ? movementDistanceKm / movementHours : null;
+      evaluateAutoPause(newPoint, movementDistanceKm, speedKmh);
+    }
+
     if (isResuming.current) {
       console.log('[GPS] First point after resume — skipping distance, updating anchor');
       lastValidPoint.current = newPoint;
       isResuming.current = false;
-      setCoords((prev) => [...prev, newCoord]);
+      setCoords((prev) => {
+        const next = [...prev, newCoord];
+        coordsRef.current = next;
+        return next;
+      });
+      void persistActiveWorkoutSession("running");
       return;
     }
 
     if (!isValidGpsPoint(newPoint, exerciseT)) {
+      void persistActiveWorkoutSession(runStateRef.current === "paused" ? "paused" : "running");
       return;
     }
 
@@ -580,12 +997,22 @@ export default function ExerciseScreen() {
         newCoord
       );
       console.log('[GPS] Valid point, distance delta:', (dist * 1000).toFixed(1), 'm, accuracy:', newPoint.accuracy?.toFixed(1), 'm');
-      setDistance((prevDist) => prevDist + dist);
+      setDistance((prevDist) => {
+        const next = prevDist + dist;
+        distanceRef.current = next;
+        announceKilometerSplitIfNeeded(next);
+        return next;
+      });
     }
 
     lastValidPoint.current = newPoint;
-    setCoords((prev) => [...prev, newCoord]);
-  }, [isValidGpsPoint]);
+    setCoords((prev) => {
+      const next = [...prev, newCoord];
+      coordsRef.current = next;
+      return next;
+    });
+    void persistActiveWorkoutSession("running");
+  }, [announceKilometerSplitIfNeeded, evaluateAutoPause, isValidGpsPoint, persistActiveWorkoutSession]);
 
   const startBackgroundLocationWatch = useCallback(async (exerciseT: ExerciseType) => {
     if (Platform.OS === "web" || !exerciseT) {
@@ -674,11 +1101,88 @@ export default function ExerciseScreen() {
 
   useEffect(() => {
     return () => {
-      void stopBackgroundLocationWatch();
+      if (runStateRef.current === "idle" || runStateRef.current === "finished") {
+        void stopBackgroundLocationWatch();
+      }
     };
   }, [stopBackgroundLocationWatch]);
 
-  const startTracking = useCallback(async (type: ExerciseType, eventRun: RegisteredEventRun | null = null) => {
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+
+    const restoreActiveWorkout = async () => {
+      const session = await getPersistedWorkoutSession();
+      if (!session || session.status === "finished" || runStateRef.current !== "idle") {
+        return;
+      }
+
+      const startDate = new Date(session.startTimeIso);
+      if (Number.isNaN(startDate.getTime())) {
+        await clearPersistedWorkoutSession();
+        return;
+      }
+
+      activeWorkoutSessionId.current = session.id;
+      elapsedBeforePause.current = session.elapsedBeforePause;
+      runningStartTimestamp.current = session.runningStartTimestamp;
+      totalPauseDuration.current = session.totalPauseDuration;
+      pauseStartTimestamp.current = session.pauseStartTimestamp;
+      lastValidPoint.current = session.lastValidPoint;
+      lastProcessedLocationTimestamp.current = session.lastProcessedLocationTimestamp;
+      filteredPointCount.current = session.filteredPointCount;
+      distanceRef.current = session.distance;
+      coordsRef.current = session.coords;
+      exerciseTypeRef.current = session.exerciseType;
+      selectedEventRunRef.current = session.eventRun;
+      startTimeRef.current = startDate;
+      pauseDurationSecondsRef.current = session.pauseDurationSeconds;
+      autoPaused.current = session.autoPaused === true;
+      lastAnnouncedKilometer.current = Math.floor(session.distance / KM_VOICE_ANNOUNCEMENT_INTERVAL);
+
+      setExerciseType(session.exerciseType);
+      setSelectedEventRun(session.eventRun);
+      setStartTime(startDate);
+      setDistance(session.distance);
+      setCoords(session.coords);
+      setPauseDurationSeconds(session.pauseDurationSeconds);
+
+      const restoredState: RunState = session.status === "paused" ? "paused" : "running";
+      runStateRef.current = restoredState;
+      setRunState(restoredState);
+
+      if (session.coords.length > 0) {
+        setCurrentLocation(session.coords[session.coords.length - 1]);
+      }
+
+      if (restoredState === "running" || session.autoPaused === true) {
+        const now = Date.now();
+        const currentSegment = session.runningStartTimestamp
+          ? Math.max(0, Math.floor((now - session.runningStartTimestamp) / 1000))
+          : 0;
+        const restoredDuration = session.elapsedBeforePause + currentSegment;
+        durationRef.current = restoredDuration;
+        setDuration(restoredDuration);
+
+        if (restoredState === "running") {
+          startWorkoutTimer();
+        }
+
+        try {
+          await startLocationWatch(session.exerciseType);
+        } catch (error) {
+          console.warn("[Workout Persistence] Could not restart foreground GPS watch:", error);
+        }
+      } else {
+        setDuration(session.elapsedBeforePause);
+      }
+
+      console.log("[Workout Persistence] Restored active workout", session.id);
+    };
+
+    void restoreActiveWorkout();
+  }, [startLocationWatch, startWorkoutTimer]);
+
+  const startTracking = useCallback(async (type: ExerciseType, eventRun: RegisteredEventRun | null = null, scheduledStartTimestamp = Date.now()) => {
     if (!type) return;
 
     if (type === "Treadmill") {
@@ -703,18 +1207,59 @@ export default function ExerciseScreen() {
     if (!hasLocationPermission) return;
 
     setCoords([]);
+    coordsRef.current = [];
     setDistance(0);
+    distanceRef.current = 0;
     setDuration(0);
+    durationRef.current = 0;
+    setPauseDurationSeconds(0);
+    pauseDurationSecondsRef.current = 0;
     lastValidPoint.current = null;
     lastProcessedLocationTimestamp.current = null;
     isResuming.current = false;
     totalPauseDuration.current = 0;
     pauseStartTimestamp.current = null;
     filteredPointCount.current = 0;
+    lastAnnouncedKilometer.current = 0;
+    stationaryStartTimestamp.current = null;
+    autoPaused.current = false;
+    autoPauseAnchorPoint.current = null;
     elapsedBeforePause.current = 0;
-    runningStartTimestamp.current = Date.now();
+    const sessionId = uuidv4();
+    const startDate = new Date(scheduledStartTimestamp);
+    activeWorkoutSessionId.current = sessionId;
+    runningStartTimestamp.current = scheduledStartTimestamp;
+    exerciseTypeRef.current = type;
+    selectedEventRunRef.current = eventRun;
+    startTimeRef.current = startDate;
+    runStateRef.current = "running";
+    setExerciseType(type);
+    setSelectedEventRun(eventRun);
+    setRunState("running");
+    setStartTime(startDate);
 
-    console.log('[Tracking] Started', type, 'at', new Date().toISOString());
+    await setPersistedWorkoutSession({
+      id: sessionId,
+      status: scheduledStartTimestamp > Date.now() ? "pending" : "running",
+      exerciseType: type,
+      eventRun,
+      startTimeIso: startDate.toISOString(),
+      startTimestamp: scheduledStartTimestamp,
+      runningStartTimestamp: scheduledStartTimestamp,
+      elapsedBeforePause: 0,
+      pauseStartTimestamp: null,
+      totalPauseDuration: 0,
+      pauseDurationSeconds: 0,
+      autoPaused: false,
+      distance: 0,
+      coords: [],
+      lastValidPoint: null,
+      lastProcessedLocationTimestamp: null,
+      filteredPointCount: 0,
+      updatedAt: Date.now(),
+    });
+
+    console.log('[Tracking] Started', type, 'for official start at', startDate.toISOString());
 
     try {
       await startLocationWatch(type);
@@ -728,25 +1273,20 @@ export default function ExerciseScreen() {
       }
       backgroundLocationHandler = null;
       runningStartTimestamp.current = null;
+      activeWorkoutSessionId.current = null;
+      await clearPersistedWorkoutSession();
+      runStateRef.current = "idle";
+      exerciseTypeRef.current = null;
+      selectedEventRunRef.current = null;
+      startTimeRef.current = null;
       setRunState("idle");
       setExerciseType(null);
       setSelectedEventRun(null);
       return;
     }
 
-    setExerciseType(type);
-    setSelectedEventRun(eventRun);
-    setRunState("running");
-    setStartTime(new Date());
-
-    timerInterval.current = setInterval(() => {
-      if (runningStartTimestamp.current !== null) {
-        const now = Date.now();
-        const currentSegment = Math.floor((now - runningStartTimestamp.current) / 1000);
-        setDuration(elapsedBeforePause.current + currentSegment);
-      }
-    }, 1000) as any;
-  }, [canUseCycleWorkout, cycleWorkoutOnly, ensureForegroundLocationPermission, startLocationWatch, stopBackgroundLocationWatch]);
+    startWorkoutTimer();
+  }, [canUseCycleWorkout, cycleWorkoutOnly, ensureForegroundLocationPermission, startLocationWatch, startWorkoutTimer, stopBackgroundLocationWatch]);
 
   const playCountdownCue = useCallback((value: string) => {
     if (!activityVoiceAssistantEnabled) {
@@ -768,30 +1308,6 @@ export default function ExerciseScreen() {
 
     Speech.stop();
     Speech.speak(spokenValue, {
-      rate: 0.95,
-      pitch: 1,
-    });
-  }, [activityVoiceAssistantEnabled]);
-
-  const speakActivityMessage = useCallback((message: string) => {
-    if (!activityVoiceAssistantEnabled) {
-      return;
-    }
-
-    AccessibilityInfo.announceForAccessibility(message);
-
-    if (Platform.OS === "web") {
-      const webGlobal = globalThis as any;
-      const SpeechUtterance = webGlobal.SpeechSynthesisUtterance;
-      if (webGlobal.speechSynthesis && SpeechUtterance) {
-        webGlobal.speechSynthesis.cancel();
-        webGlobal.speechSynthesis.speak(new SpeechUtterance(message));
-      }
-      return;
-    }
-
-    Speech.stop();
-    Speech.speak(message, {
       rate: 0.95,
       pitch: 1,
     });
@@ -825,13 +1341,17 @@ export default function ExerciseScreen() {
 
     setIsCountdownActive(true);
     try {
+      const officialStartTimestamp = Date.now() + WORKOUT_COUNTDOWN_MS;
+      await startTracking(type, eventRun, officialStartTimestamp);
+      if (!activeWorkoutSessionId.current || runStateRef.current === "idle") {
+        return;
+      }
       for (const value of ["3", "2", "1", "START"]) {
         setCountdownValue(value);
         playCountdownCue(value);
         await waitForCountdownStep(value === "START" ? 500 : 900);
       }
       setCountdownValue(null);
-      await startTracking(type, eventRun);
     } finally {
       setCountdownValue(null);
       setIsCountdownActive(false);
@@ -846,6 +1366,10 @@ export default function ExerciseScreen() {
       runningStartTimestamp.current = null;
     }
     pauseStartTimestamp.current = Date.now();
+    autoPaused.current = false;
+    stationaryStartTimestamp.current = null;
+    autoPauseAnchorPoint.current = null;
+    runStateRef.current = "paused";
     setRunState("paused");
     if (timerInterval.current) {
       clearInterval(timerInterval.current);
@@ -855,6 +1379,7 @@ export default function ExerciseScreen() {
       locationSubscription.current = null;
     }
     void stopBackgroundLocationWatch();
+    void persistActiveWorkoutSession("paused");
     console.log('[Tracking] Paused. Elapsed so far:', elapsedBeforePause.current, 's');
   };
 
@@ -871,18 +1396,17 @@ export default function ExerciseScreen() {
     }
 
     isResuming.current = true;
+    autoPaused.current = false;
+    stationaryStartTimestamp.current = null;
+    autoPauseAnchorPoint.current = null;
+    runStateRef.current = "running";
     setRunState("running");
     runningStartTimestamp.current = Date.now();
 
-    timerInterval.current = setInterval(() => {
-      if (runningStartTimestamp.current !== null) {
-        const now = Date.now();
-        const currentSegment = Math.floor((now - runningStartTimestamp.current) / 1000);
-        setDuration(elapsedBeforePause.current + currentSegment);
-      }
-    }, 1000) as any;
+    startWorkoutTimer();
 
     await startLocationWatch(exerciseType);
+    void persistActiveWorkoutSession("running");
   };
 
   const stopTracking = async () => {
@@ -892,10 +1416,12 @@ export default function ExerciseScreen() {
       runningStartTimestamp.current = null;
     }
     const finalDuration = elapsedBeforePause.current;
+    durationRef.current = finalDuration;
     const activePauseMs = pauseStartTimestamp.current !== null ? Date.now() - pauseStartTimestamp.current : 0;
     const finalPauseDurationSeconds = Math.floor((totalPauseDuration.current + activePauseMs) / 1000);
     setDuration(finalDuration);
     setPauseDurationSeconds(finalPauseDurationSeconds);
+    pauseDurationSecondsRef.current = finalPauseDurationSeconds;
 
     console.log('[Tracking] Stopped. Final distance:', distance.toFixed(3), 'km, duration:', finalDuration, 's, filtered points:', filteredPointCount.current);
 
@@ -912,6 +1438,7 @@ export default function ExerciseScreen() {
       if (pauseStartTimestamp.current === null) {
         pauseStartTimestamp.current = Date.now();
       }
+      runStateRef.current = "paused";
       setRunState("paused");
       if (timerInterval.current) {
         clearInterval(timerInterval.current);
@@ -921,6 +1448,7 @@ export default function ExerciseScreen() {
         locationSubscription.current = null;
       }
       void stopBackgroundLocationWatch();
+      void persistActiveWorkoutSession("paused");
       Alert.alert(
         "Pause and Resume Later",
         `Recordable workouts need at least ${requiredDistance} km and ${MIN_ACTIVITY_DURATION_MINUTES} minutes. You have ${distance.toFixed(2)} km and ${Math.floor(durationMinutes)} minutes so far.`,
@@ -937,6 +1465,8 @@ export default function ExerciseScreen() {
       pauseStartTimestamp.current = null;
     }
     setPauseDurationSeconds(Math.floor(totalPauseDuration.current / 1000));
+    pauseDurationSecondsRef.current = Math.floor(totalPauseDuration.current / 1000);
+    runStateRef.current = "finished";
     setRunState("finished");
     if (timerInterval.current) {
       clearInterval(timerInterval.current);
@@ -946,6 +1476,7 @@ export default function ExerciseScreen() {
       locationSubscription.current = null;
     }
     void stopBackgroundLocationWatch();
+    void persistActiveWorkoutSession("finished");
     setActivitySaved(false);
     setShowRunDetailsModal(true);
   };
@@ -1083,15 +1614,23 @@ export default function ExerciseScreen() {
   };
 
   const resetTracking = () => {
+    runStateRef.current = "idle";
     setRunState("idle");
     setDistance(0);
+    distanceRef.current = 0;
     setDuration(0);
+    durationRef.current = 0;
     setPauseDurationSeconds(0);
+    pauseDurationSecondsRef.current = 0;
     setPace(0);
     setCoords([]);
+    coordsRef.current = [];
     setStartTime(null);
+    startTimeRef.current = null;
     setExerciseType(null);
+    exerciseTypeRef.current = null;
     setSelectedEventRun(null);
+    selectedEventRunRef.current = null;
     setWorkoutLocation(null);
     setShowRunDetailsModal(false);
     setActivitySaved(false);
@@ -1103,11 +1642,17 @@ export default function ExerciseScreen() {
     totalPauseDuration.current = 0;
     pauseStartTimestamp.current = null;
     filteredPointCount.current = 0;
+    lastAnnouncedKilometer.current = 0;
+    stationaryStartTimestamp.current = null;
+    autoPaused.current = false;
+    autoPauseAnchorPoint.current = null;
+    activeWorkoutSessionId.current = null;
     if (locationSubscription.current) {
       locationSubscription.current.remove();
       locationSubscription.current = null;
     }
     void stopBackgroundLocationWatch();
+    void clearPersistedWorkoutSession();
     countdownTimeouts.current.forEach(clearTimeout);
     countdownTimeouts.current = [];
     setCountdownValue(null);

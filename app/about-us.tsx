@@ -1,4 +1,5 @@
-import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useState } from "react";
+import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import Constants from "expo-constants";
 import { Stack } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -21,6 +22,7 @@ const getAppVersion = () => {
 export default function AboutUsScreen() {
   const { colors: themeColors, isDark } = useTheme();
   const appVersion = getAppVersion();
+  const [activePage, setActivePage] = useState<"info" | "benefits">("info");
   const { data: stats, isLoading } = trpc.support.getAboutStats.useQuery(undefined, {
     staleTime: 60_000,
   });
@@ -35,6 +37,52 @@ export default function AboutUsScreen() {
     { label: "Age range", value: stats?.ageRange, icon: Users, color: "#14B8A6" },
     { label: "Male : Female", value: stats?.maleFemaleRatio, icon: UserRoundCheck, color: "#6366F1" },
     { label: "Admins", value: stats?.admins, icon: ShieldCheck, color: "#8B5CF6" },
+  ];
+  const benefitGroups = [
+    {
+      title: "User",
+      icon: Users,
+      color: "#F97316",
+      items: [
+        "Leaderboards, goals, medals, and reports to stay motivated.",
+        "Find clubs, join conversations, and connect through chat.",
+        "Discover events and read running news in The Running Post.",
+        "Find sports gear and fitness products in the shop.",
+      ],
+    },
+    {
+      title: "Club",
+      icon: Building2,
+      color: "#10B981",
+      items: [
+        "Grow visibility and attract more members.",
+        "Manage members and club activity from the admin portal.",
+        "Use club leaderboards to encourage consistency.",
+        "Organize events and support membership payments.",
+      ],
+    },
+    {
+      title: "Event Organizer",
+      icon: CalendarDays,
+      color: "#EC4899",
+      items: [
+        "Promote events to runners, clubs, and the wider community.",
+        "Manage event setup, registration, posters, and results.",
+        "Publish event leaderboards with clear performance data.",
+        "Support paid events and participant payment tracking.",
+      ],
+    },
+    {
+      title: "Businesses",
+      icon: Store,
+      color: "#F59E0B",
+      items: [
+        "Advertise in RunNation magazine.",
+        "Reach runners, clubs, and event participants directly.",
+        "Build visibility beside community and event content.",
+        "Drive discovery for sports gear, wellness, and fitness offers.",
+      ],
+    },
   ];
   const soonBadge = (
     <View style={styles.soonBadge}>
@@ -56,102 +104,148 @@ export default function AboutUsScreen() {
         </View>
       </LinearGradient>
 
-      <View style={[styles.card, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}>
-        <Text style={[styles.paragraph, { color: themeColors.text }]}>
-          RunNation is a community-powered running app that brings together everyone with a passion for running-from everyday runners and clubs to event organizers, schools, institutions, and charities using runs to raise awareness or support a cause. Whether you run for fitness, competition, connection, fundraising, or fun, you belong here. Founded by Salimo Gary, a Ugandan software developer, data scientist, and running enthusiast, RunNation was created to be one home for runners, clubs, events, sportswear shops, and communities, and continues to grow through its vibrant network of users-where runners truly belong.
-        </Text>
-      </View>
-
-      <View style={styles.metaGrid}>
-        <View style={[styles.metaCard, { backgroundColor: isDark ? themeColors.cardBackground : "#FFF7ED", borderColor: isDark ? themeColors.border : "#FDBA74" }]}>
-          <View style={styles.metaHeaderRow}>
-            <View style={[styles.metaIconChip, { backgroundColor: isDark ? "#F9731624" : "#FFEDD5" }]}>
-              <CalendarDays size={16} color="#F97316" />
-            </View>
-            <Text style={[styles.metaLabel, { color: isDark ? "#FDBA74" : "#9A3412" }]}>Milestone dates</Text>
-          </View>
-          <Text style={[styles.metaValue, { color: themeColors.text }]}>Beta launch - 30/05/2026</Text>
-          <View style={styles.platformMilestones}>
-            <View style={styles.platformMilestoneRow}>
-              <Play size={15} color={themeColors.text} />
-              {soonBadge}
-            </View>
-            <View style={styles.platformMilestoneRow}>
-              <Apple size={15} color={themeColors.text} />
-              {soonBadge}
-            </View>
-          </View>
-        </View>
-        <View style={[styles.metaCard, { backgroundColor: isDark ? themeColors.cardBackground : "#EEF2FF", borderColor: isDark ? themeColors.border : "#A5B4FC" }]}>
-          <View style={styles.metaHeaderRow}>
-            <View style={[styles.metaIconChip, { backgroundColor: isDark ? "#6366F124" : "#E0E7FF" }]}>
-              <ShieldCheck size={16} color="#6366F1" />
-            </View>
-            <Text style={[styles.metaLabel, { color: isDark ? "#A5B4FC" : "#3730A3" }]}>App version</Text>
-          </View>
-          <Text style={[styles.metaValue, { color: themeColors.text }]}>{appVersion}</Text>
-        </View>
-        <View style={[styles.metaCard, { backgroundColor: isDark ? themeColors.cardBackground : "#F0FDF4", borderColor: isDark ? themeColors.border : "#86EFAC" }]}>
-          <View style={styles.metaHeaderRow}>
-            <View style={[styles.metaIconChip, { backgroundColor: isDark ? "#16A34A24" : "#DCFCE7" }]}>
-              <Award size={16} color="#16A34A" />
-            </View>
-            <Text style={[styles.metaLabel, { color: isDark ? "#86EFAC" : "#166534" }]}>Ratings</Text>
-          </View>
-          <View style={styles.platformMilestones}>
-            <View style={styles.ratingRow}>
-              <View style={styles.platformMilestoneRow}>
-                <Play size={15} color={themeColors.text} />
-                <Text style={[styles.metaSubValue, { color: themeColors.text }]}>Google Play</Text>
-              </View>
-              {soonBadge}
-            </View>
-            <View style={styles.ratingRow}>
-              <View style={styles.platformMilestoneRow}>
-                <Apple size={15} color={themeColors.text} />
-                <Text style={[styles.metaSubValue, { color: themeColors.text }]}>Apple App Store</Text>
-              </View>
-              {soonBadge}
-            </View>
-            <View style={styles.ratingRow}>
-              <View style={styles.platformMilestoneRow}>
-                <Award size={15} color={themeColors.text} />
-                <Text style={[styles.metaSubValue, { color: themeColors.text }]}>World Athletics</Text>
-              </View>
-              {soonBadge}
-            </View>
-          </View>
-        </View>
-        <View style={[styles.metaCard, { backgroundColor: isDark ? themeColors.cardBackground : "#FDF2F8", borderColor: isDark ? themeColors.border : "#F9A8D4" }]}>
-          <View style={styles.metaHeaderRow}>
-            <View style={[styles.metaIconChip, { backgroundColor: isDark ? "#EC489924" : "#FCE7F3" }]}>
-              <TrendingUp size={16} color="#EC4899" />
-            </View>
-            <Text style={[styles.metaLabel, { color: isDark ? "#F9A8D4" : "#9D174D" }]}>App trial</Text>
-          </View>
-          <Text style={[styles.metaValue, { color: themeColors.text }]}>1st Quarter (90 days)</Text>
-        </View>
-      </View>
-
-      <View style={styles.statsHeader}>
-        <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Live Community</Text>
-        {isLoading ? <ActivityIndicator color={colors.primary} /> : null}
-      </View>
-
-      <View style={styles.statsGrid}>
-        {statCards.map((item) => {
-          const Icon = item.icon;
+      <View style={[styles.pageToggle, { backgroundColor: isDark ? themeColors.cardBackground : "#F3F4F6" }]}>
+        {(["info", "benefits"] as const).map((page) => {
+          const isActive = activePage === page;
           return (
-            <View key={item.label} style={[styles.statCard, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}>
-              <View style={[styles.statIcon, { backgroundColor: isDark ? `${item.color}22` : `${item.color}14` }]}>
-                <Icon size={20} color={item.color} />
-              </View>
-              <Text style={[styles.statValue, { color: themeColors.text }]}>{formatCount(item.value, isLoading)}</Text>
-              <Text style={[styles.statLabel, { color: themeColors.textSecondary }]}>{item.label}</Text>
-            </View>
+            <TouchableOpacity
+              key={page}
+              style={[styles.pageToggleButton, isActive && { backgroundColor: colors.primary }]}
+              onPress={() => setActivePage(page)}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.pageToggleText, { color: isActive ? colors.white : themeColors.textSecondary }]}>
+                {page === "info" ? "Info" : "Benefits"}
+              </Text>
+            </TouchableOpacity>
           );
         })}
       </View>
+
+      {activePage === "info" ? (
+        <>
+          <View style={[styles.card, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}>
+            <Text style={[styles.paragraph, { color: themeColors.text }]}>
+              RunNation is a community-powered running app that brings together everyone with a passion for running-from everyday runners and clubs to event organizers, schools, institutions, and charities using runs to raise awareness or support a cause. Whether you run for fitness, competition, connection, fundraising, or fun, you belong here. Founded by Salimo Gary, a Ugandan software developer, data scientist, and running enthusiast, RunNation was created to be one home for runners, clubs, events, sportswear shops, and communities, and continues to grow through its vibrant network of users-where runners truly belong.
+            </Text>
+          </View>
+
+          <View style={styles.metaGrid}>
+            <View style={[styles.metaCard, { backgroundColor: isDark ? themeColors.cardBackground : "#FFF7ED", borderColor: isDark ? themeColors.border : "#FDBA74" }]}>
+              <View style={styles.metaHeaderRow}>
+                <View style={[styles.metaIconChip, { backgroundColor: isDark ? "#F9731624" : "#FFEDD5" }]}>
+                  <CalendarDays size={16} color="#F97316" />
+                </View>
+                <Text style={[styles.metaLabel, { color: isDark ? "#FDBA74" : "#9A3412" }]}>Milestone dates</Text>
+              </View>
+              <Text style={[styles.metaValue, { color: themeColors.text }]}>Beta launch - 30/05/2026</Text>
+              <View style={styles.platformMilestones}>
+                <View style={styles.platformMilestoneRow}>
+                  <Play size={15} color={themeColors.text} />
+                  {soonBadge}
+                </View>
+                <View style={styles.platformMilestoneRow}>
+                  <Apple size={15} color={themeColors.text} />
+                  {soonBadge}
+                </View>
+              </View>
+            </View>
+            <View style={[styles.metaCard, { backgroundColor: isDark ? themeColors.cardBackground : "#EEF2FF", borderColor: isDark ? themeColors.border : "#A5B4FC" }]}>
+              <View style={styles.metaHeaderRow}>
+                <View style={[styles.metaIconChip, { backgroundColor: isDark ? "#6366F124" : "#E0E7FF" }]}>
+                  <ShieldCheck size={16} color="#6366F1" />
+                </View>
+                <Text style={[styles.metaLabel, { color: isDark ? "#A5B4FC" : "#3730A3" }]}>App version</Text>
+              </View>
+              <Text style={[styles.metaValue, { color: themeColors.text }]}>{appVersion}</Text>
+            </View>
+            <View style={[styles.metaCard, { backgroundColor: isDark ? themeColors.cardBackground : "#F0FDF4", borderColor: isDark ? themeColors.border : "#86EFAC" }]}>
+              <View style={styles.metaHeaderRow}>
+                <View style={[styles.metaIconChip, { backgroundColor: isDark ? "#16A34A24" : "#DCFCE7" }]}>
+                  <Award size={16} color="#16A34A" />
+                </View>
+                <Text style={[styles.metaLabel, { color: isDark ? "#86EFAC" : "#166534" }]}>Ratings</Text>
+              </View>
+              <View style={styles.platformMilestones}>
+                <View style={styles.ratingRow}>
+                  <View style={styles.platformMilestoneRow}>
+                    <Play size={15} color={themeColors.text} />
+                    <Text style={[styles.metaSubValue, { color: themeColors.text }]}>Google Play</Text>
+                  </View>
+                  {soonBadge}
+                </View>
+                <View style={styles.ratingRow}>
+                  <View style={styles.platformMilestoneRow}>
+                    <Apple size={15} color={themeColors.text} />
+                    <Text style={[styles.metaSubValue, { color: themeColors.text }]}>Apple App Store</Text>
+                  </View>
+                  {soonBadge}
+                </View>
+                <View style={styles.ratingRow}>
+                  <View style={styles.platformMilestoneRow}>
+                    <Award size={15} color={themeColors.text} />
+                    <Text style={[styles.metaSubValue, { color: themeColors.text }]}>World Athletics</Text>
+                  </View>
+                  {soonBadge}
+                </View>
+              </View>
+            </View>
+            <View style={[styles.metaCard, { backgroundColor: isDark ? themeColors.cardBackground : "#FDF2F8", borderColor: isDark ? themeColors.border : "#F9A8D4" }]}>
+              <View style={styles.metaHeaderRow}>
+                <View style={[styles.metaIconChip, { backgroundColor: isDark ? "#EC489924" : "#FCE7F3" }]}>
+                  <TrendingUp size={16} color="#EC4899" />
+                </View>
+                <Text style={[styles.metaLabel, { color: isDark ? "#F9A8D4" : "#9D174D" }]}>App trial</Text>
+              </View>
+              <Text style={[styles.metaValue, { color: themeColors.text }]}>1st Quarter (90 days)</Text>
+            </View>
+          </View>
+
+          <View style={styles.statsHeader}>
+            <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Live Community</Text>
+            {isLoading ? <ActivityIndicator color={colors.primary} /> : null}
+          </View>
+
+          <View style={styles.statsGrid}>
+            {statCards.map((item) => {
+              const Icon = item.icon;
+              return (
+                <View key={item.label} style={[styles.statCard, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}>
+                  <View style={[styles.statIcon, { backgroundColor: isDark ? `${item.color}22` : `${item.color}14` }]}>
+                    <Icon size={20} color={item.color} />
+                  </View>
+                  <Text style={[styles.statValue, { color: themeColors.text }]}>{formatCount(item.value, isLoading)}</Text>
+                  <Text style={[styles.statLabel, { color: themeColors.textSecondary }]}>{item.label}</Text>
+                </View>
+              );
+            })}
+          </View>
+        </>
+      ) : (
+        <View style={styles.benefitsList}>
+          {benefitGroups.map((group) => {
+            const Icon = group.icon;
+            return (
+              <View key={group.title} style={[styles.benefitCard, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}>
+                <View style={styles.benefitHeader}>
+                  <View style={[styles.benefitIcon, { backgroundColor: isDark ? `${group.color}24` : `${group.color}16` }]}>
+                    <Icon size={20} color={group.color} />
+                  </View>
+                  <Text style={[styles.benefitTitle, { color: themeColors.text }]}>{group.title}</Text>
+                </View>
+                <View style={styles.benefitItems}>
+                  {group.items.map((item) => (
+                    <View key={item} style={styles.benefitItemRow}>
+                      <View style={[styles.benefitBullet, { backgroundColor: group.color }]} />
+                      <Text style={[styles.benefitItemText, { color: themeColors.textSecondary }]}>{item}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -202,6 +296,23 @@ const styles = StyleSheet.create({
   paragraph: {
     fontSize: 15,
     lineHeight: 22,
+  },
+  pageToggle: {
+    flexDirection: "row",
+    borderRadius: 12,
+    padding: 4,
+    gap: 4,
+  },
+  pageToggleButton: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pageToggleText: {
+    fontSize: 14,
+    fontWeight: "900" as const,
   },
   metaGrid: {
     flexDirection: "row",
@@ -314,5 +425,51 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700" as const,
     marginTop: 3,
+  },
+  benefitsList: {
+    gap: 12,
+  },
+  benefitCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    gap: 12,
+  },
+  benefitHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  benefitIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  benefitTitle: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: "900" as const,
+  },
+  benefitItems: {
+    gap: 9,
+  },
+  benefitItemRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 9,
+  },
+  benefitBullet: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginTop: 7,
+  },
+  benefitItemText: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "600" as const,
   },
 });

@@ -10,6 +10,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Modal,
   Share,
   Image,
   Animated,
@@ -106,6 +107,66 @@ interface ProfileBundleResponse {
 
 type ClubChoice = 'join' | 'existing' | 'start' | 'organizer' | 'none' | null;
 const RUNNATION_APP_LINK = '';
+
+const buildClubMembershipTerms = (clubNames: string[]) => {
+  const title = clubNames.length === 1 ? `${clubNames[0]} Membership Terms and Club Rules` : 'Club Membership Terms and Club Rules';
+  const clubList = clubNames.length > 0 ? clubNames.join(', ') : 'the selected club';
+
+  return {
+    title,
+    clubList,
+    sections: [
+      {
+        heading: 'Welcome',
+        body: `Welcome to ${clubList}. The club exists to encourage running, fitness, sportsmanship, and positive community engagement. By joining, you agree to follow these rules and participate in good faith.`,
+      },
+      {
+        heading: 'Membership',
+        body: 'Membership may be free or paid depending on the club. Where fees apply, payment must be kept current to maintain active membership. The club may approve, suspend, or remove members whose conduct conflicts with these rules.',
+      },
+      {
+        heading: 'Club Type',
+        body: 'The club may operate physically, virtually, or as a hybrid club. Members are expected to participate in ways that support the club objectives and community spirit.',
+      },
+      {
+        heading: 'Activity Expectations',
+        body: 'Members are encouraged to stay active and contribute to club goals. A club may set minimum monthly activity expectations, and members who remain inactive for extended periods may be moved to inactive status or removed.',
+      },
+      {
+        heading: 'Honesty and Fair Play',
+        body: 'All activities submitted to the club must be genuine and accurately recorded. False, manipulated, or misleading activity data is not allowed. Fair competition and respect for fellow members are fundamental to the club.',
+      },
+      {
+        heading: 'Conduct',
+        body: 'Members must treat one another with respect and courtesy. Harassment, discrimination, bullying, abusive language, or behavior that damages the club reputation may result in disciplinary action, including removal.',
+      },
+      {
+        heading: 'Club Activities',
+        body: 'The club may organize runs, challenges, competitions, training sessions, social gatherings, educational events, and other health or fitness activities. Participation is voluntary unless the club states otherwise.',
+      },
+      {
+        heading: 'Leadership',
+        body: 'The club is managed by appointed or elected leaders such as a Club Captain, Vice Captain, Secretary, Treasurer, Event Coordinator, or other officials. Decisions made in the best interests of the club should be respected.',
+      },
+      {
+        heading: 'Safety',
+        body: 'Members participate in club activities at their own risk and are responsible for ensuring they are physically capable of participation. Members must follow local laws, observe safety precautions, and use appropriate equipment.',
+      },
+      {
+        heading: 'Club-Specific Rules',
+        body: 'If the club has its own constitution, membership policy, code of conduct, payment rules, or event rules, those club-specific rules also apply and may replace parts of this default template.',
+      },
+      {
+        heading: 'Changes to Rules',
+        body: 'These rules may be updated from time to time to support the growth and effective management of the club. Continued membership after updates means you accept the revised rules.',
+      },
+      {
+        heading: 'Agreement',
+        body: 'By selecting "I Agree, Send Request", you confirm that you have read, understood, and agree to abide by these membership terms and club rules.',
+      },
+    ],
+  };
+};
 const normalizeCountryLabel = (value?: string | null) => {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -266,6 +327,8 @@ export default function RegisterScreen() {
   const [selectedNormalClubId, setSelectedNormalClubId] = useState<string | null>(null);
   const [selectedSpecialClubIds, setSelectedSpecialClubIds] = useState<string[]>([]);
   const [clubChoice, setClubChoice] = useState<ClubChoice>(null);
+  const [showClubTermsModal, setShowClubTermsModal] = useState(false);
+  const [clubTermsAccepted, setClubTermsAccepted] = useState(false);
   const [distancePreference, setDistancePreference] = useState<DistancePreference>(savedDistanceUnit);
   const [weightPreference, setWeightPreference] = useState<WeightPreference>(savedWeightUnit);
   const [showLoginPassword, setShowLoginPassword] = useState(false);
@@ -314,6 +377,21 @@ export default function RegisterScreen() {
     () => visibleNormalClubs.filter((club) => !clubMatchesTown(club, registrationData.residence)),
     [visibleNormalClubs, registrationData.residence]
   );
+  const selectedMembershipClubs = useMemo(
+    () =>
+      clubChoice === 'join' || clubChoice === 'existing'
+        ? [selectedNormalClubId, ...selectedSpecialClubIds]
+            .filter(Boolean)
+            .map((clubId) => visibleClubs.find((club) => club.club_id === clubId))
+            .filter(Boolean) as ClubItem[]
+        : [],
+    [clubChoice, selectedNormalClubId, selectedSpecialClubIds, visibleClubs]
+  );
+  const selectedClubNames = useMemo(
+    () => selectedMembershipClubs.map((club) => club.club_name).filter(Boolean),
+    [selectedMembershipClubs]
+  );
+  const clubMembershipTerms = useMemo(() => buildClubMembershipTerms(selectedClubNames), [selectedClubNames]);
 
   useEffect(() => {
     void checkBiometricAvailability();
@@ -344,6 +422,10 @@ export default function RegisterScreen() {
   useEffect(() => {
     setWeightPreference(savedWeightUnit);
   }, [savedWeightUnit]);
+
+  useEffect(() => {
+    setClubTermsAccepted(false);
+  }, [clubChoice, selectedNormalClubId, selectedSpecialClubIds]);
 
   const getErrorMessage = (error: unknown, fallback: string) => {
     if (error instanceof Error && error.message) {
@@ -924,7 +1006,7 @@ export default function RegisterScreen() {
     }
   };
 
-  const handleStep5Complete = async () => {
+  const handleStep5Complete = async (skipClubTermsCheck = false) => {
     if (!registrationId) {
       console.error('[Register] No registrationId for step 5');
       await AsyncStorage.setItem('hasSeenOnboarding', 'true');
@@ -939,18 +1021,16 @@ export default function RegisterScreen() {
       }
     }
 
+    if (clubChoice === 'join' && !clubTermsAccepted && !skipClubTermsCheck) {
+      setShowClubTermsModal(true);
+      return;
+    }
+
     setIsLoading(true);
 
     try {
       let clubValue: string | null = null;
       let newMemberValue: string = 'No';
-      const selectedMembershipClubs =
-        clubChoice === 'join' || clubChoice === 'existing'
-          ? [selectedNormalClubId, ...selectedSpecialClubIds]
-              .filter(Boolean)
-              .map((clubId) => visibleClubs.find((club) => club.club_id === clubId))
-              .filter(Boolean) as ClubItem[]
-          : [];
 
       if (clubChoice === 'join') {
         clubValue = selectedMembershipClubs.map((club) => club.club_name).join(', ') || null;
@@ -995,6 +1075,7 @@ export default function RegisterScreen() {
               club: club.club_name,
               clubId: club.club_id,
               newMember: newMemberValue as 'Yes' | 'No',
+              clubRulesAccepted: clubChoice === 'join' ? clubTermsAccepted || skipClubTermsCheck : undefined,
               requestType: 'membership',
               proposedClubName: null,
               proposedCountry: null,
@@ -1885,6 +1966,12 @@ export default function RegisterScreen() {
       </TouchableOpacity>
       <Text style={styles.clubSubTitle}>Choose up to two clubs</Text>
       <Text style={styles.clubSelectionHint}>Pick one normal club, one special club, or just one club from either section.</Text>
+      <View style={styles.clubTermsNotice}>
+        <Check size={16} color="#fff" />
+        <Text style={styles.clubTermsNoticeText}>
+          New members must accept the selected club rules before the request is sent to the coordinator.
+        </Text>
+      </View>
       {clubsLoading ? (
         <View style={styles.loadingRow}>
           <ActivityIndicator color="#fff" />
@@ -1933,6 +2020,73 @@ export default function RegisterScreen() {
         </View>
       )}
     </View>
+  );
+
+  const renderClubTermsModal = () => (
+    <Modal
+      visible={showClubTermsModal}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setShowClubTermsModal(false)}
+    >
+      <View style={styles.clubTermsOverlay}>
+        <View style={styles.clubTermsModal}>
+          <View style={styles.clubTermsHeader}>
+            <View style={styles.clubTermsTitleWrap}>
+              <Text style={styles.clubTermsEyebrow}>Required before joining</Text>
+              <Text style={styles.clubTermsTitle}>{clubMembershipTerms.title}</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.clubTermsCloseButton}
+              onPress={() => setShowClubTermsModal(false)}
+              disabled={isLoading}
+              activeOpacity={0.7}
+            >
+              <X size={20} color="#1f2937" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.clubTermsScroll} contentContainerStyle={styles.clubTermsContent}>
+            <Text style={styles.clubTermsIntro}>
+              Read and accept these terms before your request is sent to the club coordinator. Clubs may also use their own constitution, code of conduct, or payment rules.
+            </Text>
+            {clubMembershipTerms.sections.map((section) => (
+              <View key={section.heading} style={styles.clubTermsSection}>
+                <Text style={styles.clubTermsSectionTitle}>{section.heading}</Text>
+                <Text style={styles.clubTermsSectionText}>{section.body}</Text>
+              </View>
+            ))}
+          </ScrollView>
+
+          <View style={styles.clubTermsActions}>
+            <TouchableOpacity
+              style={styles.clubTermsCancelButton}
+              onPress={() => setShowClubTermsModal(false)}
+              disabled={isLoading}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.clubTermsCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.clubTermsAgreeButton, isLoading && styles.buttonDisabled]}
+              onPress={() => {
+                setClubTermsAccepted(true);
+                setShowClubTermsModal(false);
+                void handleStep5Complete(true);
+              }}
+              disabled={isLoading}
+              activeOpacity={0.8}
+            >
+              {isLoading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.clubTermsAgreeText}>I Agree, Send Request</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 
   const renderClubStartNew = () => (
@@ -2157,7 +2311,7 @@ export default function RegisterScreen() {
           {showCompleteButton && (
             <TouchableOpacity
               style={[styles.button, styles.primaryButton, isLoading && styles.buttonDisabled]}
-              onPress={handleStep5Complete}
+              onPress={() => void handleStep5Complete()}
               disabled={isLoading}
               activeOpacity={0.8}
             >
@@ -2375,8 +2529,9 @@ export default function RegisterScreen() {
               )}
             </View>
 
-          </View>
+            </View>
         </ScrollView>
+        {renderClubTermsModal()}
       </LinearGradient>
     </KeyboardAvoidingView>
   );
@@ -2956,6 +3111,24 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginBottom: 14,
   },
+  clubTermsNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'rgba(26,26,26,0.22)',
+    padding: 12,
+    marginBottom: 14,
+  },
+  clubTermsNoticeText: {
+    flex: 1,
+    color: 'rgba(255,255,255,0.88)',
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '600' as const,
+  },
   clubsList: {
     gap: 14,
     marginBottom: 16,
@@ -3093,6 +3266,113 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: 6,
     backgroundColor: '#1a1a1a',
+  },
+  clubTermsOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.58)',
+    justifyContent: 'flex-end',
+  },
+  clubTermsModal: {
+    maxHeight: '88%',
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: 'hidden',
+  },
+  clubTermsHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  clubTermsTitleWrap: {
+    flex: 1,
+  },
+  clubTermsEyebrow: {
+    color: '#d4691e',
+    fontSize: 11,
+    fontWeight: '900' as const,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  clubTermsTitle: {
+    color: '#111827',
+    fontSize: 18,
+    lineHeight: 23,
+    fontWeight: '900' as const,
+  },
+  clubTermsCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clubTermsScroll: {
+    maxHeight: 460,
+  },
+  clubTermsContent: {
+    padding: 20,
+    gap: 14,
+  },
+  clubTermsIntro: {
+    color: '#4b5563',
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '600' as const,
+  },
+  clubTermsSection: {
+    gap: 4,
+  },
+  clubTermsSectionTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900' as const,
+  },
+  clubTermsSectionText: {
+    color: '#4b5563',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  clubTermsActions: {
+    flexDirection: 'row',
+    gap: 10,
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+    backgroundColor: '#fff',
+  },
+  clubTermsCancelButton: {
+    flex: 1,
+    borderRadius: 12,
+    backgroundColor: '#f3f4f6',
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clubTermsCancelText: {
+    color: '#374151',
+    fontSize: 14,
+    fontWeight: '800' as const,
+  },
+  clubTermsAgreeButton: {
+    flex: 1.45,
+    borderRadius: 12,
+    backgroundColor: '#1a1a1a',
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clubTermsAgreeText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '900' as const,
   },
   clubCardText: {
     fontSize: 15,

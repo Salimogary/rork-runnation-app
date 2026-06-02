@@ -14,7 +14,11 @@ import {
   checkAndNotifyBadges,
   checkAndNotifyProfileCompletion,
   checkAndNotifyGoalProgress,
+  scheduleRegisteredEventReminders,
+  checkAndNotifyWeightLogReminder,
+  checkAndNotifyActivityMilestones,
   checkAndNotifyTrialExpiry,
+  checkAndNotifySubscriptionReminders,
 } from '@/utils/notifications';
 
 const normalizePaceMinPerKm = (paceMinPerKm: number): number => {
@@ -24,7 +28,7 @@ const normalizePaceMinPerKm = (paceMinPerKm: number): number => {
 
 export const [NotificationProvider, useNotifications] = createContextHook(() => {
   const { user } = useAuth();
-  const { trialDaysRemaining, subscriptionStatus } = useSubscription();
+  const { trialDaysRemaining, subscriptionStatus, subscription } = useSubscription();
   const setupDone = useRef(false);
 
   useEffect(() => {
@@ -208,11 +212,105 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
     refetchInterval: 120000,
   });
 
+  const { data: eventReminderData } = useQuery({
+    queryKey: ['notif_event_reminders', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+
+      const { data: participantRows, error: participantError } = await supabase
+        .from('events_participants')
+        .select('event_id, registration_id')
+        .eq('registration_id', user.id);
+
+      if (participantError) {
+        console.warn('[NotifContext] Event participant lookup error:', participantError.message);
+      }
+
+      const { data: enrollmentRows, error: enrollmentError } = await supabase
+        .from('event_enrollments')
+        .select('event_id, registration_id, status')
+        .eq('registration_id', user.id)
+        .in('status', ['approved', 'registered', 'paid']);
+
+      if (enrollmentError) {
+        console.warn('[NotifContext] Event enrollment lookup error:', enrollmentError.message);
+      }
+
+      const eventIds = [
+        ...new Set([
+          ...((participantRows || []) as any[]).map((row) => row.event_id).filter(Boolean),
+          ...((enrollmentRows || []) as any[]).map((row) => row.event_id).filter(Boolean),
+        ]),
+      ];
+
+      if (eventIds.length === 0) return [];
+
+      const { data: events, error: eventsError } = await supabase
+        .from('events')
+        .select('event_id, event_name, starts_at, ends_at, event_type, recurrence_frequency, recurrence_weekday, recurrence_weekdays, recurrence_monthly_mode, recurrence_month_day, recurrence_week_of_month')
+        .in('event_id', eventIds);
+
+      if (eventsError) {
+        console.warn('[NotifContext] Event reminder details error:', eventsError.message);
+        return [];
+      }
+
+      return (events || []).map((event: any) => ({
+        eventId: String(event.event_id || ''),
+        eventName: String(event.event_name || 'RunNation event'),
+        startsAt: event.starts_at ?? null,
+        endsAt: event.ends_at ?? null,
+        eventType: event.event_type ?? null,
+        recurrenceFrequency: event.recurrence_frequency ?? null,
+        recurrenceWeekday: event.recurrence_weekday ?? null,
+        recurrenceWeekdays: event.recurrence_weekdays ?? null,
+        recurrenceMonthlyMode: event.recurrence_monthly_mode ?? null,
+        recurrenceMonthDay: event.recurrence_month_day ?? null,
+        recurrenceWeekOfMonth: event.recurrence_week_of_month ?? null,
+        registrationStatus: 'registered',
+      })).filter((event) => event.eventId);
+    },
+    enabled: !!user?.id,
+    staleTime: 15 * 60 * 1000,
+    refetchInterval: 60 * 60 * 1000,
+  });
+
+  const { data: weightReminderData } = useQuery({
+    queryKey: ['notif_weight_log_reminder', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return { hasWeightGoal: false, latestWeightEntryDate: null as string | null };
+
+      const [{ data: weightTarget }, { data: latestEntry }] = await Promise.all([
+        supabase
+          .from('weight_target_goal')
+          .select('weight_target_goal_id, target_weight')
+          .eq('registration_id', user.id)
+          .limit(1),
+        supabase
+          .from('weight_goal')
+          .select('date')
+          .eq('registration_id', user.id)
+          .order('date', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      return {
+        hasWeightGoal: (weightTarget?.length ?? 0) > 0,
+        latestWeightEntryDate: (latestEntry as any)?.date ?? null,
+      };
+    },
+    enabled: !!user?.id,
+    staleTime: 60 * 60 * 1000,
+    refetchInterval: 6 * 60 * 60 * 1000,
+  });
+
   useEffect(() => {
     if (!user?.id || !badgeData || Platform.OS === 'web') return;
     const completionPct = completionData ? calculateProfileCompletion(completionData).percentage : 0;
     const earnedCount = getEarnedBadgeCount(badgeData.totalDistance, badgeData.totalActivities, completionPct);
     void checkAndNotifyBadges(user.id, earnedCount);
+    void checkAndNotifyActivityMilestones(user.id, badgeData.totalDistance, badgeData.totalActivities);
   }, [user?.id, badgeData, completionData]);
 
   useEffect(() => {
@@ -239,7 +337,22 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
   useEffect(() => {
     if (!user?.id || Platform.OS === 'web') return;
     void checkAndNotifyTrialExpiry(user.id, trialDaysRemaining, subscriptionStatus);
-  }, [user?.id, trialDaysRemaining, subscriptionStatus]);
+    void checkAndNotifySubscriptionReminders(user.id, subscriptionStatus, subscription?.expires_at ?? null);
+  }, [user?.id, trialDaysRemaining, subscriptionStatus, subscription?.expires_at]);
+
+  useEffect(() => {
+    if (!user?.id || !eventReminderData || Platform.OS === 'web') return;
+    void scheduleRegisteredEventReminders(user.id, eventReminderData);
+  }, [user?.id, eventReminderData]);
+
+  useEffect(() => {
+    if (!user?.id || !weightReminderData || Platform.OS === 'web') return;
+    void checkAndNotifyWeightLogReminder(
+      user.id,
+      weightReminderData.hasWeightGoal,
+      weightReminderData.latestWeightEntryDate
+    );
+  }, [user?.id, weightReminderData]);
 
   const refreshNotificationData = useCallback(() => {
     console.log('[NotifContext] Manual refresh triggered');

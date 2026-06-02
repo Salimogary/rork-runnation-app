@@ -69,6 +69,7 @@ export default publicProcedure
       club: z.string().nullable(),
       clubId: z.string().uuid().nullable().optional(),
       newMember: z.enum(["Yes", "No"]),
+      clubRulesAccepted: z.boolean().optional(),
       requestType: z.enum(["membership", "start_club", "event_organizer"]).default("membership"),
       proposedClubName: z.string().nullable().optional(),
       proposedCountry: z.string().nullable().optional(),
@@ -79,6 +80,10 @@ export default publicProcedure
     await requireRegistrationOwner(ctx, input.registrationId);
 
     let selectedMembershipClub: any = null;
+
+    if ((input.requestType === "membership" || !input.requestType) && input.newMember === "Yes" && !input.clubRulesAccepted) {
+      throw new Error("Please read and accept the club membership terms before sending your join request.");
+    }
 
     if ((input.requestType === "membership" || !input.requestType) && input.clubId) {
       const [{ data: registration }, { data: selectedClub, error: clubError }, { data: userGoals }, { data: countries }] = await Promise.all([
