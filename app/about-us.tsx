@@ -96,7 +96,7 @@ export default function AboutUsScreen() {
 
       <LinearGradient colors={colors.gradient.orange} style={styles.hero}>
         <View style={styles.brandRow}>
-          <Image source={require("../assets/images/icon.png")} style={styles.logo} resizeMode="cover" />
+          <Image source={require("../assets/images/icon.png")} style={styles.logo} resizeMode="contain" />
           <View style={styles.brandTextWrap}>
             <Text style={styles.brandTitle}>RunNation</Text>
             <Text style={styles.slogan}>Where runners belong</Text>
@@ -272,6 +272,7 @@ const styles = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 14,
+    backgroundColor: "#001623",
   },
   brandTextWrap: {
     flex: 1,

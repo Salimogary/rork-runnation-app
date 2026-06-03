@@ -12,6 +12,7 @@ import { TRPCProvider } from "../lib/trpc";
 import * as SplashScreen from "expo-splash-screen";
 import * as Linking from "expo-linking";
 import { LogBox, Platform, View, Text } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 LogBox.ignoreLogs([
   "AuthApiError: Invalid Refresh Token",
@@ -267,23 +268,25 @@ export default function RootLayout() {
 
   return (
     <ErrorBoundary>
-      <TRPCProvider>
-        <CountryNamesProvider>
-          <ThemeProvider>
-            <AuthProvider>
-              <SubscriptionProvider>
-                <DistanceUnitProvider>
-                  <WeightUnitProvider>
+      <SafeAreaProvider>
+        <TRPCProvider>
+          <CountryNamesProvider>
+            <ThemeProvider>
+              <AuthProvider>
+                <SubscriptionProvider>
+                  <DistanceUnitProvider>
+                    <WeightUnitProvider>
                     <NotificationProvider>
-                      <RootLayoutNav />
+                        <RootLayoutNav />
                     </NotificationProvider>
-                  </WeightUnitProvider>
-                </DistanceUnitProvider>
-              </SubscriptionProvider>
-            </AuthProvider>
-          </ThemeProvider>
-        </CountryNamesProvider>
-      </TRPCProvider>
+                    </WeightUnitProvider>
+                  </DistanceUnitProvider>
+                </SubscriptionProvider>
+              </AuthProvider>
+            </ThemeProvider>
+          </CountryNamesProvider>
+        </TRPCProvider>
+      </SafeAreaProvider>
     </ErrorBoundary>
   );
 }

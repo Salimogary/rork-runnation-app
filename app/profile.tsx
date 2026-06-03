@@ -60,7 +60,7 @@ import { WORLD_COUNTRIES } from "@/constants/countries";
 import { clubMatchesTown, filterVisibleClubsForAge, getAgeFromDob, isAtLeastRunNationAge } from "@/utils/specialClubs";
 import { useDistanceUnit, type DistanceUnit } from "@/contexts/DistanceUnitContext";
 import { useWeightUnit, type WeightUnit } from "@/contexts/WeightUnitContext";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 const FALLBACK_COUNTRIES = WORLD_COUNTRIES;
 const RUNNATION_APP_LINK = "https://expo.dev/artifacts/eas/jvd4kbNdrsg88bDMm7oBe2.apk";
@@ -399,7 +399,7 @@ export default function ProfileScreen() {
   const profileBadge = useMemo(() => {
     return getProfileCompleteBadge(completionPct);
   }, [completionPct]);
-  const bottomNavPadding = Platform.OS === "android" ? Math.max(insets.bottom, 48) + 32 : insets.bottom + 32;
+  const bottomNavPadding = Platform.OS === "android" ? Math.max(insets.bottom, 88) + 32 : insets.bottom + 32;
 
   const handleAdminPortalPress = useCallback(async () => {
     router.push('/admin' as any);
@@ -2216,10 +2216,14 @@ export default function ProfileScreen() {
         ),
       }}
     />
-    <ScrollView
+    <SafeAreaView
+      edges={Platform.OS === "android" ? ["bottom"] : []}
       style={[styles.container, { backgroundColor: themeColors.background }]}
-      contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomNavPadding }]}
     >
+      <ScrollView
+        style={styles.safeScroll}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomNavPadding }]}
+      >
       <View style={styles.header}>
         <View style={styles.photoContainer}>
           {profilePhoto ? (
@@ -2344,7 +2348,8 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </Modal>
 
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
     </>
   );
 }
@@ -2356,6 +2361,9 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 80,
+  },
+  safeScroll: {
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,

@@ -33,6 +33,7 @@ import { WORLD_COUNTRIES } from '@/constants/countries';
 import { clubMatchesTown, filterVisibleClubsForAge, getAgeFromDob, isAtLeastRunNationAge } from '@/utils/specialClubs';
 import { useDistanceUnit } from '@/contexts/DistanceUnitContext';
 import { useWeightUnit } from '@/contexts/WeightUnitContext';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -262,6 +263,8 @@ function showPostSocialAuthProfilePrompt(router: ReturnType<typeof useRouter>) {
 
 export default function RegisterScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const authBottomPadding = Platform.OS === 'android' ? Math.max(insets.bottom, 88) + 32 : 40;
   const goToApp = async () => {
     await AsyncStorage.setItem('hasSeenOnboarding', 'true');
     router.replace('/(tabs)');
@@ -2393,10 +2396,12 @@ export default function RegisterScreen() {
         colors={['#C74E1A', '#D4691E', '#CC8800']}
         style={styles.gradient}
       >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-        >
+        <SafeAreaView edges={Platform.OS === 'android' ? ['bottom'] : []} style={styles.safeContent}>
+          <ScrollView
+            style={styles.safeScroll}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: authBottomPadding }]}
+            keyboardShouldPersistTaps="handled"
+          >
             <View style={styles.content}>
             <View style={styles.header}>
               <View style={styles.logoWrap}>
@@ -2579,7 +2584,8 @@ export default function RegisterScreen() {
             </View>
 
             </View>
-        </ScrollView>
+          </ScrollView>
+        </SafeAreaView>
         {renderClubTermsModal()}
       </LinearGradient>
     </KeyboardAvoidingView>
@@ -2591,6 +2597,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   gradient: {
+    flex: 1,
+  },
+  safeContent: {
+    flex: 1,
+  },
+  safeScroll: {
     flex: 1,
   },
   scrollContent: {
@@ -2608,17 +2620,19 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   logoWrap: {
-    width: 64,
-    height: 64,
+    width: 86,
+    height: 86,
     overflow: 'hidden',
-    borderRadius: 18,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
+    backgroundColor: '#001623',
+    padding: 6,
   },
   logoImage: {
-    width: 132,
-    height: 132,
+    width: '100%',
+    height: '100%',
   },
   title: {
     fontSize: 36,

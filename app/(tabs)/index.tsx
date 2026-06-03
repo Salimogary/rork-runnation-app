@@ -2681,7 +2681,7 @@ export default function ExerciseScreen() {
                   )}
                   <View style={styles.shareMapShade} />
                   <View style={styles.shareBrandPill}>
-                    <Image source={require("../../assets/images/icon.png")} style={styles.shareBrandLogo} resizeMode="cover" />
+                    <Image source={require("../../assets/images/icon.png")} style={styles.shareBrandLogo} resizeMode="contain" />
                     <View>
                       <Text style={styles.shareBrand}>RunNation</Text>
                       <Text style={styles.shareTagline}>Where runners belong</Text>
@@ -3644,6 +3644,7 @@ const styles = StyleSheet.create({
     width: 46,
     height: 46,
     borderRadius: 23,
+    backgroundColor: "#001623",
   },
   shareBrand: {
     color: "#111827",

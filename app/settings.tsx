@@ -5,7 +5,7 @@ import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIc
 import { Linking } from "react-native";
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { trpc } from "@/lib/trpc";
@@ -731,13 +731,17 @@ export default function SettingsScreen() {
     { key: "support", label: "Support" },
     { key: "billing", label: "Billing" },
   ];
-  const bottomNavPadding = Platform.OS === "android" ? Math.max(insets.bottom, 48) + 24 : insets.bottom + 24;
+  const bottomNavPadding = Platform.OS === "android" ? Math.max(insets.bottom, 88) + 24 : insets.bottom + 24;
 
   return (
-    <ScrollView
+    <SafeAreaView
+      edges={Platform.OS === "android" ? ["bottom"] : []}
       style={[styles.container, { backgroundColor: themeColors.background }]}
-      contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomNavPadding }]}
     >
+      <ScrollView
+        style={styles.safeScroll}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomNavPadding }]}
+      >
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>Subscription</Text>
         <TouchableOpacity
@@ -2329,7 +2333,8 @@ export default function SettingsScreen() {
         </View>
       </Modal>
 
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -2340,6 +2345,9 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 72,
+  },
+  safeScroll: {
+    flex: 1,
   },
   section: {
     marginTop: 24,
