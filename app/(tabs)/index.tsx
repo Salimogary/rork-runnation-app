@@ -24,6 +24,7 @@ import { getServerClient } from "@/lib/server-client";
 import { trpc } from "@/lib/trpc";
 import { getActivityVoiceAssistantEnabled } from "@/utils/activityVoice";
 import MyWorkouts from "@/components/MyWorkouts";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type RunState = "idle" | "running" | "paused" | "finished";
 type ExerciseType = "Walk" | "Run" | "Cycle" | "Treadmill" | null;
@@ -118,6 +119,7 @@ const AUTO_RESUME_MIN_DISTANCE_KM = 0.015;
 const BACKGROUND_LOCATION_TASK = "runnation-background-location";
 const ACTIVE_WORKOUT_SESSION_KEY = "runnation_active_workout_session";
 const WORKOUT_COUNTDOWN_MS = 3200;
+const RUNNATION_ANDROID_APK_LINK = "https://expo.dev/artifacts/eas/kp69Wjr6TwqrnqbLTFkiK.apk";
 
 type BackgroundLocationPayload = {
   locations?: Location.LocationObject[];
@@ -307,6 +309,7 @@ const SMART_WATCH_FIELDS: SmartWatchField[] = [
 export default function ExerciseScreen() {
   const router = useRouter();
   const { user, registrationId } = useAuth();
+  const insets = useSafeAreaInsets();
   const trpcUtils = trpc.useUtils();
   const effectiveRegistrationId = registrationId || user?.id || "";
   const { colors: themeColors } = useTheme();
@@ -405,6 +408,9 @@ export default function ExerciseScreen() {
   const exerciseTypeRef = useRef<ExerciseType>(null);
   const selectedEventRunRef = useRef<RegisteredEventRun | null>(null);
   const startTimeRef = useRef<Date | null>(null);
+  const androidBottomInset = Platform.OS === "android" ? Math.max(insets.bottom, 48) : insets.bottom;
+  const workoutBottomPadding = runState === "finished" ? androidBottomInset + 48 : androidBottomInset + 24;
+  const runDetailsActionsBottomPadding = androidBottomInset + 14;
 
   useEffect(() => {
     runStateRef.current = runState;
@@ -1679,6 +1685,10 @@ export default function ExerciseScreen() {
       `Date: ${dateLine}`,
       `Start: ${startLine}${eventLine}`,
       "RunNation - Where runners belong",
+      "",
+      Platform.OS === "ios"
+        ? "Get RunNation on iOS: coming soon"
+        : `Get RunNation Android APK: ${RUNNATION_ANDROID_APK_LINK}`,
     ].join("\n");
   };
 
@@ -2282,7 +2292,7 @@ export default function ExerciseScreen() {
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <Stack.Screen options={{ title: "Workout" }} />
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: workoutBottomPadding }]}>
         {Platform.OS !== 'web' && currentLocation && runState !== 'idle' && (
           <View style={styles.mapContainer}>
             <MapView
@@ -2762,7 +2772,7 @@ export default function ExerciseScreen() {
               </View>
             </ScrollView>
 
-            <View style={[styles.runDetailsActions, { borderTopColor: themeColors.border }]}>
+            <View style={[styles.runDetailsActions, { borderTopColor: themeColors.border, paddingBottom: runDetailsActionsBottomPadding }]}>
               <TouchableOpacity
                 style={[styles.runDetailsActionButton, styles.runDetailsCloseButton]}
                 onPress={() => setShowRunDetailsModal(false)}

@@ -61,6 +61,7 @@ import { WORLD_COUNTRIES } from "@/constants/countries";
 import { clubMatchesTown, filterVisibleClubsForAge, getAgeFromDob, isAtLeastRunNationAge } from "@/utils/specialClubs";
 import { useDistanceUnit, type DistanceUnit } from "@/contexts/DistanceUnitContext";
 import { useWeightUnit, type WeightUnit } from "@/contexts/WeightUnitContext";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const FALLBACK_COUNTRIES = WORLD_COUNTRIES;
 const RUNNATION_APP_LINK = "https://expo.dev/artifacts/eas/kp69Wjr6TwqrnqbLTFkiK.apk";
@@ -177,6 +178,7 @@ interface OrganizerRequestData {
 export default function ProfileScreen() {
   const { user, roleSession } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const { subscriptionStatus, trialDaysRemaining, subscription, isLoading: subLoading } = useSubscription();
   const { colors: themeColors } = useTheme();
@@ -401,6 +403,7 @@ export default function ProfileScreen() {
   const profileBadge = useMemo(() => {
     return getProfileCompleteBadge(completionPct);
   }, [completionPct]);
+  const bottomNavPadding = Platform.OS === "android" ? Math.max(insets.bottom, 48) + 32 : insets.bottom + 32;
 
   const handleAdminPortalPress = useCallback(async () => {
     router.push('/admin' as any);
@@ -2287,7 +2290,10 @@ export default function ProfileScreen() {
         ),
       }}
     />
-    <ScrollView style={[styles.container, { backgroundColor: themeColors.background }]} contentContainerStyle={styles.scrollContent}>
+    <ScrollView
+      style={[styles.container, { backgroundColor: themeColors.background }]}
+      contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomNavPadding }]}
+    >
       <View style={styles.header}>
         <View style={styles.photoContainer}>
           {profilePhoto ? (
@@ -2489,7 +2495,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#f5f5f5",
   },
   scrollContent: {
-    paddingBottom: 40,
+    paddingBottom: 80,
   },
   loadingContainer: {
     flex: 1,

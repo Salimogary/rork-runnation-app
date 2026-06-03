@@ -5,6 +5,7 @@ import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIc
 import { Linking } from "react-native";
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { trpc } from "@/lib/trpc";
@@ -124,6 +125,7 @@ function countWords(value: string): number {
 export default function SettingsScreen() {
   const { signOut, user, registrationId, roleSession, privateMode, setPrivateMode, verifyPin, deleteAccount } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const { width } = useWindowDimensions();
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -729,9 +731,13 @@ export default function SettingsScreen() {
     { key: "support", label: "Support" },
     { key: "billing", label: "Billing" },
   ];
+  const bottomNavPadding = Platform.OS === "android" ? Math.max(insets.bottom, 48) + 24 : insets.bottom + 24;
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: themeColors.background }]}>
+    <ScrollView
+      style={[styles.container, { backgroundColor: themeColors.background }]}
+      contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomNavPadding }]}
+    >
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>Subscription</Text>
         <TouchableOpacity
@@ -2331,6 +2337,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#f5f5f5",
+  },
+  scrollContent: {
+    paddingBottom: 72,
   },
   section: {
     marginTop: 24,
