@@ -20,7 +20,6 @@ export interface ProfileCompletionInputs {
   hasSubscription: boolean;
   hasTargets: boolean;
   hasEventEnrollment: boolean;
-  hasVerifiedEmail: boolean;
   hasAtLeastOneBadge: boolean;
   requiresAdminTerms?: boolean;
   hasAcceptedAdminTerms?: boolean;
@@ -36,7 +35,6 @@ export function calculateProfileCompletion(inputs: ProfileCompletionInputs): Pro
     { id: "subscription", label: "Has subscription", completed: inputs.hasSubscription },
     { id: "targets", label: "Loaded targets for at least 1 goal", completed: inputs.hasTargets },
     { id: "event", label: "Enrolled for at least 1 event", completed: inputs.hasEventEnrollment },
-    { id: "email", label: "Verified email", completed: inputs.hasVerifiedEmail },
     { id: "badge", label: "At least one badge", completed: inputs.hasAtLeastOneBadge },
   ];
 

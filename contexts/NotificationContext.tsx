@@ -73,23 +73,16 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
         return {
           allFieldsFilled: false, hasProfilePhoto: false, hasGoal: false,
           hasClub: false, hasFiveActivities: false, hasSubscription: false,
-          hasTargets: false, hasEventEnrollment: false, hasVerifiedEmail: false,
+          hasTargets: false, hasEventEnrollment: false,
           hasAtLeastOneBadge: false,
         };
       }
-      const { data: authUserData } = await supabase.auth.getUser();
-      const authProvider =
-        authUserData.user?.app_metadata?.provider ||
-        authUserData.user?.identities?.[0]?.provider ||
-        null;
-      const socialAuthVerified = authProvider === "google" || authProvider === "apple";
-
       const [
         profileRes, photoRes, goalsRes, clubRes, activitiesRes,
         subscriptionRes, fitnessGoalRes, weightTargetRes, enrollmentRes,
       ] = await Promise.all([
         supabase.from('registrations')
-          .select('first_name, other_names, username, email, sex, city_town_district, country, dob, email_verified')
+          .select('first_name, other_names, username, email, sex, city_town_district, country, dob')
           .eq('registration_id', user.id).maybeSingle(),
         supabase.from('user_photos').select('file_path')
           .eq('registration_id', user.id).eq('is_profile_photo', true).maybeSingle(),
@@ -127,11 +120,10 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
       const hasSubscription = hasFreeAdminAccess || hasPaidSubscription;
       const hasTargets = (fitnessGoalRes.data?.length ?? 0) > 0 || (weightTargetRes.data?.length ?? 0) > 0;
       const hasEventEnrollment = (enrollmentRes.data?.length ?? 0) > 0;
-      const hasVerifiedEmail = p?.email_verified === true || socialAuthVerified;
 
       return {
         allFieldsFilled, hasProfilePhoto, hasGoal, hasClub, hasFiveActivities,
-        hasSubscription, hasTargets, hasEventEnrollment, hasVerifiedEmail, hasAtLeastOneBadge,
+        hasSubscription, hasTargets, hasEventEnrollment, hasAtLeastOneBadge,
       };
     },
     enabled: !!user?.id,

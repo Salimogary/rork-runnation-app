@@ -39,7 +39,6 @@ import {
   Calendar,
   Award,
   BadgeCheck,
-  Mail,
   Phone,
   Clock,
   CreditCard,
@@ -210,9 +209,6 @@ export default function ProfileScreen() {
     country: "",
     description: "",
   });
-  const [showVerifyModal, setShowVerifyModal] = useState(false);
-  const [verificationCode, setVerificationCode] = useState("");
-
   const { data: profileBundle, isLoading } = useQuery({
     queryKey: ["profileBundle", user?.id],
     queryFn: async () => {
@@ -416,50 +412,6 @@ export default function ProfileScreen() {
     }
     router.replace("/(tabs)" as any);
   }, [router]);
-
-  const sendVerificationMutation = useMutation({
-    mutationFn: async () => {
-      if (!user || !profile?.email) throw new Error("No email found");
-      return await getServerClient().profile.sendEmailVerification.mutate({
-        registrationId: user.id,
-        email: profile.email,
-      });
-    },
-    onSuccess: (result) => {
-      const previewCode = "code" in result ? result.code : null;
-      const message = previewCode
-        ? `A 6-digit verification code has been generated for ${profile?.email}.\n\nFor testing, your code is: ${previewCode}`
-        : `A verification code is ready for ${profile?.email}. Enter it when you receive it.`;
-
-      Alert.alert("Verification Code Sent", message, [
-        { text: "Enter Code", onPress: () => setShowVerifyModal(true) },
-      ]);
-    },
-    onError: (error) => {
-      console.error("[EmailVerify] Send error:", error);
-      Alert.alert("Error", "Failed to send verification code. Please try again.");
-    },
-  });
-
-  const verifyCodeMutation = useMutation({
-    mutationFn: async (code: string) => {
-      if (!user) throw new Error("Not authenticated");
-      await getServerClient().profile.verifyEmailCode.mutate({
-        registrationId: user.id,
-        code,
-      });
-    },
-    onSuccess: () => {
-      setShowVerifyModal(false);
-      setVerificationCode("");
-      void queryClient.invalidateQueries({ queryKey: ["profileBundle"] });
-      Alert.alert("Verified!", "Your email has been verified successfully.");
-    },
-    onError: (error) => {
-      console.error("[EmailVerify] Verify error:", error);
-      Alert.alert("Verification Failed", "Invalid or expired code. Please try again.");
-    },
-  });
 
   const updateProfileMutation = useMutation({
     mutationFn: async ({
@@ -1241,20 +1193,7 @@ export default function ProfileScreen() {
             <View style={styles.verifiedBadge}>
               <BadgeCheck size={24} color="#1d9bf0" />
             </View>
-          ) : (
-            <TouchableOpacity
-              style={styles.verifyButton}
-              onPress={() => sendVerificationMutation.mutate()}
-              disabled={sendVerificationMutation.isPending}
-              activeOpacity={0.7}
-            >
-              {sendVerificationMutation.isPending ? (
-                <ActivityIndicator size="small" color="#1d9bf0" />
-              ) : (
-                <Text style={styles.verifyButtonText}>Verify</Text>
-              )}
-            </TouchableOpacity>
-          )}
+          ) : null}
         </View>
       </View>
 
@@ -2178,19 +2117,6 @@ export default function ProfileScreen() {
               <View style={styles.verifiedBadgeView}>
                 <BadgeCheck size={20} color="#1d9bf0" />
               </View>
-            ) : profile.email ? (
-              <TouchableOpacity
-                style={styles.verifyButtonSmall}
-                onPress={() => sendVerificationMutation.mutate()}
-                disabled={sendVerificationMutation.isPending}
-                activeOpacity={0.7}
-              >
-                {sendVerificationMutation.isPending ? (
-                  <ActivityIndicator size="small" color="#1d9bf0" />
-                ) : (
-                  <Text style={styles.verifyButtonSmallText}>Verify</Text>
-                )}
-              </TouchableOpacity>
             ) : null}
           </View>
         </View>
@@ -2418,72 +2344,6 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </Modal>
 
-      <Modal
-        visible={showVerifyModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowVerifyModal(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowVerifyModal(false)}
-        >
-          <View style={styles.verifyModalContainer}>
-            <View style={styles.verifyModalIconWrap}>
-              <Mail size={32} color="#1d9bf0" />
-            </View>
-            <Text style={styles.verifyModalTitle}>Enter Verification Code</Text>
-            <Text style={styles.verifyModalDesc}>
-              Enter the 6-digit code for {profile?.email}
-            </Text>
-            <TextInput
-              style={styles.verifyCodeInput}
-              value={verificationCode}
-              onChangeText={setVerificationCode}
-              placeholder="000000"
-              keyboardType="number-pad"
-              maxLength={6}
-              textAlign="center"
-              autoFocus
-            />
-            <View style={styles.verifyModalActions}>
-              <TouchableOpacity
-                style={styles.verifyModalCancel}
-                onPress={() => {
-                  setShowVerifyModal(false);
-                  setVerificationCode("");
-                }}
-              >
-                <Text style={styles.verifyModalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.verifyModalSubmit,
-                  verificationCode.length !== 6 && styles.verifyModalSubmitDisabled,
-                ]}
-                onPress={() => verifyCodeMutation.mutate(verificationCode)}
-                disabled={verificationCode.length !== 6 || verifyCodeMutation.isPending}
-              >
-                {verifyCodeMutation.isPending ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.verifyModalSubmitText}>Verify</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity
-              style={styles.resendButton}
-              onPress={() => sendVerificationMutation.mutate()}
-              disabled={sendVerificationMutation.isPending}
-            >
-              <Text style={styles.resendButtonText}>
-                {sendVerificationMutation.isPending ? "Sending..." : "Resend Code"}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
     </ScrollView>
     </>
   );
@@ -3326,22 +3186,6 @@ const styles = StyleSheet.create({
   phoneNumberInput: {
     flex: 1,
   },
-  verifyButton: {
-    backgroundColor: "#e8f5fd",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: "#1d9bf0",
-    minWidth: 64,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  verifyButtonText: {
-    fontSize: 13,
-    fontWeight: "700" as const,
-    color: "#1d9bf0",
-  },
   oauthVerifiedButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -3382,101 +3226,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingVertical: 4,
   },
-  verifyButtonSmall: {
-    backgroundColor: "#e8f5fd",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#1d9bf0",
-  },
-  verifyButtonSmallText: {
-    fontSize: 12,
-    fontWeight: "700" as const,
-    color: "#1d9bf0",
-  },
-  verifyModalContainer: {
-    backgroundColor: "#fff",
-    borderRadius: 20,
-    padding: 28,
-    width: "100%",
-    maxWidth: 360,
-    alignItems: "center",
-    gap: 12,
-  },
-  verifyModalIconWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: "#e8f5fd",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 4,
-  },
-  verifyModalTitle: {
-    fontSize: 20,
-    fontWeight: "700" as const,
-    color: "#111",
-  },
-  verifyModalDesc: {
-    fontSize: 14,
-    color: "#666",
-    textAlign: "center",
-    lineHeight: 20,
-  },
-  verifyCodeInput: {
-    fontSize: 28,
-    fontWeight: "700" as const,
-    color: "#111",
-    backgroundColor: "#f5f5f5",
-    borderRadius: 14,
-    padding: 16,
-    width: "100%",
-    letterSpacing: 8,
-    borderWidth: 2,
-    borderColor: "#1d9bf0",
-  },
-  verifyModalActions: {
-    flexDirection: "row",
-    gap: 12,
-    width: "100%",
-    marginTop: 4,
-  },
-  verifyModalCancel: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-    backgroundColor: "#f5f5f5",
-  },
-  verifyModalCancelText: {
-    fontSize: 15,
-    fontWeight: "600" as const,
-    color: "#666",
-  },
-  verifyModalSubmit: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-    backgroundColor: "#1d9bf0",
-  },
-  verifyModalSubmitDisabled: {
-    opacity: 0.5,
-  },
-  verifyModalSubmitText: {
-    fontSize: 15,
-    fontWeight: "700" as const,
-    color: "#fff",
-  },
-  resendButton: {
-    paddingVertical: 8,
-  },
-  resendButtonText: {
-    fontSize: 14,
-    color: "#1d9bf0",
-    fontWeight: "600" as const,
-  },
   pinModalContainer: {
     backgroundColor: "#fff",
     borderRadius: 20,
@@ -3505,18 +3254,6 @@ const styles = StyleSheet.create({
     color: "#666",
     textAlign: "center" as const,
     lineHeight: 20,
-  },
-  passwordVerifyInput: {
-    width: "100%",
-    backgroundColor: "#f5f5f5",
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: "#111",
-    borderWidth: 1.5,
-    borderColor: "#10b981",
-    marginTop: 8,
   },
   pinDotsRow: {
     flexDirection: "row" as const,

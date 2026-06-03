@@ -125,7 +125,6 @@ export default function HeaderProfile() {
           hasSubscription: false,
           hasTargets: false,
           hasEventEnrollment: false,
-          hasVerifiedEmail: false,
           hasAtLeastOneBadge: false,
         };
       }
@@ -233,8 +232,6 @@ export default function HeaderProfile() {
         (weightTargetRes.data?.length ?? 0) > 0;
 
       const hasEventEnrollment = (enrollmentRes.data?.length ?? 0) > 0;
-      const hasVerifiedEmail = p?.email_verified === true;
-
       return {
         allFieldsFilled,
         hasProfilePhoto,
@@ -244,7 +241,6 @@ export default function HeaderProfile() {
         hasSubscription,
         hasTargets,
         hasEventEnrollment,
-        hasVerifiedEmail,
         hasAtLeastOneBadge,
       };
     },

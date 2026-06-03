@@ -207,7 +207,6 @@ export default publicProcedure
     );
     const hasTargets = (fitnessGoalRes.data?.length ?? 0) > 0 || (weightTargetRes.data?.length ?? 0) > 0;
     const hasEventEnrollment = (enrollmentRes.data?.length ?? 0) > 0;
-    const hasVerifiedEmail = p?.email_verified === true || socialAuthVerified;
     let requiresAdminTerms = false;
     let hasAcceptedAdminTerms = false;
     let hasFreeAdminSubscription = false;
@@ -261,7 +260,6 @@ export default publicProcedure
         hasSubscription,
         hasTargets,
         hasEventEnrollment,
-        hasVerifiedEmail,
         hasAtLeastOneBadge,
         requiresAdminTerms,
         hasAcceptedAdminTerms,

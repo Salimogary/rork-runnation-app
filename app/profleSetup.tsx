@@ -314,6 +314,7 @@ export default function RegisterScreen() {
   });
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [emailConfirmationSent, setEmailConfirmationSent] = useState(false);
   const [countries, setCountries] = useState<{ name: string; iso_alpha2: string }[]>([]);
   const [countriesLoading, setCountriesLoading] = useState(true);
 
@@ -912,25 +913,67 @@ export default function RegisterScreen() {
     setIsLoading(true);
 
     try {
-      const phoneNumber = parseInt(contactData.phone.replace(/[^0-9]/g, ''), 10);
+      const normalizedEmail = contactData.email.trim().toLowerCase();
+      const displayName = [registrationData.firstName, registrationData.otherNames].filter(Boolean).join(' ').trim() || registrationData.username;
 
       console.log('[Register] Inserting contact:', {
         registration_id: registrationId,
-        phone: phoneNumber,
-        email: contactData.email.trim(),
+        email: normalizedEmail,
       });
+
+      const signInResult = await signIn(normalizedEmail, registrationData.pin);
+      if (signInResult.error) {
+        const signInMessage = signInResult.error.message.toLowerCase();
+        if (signInMessage.includes('confirm')) {
+          setEmailConfirmationSent(true);
+          Alert.alert(
+            'Verify Your Email',
+            `We have sent a confirmation link to ${normalizedEmail}. Open that email, tap the confirmation link, then return here and tap Continue again.`
+          );
+          return;
+        }
+
+        const { data: authSignUpData, error: authSignUpError } = await supabase.auth.signUp({
+          email: normalizedEmail,
+          password: registrationData.pin,
+          options: {
+            emailRedirectTo: getOAuthRedirectUrl(),
+            data: {
+              username: registrationData.username.trim().toLowerCase(),
+              display_name: displayName,
+            },
+          },
+        });
+
+        if (authSignUpError) {
+          const message = authSignUpError.message || 'Could not send the confirmation email.';
+          if (message.toLowerCase().includes('already')) {
+            Alert.alert(
+              'Email Already Registered',
+              'If this is your email, open the confirmation email from RunNation, then return here and tap Continue again. If you already verified it, go back to Login.'
+            );
+            return;
+          }
+          throw authSignUpError;
+        }
+
+        if (!authSignUpData.session) {
+          setEmailConfirmationSent(true);
+          Alert.alert(
+            'Check Your Email',
+            `We sent a confirmation link to ${normalizedEmail}. Open it to verify your email, then return here and tap Continue again.`
+          );
+          return;
+        }
+      }
 
       await getServerClient().auth.createAuthUser.mutate({
         registrationId,
-        email: contactData.email.trim(),
+        email: normalizedEmail,
         pin: registrationData.pin,
       });
 
-      const normalizedEmail = contactData.email.trim().toLowerCase();
-      const { error: signInError } = await signIn(normalizedEmail, registrationData.pin);
-      if (signInError) {
-        throw new Error(signInError.message);
-      }
+      await refreshRoleSession();
 
       if (Platform.OS !== 'web' && biometricAvailable) {
         await SecureStore.setItemAsync(getBiometricStorageKey(normalizedEmail, 'password'), registrationData.pin);
@@ -940,10 +983,11 @@ export default function RegisterScreen() {
       await getServerClient().auth.saveContacts.mutate({
         registrationId,
         phone: contactData.phone,
-        email: contactData.email.trim(),
+        email: normalizedEmail,
       });
 
       console.log('[Register] Contacts saved, moving to goals');
+      setEmailConfirmationSent(false);
       setRegistrationStep(3);
     } catch (err) {
       console.error('[Register] Contact save error:', err);
@@ -1135,7 +1179,7 @@ export default function RegisterScreen() {
 
   const handleSkipStep = async () => {
     if (registrationStep === 2) {
-      setRegistrationStep(3);
+      Alert.alert('Email Verification Required', 'Please verify your email address before continuing registration.');
     } else if (registrationStep === 3) {
       setRegistrationStep(4);
     } else if (registrationStep === 4) {
@@ -1173,6 +1217,9 @@ export default function RegisterScreen() {
   };
 
   const updateContactField = (field: keyof ContactData, value: string) => {
+    if (field === 'email') {
+      setEmailConfirmationSent(false);
+    }
     setContactData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -1692,7 +1739,7 @@ export default function RegisterScreen() {
       <View style={styles.contactSecurityNote}>
         <Mail size={16} color="rgba(255,255,255,0.7)" />
         <Text style={styles.contactSecurityText}>
-          Your phone and email will be verified later. This information is kept separately for your security.
+          We will send a confirmation link to this email. You must verify it before continuing registration.
         </Text>
       </View>
 
@@ -1707,7 +1754,9 @@ export default function RegisterScreen() {
             <ActivityIndicator color="#FFFFFF" />
           ) : (
             <View style={styles.buttonInner}>
-              <Text style={styles.buttonText}>Next: Set Your Goals</Text>
+              <Text style={styles.buttonText}>
+                {emailConfirmationSent ? 'I Verified Email: Continue' : 'Send Verification Email'}
+              </Text>
               <ChevronRight size={20} color="#fff" />
             </View>
           )}
@@ -1715,10 +1764,10 @@ export default function RegisterScreen() {
 
         <TouchableOpacity
           style={styles.textButton}
-          onPress={() => void handleSkipStep()}
+          onPress={() => setRegistrationStep(1)}
           disabled={isLoading}
         >
-          <Text style={styles.textButtonText}>Skip for now</Text>
+          <Text style={styles.textButtonText}>Back to Registration</Text>
         </TouchableOpacity>
       </View>
     </>

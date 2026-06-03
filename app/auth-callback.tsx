@@ -12,7 +12,7 @@ export default function AuthCallbackScreen() {
   const router = useRouter();
   const { refreshRoleSession } = useAuth();
   const [state, setState] = useState<CallbackState>('working');
-  const [message, setMessage] = useState('Completing Google sign-in...');
+  const [message, setMessage] = useState('Completing sign-in...');
 
   const currentUrl = useMemo(() => {
     if (typeof window === 'undefined') {
@@ -47,18 +47,23 @@ export default function AuthCallbackScreen() {
         } = await supabase.auth.getSession();
 
         if (!session) {
-          throw new Error('Google sign-in completed, but no session was created.');
+          throw new Error('Sign-in completed, but no session was created.');
         }
 
-        await getServerClient().auth.ensureOauthRegistration.mutate();
+        const provider = String(session.user.app_metadata?.provider || '').toLowerCase();
+        if (provider && provider !== 'email') {
+          await getServerClient().auth.ensureOauthRegistration.mutate();
+        }
         await refreshRoleSession();
-        await AsyncStorage.setItem('hasSeenOnboarding', 'true');
+        if (provider && provider !== 'email') {
+          await AsyncStorage.setItem('hasSeenOnboarding', 'true');
+        }
 
         if (!isMounted) {
           return;
         }
 
-        router.replace('/(tabs)');
+        router.replace(provider === 'email' ? '/register' : '/(tabs)');
       } catch (error) {
         console.error('[AuthCallback] Web OAuth completion error:', error);
         if (!isMounted) {
@@ -69,7 +74,7 @@ export default function AuthCallbackScreen() {
         setMessage(
           error instanceof Error
             ? error.message
-            : 'Google sign-in could not be completed right now.'
+            : 'Sign-in could not be completed right now.'
         );
       }
     };
@@ -92,7 +97,7 @@ export default function AuthCallbackScreen() {
           </>
         ) : (
           <>
-            <Text style={styles.title}>Google sign-in could not finish</Text>
+            <Text style={styles.title}>Sign-in could not finish</Text>
             <Text style={styles.message}>{message}</Text>
             <TouchableOpacity style={styles.button} onPress={() => router.replace('/register')}>
               <Text style={styles.buttonText}>Back to login</Text>
