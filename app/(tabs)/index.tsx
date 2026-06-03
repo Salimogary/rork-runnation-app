@@ -2501,8 +2501,8 @@ export default function ExerciseScreen() {
                       {timedEventRunOptions.length > 0
                         ? `${timedEventRunOptions.length} timed event${timedEventRunOptions.length === 1 ? "" : "s"} listed`
                         : multidayRegisteredCount > 0
-                        ? "Find here your same day events"
-                        : "Find here your same day events"}
+                        ? "Find here your one day events"
+                        : "Find here your one day events"}
                     </Text>
                   </View>
                   <ChevronRight size={18} color={themeColors.textLight} />

@@ -93,7 +93,7 @@ const slides: Slide[] = [
     pillar: 'Events',
     title: 'Show up for runs that matter.',
     description:
-      'Discover same-day, recurring, and multiday events, join challenges, chase medals, support causes, and keep your results in one RunNation story.',
+      'Discover one-day, recurring, and multiday events, join challenges, chase medals, support causes, and keep your results in one RunNation story.',
     gradient: ['#111827', '#334155', '#0F766E'] as const,
     cta: 'Join RunNation',
   },
@@ -131,7 +131,7 @@ const leaderboardRows = [
 ];
 
 const eventCards = [
-  { type: 'Same Day', name: 'City 10K', date: '12 May' },
+  { type: 'One Day', name: 'City 10K', date: '12 May' },
   { type: 'Recurring', name: 'Wednesday Run', date: 'Weekly' },
   { type: 'Multiday', name: '100 Day Challenge', date: 'Ongoing' },
 ];

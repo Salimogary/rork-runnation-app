@@ -187,13 +187,13 @@ function getEventModeParam(item: any) {
 function getEventTypeLabel(item: any) {
   const eventType = getEventType(item);
   if (eventType === "recurring") return "Recurring";
-  return eventType === "same_day" ? "Same Day" : "Multiday";
+  return eventType === "same_day" ? "One Day" : "Multiday";
 }
 
 function getEventTypeTableLabel(item: any) {
   const eventType = getEventType(item);
   if (eventType === "recurring") return "Recurring";
-  return eventType === "same_day" ? "Sameday" : "Multiday";
+  return eventType === "same_day" ? "One Day" : "Multiday";
 }
 
 function getEventLocationLabel(item: any) {
@@ -350,7 +350,7 @@ export default function EventsScreen() {
 
   const eventTypeFilterLabel = {
     all: "All Types",
-    same_day: "Same Day",
+    same_day: "One Day",
     recurring: "Recurring",
     multiday: "Multiday",
   }[eventTypeFilter];
@@ -683,7 +683,7 @@ export default function EventsScreen() {
         <Pressable style={styles.singleFilterButton} onPress={() => setSelectorMode("filters")}>
           <List size={15} color={appColors.primary} />
           <Text style={styles.singleFilterText} numberOfLines={1}>
-            Filters: {locationFilterLabel} / {eventTypeFilterLabel} / {eventViewMode === "table" ? "List" : "Cards"}
+            Filters: {locationFilterLabel} / {eventTypeFilterLabel} / {eventViewMode === "table" ? "Calendar" : "Cards"}
           </Text>
           <ChevronDown size={14} color={appColors.textSecondary} />
         </Pressable>
@@ -727,109 +727,101 @@ export default function EventsScreen() {
           </View>
         ) : eventViewMode === "table" ? (
           <View style={styles.calendarCard}>
-            <Text style={styles.calendarTitle}>List View</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={styles.eventTable}>
-                <View style={styles.eventTableHeader}>
-                  <Text style={[styles.eventTableHeaderText, styles.eventTableNameCell]}>Name</Text>
-                  <Text style={[styles.eventTableHeaderText, styles.eventTableDateCell]}>Start</Text>
-                  <Text style={[styles.eventTableHeaderText, styles.eventTableDateCell]}>End</Text>
-                  <Text style={[styles.eventTableHeaderText, styles.eventTableDateCell]}>Close</Text>
-                  <Text style={[styles.eventTableHeaderText, styles.eventTableTypeCell]}>Type</Text>
-                  <Text style={[styles.eventTableHeaderText, styles.eventTableOrganizerCell]}>Organizer</Text>
-                  <Text style={[styles.eventTableHeaderText, styles.eventTableLocationCell]}>Location</Text>
-                  <Text style={[styles.eventTableHeaderText, styles.eventTableMedalCell]}>Medal</Text>
-                  <Text style={[styles.eventTableHeaderText, styles.eventTableFeeCell]}>Fee</Text>
-                  <Text style={[styles.eventTableHeaderText, styles.eventTableDistancesCell]}>Distances</Text>
-                  <Text style={[styles.eventTableHeaderText, styles.eventTableActionCell]} />
-                  <Text style={[styles.eventTableHeaderText, styles.eventTableActionCell]} />
-                  <Text style={[styles.eventTableHeaderText, styles.eventTableActionCell]} />
-                </View>
-                {tableEvents.map((item: any) => {
-                  const organizerLabel = item.organizer_name || item.club || "RunNation";
-                  const registeredEvent = registeredEventMap.get(item.event_id);
-                  const status = getTableEventStatus(item, registeredEvent);
-                  const eventCountryCode = normalizeCountryCode(item.country_code || item.country);
-                  const isLocal = item.is_virtual === true || item.isVirtual === true || localCountryCodes.has(eventCountryCode);
-                  const isSubmitting = enrollEventMutation.isPending || submittedEventIds.includes(item.event_id);
-                  const eventFull = isEventFull(item);
-                  const canSignUpFromTable = !status && isLocal && !eventFull;
-                  const locationLabel = getEventLocationLabel({
-                    ...item,
-                    eventLocation: item.event_location || item.eventLocation || registeredEvent?.eventLocation,
-                  });
-                  return (
-                    <View key={`calendar-${item.event_id}`} style={styles.eventTableRow}>
-                      <Text style={[styles.eventTableCellText, styles.eventTableNameCell]} numberOfLines={2}>
-                        {item.event_name || "Unnamed"}
-                      </Text>
-                      <Text style={[styles.eventTableCellText, styles.eventTableDateCell]} numberOfLines={1}>
-                        {formatShortEventDate(item.starts_at || item.startsAt) || "TBA"}
-                      </Text>
-                      <Text style={[styles.eventTableCellText, styles.eventTableDateCell]} numberOfLines={1}>
-                        {formatShortEventDate(item.ends_at || item.endsAt) || "-"}
-                      </Text>
-                      <Text style={[styles.eventTableCellText, styles.eventTableDateCell]} numberOfLines={1}>
-                        {formatShortEventDate(item.registration_closes_at || item.registrationClosesAt) || "-"}
-                      </Text>
-                      <Text style={[styles.eventTableCellText, styles.eventTableTypeCell]} numberOfLines={1}>
-                        {getEventTypeTableLabel(item)}
-                      </Text>
-                      <Text style={[styles.eventTableCellText, styles.eventTableOrganizerCell]} numberOfLines={2}>
-                        {organizerLabel}
-                      </Text>
-                      <Text style={[styles.eventTableCellText, styles.eventTableLocationCell]} numberOfLines={2}>
-                        {locationLabel}
-                      </Text>
-                      <Text style={[styles.eventTableCellText, styles.eventTableMedalCell]} numberOfLines={1}>
-                        {item.has_medal ?? item.hasMedal ? "Yes" : "No"}
-                      </Text>
-                      <Text style={[styles.eventTableCellText, styles.eventTableFeeCell]} numberOfLines={1}>
-                        {formatEventFee(item)}
-                      </Text>
-                      <Text style={[styles.eventTableCellText, styles.eventTableDistancesCell]} numberOfLines={2}>
-                        {formatEventDistances(item)}
-                      </Text>
-                      <Pressable
-                        style={[styles.eventTablePreviewButton, !(item.poster_link || item.posterLink) && styles.eventTableParticipateButtonDisabled]}
-                        onPress={() => setSelectedPosterEvent(item)}
-                        disabled={!(item.poster_link || item.posterLink)}
-                      >
-                        <Text style={styles.eventTableParticipateText}>preview</Text>
-                      </Pressable>
-                      <Pressable
-                        style={[
-                          styles.eventTableParticipateButton,
-                          (!canSignUpFromTable || isSubmitting) && styles.eventTableParticipateButtonDisabled,
-                        ]}
-                        onPress={() => {
-                          if (canSignUpFromTable) {
-                            handleParticipate(item);
-                            return;
-                          }
-                          if (eventFull) {
-                            Alert.alert("Event Full", "This event has reached its participant limit.");
-                            return;
-                          }
-                          handleUnavailableSignupPress(status || "closed");
-                        }}
-                        disabled={isSubmitting}
-                      >
-                        <Text style={styles.eventTableParticipateText}>
-                          {isSubmitting ? "..." : canSignUpFromTable ? "sign up" : status || "closed"}
+            <Text style={styles.calendarTitle}>Calendar</Text>
+            <View style={styles.eventTileList}>
+              {tableEvents.map((item: any) => {
+                const organizerLabel = item.organizer_name || item.club || "RunNation";
+                const registeredEvent = registeredEventMap.get(item.event_id);
+                const status = getTableEventStatus(item, registeredEvent);
+                const eventCountryCode = normalizeCountryCode(item.country_code || item.country);
+                const isLocal = item.is_virtual === true || item.isVirtual === true || localCountryCodes.has(eventCountryCode);
+                const isSubmitting = enrollEventMutation.isPending || submittedEventIds.includes(item.event_id);
+                const eventFull = isEventFull(item);
+                const canSignUpFromTable = !status && isLocal && !eventFull;
+                const locationLabel = getEventLocationLabel({
+                  ...item,
+                  eventLocation: item.event_location || item.eventLocation || registeredEvent?.eventLocation,
+                });
+                const startLabel = formatShortEventDate(item.starts_at || item.startsAt) || "TBA";
+                const endLabel = formatShortEventDate(item.ends_at || item.endsAt);
+                const closeLabel = formatShortEventDate(item.registration_closes_at || item.registrationClosesAt);
+                const distanceLabel = formatEventDistances(item);
+                const displayStatus =
+                  status === "closed"
+                    ? "Registration closed"
+                    : status === "registered"
+                      ? "Registered"
+                    : status === "pending"
+                      ? "Pending"
+                    : status === "completed"
+                      ? "Completed"
+                    : eventFull
+                      ? "Full"
+                    : isLocal
+                      ? "Open"
+                    : "View only";
+                const statusLabel = isSubmitting ? "..." : canSignUpFromTable ? "sign up" : displayStatus;
+
+                return (
+                  <View key={`calendar-${item.event_id}`} style={styles.eventCalendarTile}>
+                    <View style={styles.eventTileBody}>
+                      <View style={styles.eventTileTextBlock}>
+                        <View style={styles.eventTileLine}>
+                          <Text style={styles.eventTileName} numberOfLines={2}>
+                            {item.event_name || "Unnamed"}
+                          </Text>
+                        </View>
+                        <Text style={styles.eventTileMeta} numberOfLines={2}>
+                          {startLabel}{endLabel && endLabel !== startLabel ? `-${endLabel}` : ""} | {getEventTypeTableLabel(item)} | {formatEventFee(item)} | {distanceLabel}
                         </Text>
-                      </Pressable>
-                      <Pressable
-                        style={styles.eventTableParticipantsButton}
-                        onPress={() => openEventParticipants(item)}
-                      >
-                        <Text style={styles.eventTableParticipateText}>participants</Text>
-                      </Pressable>
+                        <Text style={styles.eventTileSubMeta} numberOfLines={2}>
+                          {organizerLabel} | {locationLabel}{closeLabel ? ` | close ${closeLabel}` : ""}
+                        </Text>
+                        <Text style={styles.eventTileStatus} numberOfLines={1}>
+                          {displayStatus}
+                        </Text>
+                      </View>
+                      <View style={styles.eventTileActions}>
+                        <Pressable
+                          style={[styles.eventTileActionButton, styles.eventTilePreviewButton, !(item.poster_link || item.posterLink) && styles.eventTableParticipateButtonDisabled]}
+                          onPress={() => setSelectedPosterEvent(item)}
+                          disabled={!(item.poster_link || item.posterLink)}
+                        >
+                          <Text style={styles.eventTileActionText}>preview</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[
+                            styles.eventTileActionButton,
+                            styles.eventTileSignupButton,
+                            (!canSignUpFromTable || isSubmitting) && styles.eventTableParticipateButtonDisabled,
+                          ]}
+                          onPress={() => {
+                            if (canSignUpFromTable) {
+                              handleParticipate(item);
+                              return;
+                            }
+                            if (eventFull) {
+                              Alert.alert("Event Full", "This event has reached its participant limit.");
+                              return;
+                            }
+                            handleUnavailableSignupPress(status || "closed");
+                          }}
+                          disabled={isSubmitting}
+                        >
+                          <Text style={styles.eventTileActionText}>{statusLabel}</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.eventTileActionButton, styles.eventTileParticipantsButton]}
+                          onPress={() => openEventParticipants(item)}
+                        >
+                          <Text style={styles.eventTileActionText}>people</Text>
+                        </Pressable>
+                      </View>
                     </View>
-                  );
-                })}
-              </View>
-            </ScrollView>
+                  </View>
+                );
+              })}
+            </View>
           </View>
         ) : (
           visibleEvents.map((item: any) => {
@@ -839,7 +831,7 @@ export default function EventsScreen() {
             const organizerLabel = item.organizer_name || item.club || "";
             const eventTypeLabel = getEventTypeLabel(item);
             const dateLabel =
-              eventTypeLabel === "Same Day" || eventTypeLabel === "Recurring"
+              eventTypeLabel === "One Day" || eventTypeLabel === "Recurring"
                 ? formatDate(item.starts_at)
                 : `${formatDate(item.starts_at)} - ${formatDate(item.ends_at)}`;
             const compactMetaLabel = [
@@ -886,7 +878,7 @@ export default function EventsScreen() {
                 <View
                   style={[
                     styles.posterEventTypeBadge,
-                    eventTypeLabel === "Same Day" ? styles.posterSameDayBadge : eventTypeLabel === "Recurring" ? styles.posterRecurringBadge : styles.posterMultidayBadge,
+                    eventTypeLabel === "One Day" ? styles.posterSameDayBadge : eventTypeLabel === "Recurring" ? styles.posterRecurringBadge : styles.posterMultidayBadge,
                   ]}
                 >
                   <Text style={styles.posterEventTypeBadgeText}>{eventTypeLabel}</Text>
@@ -916,7 +908,7 @@ export default function EventsScreen() {
                   <View
                     style={[
                       styles.eventTypeChipInline,
-                      eventTypeLabel === "Same Day" ? styles.eventTypeChipInlineSameDay : eventTypeLabel === "Recurring" ? styles.eventTypeChipInlineRecurring : styles.eventTypeChipInlineMultiday,
+                      eventTypeLabel === "One Day" ? styles.eventTypeChipInlineSameDay : eventTypeLabel === "Recurring" ? styles.eventTypeChipInlineRecurring : styles.eventTypeChipInlineMultiday,
                     ]}
                   >
                     <Text style={styles.eventTypeChipInlineText}>{eventTypeLabel}</Text>
@@ -1082,7 +1074,7 @@ export default function EventsScreen() {
             <Text style={styles.selectorSectionTitle}>Event Type</Text>
             {([
               ["all", "All Types"],
-              ["same_day", "Same Day"],
+              ["same_day", "One Day"],
               ["recurring", "Recurring"],
               ["multiday", "Multiday"],
             ] as const).map(([value, label]) => (
@@ -1097,7 +1089,7 @@ export default function EventsScreen() {
 
             <Text style={styles.selectorSectionTitle}>View</Text>
             {([
-              ["table", "List View"],
+              ["table", "Calendar"],
               ["cards", "Cards"],
             ] as const).map(([value, label]) => (
                 <Pressable
@@ -1461,6 +1453,94 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
     color: appColors.textSecondary,
+  },
+  eventTileList: {
+    gap: 8,
+  },
+  eventCalendarTile: {
+    borderWidth: 1,
+    borderColor: appColors.border,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: "#FFFFFF",
+  },
+  eventTileBody: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: 10,
+  },
+  eventTileTextBlock: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: "center",
+    gap: 4,
+  },
+  eventTileLine: {
+    minHeight: 17,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  eventTileName: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 15,
+    lineHeight: 19,
+    fontWeight: "900",
+    color: appColors.text,
+  },
+  eventTileStatus: {
+    alignSelf: "flex-start",
+    marginTop: 1,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: "900",
+    color: appColors.primary,
+  },
+  eventTileMeta: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "800",
+    color: appColors.text,
+  },
+  eventTileSubMeta: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "700",
+    color: appColors.textLight,
+  },
+  eventTileActions: {
+    width: 82,
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  eventTileActionButton: {
+    width: 82,
+    minHeight: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
+    borderRadius: 8,
+  },
+  eventTilePreviewButton: {
+    backgroundColor: appColors.dark,
+  },
+  eventTileSignupButton: {
+    backgroundColor: appColors.primary,
+  },
+  eventTileParticipantsButton: {
+    backgroundColor: "#2563EB",
+  },
+  eventTileActionText: {
+    fontSize: 9,
+    lineHeight: 11,
+    fontWeight: "900",
+    color: appColors.white,
+    textTransform: "lowercase",
+    textAlign: "center",
   },
   eventTableHeader: {
     flexDirection: "row",

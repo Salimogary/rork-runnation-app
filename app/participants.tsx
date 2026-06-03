@@ -1,4 +1,4 @@
-import { StyleSheet, View, Text, ScrollView, RefreshControl, TouchableOpacity, SectionList } from "react-native";
+import { StyleSheet, View, Text, ScrollView, RefreshControl, TouchableOpacity, SectionList, Platform } from "react-native";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { Award } from "lucide-react-native";
 import { useQuery } from "@tanstack/react-query";
@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { WORLD_COUNTRIES } from "@/constants/countries";
 import { formatCountryName } from "@/constants/country-utils";
 import { getAgeFromDob } from "@/utils/specialClubs";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface Participant {
   event_id?: string;
@@ -214,6 +215,7 @@ type ParticipantSection = {
 
 export default function ParticipantsScreen() {
   const { user, privateMode } = useAuth();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ eventMode?: string; eventId?: string }>();
   const routeEventId = String(params.eventId || "").trim();
   const [selectedEvent, setSelectedEvent] = useState<string>(routeEventId || "all");
@@ -222,8 +224,9 @@ export default function ParticipantsScreen() {
   const [selectedSex, setSelectedSex] = useState<string>("all");
   const [activeFilter, setActiveFilter] = useState<"event" | "country" | "club" | "sex" | null>(null);
   const eventMode = params.eventMode === "multiday" ? "multiday" : params.eventMode === "recurring" ? "recurring" : "same-day";
-  const screenTitle = routeEventId ? "Event Participants" : eventMode === "multiday" ? "Multiday Events" : eventMode === "recurring" ? "Recurring Events" : "Same Day Events";
-  const participantLabel = eventMode === "multiday" ? "multiday" : eventMode === "recurring" ? "recurring" : "same day";
+  const screenTitle = routeEventId ? "Event Participants" : eventMode === "multiday" ? "Multiday Events" : eventMode === "recurring" ? "Recurring Events" : "One Day Events";
+  const participantLabel = eventMode === "multiday" ? "multiday" : eventMode === "recurring" ? "recurring" : "one day";
+  const bottomNavPadding = Platform.OS === "android" ? Math.max(insets.bottom, 88) + 24 : insets.bottom + 24;
 
   const matchesEventMode = useCallback((participant: Participant) => {
     return getEventKind(participant) === eventMode;
@@ -850,7 +853,10 @@ export default function ParticipantsScreen() {
           },
         }}
       />
-      <View style={styles.container}>
+      <SafeAreaView
+        edges={Platform.OS === "android" ? ["bottom"] : []}
+        style={styles.container}
+      >
         {eventNames.length > 0 && (
           <View style={styles.filterHeader}>
             {renderFilterDropdown(
@@ -901,7 +907,7 @@ export default function ParticipantsScreen() {
             keyExtractor={(item, index) => `${item.registration_id || item.first_name}-${index}`}
             stickySectionHeadersEnabled
             refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refetch} />}
-            contentContainerStyle={styles.participantsContainer}
+            contentContainerStyle={[styles.participantsContainer, { paddingBottom: bottomNavPadding }]}
             renderItem={({ item, index }) => {
               const activeDays = item.activeDays || 0;
               const eventDay = getCurrentEventDay(item.starts_at, item.ends_at);
@@ -1030,7 +1036,7 @@ export default function ParticipantsScreen() {
             )}
           />
         )}
-      </View>
+      </SafeAreaView>
     </>
   );
 }

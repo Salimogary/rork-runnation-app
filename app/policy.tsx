@@ -30,7 +30,7 @@ const SECTIONS: PolicySection[] = [
     icon: <Eye size={20} color="#3b82f6" />,
     accentColor: '#3b82f6',
     content: [
-      'RunNation ("the App") is a fitness, community, events, shopping, chat, goals, reports, and magazine platform for runners and walkers. It helps users track workouts, join clubs, participate in same-day, recurring, and multiday events, share social content, discover country-specific shop items, and read or submit magazine stories.',
+      'RunNation ("the App") is a fitness, community, events, shopping, chat, goals, reports, and magazine platform for runners and walkers. It helps users track workouts, join clubs, participate in one-day, recurring, and multiday events, share social content, discover country-specific shop items, and read or submit magazine stories.',
       'This document explains how we collect, use, store, protect, moderate, and display your information. By creating an account, signing in with email or a supported social provider, or using the App, you agree to these practices and terms.',
       'Some features are country-specific, travel-specific, age-specific, club-specific, or role-specific. For example, shopping and event access may depend on your profile or travel country, special clubs may depend on age or preference, while admin tools are available only to users with approved roles.',
       'RunNation is designed with concern for inclusion across different running communities. Special groups such as Junior Runners, Golden Age Runners, Para Runners, Treadmill Runners, SmartFit users, beginners, and other eligible groups may have dedicated clubs, reporting views, coordinator roles, safeguards, and ranking contexts so users can participate in fairer and more relevant communities.',

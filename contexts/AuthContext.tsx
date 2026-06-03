@@ -197,6 +197,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [privateMode, setPrivateModeState] = useState(false);
   const [loginAttempts, setLoginAttempts] = useState<Record<string, { count: number; timestamp: number }>>({});
 
+  const setFallbackSessionState = useCallback((session: Session | null) => {
+    if (!session) {
+      setUser(null);
+      setRoleSession(EMPTY_ROLE_SESSION);
+      return;
+    }
+
+    const fallbackRoleSession: RoleSession = {
+      ...EMPTY_ROLE_SESSION,
+      authUserId: session.user.id,
+      source: 'auth',
+    };
+
+    setRoleSession(fallbackRoleSession);
+    setUser({
+      id: session.user.id,
+      username:
+        session.user.user_metadata?.username ??
+        session.user.email?.split('@')[0] ??
+        'runner',
+      createdAt: session.user.created_at ?? new Date().toISOString(),
+    });
+  }, []);
+
   const hydrateFromSession = useCallback(async (session: Session | null): Promise<RoleSession> => {
     setIsRoleSessionLoading(true);
 
@@ -245,10 +269,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+
     const init = async () => {
       try {
         const storedPrivateMode = await AsyncStorage.getItem(STORAGE_KEYS.PRIVATE_MODE);
-        if (storedPrivateMode !== null) {
+        if (mounted && storedPrivateMode !== null) {
           setPrivateModeState(storedPrivateMode === 'true');
         }
       } catch (error) {
@@ -257,17 +283,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       try {
         const session = await getSafeSession();
-        await hydrateFromSession(session);
+        if (!mounted) return;
+
+        setFallbackSessionState(session);
+        setIsLoading(false);
+
+        void hydrateFromSession(session).catch((error) => {
+          console.warn(
+            '[AuthContext] Background role session hydration failed:',
+            error instanceof Error ? error.message : error
+          );
+        });
       } catch (error) {
         console.error('Error checking auth status:', error);
-        await hydrateFromSession(null);
-      } finally {
+        if (!mounted) return;
+        setFallbackSessionState(null);
         setIsLoading(false);
       }
     };
 
     void init();
-  }, [hydrateFromSession]);
+
+    return () => {
+      mounted = false;
+    };
+  }, [hydrateFromSession, setFallbackSessionState]);
 
   useEffect(() => {
     const {

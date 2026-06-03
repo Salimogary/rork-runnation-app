@@ -8790,7 +8790,7 @@ const getStatusLabel = (status: string) => {
                 <Text style={styles.label}>Event Type</Text>
                 <View style={styles.segmentRow}>
                   {([
-                    ["same_day", "Same Day"],
+                    ["same_day", "One Day"],
                     ["recurring", "Recurring"],
                     ["multiday", "Multiday"],
                   ] as Array<[EventTypeMode, string]>).map(([value, label]) => (

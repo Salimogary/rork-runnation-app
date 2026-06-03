@@ -5,7 +5,7 @@ const DEFAULT_FAQS = [
     faq_id: "default-1",
     question: "How do events, approvals, and event payments work?",
     answer:
-      "Events may be free, approval-based, paid, virtual, local, recurring, same-day, or multiday. Your enrollment may be confirmed immediately, sent to an admin or club coordinator for review, or held until payment is confirmed.",
+      "Events may be free, approval-based, paid, virtual, local, recurring, one-day, or multiday. Your enrollment may be confirmed immediately, sent to an admin or club coordinator for review, or held until payment is confirmed.",
     display_order: 10,
   },
   {

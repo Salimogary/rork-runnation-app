@@ -125,7 +125,7 @@ function useDeepLinkHandler() {
 function NavigationGuard() {
   const segments = useSegments();
   const router = useRouter();
-  const { user, isLoading: authLoading } = useAuth();
+  const { user, isLoading: authLoading, isRoleSessionLoading } = useAuth();
   const { hasSeenOnboarding, isReady } = useOnboardingCheck();
   const { trialExpired, isSubscribed, isLoading: subLoading } = useSubscription();
 
@@ -157,7 +157,7 @@ function NavigationGuard() {
       currentSegment === "subscription";
 
     if (user) {
-      if (!subLoading && trialExpired && !isSubscribed && !inSubscription && !inAllowedRoute) {
+      if (!isRoleSessionLoading && !subLoading && trialExpired && !isSubscribed && !inSubscription && !inAllowedRoute) {
         router.replace("/subscription" as never);
         return;
       }
@@ -175,7 +175,7 @@ function NavigationGuard() {
         }
       }
     }
-  }, [user, isReady, authLoading, hasSeenOnboarding, segments, router, trialExpired, isSubscribed, subLoading]);
+  }, [user, isReady, authLoading, hasSeenOnboarding, segments, router, trialExpired, isSubscribed, subLoading, isRoleSessionLoading]);
 
   return null;
 }
