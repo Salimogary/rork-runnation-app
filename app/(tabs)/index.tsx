@@ -119,7 +119,7 @@ const AUTO_RESUME_MIN_DISTANCE_KM = 0.015;
 const BACKGROUND_LOCATION_TASK = "runnation-background-location";
 const ACTIVE_WORKOUT_SESSION_KEY = "runnation_active_workout_session";
 const WORKOUT_COUNTDOWN_MS = 3200;
-const RUNNATION_ANDROID_APK_LINK = "https://expo.dev/artifacts/eas/kp69Wjr6TwqrnqbLTFkiK.apk";
+const RUNNATION_ANDROID_APK_LINK = "https://expo.dev/artifacts/eas/jvd4kbNdrsg88bDMm7oBe2.apk";
 
 type BackgroundLocationPayload = {
   locations?: Location.LocationObject[];

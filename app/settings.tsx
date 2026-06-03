@@ -49,7 +49,7 @@ const SERVICE_APPLICANT_LINKS_HELPER =
 const SERVICE_APPLICANT_STATEMENT_HELPER =
   "Optional: briefly explain why admins should consider you for this role. Use 25-250 words if you choose to add it.";
 
-const RUNNATION_APK_LINK = "https://expo.dev/artifacts/eas/kp69Wjr6TwqrnqbLTFkiK.apk";
+const RUNNATION_APK_LINK = "https://expo.dev/artifacts/eas/jvd4kbNdrsg88bDMm7oBe2.apk";
 
 const REQUIRED_FRONTEND_FAQS = [
   {
