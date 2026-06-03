@@ -48,6 +48,8 @@ const SERVICE_APPLICANT_LINKS_HELPER =
 const SERVICE_APPLICANT_STATEMENT_HELPER =
   "Optional: briefly explain why admins should consider you for this role. Use 25-250 words if you choose to add it.";
 
+const RUNNATION_APK_LINK = "https://expo.dev/artifacts/eas/kp69Wjr6TwqrnqbLTFkiK.apk";
+
 const REQUIRED_FRONTEND_FAQS = [
   {
     faq_id: "frontend-special-club-eligibility",
@@ -384,7 +386,7 @@ export default function SettingsScreen() {
   };
 
   const APP_STORE_URL = '';
-  const APP_DOWNLOAD_LINK = '';
+  const APP_DOWNLOAD_LINK = RUNNATION_APK_LINK;
 
   const { data: existingRating } = useQuery<{ rating: number; feedback: string | null } | null>({
     queryKey: ['appRating', user?.id],
@@ -692,9 +694,12 @@ export default function SettingsScreen() {
 
   const handleShareApp = () => {
     const link = APP_DOWNLOAD_LINK || APP_STORE_URL;
-    const shareMessage = link
-      ? `Check out this awesome fitness app! Download it here: ${String(link)}`
-      : 'Check out this awesome fitness app! Download link coming soon.';
+    const shareMessage =
+      Platform.OS === "ios"
+        ? "RunNation iOS: coming soon"
+        : link
+          ? `RunNation Android APK: ${String(link)}`
+          : 'RunNation Android APK: download link coming soon.';
     if (Platform.OS === 'web') {
       if (navigator.clipboard) {
         void navigator.clipboard.writeText(shareMessage);

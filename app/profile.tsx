@@ -63,7 +63,7 @@ import { useDistanceUnit, type DistanceUnit } from "@/contexts/DistanceUnitConte
 import { useWeightUnit, type WeightUnit } from "@/contexts/WeightUnitContext";
 
 const FALLBACK_COUNTRIES = WORLD_COUNTRIES;
-const RUNNATION_APP_LINK = "";
+const RUNNATION_APP_LINK = "https://expo.dev/artifacts/eas/kp69Wjr6TwqrnqbLTFkiK.apk";
 const PARA_EQUIPMENT_OPTIONS = [
   { value: "wheelchair", label: "Wheelchair" },
   { value: "handcycle", label: "Handcycle" },

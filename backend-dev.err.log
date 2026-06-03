@@ -288,3 +288,11 @@ Error adding event: {
   message: 'duplicate key value violates unique constraint "Events_pkey"'
 }
 Compilation error in C:\Users\salim\rork-runnation-app\backend\trpc\routes\session\get-role-session\route.ts
+[TypeError: fetch failed] {
+  [cause]: ConnectTimeoutError: Connect Timeout Error (attempted addresses: 104.18.38.10:443, 172.64.149.246:443, timeout: 10000ms)
+      at onConnectTimeout (node:internal/deps/undici/undici:1981:23)
+      at Immediate._onImmediate (node:internal/deps/undici/undici:1947:35)
+      at processImmediate (node:internal/timers:504:21) {
+    code: 'UND_ERR_CONNECT_TIMEOUT'
+  }
+}
