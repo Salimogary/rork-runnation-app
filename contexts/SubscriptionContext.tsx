@@ -2,6 +2,7 @@ import React, { createContext, useContext, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { hasFreeAdminSubscriptionAccess } from '@/lib/role-session';
 
 export type SubscriptionStatus = 'trial' | 'active' | 'expired' | 'pending';
 export type PaymentMethod = 'mtn_mobile_money' | 'airtel_money' | 'mpesa' | 'credit_card';
@@ -108,12 +109,7 @@ const SubscriptionContext = createContext<SubscriptionContextValue | undefined>(
 export function SubscriptionProvider({ children }: { children: React.ReactNode }) {
   const { user, roleSession } = useAuth();
   const queryClient = useQueryClient();
-  const hasFreeAdminAccess =
-    roleSession.isSuperAdmin ||
-    roleSession.isCountryAdmin ||
-    roleSession.isCountryCoordinator ||
-    roleSession.isSpecialClubCoordinator ||
-    roleSession.isEventOrganizer;
+  const hasFreeAdminAccess = hasFreeAdminSubscriptionAccess(roleSession);
 
   const userProfileQuery = useQuery({
     queryKey: ['subscriptionUserProfile', user?.id],

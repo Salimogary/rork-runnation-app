@@ -6,6 +6,26 @@ import { requireRegistrationOwner } from "../../../rbac";
 const DISTANCE_MILESTONES = [10, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000];
 const ACTIVITY_INTERVAL = 10;
 const MAX_ACTIVITY_BADGES = 100;
+const ADMIN_ROLE_NAMES = [
+  "super_admin",
+  "global_admin",
+  "country_admin",
+  "country_coordinator",
+  "club_coordinator",
+  "junior_runners_club_coordinator",
+  "golden_age_runners_club_coordinator",
+  "treadmill_runners_club_coordinator",
+  "para_runners_club_coordinator",
+  "smartfit_club_coordinator",
+  "event_organizer",
+  "magazine_editor",
+  "chat_room_administrator",
+  "magazine_columnist_fitness_coach",
+  "magazine_columnist_sports_journalist",
+  "magazine_columnist_motivation_speaker",
+  "shop_manager",
+];
+const FREE_ADMIN_SUBSCRIPTION_ROLE_NAMES = new Set(ADMIN_ROLE_NAMES);
 
 function normalizeClubName(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
@@ -180,7 +200,7 @@ export default publicProcedure
     const hasFiveActivities = totalActivities >= 5;
     const hasAtLeastOneBadge = getEarnedBadgeCount(totalDistance, totalActivities) > 0;
     const sub = subscriptionRes.data;
-    const hasSubscription = !!(
+    const hasPaidSubscription = !!(
       sub &&
       sub.status === "active" &&
       (!sub.expires_at || new Date(sub.expires_at) > new Date())
@@ -190,37 +210,22 @@ export default publicProcedure
     const hasVerifiedEmail = p?.email_verified === true || socialAuthVerified;
     let requiresAdminTerms = false;
     let hasAcceptedAdminTerms = false;
+    let hasFreeAdminSubscription = false;
 
     if (profileRes.data?.profile_id) {
+      const { data: roleRows } = await ctx.supabase
+        .from("roles")
+        .select("role_id, role_name")
+        .in("role_name", ADMIN_ROLE_NAMES);
+      const roleNameById = new Map((roleRows ?? []).map((role: any) => [String(role.role_id), String(role.role_name || "")]));
+      const roleIds = (roleRows ?? []).map((role: any) => role.role_id);
       const [{ data: roleAssignments }, { data: termsAcceptance }] = await Promise.all([
         ctx.supabase
           .from("user_role_assignments")
-          .select("assignment_id")
+          .select("assignment_id, role_id")
           .eq("user_id", profileRes.data.profile_id)
           .eq("is_active", true)
-          .in("role_id", (
-            await ctx.supabase
-              .from("roles")
-              .select("role_id")
-              .in("role_name", [
-                "super_admin",
-                "global_admin",
-                "country_admin",
-                "country_coordinator",
-                "club_coordinator",
-                "junior_runners_club_coordinator",
-                "golden_age_runners_club_coordinator",
-                "treadmill_runners_club_coordinator",
-                "para_runners_club_coordinator",
-                "smartfit_club_coordinator",
-                "event_organizer",
-                "magazine_editor",
-                "chat_room_administrator",
-                "magazine_columnist_fitness_coach",
-                "magazine_columnist_sports_journalist",
-                "magazine_columnist_motivation_speaker",
-              ])
-          ).data?.map((role: any) => role.role_id) ?? [-1]),
+          .in("role_id", roleIds.length > 0 ? roleIds : [-1]),
         ctx.supabase
           .from("admin_terms_acceptances")
           .select("acceptance_id")
@@ -231,7 +236,11 @@ export default publicProcedure
 
       requiresAdminTerms = (roleAssignments?.length ?? 0) > 0;
       hasAcceptedAdminTerms = !!termsAcceptance;
+      hasFreeAdminSubscription = (roleAssignments ?? []).some((assignment: any) =>
+        FREE_ADMIN_SUBSCRIPTION_ROLE_NAMES.has(roleNameById.get(String(assignment.role_id)) || "")
+      );
     }
+    const hasSubscription = hasFreeAdminSubscription || hasPaidSubscription;
 
     return {
       profile,

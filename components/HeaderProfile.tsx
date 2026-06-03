@@ -17,6 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
+import { hasFreeAdminSubscriptionAccess } from "@/lib/role-session";
 import { getEarnedBadgeCount } from "@/utils/badges";
 import { calculateProfileCompletion } from "@/utils/profileCompletion";
 import type { ProfileCompletionInputs } from "@/utils/profileCompletion";
@@ -35,7 +36,7 @@ interface HeaderUserProfile {
 }
 
 export default function HeaderProfile() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, roleSession } = useAuth();
   const router = useRouter();
   const { colors: themeColors, isDark } = useTheme();
   const [menuVisible, setMenuVisible] = useState(false);
@@ -109,8 +110,10 @@ export default function HeaderProfile() {
     staleTime: 60000,
   });
 
+  const hasFreeAdminAccess = hasFreeAdminSubscriptionAccess(roleSession);
+
   const { data: completionInputs } = useQuery<ProfileCompletionInputs>({
-    queryKey: ["profileCompletion", user?.id],
+    queryKey: ["profileCompletion", user?.id, hasFreeAdminAccess],
     queryFn: async () => {
       if (!user) {
         return {
@@ -215,14 +218,15 @@ export default function HeaderProfile() {
       const hasAtLeastOneBadge = getEarnedBadgeCount(totalDistance, totalActivities) > 0;
 
       const sub = subscriptionRes.data;
-      let hasSubscription = false;
+      let hasPaidSubscription = false;
       if (sub && sub.status === "active") {
         if (sub.expires_at) {
-          hasSubscription = new Date(sub.expires_at) > new Date();
+          hasPaidSubscription = new Date(sub.expires_at) > new Date();
         } else {
-          hasSubscription = true;
+          hasPaidSubscription = true;
         }
       }
+      const hasSubscription = hasFreeAdminAccess || hasPaidSubscription;
 
       const hasTargets =
         (fitnessGoalRes.data?.length ?? 0) > 0 ||

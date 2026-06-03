@@ -59,6 +59,45 @@ export const EMPTY_ROLE_SESSION: RoleSession = {
   source: "none",
 };
 
+const FREE_ADMIN_SUBSCRIPTION_ROLE_NAMES = new Set([
+  "super_admin",
+  "global_admin",
+  "country_admin",
+  "country_coordinator",
+  "club_coordinator",
+  "junior_runners_club_coordinator",
+  "golden_age_runners_club_coordinator",
+  "treadmill_runners_club_coordinator",
+  "para_runners_club_coordinator",
+  "smartfit_club_coordinator",
+  "event_organizer",
+  "magazine_editor",
+  "magazine_columnist_fitness_coach",
+  "magazine_columnist_sports_journalist",
+  "magazine_columnist_motivation_speaker",
+  "chat_room_administrator",
+  "shop_manager",
+]);
+
+export function roleNameHasFreeAdminSubscriptionAccess(roleName: string | null | undefined): boolean {
+  return FREE_ADMIN_SUBSCRIPTION_ROLE_NAMES.has((roleName ?? "").trim().toLowerCase());
+}
+
+export function hasFreeAdminSubscriptionAccess(roleSession: RoleSession): boolean {
+  return (
+    roleSession.isSuperAdmin ||
+    roleSession.isCountryAdmin ||
+    roleSession.isCountryCoordinator ||
+    roleSession.isClubCoordinator ||
+    roleSession.isSpecialClubCoordinator ||
+    roleSession.isEventOrganizer ||
+    roleSession.isMagazineEditor ||
+    roleSession.isMagazineColumnist ||
+    roleSession.isChatRoomAdministrator ||
+    roleSession.roles.some((role) => roleNameHasFreeAdminSubscriptionAccess(role.roleName))
+  );
+}
+
 export function hasAdminPortalAccess(roleSession: RoleSession): boolean {
   return (
     roleSession.hasAdminAccess ||

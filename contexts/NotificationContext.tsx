@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { hasFreeAdminSubscriptionAccess } from '@/lib/role-session';
 import { getEarnedBadgeCount } from '@/utils/badges';
 import { calculateProfileCompletion } from '@/utils/profileCompletion';
 import type { ProfileCompletionInputs } from '@/utils/profileCompletion';
@@ -27,9 +28,10 @@ const normalizePaceMinPerKm = (paceMinPerKm: number): number => {
 };
 
 export const [NotificationProvider, useNotifications] = createContextHook(() => {
-  const { user } = useAuth();
+  const { user, roleSession } = useAuth();
   const { trialDaysRemaining, subscriptionStatus, subscription } = useSubscription();
   const setupDone = useRef(false);
+  const hasFreeAdminAccess = hasFreeAdminSubscriptionAccess(roleSession);
 
   useEffect(() => {
     const isExpoGoAndroid = Platform.OS === "android" && Constants.appOwnership === "expo";
@@ -65,7 +67,7 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
   });
 
   const { data: completionData } = useQuery({
-    queryKey: ['notif_completion', user?.id],
+    queryKey: ['notif_completion', user?.id, hasFreeAdminAccess],
     queryFn: async (): Promise<ProfileCompletionInputs> => {
       if (!user?.id) {
         return {
@@ -118,10 +120,11 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
       const totalDist = filtered.reduce((s: number, a: any) => s + (a.distance_km || 0), 0);
       const hasAtLeastOneBadge = getEarnedBadgeCount(totalDist, filtered.length) > 0;
       const sub = subscriptionRes.data as any;
-      let hasSubscription = false;
+      let hasPaidSubscription = false;
       if (sub && sub.status === 'active') {
-        hasSubscription = sub.expires_at ? new Date(sub.expires_at) > new Date() : true;
+        hasPaidSubscription = sub.expires_at ? new Date(sub.expires_at) > new Date() : true;
       }
+      const hasSubscription = hasFreeAdminAccess || hasPaidSubscription;
       const hasTargets = (fitnessGoalRes.data?.length ?? 0) > 0 || (weightTargetRes.data?.length ?? 0) > 0;
       const hasEventEnrollment = (enrollmentRes.data?.length ?? 0) > 0;
       const hasVerifiedEmail = p?.email_verified === true || socialAuthVerified;
