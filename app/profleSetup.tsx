@@ -107,7 +107,7 @@ interface ProfileBundleResponse {
 }
 
 type ClubChoice = 'join' | 'existing' | 'start' | 'organizer' | 'none' | null;
-const RUNNATION_APP_LINK = 'https://expo.dev/artifacts/eas/jvd4kbNdrsg88bDMm7oBe2.apk';
+const RUNNATION_APP_LINK = 'https://expo.dev/artifacts/eas/27LbCHM76M74izfEPYt1pN.apk';
 
 const buildClubMembershipTerms = (clubNames: string[]) => {
   const title = clubNames.length === 1 ? `${clubNames[0]} Membership Terms and Club Rules` : 'Club Membership Terms and Club Rules';

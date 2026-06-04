@@ -63,7 +63,7 @@ import { useWeightUnit, type WeightUnit } from "@/contexts/WeightUnitContext";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 const FALLBACK_COUNTRIES = WORLD_COUNTRIES;
-const RUNNATION_APP_LINK = "https://expo.dev/artifacts/eas/jvd4kbNdrsg88bDMm7oBe2.apk";
+const RUNNATION_APP_LINK = "https://expo.dev/artifacts/eas/27LbCHM76M74izfEPYt1pN.apk";
 const PARA_EQUIPMENT_OPTIONS = [
   { value: "wheelchair", label: "Wheelchair" },
   { value: "handcycle", label: "Handcycle" },

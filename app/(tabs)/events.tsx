@@ -61,6 +61,14 @@ function formatShortEventDate(dateString?: string | null) {
   return `${Number(day)}/${Number(month)}/${String(year).slice(-2)}`;
 }
 
+function formatFullEventDate(dateString?: string | null) {
+  const dateOnly = String(dateString || "").slice(0, 10);
+  if (!dateOnly) return "";
+  const [year, month, day] = dateOnly.split("-");
+  if (!year || !month || !day) return "";
+  return `${day.padStart(2, "0")}/${month.padStart(2, "0")}/${year}`;
+}
+
 function formatTableEventDate(dateString?: string | null) {
   const raw = String(dateString || "").trim();
   if (!raw) return "";
@@ -744,11 +752,13 @@ export default function EventsScreen() {
                 });
                 const startLabel = formatShortEventDate(item.starts_at || item.startsAt) || "TBA";
                 const endLabel = formatShortEventDate(item.ends_at || item.endsAt);
-                const closeLabel = formatShortEventDate(item.registration_closes_at || item.registrationClosesAt);
+                const closeLabel = formatFullEventDate(item.registration_closes_at || item.registrationClosesAt);
                 const distanceLabel = formatEventDistances(item);
                 const displayStatus =
                   status === "closed"
-                    ? "Registration closed"
+                    ? closeLabel
+                      ? `Registration closed ${closeLabel}`
+                      : "Registration closed"
                     : status === "registered"
                       ? "Registered"
                     : status === "pending"
@@ -758,9 +768,21 @@ export default function EventsScreen() {
                     : eventFull
                       ? "Full"
                     : isLocal
-                      ? "Open"
+                      ? closeLabel
+                        ? `Active until ${closeLabel}`
+                        : "Active"
                     : "View only";
-                const statusLabel = isSubmitting ? "..." : canSignUpFromTable ? "sign up" : displayStatus;
+                const statusLabel = isSubmitting
+                  ? "..."
+                  : canSignUpFromTable
+                    ? "sign up"
+                  : status === "closed"
+                    ? closeLabel
+                      ? `closed\n${closeLabel}`
+                      : "registration\nclosed"
+                  : eventFull
+                    ? "full"
+                  : displayStatus;
 
                 return (
                   <View key={`calendar-${item.event_id}`} style={styles.eventCalendarTile}>
@@ -771,14 +793,14 @@ export default function EventsScreen() {
                             {item.event_name || "Unnamed"}
                           </Text>
                         </View>
-                        <Text style={styles.eventTileMeta} numberOfLines={2}>
-                          {startLabel}{endLabel && endLabel !== startLabel ? `-${endLabel}` : ""} | {getEventTypeTableLabel(item)} | {formatEventFee(item)} | {distanceLabel}
+                        <Text style={styles.eventTileMeta} numberOfLines={1}>
+                          Date: {startLabel}{endLabel && endLabel !== startLabel ? `-${endLabel}` : ""} | Type: {getEventTypeTableLabel(item)} | Fee: {formatEventFee(item)}
                         </Text>
-                        <Text style={styles.eventTileSubMeta} numberOfLines={2}>
-                          {organizerLabel} | {locationLabel}{closeLabel ? ` | close ${closeLabel}` : ""}
+                        <Text style={styles.eventTileSubMeta} numberOfLines={1}>
+                          Organizer: {organizerLabel}
                         </Text>
-                        <Text style={styles.eventTileStatus} numberOfLines={1}>
-                          {displayStatus}
+                        <Text style={styles.eventTileSubMeta} numberOfLines={1}>
+                          Venue: {locationLabel} | Distances: {distanceLabel}
                         </Text>
                       </View>
                       <View style={styles.eventTileActions}>
@@ -1474,7 +1496,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     justifyContent: "center",
-    gap: 4,
+    gap: 5,
   },
   eventTileLine: {
     minHeight: 17,
@@ -1485,30 +1507,22 @@ const styles = StyleSheet.create({
   eventTileName: {
     flex: 1,
     minWidth: 0,
-    fontSize: 15,
-    lineHeight: 19,
+    fontSize: 16,
+    lineHeight: 20,
     fontWeight: "900",
     color: appColors.text,
   },
-  eventTileStatus: {
-    alignSelf: "flex-start",
-    marginTop: 1,
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: "900",
-    color: appColors.primary,
-  },
   eventTileMeta: {
-    fontSize: 12,
+    fontSize: 12.5,
     lineHeight: 16,
     fontWeight: "800",
     color: appColors.text,
   },
   eventTileSubMeta: {
-    fontSize: 11,
+    fontSize: 12,
     lineHeight: 15,
-    fontWeight: "700",
-    color: appColors.textLight,
+    fontWeight: "800",
+    color: appColors.textSecondary,
   },
   eventTileActions: {
     width: 82,
@@ -1535,7 +1549,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#2563EB",
   },
   eventTileActionText: {
-    fontSize: 9,
+    fontSize: 9.5,
     lineHeight: 11,
     fontWeight: "900",
     color: appColors.white,

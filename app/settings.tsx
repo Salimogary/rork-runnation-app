@@ -49,8 +49,6 @@ const SERVICE_APPLICANT_LINKS_HELPER =
 const SERVICE_APPLICANT_STATEMENT_HELPER =
   "Optional: briefly explain why admins should consider you for this role. Use 25-250 words if you choose to add it.";
 
-const RUNNATION_APK_LINK = "https://expo.dev/artifacts/eas/jvd4kbNdrsg88bDMm7oBe2.apk";
-
 const REQUIRED_FRONTEND_FAQS = [
   {
     faq_id: "frontend-special-club-eligibility",
@@ -210,6 +208,9 @@ export default function SettingsScreen() {
     undefined,
     { enabled: showFaqModal }
   );
+  const { data: appLinks } = trpc.support.getAppLinks.useQuery(undefined, {
+    staleTime: 5 * 60 * 1000,
+  });
   const displayedFaqEntries = useMemo(() => {
     const rows = Array.isArray(faqEntries) ? faqEntries : [];
     const existingQuestions = new Set(
@@ -387,8 +388,8 @@ export default function SettingsScreen() {
     return raw;
   };
 
-  const APP_STORE_URL = '';
-  const APP_DOWNLOAD_LINK = RUNNATION_APK_LINK;
+  const APP_DOWNLOAD_LINK = appLinks?.androidApkUrl || "";
+  const APP_STORE_URL = appLinks?.iosAppUrl || "";
 
   const { data: existingRating } = useQuery<{ rating: number; feedback: string | null } | null>({
     queryKey: ['appRating', user?.id],
@@ -694,11 +695,26 @@ export default function SettingsScreen() {
     setShowRatingModal(true);
   };
 
-  const handleShareApp = () => {
-    const link = APP_DOWNLOAD_LINK || APP_STORE_URL;
+  const handleShareApp = async () => {
+    let androidLink = APP_DOWNLOAD_LINK;
+    let iosLink = APP_STORE_URL;
+
+    if (!androidLink && !iosLink) {
+      try {
+        const latestLinks = await getServerClient().support.getAppLinks.query();
+        androidLink = latestLinks.androidApkUrl || "";
+        iosLink = latestLinks.iosAppUrl || "";
+      } catch (error) {
+        console.warn("[Share App] Could not refresh app links:", error);
+      }
+    }
+
+    const link = androidLink || iosLink;
     const shareMessage =
       Platform.OS === "ios"
-        ? "RunNation iOS: coming soon"
+        ? iosLink
+          ? `RunNation iOS: ${String(iosLink)}`
+          : "RunNation iOS: coming soon"
         : link
           ? `RunNation Android APK: ${String(link)}`
           : 'RunNation Android APK: download link coming soon.';

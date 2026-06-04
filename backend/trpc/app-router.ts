@@ -137,6 +137,7 @@ import getMagazineArticlesRoute from "./routes/magazine/get-articles/route";
 import getAdminContactsRoute from "./routes/support/get-admin-contacts/route";
 import getFaqEntriesRoute from "./routes/support/get-faq-entries/route";
 import getAboutStatsRoute from "./routes/support/get-about-stats/route";
+import getAppLinksRoute from "./routes/support/get-app-links/route";
 import submitDonationRoute from "./routes/support/submit-donation/route";
 import getServiceTeamRolesRoute from "./routes/service-team/get-service-roles/route";
 import requestServiceTeamRoleRoute from "./routes/service-team/request-role/route";
@@ -306,6 +307,7 @@ export const appRouter = createTRPCRouter({
     getAdminContacts: getAdminContactsRoute,
     getFaqEntries: getFaqEntriesRoute,
     getAboutStats: getAboutStatsRoute,
+    getAppLinks: getAppLinksRoute,
     submitDonation: submitDonationRoute,
   }),
   serviceTeam: createTRPCRouter({

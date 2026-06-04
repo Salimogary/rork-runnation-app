@@ -209,6 +209,7 @@ const MEDAL_BANDS: { key: MedalBand; minKm: number; points: number }[] = [
   { key: "5k", minKm: 5, points: 2 },
   { key: "3k", minKm: 3, points: 1 },
 ];
+const MEDAL_DISPLAY_BANDS = [...MEDAL_BANDS].sort((a, b) => a.minKm - b.minKm);
 const EMPTY_MEDAL_COUNTS = MEDAL_BANDS.reduce((acc, band) => {
   acc[band.key] = 0;
   return acc;
@@ -2210,7 +2211,7 @@ export default function ActivityScreen() {
       existing.athleteCount += 1;
       existing.totalMedals += row.totalMedals;
       existing.points += row.points;
-      MEDAL_BANDS.forEach((band) => {
+      MEDAL_DISPLAY_BANDS.forEach((band) => {
         existing.medalCounts[band.key] += row.medalCounts[band.key] || 0;
       });
       if ((!existing.country || existing.country === "-") && row.Country) {
@@ -2437,9 +2438,9 @@ export default function ActivityScreen() {
   const renderMedalLeaderboardTable = (rows: CommunityMedalData[]) => (
     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
       <View style={styles.medalLeaderboardTableContainer}>
-        <View style={styles.leaderboardTableHeader}>
+        <View style={[styles.leaderboardTableHeader, styles.medalLeaderboardTableHeader]}>
           <View style={styles.medalRankColumn}>
-            <Text style={styles.leaderTableHeaderText}>Rank</Text>
+            <Text style={styles.leaderTableHeaderText}>#</Text>
           </View>
           <View style={styles.medalNameColumn}>
             <Text style={styles.leaderTableHeaderText}>Name</Text>
@@ -2450,17 +2451,17 @@ export default function ActivityScreen() {
           <View style={styles.medalClubColumn}>
             <Text style={styles.leaderTableHeaderText}>Club</Text>
           </View>
-          {MEDAL_BANDS.map((band) => (
+          {MEDAL_DISPLAY_BANDS.map((band) => (
             <View key={band.key} style={styles.medalCountColumn}>
               <Text style={styles.leaderTableHeaderText}>{band.key}</Text>
             </View>
           ))}
           <View style={styles.medalPointsColumn}>
-            <Text style={styles.leaderTableHeaderText}>Points</Text>
+            <Text style={styles.leaderTableHeaderText}>Pts</Text>
           </View>
         </View>
         {rows.map((item, index) => (
-          <View key={item.registrationId} style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt]}>
+          <View key={item.registrationId} style={[styles.leaderboardTableRow, styles.medalLeaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt]}>
             <View style={[styles.medalRankColumn, styles.leaderRankCell]}>
               <Text style={styles.leaderFlagText}>{getCountryFlag(item.Country)}</Text>
               <Text style={styles.leaderTableCellText}>{index + 1}</Text>
@@ -2476,7 +2477,7 @@ export default function ActivityScreen() {
             <View style={styles.medalClubColumn}>
               <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.Club || "-"}</Text>
             </View>
-            {MEDAL_BANDS.map((band) => (
+            {MEDAL_DISPLAY_BANDS.map((band) => (
               <View key={band.key} style={styles.medalCountColumn}>
                 <Text style={styles.leaderTableCellText}>{item.medalCounts[band.key] || 0}</Text>
               </View>
@@ -2493,27 +2494,27 @@ export default function ActivityScreen() {
   const renderClubMedalLeaderboardTable = (rows: CommunityClubMedalData[]) => (
     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
       <View style={styles.medalLeaderboardTableContainer}>
-        <View style={styles.leaderboardTableHeader}>
+        <View style={[styles.leaderboardTableHeader, styles.medalLeaderboardTableHeader]}>
           <View style={styles.medalRankColumn}>
-            <Text style={styles.leaderTableHeaderText}>Rank</Text>
+            <Text style={styles.leaderTableHeaderText}>#</Text>
           </View>
           <View style={styles.medalNameColumn}>
             <Text style={styles.leaderTableHeaderText}>Club</Text>
           </View>
           <View style={styles.medalSexColumn}>
-            <Text style={styles.leaderTableHeaderText}>Members</Text>
+            <Text style={styles.leaderTableHeaderText}>Mbrs</Text>
           </View>
-          {MEDAL_BANDS.map((band) => (
+          {MEDAL_DISPLAY_BANDS.map((band) => (
             <View key={band.key} style={styles.medalCountColumn}>
               <Text style={styles.leaderTableHeaderText}>{band.key}</Text>
             </View>
           ))}
           <View style={styles.medalPointsColumn}>
-            <Text style={styles.leaderTableHeaderText}>Points</Text>
+            <Text style={styles.leaderTableHeaderText}>Pts</Text>
           </View>
         </View>
         {rows.map((item, index) => (
-          <View key={item.clubName} style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt]}>
+          <View key={item.clubName} style={[styles.leaderboardTableRow, styles.medalLeaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt]}>
             <View style={[styles.medalRankColumn, styles.leaderRankCell]}>
               <Text style={styles.leaderFlagText}>{getCountryFlag(item.country)}</Text>
               <Text style={styles.leaderTableCellText}>{index + 1}</Text>
@@ -2524,7 +2525,7 @@ export default function ActivityScreen() {
             <View style={styles.medalSexColumn}>
               <Text style={styles.leaderTableCellText}>{item.athleteCount}</Text>
             </View>
-            {MEDAL_BANDS.map((band) => (
+            {MEDAL_DISPLAY_BANDS.map((band) => (
               <View key={band.key} style={styles.medalCountColumn}>
                 <Text style={styles.leaderTableCellText}>{item.medalCounts[band.key] || 0}</Text>
               </View>
@@ -4278,7 +4279,7 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   medalLeaderboardTableContainer: {
-    minWidth: 620,
+    minWidth: 382,
     margin: 6,
     marginBottom: 10,
     borderRadius: 8,
@@ -4287,24 +4288,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.divider,
   },
+  medalLeaderboardTableHeader: {
+    paddingHorizontal: 1,
+    paddingVertical: 3,
+  },
+  medalLeaderboardTableRow: {
+    paddingHorizontal: 1,
+    paddingVertical: 3,
+  },
   medalRankColumn: {
-    width: 34,
-  },
-  medalNameColumn: {
-    width: 84,
-  },
-  medalSexColumn: {
     width: 28,
   },
+  medalNameColumn: {
+    width: 66,
+  },
+  medalSexColumn: {
+    width: 22,
+  },
   medalClubColumn: {
-    width: 68,
+    width: 44,
   },
   medalCountColumn: {
-    width: 36,
+    width: 22,
     alignItems: "center" as const,
   },
   medalPointsColumn: {
-    width: 44,
+    width: 34,
     alignItems: "center" as const,
   },
   clubActivityTableContainer: {
