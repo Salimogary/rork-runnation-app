@@ -793,13 +793,13 @@ export default function EventsScreen() {
                             {item.event_name || "Unnamed"}
                           </Text>
                         </View>
-                        <Text style={styles.eventTileMeta} numberOfLines={1}>
+                        <Text style={styles.eventTileMeta} numberOfLines={2}>
                           Date: {startLabel}{endLabel && endLabel !== startLabel ? `-${endLabel}` : ""} | Type: {getEventTypeTableLabel(item)} | Fee: {formatEventFee(item)}
                         </Text>
                         <Text style={styles.eventTileSubMeta} numberOfLines={1}>
                           Organizer: {organizerLabel}
                         </Text>
-                        <Text style={styles.eventTileSubMeta} numberOfLines={1}>
+                        <Text style={styles.eventTileSubMeta} numberOfLines={2}>
                           Venue: {locationLabel} | Distances: {distanceLabel}
                         </Text>
                       </View>
@@ -1507,19 +1507,19 @@ const styles = StyleSheet.create({
   eventTileName: {
     flex: 1,
     minWidth: 0,
-    fontSize: 16,
-    lineHeight: 20,
+    fontSize: 15,
+    lineHeight: 19,
     fontWeight: "900",
     color: appColors.text,
   },
   eventTileMeta: {
-    fontSize: 12.5,
-    lineHeight: 16,
+    fontSize: 11.5,
+    lineHeight: 15,
     fontWeight: "800",
     color: appColors.text,
   },
   eventTileSubMeta: {
-    fontSize: 12,
+    fontSize: 11.5,
     lineHeight: 15,
     fontWeight: "800",
     color: appColors.textSecondary,
