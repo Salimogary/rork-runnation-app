@@ -1,7 +1,7 @@
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, TextInput, ActivityIndicator, Share, useWindowDimensions } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIcon, MessageSquare, Paperclip, EyeOff, Eye, Lock, Trash2, AlertTriangle, Star, Share2, Crown, HelpCircle, Phone, Globe, Volume2, VolumeX, Info, Handshake, Check } from "lucide-react-native";
+import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIcon, MessageSquare, Paperclip, EyeOff, Eye, Lock, Trash2, AlertTriangle, Star, Share2, Download, Crown, HelpCircle, Phone, Globe, Volume2, VolumeX, Info, Handshake, Check } from "lucide-react-native";
 import { Linking } from "react-native";
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -25,6 +25,7 @@ import { WORLD_COUNTRIES } from "@/constants/countries";
 import { getActivityVoiceAssistantEnabled, setActivityVoiceAssistantEnabled as saveActivityVoiceAssistantEnabled } from "@/utils/activityVoice";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import Constants from "expo-constants";
 
 function normalizeSettingsCountryCode(country: string | null | undefined): string | null {
   const value = String(country || "").trim();
@@ -75,6 +76,13 @@ const DONATION_CURRENCY_BY_COUNTRY: Record<string, string> = {
 };
 
 const MOBILE_MONEY_COUNTRIES = new Set(["UG", "KE", "TZ", "RW", "GH", "ZM", "MW", "CM", "CI", "SN"]);
+
+function getInstalledAndroidBuildNumber(): number {
+  const nativeBuildVersion = Number(Constants.nativeBuildVersion);
+  if (Number.isFinite(nativeBuildVersion) && nativeBuildVersion > 0) return nativeBuildVersion;
+  const configVersionCode = Number(Constants.expoConfig?.android?.versionCode);
+  return Number.isFinite(configVersionCode) && configVersionCode > 0 ? configVersionCode : 0;
+}
 
 type DonationPaymentMethod = "card" | "mobile_money";
 type ServiceRoleAvailabilityGrouping = "grouped" | "flat";
@@ -174,6 +182,7 @@ export default function SettingsScreen() {
   const [expandedFaqIds, setExpandedFaqIds] = useState<string[]>([]);
   const adminTapCount = useRef<number>(0);
   const adminTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const updateAlertShown = useRef(false);
   const helpGridColumns = width >= 700 ? 2 : 1;
   const hasAdminPortalAccess = getHasAdminPortalAccess(roleSession);
 
@@ -390,6 +399,12 @@ export default function SettingsScreen() {
 
   const APP_DOWNLOAD_LINK = appLinks?.androidApkUrl || "";
   const APP_STORE_URL = appLinks?.iosAppUrl || "";
+  const installedAndroidBuildNumber = getInstalledAndroidBuildNumber();
+  const latestAndroidBuildNumber = Number(appLinks?.androidBuildNumber || 0);
+  const androidUpdateAvailable =
+    Platform.OS === "android" &&
+    Boolean(APP_DOWNLOAD_LINK) &&
+    latestAndroidBuildNumber > installedAndroidBuildNumber;
 
   const { data: existingRating } = useQuery<{ rating: number; feedback: string | null } | null>({
     queryKey: ['appRating', user?.id],
@@ -728,6 +743,45 @@ export default function SettingsScreen() {
     } else {
       void Share.share({ message: shareMessage });
     }
+  };
+
+  useEffect(() => {
+    if (!androidUpdateAvailable || updateAlertShown.current) return;
+    updateAlertShown.current = true;
+    Alert.alert(
+      "RunNation Update Available",
+      "A newer Android APK is available for testing. Open Settings > App Update to install it."
+    );
+  }, [androidUpdateAvailable]);
+
+  const handleUpdateApp = async () => {
+    let androidLink = APP_DOWNLOAD_LINK;
+    let latestBuild = latestAndroidBuildNumber;
+
+    try {
+      const latestLinks = await getServerClient().support.getAppLinks.query();
+      androidLink = latestLinks.androidApkUrl || androidLink;
+      latestBuild = Number(latestLinks.androidBuildNumber || latestBuild);
+    } catch (error) {
+      console.warn("[App Update] Could not refresh app links:", error);
+    }
+
+    if (Platform.OS === "ios") {
+      Alert.alert("iOS Coming Soon", "RunNation iOS testing will be available through TestFlight soon.");
+      return;
+    }
+
+    if (!androidLink) {
+      Alert.alert("No APK Link", "The Android APK link is not available yet.");
+      return;
+    }
+
+    if (latestBuild > 0 && installedAndroidBuildNumber >= latestBuild) {
+      Alert.alert("App Up To Date", "You already have the latest RunNation test APK installed.");
+      return;
+    }
+
+    await Linking.openURL(androidLink);
   };
 
   const getRatingLabel = (rating: number): string => {
@@ -1089,6 +1143,36 @@ export default function SettingsScreen() {
             <View style={styles.settingTextContainer}>
               <Text style={[styles.settingTitle, { color: themeColors.text }]}>Share App</Text>
               <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Invite friends to join</Text>
+            </View>
+          </View>
+          <ChevronRight size={20} color={themeColors.iconMuted} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.settingItem,
+            {
+              backgroundColor: themeColors.cardBackground,
+              opacity: Platform.OS === "ios" || androidUpdateAvailable ? 1 : 0.65,
+            },
+          ]}
+          onPress={handleUpdateApp}
+        >
+          <View style={styles.settingLeft}>
+            <View style={[styles.iconContainer, { backgroundColor: androidUpdateAvailable ? '#ECFDF5' : isDark ? '#1F2937' : '#F3F4F6' }]}>
+              <Download size={22} color={androidUpdateAvailable ? "#10b981" : themeColors.iconMuted} />
+            </View>
+            <View style={styles.settingTextContainer}>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>App Update</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>
+                {Platform.OS === "ios"
+                  ? "iOS TestFlight coming soon"
+                  : androidUpdateAvailable
+                    ? `New APK available: build ${latestAndroidBuildNumber}`
+                    : latestAndroidBuildNumber > 0
+                      ? `Current build ${installedAndroidBuildNumber} is up to date`
+                      : "Checking latest APK"}
+              </Text>
             </View>
           </View>
           <ChevronRight size={20} color={themeColors.iconMuted} />

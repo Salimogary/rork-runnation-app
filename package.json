@@ -8,7 +8,9 @@
     "start-web-dev": "DEBUG=expo* bunx rork start -p j3kt8bxpo6o5n3oxp48kg --web --tunnel",
     "lint": "expo lint",
     "android": "expo run:android",
-    "ios": "expo run:ios"
+    "ios": "expo run:ios",
+    "apk:bump": "node scripts/bump-android-version-code.mjs",
+    "apk:publish-link": "node scripts/publish-apk-link.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
