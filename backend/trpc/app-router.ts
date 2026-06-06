@@ -144,6 +144,8 @@ import requestServiceTeamRoleRoute from "./routes/service-team/request-role/rout
 import getFamilyMembersRoute from "./routes/family/get-family-members/route";
 import addFamilyMemberRoute from "./routes/family/add-family-member/route";
 import removeFamilyMemberRoute from "./routes/family/remove-family-member/route";
+import getWearableProvidersRoute from "./routes/wearables/get-providers/route";
+import startWearableConnectionRoute from "./routes/wearables/start-connection/route";
 
 export const appRouter = createTRPCRouter({
   example: createTRPCRouter({
@@ -318,6 +320,10 @@ export const appRouter = createTRPCRouter({
     getMembers: getFamilyMembersRoute,
     addMember: addFamilyMemberRoute,
     removeMember: removeFamilyMemberRoute,
+  }),
+  wearables: createTRPCRouter({
+    getProviders: getWearableProvidersRoute,
+    startConnection: startWearableConnectionRoute,
   }),
 });
 

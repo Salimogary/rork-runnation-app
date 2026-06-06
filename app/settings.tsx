@@ -1,7 +1,7 @@
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, TextInput, ActivityIndicator, Share, useWindowDimensions } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIcon, MessageSquare, Paperclip, EyeOff, Eye, Lock, Trash2, AlertTriangle, Star, Share2, Download, Crown, HelpCircle, Phone, Globe, Volume2, VolumeX, Info, Handshake, Check } from "lucide-react-native";
+import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIcon, MessageSquare, Paperclip, EyeOff, Eye, Lock, Trash2, AlertTriangle, Star, Share2, Download, Crown, HelpCircle, Phone, Globe, Volume2, VolumeX, Info, Handshake, Check, HeartPulse, Watch } from "lucide-react-native";
 import { Linking } from "react-native";
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -87,6 +87,39 @@ function getInstalledAndroidBuildNumber(): number {
 type DonationPaymentMethod = "card" | "mobile_money";
 type ServiceRoleAvailabilityGrouping = "grouped" | "flat";
 type ChatReportTab = "complaint" | "feedback";
+type WearableProvider = {
+  provider: "health_connect" | "garmin";
+  displayName: string;
+  status: string;
+  platform: string;
+  capabilities: readonly string[];
+  isEnabled: boolean;
+  connectionStatus: string;
+  lastSyncedAt: string | null;
+};
+
+const WEARABLE_PROVIDER_FALLBACKS: WearableProvider[] = [
+  {
+    provider: "health_connect",
+    displayName: "Health Connect",
+    status: "coming_soon",
+    platform: "android",
+    capabilities: ["exercise", "distance", "steps", "heart_rate", "sleep", "oxygen_saturation"],
+    isEnabled: false,
+    connectionStatus: "not_connected",
+    lastSyncedAt: null,
+  },
+  {
+    provider: "garmin",
+    displayName: "Garmin",
+    status: "coming_soon",
+    platform: "all",
+    capabilities: ["activities", "distance", "steps", "heart_rate", "sleep", "oxygen_saturation"],
+    isEnabled: false,
+    connectionStatus: "not_connected",
+    lastSyncedAt: null,
+  },
+];
 
 function formatSettingsDate(value?: string | null): string {
   if (!value) return "-";
@@ -238,6 +271,15 @@ export default function SettingsScreen() {
   }, [faqEntries]);
 
   const effectiveRegistrationId = registrationId || user?.id || "";
+  const { data: wearableProviderData } = trpc.wearables.getProviders.useQuery(
+    { registrationId: effectiveRegistrationId },
+    {
+      enabled: Boolean(effectiveRegistrationId),
+      staleTime: 5 * 60 * 1000,
+      retry: 1,
+    }
+  );
+  const wearableProviders = (wearableProviderData || WEARABLE_PROVIDER_FALLBACKS) as WearableProvider[];
   const { data: serviceProfile, isLoading: isLoadingServiceProfile } = trpc.profile.getBundle.useQuery(
     { registrationId: effectiveRegistrationId },
     { enabled: !!effectiveRegistrationId }
@@ -971,6 +1013,53 @@ export default function SettingsScreen() {
             {privateMode && <View style={styles.radioButtonInner} />}
           </View>
         </TouchableOpacity>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>Wearable Integrations</Text>
+        {wearableProviders.map((provider) => {
+          const isHealthConnect = provider.provider === "health_connect";
+          const isAvailable = provider.isEnabled && provider.status === "available";
+          return (
+            <TouchableOpacity
+              key={provider.provider}
+              style={[
+                styles.settingItem,
+                { backgroundColor: themeColors.cardBackground },
+                !isAvailable && styles.wearableSettingDisabled,
+              ]}
+              disabled={!isAvailable}
+              activeOpacity={isAvailable ? 0.7 : 1}
+              accessibilityLabel={`${provider.displayName}, ${isAvailable ? "available" : "coming soon"}`}
+            >
+              <View style={styles.settingLeft}>
+                <View style={[styles.iconContainer, { backgroundColor: isDark ? "#1F2937" : "#F3F4F6" }]}>
+                  {isHealthConnect ? (
+                    <HeartPulse size={22} color={themeColors.iconMuted} />
+                  ) : (
+                    <Watch size={22} color={themeColors.iconMuted} />
+                  )}
+                </View>
+                <View style={styles.settingTextContainer}>
+                  <Text style={[styles.settingTitle, { color: isAvailable ? themeColors.text : themeColors.textLight }]}>
+                    {provider.displayName}
+                  </Text>
+                  <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>
+                    {isHealthConnect
+                      ? "Android workouts and health data sync"
+                      : "Garmin activities and wellness sync"}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.comingSoonBadge}>
+                <Text style={styles.comingSoonBadgeText}>{isAvailable ? "CONNECT" : "COMING SOON"}</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+        <Text style={[styles.wearablePipelineNote, { color: themeColors.textSecondary }]}>
+          Connections will activate after provider approval, API setup, and health-data compliance review.
+        </Text>
       </View>
 
       <View style={styles.section}>
@@ -2463,6 +2552,28 @@ const styles = StyleSheet.create({
   },
   settingItemDisabled: {
     opacity: 0.55,
+  },
+  wearableSettingDisabled: {
+    opacity: 0.62,
+  },
+  comingSoonBadge: {
+    minWidth: 86,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: "#E5E7EB",
+    alignItems: "center",
+  },
+  comingSoonBadgeText: {
+    color: "#6B7280",
+    fontSize: 9,
+    fontWeight: "700" as const,
+  },
+  wearablePipelineNote: {
+    marginTop: 2,
+    paddingHorizontal: 4,
+    fontSize: 11,
+    lineHeight: 15,
   },
   settingItem: {
     flexDirection: "row",

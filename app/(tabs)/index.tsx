@@ -2549,6 +2549,52 @@ export default function ExerciseScreen() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                  style={[styles.addActivityCard, styles.wearableComingSoonCard, { backgroundColor: themeColors.cardBackground }]}
+                  disabled
+                  activeOpacity={1}
+                  testID="health-connect-coming-soon"
+                  accessibilityLabel="Health Connect, coming soon"
+                >
+                  <View style={[styles.addActivityIcon, styles.wearableComingSoonIcon]}>
+                    <Heart size={20} color={themeColors.iconMuted} />
+                  </View>
+                  <View style={styles.addActivityInfo}>
+                    <View style={styles.wearableComingSoonTitleRow}>
+                      <Text style={[styles.addActivityTitle, { color: themeColors.textLight }]}>Health Connect</Text>
+                      <View style={styles.wearableComingSoonBadge}>
+                        <Text style={styles.wearableComingSoonBadgeText}>COMING SOON</Text>
+                      </View>
+                    </View>
+                    <Text style={[styles.addActivitySub, { color: themeColors.textSecondary }]}>
+                      Automatic Android workout and health data sync
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.addActivityCard, styles.wearableComingSoonCard, { backgroundColor: themeColors.cardBackground }]}
+                  disabled
+                  activeOpacity={1}
+                  testID="garmin-coming-soon"
+                  accessibilityLabel="Garmin, coming soon"
+                >
+                  <View style={[styles.addActivityIcon, styles.wearableComingSoonIcon]}>
+                    <Watch size={20} color={themeColors.iconMuted} />
+                  </View>
+                  <View style={styles.addActivityInfo}>
+                    <View style={styles.wearableComingSoonTitleRow}>
+                      <Text style={[styles.addActivityTitle, { color: themeColors.textLight }]}>Garmin</Text>
+                      <View style={styles.wearableComingSoonBadge}>
+                        <Text style={styles.wearableComingSoonBadgeText}>COMING SOON</Text>
+                      </View>
+                    </View>
+                    <Text style={[styles.addActivitySub, { color: themeColors.textSecondary }]}>
+                      Automatic Garmin activity and wellness sync
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
                   style={[styles.addActivityCard, { backgroundColor: themeColors.cardBackground }]}
                   onPress={() => setShowOtherSportsModal(true)}
                   activeOpacity={0.7}
@@ -2681,7 +2727,7 @@ export default function ExerciseScreen() {
                   )}
                   <View style={styles.shareMapShade} />
                   <View style={styles.shareBrandPill}>
-                    <Image source={require("../../assets/images/icon.png")} style={styles.shareBrandLogo} resizeMode="contain" />
+                    <Image source={require("../../assets/images/adaptive-icon-fill.png")} style={styles.shareBrandLogo} resizeMode="cover" />
                     <View>
                       <Text style={styles.shareBrand}>RunNation</Text>
                       <Text style={styles.shareTagline}>Where runners belong</Text>
@@ -3566,6 +3612,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSecondary,
     marginTop: 2,
+  },
+  wearableComingSoonCard: {
+    opacity: 0.62,
+    elevation: 0,
+    shadowOpacity: 0,
+  },
+  wearableComingSoonIcon: {
+    backgroundColor: "#E5E7EB",
+  },
+  wearableComingSoonTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  wearableComingSoonBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 5,
+    backgroundColor: "#E5E7EB",
+  },
+  wearableComingSoonBadgeText: {
+    color: "#6B7280",
+    fontSize: 8,
+    fontWeight: "700" as const,
   },
   sourceFootnote: {
     fontSize: 11,

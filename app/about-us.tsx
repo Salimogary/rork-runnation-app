@@ -96,7 +96,7 @@ export default function AboutUsScreen() {
 
       <LinearGradient colors={colors.gradient.orange} style={styles.hero}>
         <View style={styles.brandRow}>
-          <Image source={require("../assets/images/icon.png")} style={styles.logo} resizeMode="contain" />
+          <Image source={require("../assets/images/adaptive-icon-fill.png")} style={styles.logo} resizeMode="cover" />
           <View style={styles.brandTextWrap}>
             <Text style={styles.brandTitle}>RunNation</Text>
             <Text style={styles.slogan}>Where runners belong</Text>

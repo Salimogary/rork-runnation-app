@@ -533,6 +533,32 @@ export default function ChatScreen() {
               style={styles.selectedImage}
               contentFit="cover"
             />
+            {showActivity && currentActivity ? (
+              <View style={styles.activityImageOverlay}>
+                <View style={styles.activityOverlayStat}>
+                  <Text style={styles.activityOverlayLabel}>TYPE</Text>
+                  <Text style={styles.activityOverlayValue} numberOfLines={1}>
+                    {currentActivity.exercise_type}
+                  </Text>
+                </View>
+                <View style={styles.activityOverlayStat}>
+                  <Text style={styles.activityOverlayLabel}>DISTANCE</Text>
+                  <Text style={styles.activityOverlayValue}>
+                    {currentActivity.distance_km != null ? currentActivity.distance_km.toFixed(2) : "0.00"} km
+                  </Text>
+                </View>
+                <View style={styles.activityOverlayStat}>
+                  <Text style={styles.activityOverlayLabel}>TIME</Text>
+                  <Text style={styles.activityOverlayValue}>{currentActivity.Time}</Text>
+                </View>
+                <View style={styles.activityOverlayStat}>
+                  <Text style={styles.activityOverlayLabel}>PACE</Text>
+                  <Text style={styles.activityOverlayValue} numberOfLines={1}>
+                    {formatPaceMinPerKm(currentActivity.pace_min_per_km)}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
             <TouchableOpacity
               style={styles.removeImageButton}
               onPress={() => setPickedImage(null)}
@@ -576,25 +602,37 @@ export default function ChatScreen() {
             style={styles.iconButton}
             onPress={pickImage}
             disabled={createPostMutation.isPending}
+            accessibilityLabel="Add picture"
           >
-            <Camera size={22} color="#10b981" />
+            <Camera size={17} color="#10b981" />
           </TouchableOpacity>
           
           <TouchableOpacity
             style={styles.iconButton}
             onPress={() => setShowEmojis(!showEmojis)}
+            accessibilityLabel="Add emoji"
           >
-            <Smile size={22} color="#10b981" />
+            <Smile size={17} color="#10b981" />
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.iconButton, showPollComposer && styles.iconButtonActive]}
             onPress={() => setShowPollComposer((value) => !value)}
+            accessibilityLabel="Add poll"
           >
-            <BarChart3 size={20} color="#10b981" />
+            <BarChart3 size={16} color="#10b981" />
           </TouchableOpacity>
-          
-          <View style={{ flex: 1 }} />
+
+          <TouchableOpacity
+            style={[styles.activityCompactButton, showActivity && styles.activityCompactButtonActive]}
+            onPress={() => setShowActivity(!showActivity)}
+            accessibilityLabel="Show activity"
+          >
+            <Activity size={15} color={showActivity ? "#fff" : "#10b981"} />
+            <Text style={[styles.activityCompactButtonText, showActivity && styles.activityCompactButtonTextActive]}>
+              Activity
+            </Text>
+          </TouchableOpacity>
           
           <TouchableOpacity
             style={styles.postButton}
@@ -630,64 +668,15 @@ export default function ChatScreen() {
             />
           </View>
         )}
-        
-        <View style={styles.activityToggleContainer}>
-          <TouchableOpacity
-            style={styles.activityToggle}
-            onPress={() => setShowActivity(!showActivity)}
-          >
-            <View style={[styles.radioButton, showActivity && styles.radioButtonSelected]}>
-              {showActivity && <View style={styles.radioButtonInner} />}
-            </View>
-            <Text style={styles.activityToggleText}>Show Activity</Text>
-          </TouchableOpacity>
-        </View>
 
         {showActivity && currentActivity && (
-          <View style={styles.activityCard}>
-            <View style={styles.activityHeader}>
-              <Activity size={20} color="#10b981" />
-              <Text style={styles.activityTitle}>Today&apos;s Activity</Text>
-            </View>
-            <View style={styles.activityStats}>
-              <View style={styles.activityStat}>
-                <Text style={styles.activityLabel}>Date</Text>
-                <Text style={styles.activityValue}>
-                  {new Date(currentActivity.activity_date).toLocaleDateString('en-US', {
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric'
-                  })}
-                </Text>
-              </View>
-              <View style={styles.activityStat}>
-                <Text style={styles.activityLabel}>Type</Text>
-                <Text style={styles.activityValue}>{currentActivity.exercise_type}</Text>
-              </View>
-              <View style={styles.activityStat}>
-                <Text style={styles.activityLabel}>Distance</Text>
-                <Text style={styles.activityValue}>
-                  {currentActivity.distance_km != null ? currentActivity.distance_km.toFixed(2) : '0.00'} km
-                </Text>
-              </View>
-              <View style={styles.activityStat}>
-                <Text style={styles.activityLabel}>Time</Text>
-                <Text style={styles.activityValue}>{currentActivity.Time}</Text>
-              </View>
-              <View style={styles.activityStat}>
-                <Text style={styles.activityLabel}>Pace</Text>
-                <Text style={styles.activityValue}>
-                  {formatPaceMinPerKm(currentActivity.pace_min_per_km)}
-                </Text>
-              </View>
-            </View>
-          </View>
+          <Text style={styles.activitySelectionStatus} numberOfLines={1}>
+            {currentActivity.exercise_type} · {currentActivity.distance_km != null ? currentActivity.distance_km.toFixed(2) : "0.00"} km · {currentActivity.Time} · {formatPaceMinPerKm(currentActivity.pace_min_per_km)}
+          </Text>
         )}
 
         {showActivity && !currentActivity && (
-          <View style={styles.noActivityCard}>
-            <Text style={styles.noActivityText}>No activity recorded for today</Text>
-          </View>
+          <Text style={styles.activitySelectionStatus}>No activity recorded for today</Text>
         )}
       </View>
 
@@ -745,14 +734,42 @@ export default function ChatScreen() {
                 )}
 
                 {post.photo_url && (
-                  <Image
-                    source={{ uri: post.photo_url }}
-                    style={styles.photoImage}
-                    contentFit="cover"
-                  />
+                  <View style={styles.postImageContainer}>
+                    <Image
+                      source={{ uri: post.photo_url }}
+                      style={styles.photoImage}
+                      contentFit="cover"
+                    />
+                    {post.activity_data ? (
+                      <View style={styles.activityImageOverlay}>
+                        <View style={styles.activityOverlayStat}>
+                          <Text style={styles.activityOverlayLabel}>TYPE</Text>
+                          <Text style={styles.activityOverlayValue} numberOfLines={1}>
+                            {post.activity_data.exercise_type}
+                          </Text>
+                        </View>
+                        <View style={styles.activityOverlayStat}>
+                          <Text style={styles.activityOverlayLabel}>DISTANCE</Text>
+                          <Text style={styles.activityOverlayValue}>
+                            {post.activity_data.distance_km != null ? post.activity_data.distance_km.toFixed(2) : "0.00"} km
+                          </Text>
+                        </View>
+                        <View style={styles.activityOverlayStat}>
+                          <Text style={styles.activityOverlayLabel}>TIME</Text>
+                          <Text style={styles.activityOverlayValue}>{post.activity_data.Time}</Text>
+                        </View>
+                        <View style={styles.activityOverlayStat}>
+                          <Text style={styles.activityOverlayLabel}>PACE</Text>
+                          <Text style={styles.activityOverlayValue} numberOfLines={1}>
+                            {formatPaceMinPerKm(post.activity_data.pace_min_per_km)}
+                          </Text>
+                        </View>
+                      </View>
+                    ) : null}
+                  </View>
                 )}
 
-                {post.activity_data && (
+                {post.activity_data && !post.photo_url && (
                   <View style={[styles.postActivityCard, { backgroundColor: themeColors.inputBackground }]}>
                     <View style={styles.compactActivityStats}>
                       <View style={styles.compactActivityStat}>
@@ -818,9 +835,9 @@ export default function ChatScreen() {
                         <Text style={styles.actionEmoji}>{post.user_reaction}</Text>
                       ) : (
                         <View style={styles.addEmojiIconWrap}>
-                          <Smile size={24} color="#666" />
+                          <Smile size={18} color="#666" />
                           <View style={styles.addEmojiPlusBadge}>
-                            <Plus size={9} color="#fff" strokeWidth={3} />
+                            <Plus size={7} color="#fff" strokeWidth={3} />
                           </View>
                         </View>
                       )}
@@ -834,7 +851,7 @@ export default function ChatScreen() {
                       style={styles.actionButton}
                       onPress={() => handleCommentPress(post)}
                     >
-                      <MessageCircle size={24} color="#666" />
+                      <MessageCircle size={18} color="#666" />
                       <Text style={styles.actionText}>{post.comments_count}</Text>
                     </TouchableOpacity>
                   </View>
@@ -1000,7 +1017,8 @@ const styles = StyleSheet.create({
   },
   uploadSection: {
     backgroundColor: "#fff",
-    padding: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: "#e0e0e0",
   },
@@ -1041,14 +1059,14 @@ const styles = StyleSheet.create({
   },
   actionButtons2: {
     flexDirection: "row",
-    gap: 12,
-    marginTop: 12,
+    gap: 6,
+    marginTop: 8,
     alignItems: "center",
   },
   iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: "#f0fdf4",
     alignItems: "center",
     justifyContent: "center",
@@ -1058,17 +1076,41 @@ const styles = StyleSheet.create({
   iconButtonActive: {
     backgroundColor: "#d1fae5",
   },
+  activityCompactButton: {
+    height: 32,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: "#f0fdf4",
+    borderWidth: 1,
+    borderColor: "#10b981",
+  },
+  activityCompactButtonActive: {
+    backgroundColor: "#10b981",
+  },
+  activityCompactButtonText: {
+    color: "#059669",
+    fontSize: 11,
+    fontWeight: "600" as const,
+  },
+  activityCompactButtonTextActive: {
+    color: "#fff",
+  },
   postButton: {
     backgroundColor: "#10b981",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 24,
-    borderRadius: 12,
+    height: 32,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    marginLeft: "auto",
   },
   postButtonText: {
     color: "#fff",
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "600" as const,
   },
   scrollView: {
@@ -1167,6 +1209,41 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     backgroundColor: "#f0f0f0",
   },
+  postImageContainer: {
+    position: "relative",
+    width: "100%",
+  },
+  activityImageOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    minHeight: 52,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    backgroundColor: "rgba(0, 0, 0, 0.68)",
+  },
+  activityOverlayStat: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: "center",
+    paddingHorizontal: 2,
+  },
+  activityOverlayLabel: {
+    color: "rgba(255, 255, 255, 0.75)",
+    fontSize: 8,
+    lineHeight: 10,
+    fontWeight: "700" as const,
+  },
+  activityOverlayValue: {
+    color: "#fff",
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: "700" as const,
+    textAlign: "center",
+  },
   captionContainer: {
     paddingHorizontal: 10,
     paddingTop: 4,
@@ -1181,43 +1258,43 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 10,
-    paddingTop: 6,
-    paddingBottom: 8,
+    paddingTop: 4,
+    paddingBottom: 6,
     borderTopWidth: 1,
     borderTopColor: "#f0f0f0",
   },
   actionButtons: {
     flexDirection: "row",
-    gap: 16,
+    gap: 12,
   },
   actionButton: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 4,
   },
   actionText: {
-    fontSize: 14,
+    fontSize: 12,
     color: "#666",
     fontWeight: "500" as const,
   },
   actionEmoji: {
-    fontSize: 22,
-    lineHeight: 24,
+    fontSize: 17,
+    lineHeight: 20,
   },
   addEmojiIconWrap: {
     position: "relative",
-    width: 28,
-    height: 26,
+    width: 22,
+    height: 20,
     alignItems: "center",
     justifyContent: "center",
   },
   addEmojiPlusBadge: {
     position: "absolute",
-    top: -3,
+    top: -2,
     right: 0,
-    width: 13,
-    height: 13,
-    borderRadius: 7,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     backgroundColor: "#10b981",
     alignItems: "center",
     justifyContent: "center",
@@ -1409,87 +1486,12 @@ const styles = StyleSheet.create({
   likedText: {
     color: "#ef4444",
   },
-  activityToggleContainer: {
-    marginTop: 12,
-  },
-  activityToggle: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  radioButton: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: "#10b981",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  radioButtonSelected: {
-    borderColor: "#10b981",
-  },
-  radioButtonInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#10b981",
-  },
-  activityToggleText: {
-    fontSize: 15,
-    color: "#000",
-    fontWeight: "500" as const,
-  },
-  activityCard: {
-    marginTop: 12,
-    backgroundColor: "#f0fdf4",
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "#10b981",
-  },
-  activityHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 12,
-  },
-  activityTitle: {
-    fontSize: 16,
-    fontWeight: "600" as const,
-    color: "#10b981",
-  },
-  activityStats: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-  },
-  activityStat: {
-    minWidth: "30%",
-  },
-  activityLabel: {
-    fontSize: 11,
+  activitySelectionStatus: {
+    marginTop: 6,
     color: "#059669",
-    fontWeight: "600" as const,
-    textTransform: "uppercase" as const,
-    marginBottom: 2,
-  },
-  activityValue: {
-    fontSize: 14,
-    color: "#000",
+    fontSize: 10,
+    lineHeight: 13,
     fontWeight: "500" as const,
-  },
-  noActivityCard: {
-    marginTop: 12,
-    backgroundColor: "#f5f5f5",
-    borderRadius: 12,
-    padding: 12,
-    alignItems: "center",
-  },
-  noActivityText: {
-    fontSize: 14,
-    color: "#666",
-    fontStyle: "italic" as const,
   },
   emojiContainer: {
     marginTop: 12,

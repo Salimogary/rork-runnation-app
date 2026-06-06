@@ -73,9 +73,9 @@ export function MagazineHeroCard({
       <Image source={{ uri: backgroundImageUrl || issue.coverImageUrl }} style={styles.heroImage} contentFit="cover" transition={250} />
       <LinearGradient colors={["rgba(0,0,0,0.05)", "rgba(0,0,0,0.78)"]} style={styles.heroOverlay}>
         <Image
-          source={require("../../assets/images/adaptive-icon.png")}
+          source={require("../../assets/images/adaptive-icon-fill.png")}
           style={styles.heroLogoWatermark}
-          contentFit="contain"
+          contentFit="cover"
         />
         <Text style={styles.kicker}>RunNation Magazine</Text>
         {backgroundCredit ? <Text style={styles.coverCredit}>{backgroundCredit}</Text> : null}

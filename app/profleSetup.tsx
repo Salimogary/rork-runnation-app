@@ -2406,9 +2406,9 @@ export default function RegisterScreen() {
             <View style={styles.header}>
               <View style={styles.logoWrap}>
                 <Image
-                  source={require('../assets/images/adaptive-icon.png')}
+                  source={require('../assets/images/adaptive-icon-fill.png')}
                   style={styles.logoImage}
-                  resizeMode="contain"
+                  resizeMode="cover"
                 />
               </View>
               <Text style={styles.title}>RunNation</Text>
@@ -2628,7 +2628,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 16,
     backgroundColor: '#001623',
-    padding: 6,
   },
   logoImage: {
     width: '100%',

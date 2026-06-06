@@ -4,14 +4,14 @@
     "slug": "runnation-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/adaptive-icon-fill.png",
     "scheme": "runnation",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "image": "./assets/images/adaptive-icon-fill.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#071538"
     },
     "ios": {
       "supportsTablet": false,
@@ -36,8 +36,8 @@
     "android": {
       "versionCode": 2,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/images/adaptive-icon-fill.png",
+        "backgroundColor": "#071538"
       },
       "package": "app.rork.runnation_app",
       "permissions": [
@@ -56,7 +56,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/adaptive-icon-fill.png"
     },
     "plugins": [
       [

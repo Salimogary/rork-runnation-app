@@ -746,6 +746,8 @@ export default function EventsScreen() {
                 const isSubmitting = enrollEventMutation.isPending || submittedEventIds.includes(item.event_id);
                 const eventFull = isEventFull(item);
                 const canSignUpFromTable = !status && isLocal && !eventFull;
+                const hasPoster = Boolean(item.poster_link || item.posterLink);
+                const hasEntrants = getParticipantCount(item) > 0;
                 const locationLabel = getEventLocationLabel({
                   ...item,
                   eventLocation: item.event_location || item.eventLocation || registeredEvent?.eventLocation,
@@ -805,11 +807,11 @@ export default function EventsScreen() {
                       </View>
                       <View style={styles.eventTileActions}>
                         <Pressable
-                          style={[styles.eventTileActionButton, styles.eventTilePreviewButton, !(item.poster_link || item.posterLink) && styles.eventTableParticipateButtonDisabled]}
+                          style={[styles.eventTileActionButton, styles.eventTilePreviewButton, !hasPoster && styles.eventTableParticipateButtonDisabled]}
                           onPress={() => setSelectedPosterEvent(item)}
-                          disabled={!(item.poster_link || item.posterLink)}
+                          disabled={!hasPoster}
                         >
-                          <Text style={styles.eventTileActionText}>preview</Text>
+                          <Text style={styles.eventTileActionText}>{hasPoster ? "poster" : "no poster"}</Text>
                         </Pressable>
                         <Pressable
                           style={[
@@ -836,7 +838,7 @@ export default function EventsScreen() {
                           style={[styles.eventTileActionButton, styles.eventTileParticipantsButton]}
                           onPress={() => openEventParticipants(item)}
                         >
-                          <Text style={styles.eventTileActionText}>people</Text>
+                          <Text style={styles.eventTileActionText}>{hasEntrants ? "entrants" : "no entrants"}</Text>
                         </Pressable>
                       </View>
                     </View>
