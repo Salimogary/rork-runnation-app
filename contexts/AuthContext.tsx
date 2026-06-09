@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { clearPersistedQueryCache } from '@/lib/query-cache';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
@@ -60,6 +61,7 @@ interface AuthContextValue {
 
 const STORAGE_KEYS = {
   PRIVATE_MODE: 'private_mode',
+  CACHED_USER: 'runnation_cached_user',
 };
 
 const MAX_LOGIN_ATTEMPTS = 5;
@@ -197,6 +199,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [privateMode, setPrivateModeState] = useState(false);
   const [loginAttempts, setLoginAttempts] = useState<Record<string, { count: number; timestamp: number }>>({});
 
+  const cacheUser = useCallback(async (nextUser: UserData | null) => {
+    try {
+      if (nextUser) {
+        await AsyncStorage.setItem(STORAGE_KEYS.CACHED_USER, JSON.stringify(nextUser));
+      } else {
+        await AsyncStorage.removeItem(STORAGE_KEYS.CACHED_USER);
+      }
+    } catch (error) {
+      console.warn('[AuthContext] Could not update cached user:', error);
+    }
+  }, []);
+
   const setFallbackSessionState = useCallback((session: Session | null) => {
     if (!session) {
       setUser(null);
@@ -210,16 +224,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       source: 'auth',
     };
 
-    setRoleSession(fallbackRoleSession);
-    setUser({
+    const fallbackUser = {
       id: session.user.id,
       username:
         session.user.user_metadata?.username ??
         session.user.email?.split('@')[0] ??
         'runner',
       createdAt: session.user.created_at ?? new Date().toISOString(),
+    };
+    setRoleSession(fallbackRoleSession);
+    setUser((currentUser) => {
+      if (currentUser) return currentUser;
+      void cacheUser(fallbackUser);
+      return fallbackUser;
     });
-  }, []);
+  }, [cacheUser]);
 
   const hydrateFromSession = useCallback(async (session: Session | null): Promise<RoleSession> => {
     setIsRoleSessionLoading(true);
@@ -238,7 +257,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const resolvedRoleSession = normalizeRoleSession(nextRoleSession as Partial<RoleSession>);
       setRoleSession(resolvedRoleSession);
-      setUser(buildUserFromSession(session, resolvedRoleSession));
+      const resolvedUser = buildUserFromSession(session, resolvedRoleSession);
+      setUser(resolvedUser);
+      void cacheUser(resolvedUser);
       return resolvedRoleSession;
     } catch (error) {
       console.warn(
@@ -253,25 +274,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       };
 
       setRoleSession(fallbackRoleSession);
-      setUser(
-        session
+      const fallbackUser = session
           ? {
               id: session.user.id,
               username: session.user.email?.split('@')[0] ?? 'runner',
               createdAt: session.user.created_at ?? new Date().toISOString(),
             }
-          : null
-      );
+          : null;
+      setUser((currentUser) => {
+        if (currentUser) return currentUser;
+        void cacheUser(fallbackUser);
+        return fallbackUser;
+      });
       return fallbackRoleSession;
     } finally {
       setIsRoleSessionLoading(false);
     }
-  }, []);
+  }, [cacheUser]);
 
   useEffect(() => {
     let mounted = true;
 
     const init = async () => {
+      try {
+        const cachedUser = await AsyncStorage.getItem(STORAGE_KEYS.CACHED_USER);
+        if (mounted && cachedUser) {
+          setUser(JSON.parse(cachedUser) as UserData);
+        }
+      } catch (error) {
+        console.warn('[AuthContext] Could not restore cached user:', error);
+      }
+
       try {
         const storedPrivateMode = await AsyncStorage.getItem(STORAGE_KEYS.PRIVATE_MODE);
         if (mounted && storedPrivateMode !== null) {
@@ -297,7 +330,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         console.error('Error checking auth status:', error);
         if (!mounted) return;
-        setFallbackSessionState(null);
+        setRoleSession(EMPTY_ROLE_SESSION);
         setIsLoading(false);
       }
     };
@@ -472,12 +505,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await supabase.auth.signOut();
       setUser(null);
       setRoleSession(EMPTY_ROLE_SESSION);
+      await cacheUser(null);
+      await clearPersistedQueryCache();
       return { error: null };
     } catch (error) {
       console.error('Sign out error:', error);
       return { error: { message: 'Sign out failed' } };
     }
-  }, []);
+  }, [cacheUser]);
 
   const deleteAccount = useCallback(async (): Promise<{ error: { message: string } | null }> => {
     if (!user) return { error: { message: 'No user logged in' } };
@@ -511,13 +546,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await supabase.auth.signOut();
       setUser(null);
       setRoleSession(EMPTY_ROLE_SESSION);
+      await cacheUser(null);
+      await clearPersistedQueryCache();
 
       return { error: null };
     } catch (error) {
       console.error('[AuthContext] Delete account error:', error);
       return { error: { message: 'Failed to delete account. Please try again.' } };
     }
-  }, [user]);
+  }, [cacheUser, user]);
 
   const getBiometricStatus = useCallback(async (username: string): Promise<boolean> => {
     const status = await secureStorage.getItem(`biometric_enabled_${username.toLowerCase()}`);

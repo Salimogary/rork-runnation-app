@@ -69,6 +69,8 @@ interface FamilyLeaderboardRow {
   distance: number;
   time: number;
   pace: number;
+  sex?: string;
+  country?: string;
 }
 
 interface FamilyWeekGroup {
@@ -86,6 +88,28 @@ interface FamilyMonthGroup {
 interface FamilyYearGroup {
   year: string;
   months: FamilyMonthGroup[];
+}
+
+interface ClubDayGroup {
+  key: string;
+  label: string;
+  rows: FamilyLeaderboardRow[];
+}
+
+interface ClubWeekGroup extends FamilyWeekGroup {
+  days?: ClubDayGroup[];
+}
+
+interface ClubMonthGroup {
+  key: string;
+  label: string;
+  weeks: ClubWeekGroup[];
+}
+
+interface ClubLeaderboardYearGroup {
+  year: string;
+  months: ClubMonthGroup[];
+  annualRows?: FamilyLeaderboardRow[];
 }
 
 interface RegisteredEvent {
@@ -1248,6 +1272,215 @@ export default function ActivityScreen() {
     staleTime: 30000,
   });
 
+  const {
+    data: clubLeaderboardGroups = [],
+    isLoading: clubLeaderboardLoading,
+    error: clubLeaderboardError,
+    refetch: refetchClubLeaderboard,
+  } = useQuery<ClubLeaderboardYearGroup[]>({
+    queryKey: [
+      "club-leaderboard-groups",
+      selectedClub?.key,
+      clubMemberIds,
+      selectedClubIsTreadmill,
+      filterStartDate,
+      filterEndDate,
+      filterSex,
+      filterCountry,
+    ],
+    queryFn: async () => {
+      if (!clubMemberIds || clubMemberIds.length === 0) return [];
+
+      const canonicalMap = await resolveCanonicalRegistrationIds(clubMemberIds);
+      const canonicalIds = Array.from(
+        new Set(clubMemberIds.map((id) => canonicalMap.get(id) || id).filter(Boolean))
+      );
+
+      let activitiesQuery = supabase
+        .from("activities")
+        .select("registration_id, activity_date, distance_km, start_time, end_time, pause_duration_seconds, exercise_type")
+        .in("registration_id", canonicalIds);
+
+      if (selectedClubIsTreadmill) activitiesQuery = activitiesQuery.eq("exercise_type", "Treadmill");
+      if (filterStartDate) activitiesQuery = activitiesQuery.gte("activity_date", filterStartDate);
+      if (filterEndDate) activitiesQuery = activitiesQuery.lte("activity_date", filterEndDate);
+
+      const [{ data: activities, error: activityError }, { data: registrations, error: registrationError }] =
+        await Promise.all([
+          activitiesQuery,
+          supabase
+            .from("registrations")
+            .select("registration_id, first_name, other_names, username, sex, country")
+            .in("registration_id", canonicalIds),
+        ]);
+
+      if (activityError) throw activityError;
+      if (registrationError) throw registrationError;
+
+      const profileMap = new Map(
+        (registrations || []).map((profile: any) => [
+          profile.registration_id,
+          {
+            name:
+              [profile.first_name, profile.other_names].filter(Boolean).join(" ").trim() ||
+              profile.username ||
+              "Runner",
+            sex: profile.sex || "-",
+            country: profile.country || "-",
+          },
+        ])
+      );
+      const years = new Map<
+        string,
+        {
+          months: Map<
+            string,
+            {
+              label: string;
+              weeks: Map<
+                string,
+                {
+                  label: string;
+                  stats: Map<string, { days: Set<string>; distance: number; time: number }>;
+                  dayStats: Map<string, Map<string, { distance: number; time: number }>>;
+                }
+              >;
+            }
+          >;
+        }
+      >();
+
+      (activities || []).forEach((activity: any) => {
+        const registrationId = canonicalMap.get(activity.registration_id) || activity.registration_id;
+        const profile = profileMap.get(registrationId);
+        if (!registrationId || !profile) return;
+        if (filterSex !== "all" && profile.sex !== filterSex) return;
+        if (filterCountry !== "all" && profile.country !== filterCountry) return;
+
+        const dateOnly = String(activity.activity_date || "").slice(0, 10);
+        const date = new Date(`${dateOnly}T00:00:00`);
+        if (Number.isNaN(date.getTime())) return;
+
+        const year = String(date.getFullYear());
+        const monthKey = `${year}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+        const monthLabel = date.toLocaleDateString("en-US", { month: "long" });
+        const weekNumber = Math.ceil(date.getDate() / 7);
+        const weekKey = `${monthKey}-W${weekNumber}`;
+
+        const yearGroup = years.get(year) || { months: new Map() };
+        const monthGroup = yearGroup.months.get(monthKey) || { label: monthLabel, weeks: new Map() };
+        const weekGroup = monthGroup.weeks.get(weekKey) || {
+          label: `Week ${weekNumber}`,
+          stats: new Map(),
+          dayStats: new Map(),
+        };
+        const stats = weekGroup.stats.get(registrationId) || {
+          days: new Set<string>(),
+          distance: 0,
+          time: 0,
+        };
+
+        stats.days.add(dateOnly);
+        stats.distance += Number(activity.distance_km || 0);
+        stats.time += getActivityDurationMinutes(activity);
+        weekGroup.stats.set(registrationId, stats);
+
+        const dayStats = weekGroup.dayStats.get(dateOnly) || new Map();
+        const runnerDayStats = dayStats.get(registrationId) || { distance: 0, time: 0 };
+        runnerDayStats.distance += Number(activity.distance_km || 0);
+        runnerDayStats.time += getActivityDurationMinutes(activity);
+        dayStats.set(registrationId, runnerDayStats);
+        weekGroup.dayStats.set(dateOnly, dayStats);
+
+        monthGroup.weeks.set(weekKey, weekGroup);
+        yearGroup.months.set(monthKey, monthGroup);
+        years.set(year, yearGroup);
+      });
+
+      const now = new Date();
+      const currentYear = String(now.getFullYear());
+      const currentMonthKey = `${currentYear}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const toRows = (
+        stats: Map<string, { days?: Set<string>; distance: number; time: number }>,
+        fixedDays?: number
+      ) =>
+        Array.from(stats.entries())
+          .map(([registrationId, values]) => {
+            const profile = profileMap.get(registrationId);
+            const days = fixedDays ?? values.days?.size ?? 0;
+            return {
+              registrationId,
+              name: profile?.name || "Runner",
+              sex: profile?.sex || "-",
+              country: profile?.country || "-",
+              days,
+              distance: values.distance,
+              time: values.time,
+              pace: values.distance > 0 ? values.time / values.distance : 0,
+            };
+          })
+          .sort((a, b) => b.distance - a.distance || b.days - a.days || a.pace - b.pace);
+
+      return Array.from(years.entries())
+        .sort(([a], [b]) => b.localeCompare(a))
+        .map(([year, yearGroup]) => {
+          if (year !== currentYear) {
+            const annualStats = new Map<string, { days: Set<string>; distance: number; time: number }>();
+            yearGroup.months.forEach((monthGroup) => {
+              monthGroup.weeks.forEach((weekGroup) => {
+                weekGroup.stats.forEach((stats, registrationId) => {
+                  const total = annualStats.get(registrationId) || {
+                    days: new Set<string>(),
+                    distance: 0,
+                    time: 0,
+                  };
+                  stats.days.forEach((day) => total.days.add(day));
+                  total.distance += stats.distance;
+                  total.time += stats.time;
+                  annualStats.set(registrationId, total);
+                });
+              });
+            });
+            return { year, months: [], annualRows: toRows(annualStats) };
+          }
+
+          return {
+            year,
+            months: Array.from(yearGroup.months.entries())
+            .sort(([a], [b]) => b.localeCompare(a))
+            .map(([monthKey, monthGroup]) => ({
+              key: monthKey,
+              label: monthGroup.label,
+              weeks: Array.from(monthGroup.weeks.entries())
+                .sort(([a], [b]) => b.localeCompare(a))
+                .map(([weekKey, weekGroup]) => ({
+                  key: weekKey,
+                  label: weekGroup.label,
+                  rows: monthKey === currentMonthKey ? [] : toRows(weekGroup.stats),
+                  days:
+                    monthKey === currentMonthKey
+                      ? Array.from(weekGroup.dayStats.entries())
+                          .sort(([a], [b]) => b.localeCompare(a))
+                          .map(([dayKey, dayStats]) => ({
+                            key: dayKey,
+                            label: new Date(`${dayKey}T00:00:00`).toLocaleDateString("en-GB", {
+                              weekday: "short",
+                              day: "2-digit",
+                              month: "short",
+                            }),
+                            rows: toRows(dayStats, 1),
+                          }))
+                      : undefined,
+                })),
+            })),
+          };
+        });
+    },
+    enabled: activeTab === "club" && !!selectedClub && !!clubMemberIds?.length,
+    staleTime: 30000,
+    retry: 1,
+  });
+
   const { data: clubCommunityData, isLoading: clubLoading, refetch: refetchClub, error: clubError } = useQuery<CommunityData[]>({
     queryKey: ["club-community", selectedClub?.key, clubMemberIds, selectedClubIsTreadmill, filterStartDate, filterEndDate],
     queryFn: async () => {
@@ -1363,7 +1596,7 @@ export default function ActivityScreen() {
         throw error;
       }
     },
-    enabled: activeTab === "club" && !!selectedClub && !!clubMemberIds && clubMemberIds.length > 0,
+    enabled: false,
     staleTime: 30000,
     retry: 1,
   });
@@ -1372,30 +1605,41 @@ export default function ActivityScreen() {
     queryKey: ["community", filterStartDate, filterEndDate],
     queryFn: async () => {
       try {
-        let activitiesQuery = supabase
-          .from("activities")
-          .select(`
-            registration_id,
-            activity_date,
-            distance_km,
-            start_time,
-            end_time,
-            pause_duration_seconds,
-            pace_min_per_km
-          `);
+        const activities: any[] = [];
+        const pageSize = 1000;
 
-        if (filterStartDate) {
-          activitiesQuery = activitiesQuery.gte("activity_date", filterStartDate);
-        }
-        if (filterEndDate) {
-          activitiesQuery = activitiesQuery.lte("activity_date", filterEndDate);
-        }
+        for (let offset = 0; ; offset += pageSize) {
+          let activitiesQuery = supabase
+            .from("activities")
+            .select(`
+              activity_id,
+              registration_id,
+              activity_date,
+              distance_km,
+              start_time,
+              end_time,
+              pause_duration_seconds,
+              pace_min_per_km
+            `)
+            .order("activity_id", { ascending: true })
+            .range(offset, offset + pageSize - 1);
 
-        const { data: activities, error: activityError } = await activitiesQuery;
+          if (filterStartDate) {
+            activitiesQuery = activitiesQuery.gte("activity_date", filterStartDate);
+          }
+          if (filterEndDate) {
+            activitiesQuery = activitiesQuery.lte("activity_date", filterEndDate);
+          }
 
-        if (activityError) {
-          console.error("[Community] Activity fetch error:", activityError);
-          throw activityError;
+          const { data: activityPage, error: activityError } = await activitiesQuery;
+
+          if (activityError) {
+            console.error("[Community] Activity fetch error:", activityError);
+            throw activityError;
+          }
+
+          activities.push(...(activityPage || []));
+          if (!activityPage || activityPage.length < pageSize) break;
         }
 
         const { data: registrations, error: regError } = await supabase
@@ -1938,7 +2182,7 @@ export default function ActivityScreen() {
             Name: [registration.first_name, registration.other_names].filter(Boolean).join(" ") || "Unknown",
             Country: registration.country || "-",
             Club: clubNameMap.get(canonicalId) || "",
-            Sex: registration.sex || "-",
+            Sex: normalizeSex(registration.sex),
             medalCounts: { ...EMPTY_MEDAL_COUNTS },
             totalMedals: 0,
             points: 0,
@@ -2104,7 +2348,13 @@ export default function ActivityScreen() {
 
   const availableCountries = useMemo(() => {
     const source = activeTab === "club"
-      ? clubCommunityData
+      ? clubLeaderboardGroups.flatMap((year) =>
+          year.months.flatMap((month) =>
+            month.weeks.flatMap((week) =>
+              week.rows.map((row) => ({ Country: row.country || "-" }))
+            )
+          )
+        )
       : communityLeaderboardView === "medals_indv"
         ? communityMedalData
         : communityData;
@@ -2113,7 +2363,7 @@ export default function ActivityScreen() {
       .filter((country) => country && country !== "-");
 
     return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
-  }, [activeTab, clubCommunityData, communityData, communityLeaderboardView, communityMedalData]);
+  }, [activeTab, clubLeaderboardGroups, communityData, communityLeaderboardView, communityMedalData]);
 
   const applyLeaderboardFilters = useCallback((rows: CommunityData[]) => {
     return rows.filter((item) => {
@@ -2285,7 +2535,7 @@ export default function ActivityScreen() {
     </View>
   );
 
-  const renderFamilyLeaderboard = (groups: FamilyYearGroup[]) => (
+  const renderGroupedLeaderboard = (groups: FamilyYearGroup[]) => (
     <View style={styles.familyLeaderboardContainer}>
       {groups.map((yearGroup) => (
         <View key={yearGroup.year} style={styles.familyYearGroup}>
@@ -2322,6 +2572,69 @@ export default function ActivityScreen() {
               ))}
             </View>
           ))}
+        </View>
+      ))}
+    </View>
+  );
+
+  const renderClubRows = (rows: FamilyLeaderboardRow[], keyPrefix: string) => (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      <View style={styles.familyTable}>
+        <View style={styles.leaderboardTableHeader}>
+          <View style={styles.familyRankColumn}><Text style={styles.leaderTableHeaderText}>Rank</Text></View>
+          <View style={styles.familyNameColumn}><Text style={styles.leaderTableHeaderText}>Name</Text></View>
+          <View style={styles.familyDaysColumn}><Text style={styles.leaderTableHeaderText}>Days</Text></View>
+          <View style={styles.familyDistanceColumn}><Text style={styles.leaderTableHeaderText}>Distance</Text></View>
+          <View style={styles.familyTimeColumn}><Text style={styles.leaderTableHeaderText}>Time</Text></View>
+          <View style={styles.familyPaceColumn}><Text style={styles.leaderTableHeaderText}>Pace</Text></View>
+        </View>
+        {rows.map((row, index) => (
+          <View
+            key={`${keyPrefix}-${row.registrationId}`}
+            style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt]}
+          >
+            <View style={styles.familyRankColumn}><Text style={styles.leaderTableCellText}>{index + 1}</Text></View>
+            <View style={styles.familyNameColumn}><Text style={styles.leaderTableCellText} numberOfLines={1}>{row.name}</Text></View>
+            <View style={styles.familyDaysColumn}><Text style={styles.leaderTableCellText}>{row.days}</Text></View>
+            <View style={styles.familyDistanceColumn}><Text style={styles.leaderTableCellText}>{row.distance.toFixed(1)} km</Text></View>
+            <View style={styles.familyTimeColumn}><Text style={styles.leaderTableCellText}>{formatTime(row.time)}</Text></View>
+            <View style={styles.familyPaceColumn}><Text style={styles.leaderTableCellText}>{formatPaceMinPerKm(row.pace)}</Text></View>
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+  );
+
+  const renderClubLeaderboard = (groups: ClubLeaderboardYearGroup[]) => (
+    <View style={styles.familyLeaderboardContainer}>
+      {groups.map((yearGroup) => (
+        <View key={yearGroup.year} style={styles.familyYearGroup}>
+          <Text style={styles.runsYearTitle}>{yearGroup.year}</Text>
+          {yearGroup.annualRows ? (
+            <View style={styles.familyWeekGroup}>
+              <Text style={styles.familyWeekTitle}>Year total</Text>
+              {renderClubRows(yearGroup.annualRows, `${yearGroup.year}-total`)}
+            </View>
+          ) : (
+            yearGroup.months.map((monthGroup) => (
+              <View key={monthGroup.key} style={styles.familyMonthGroup}>
+                <Text style={styles.runsMonthTitle}>{monthGroup.label}</Text>
+                {monthGroup.weeks.map((weekGroup) => (
+                  <View key={weekGroup.key} style={styles.familyWeekGroup}>
+                    <Text style={styles.familyWeekTitle}>{weekGroup.label}</Text>
+                    {weekGroup.days?.length
+                      ? weekGroup.days.map((dayGroup) => (
+                          <View key={dayGroup.key} style={styles.clubDayGroup}>
+                            <Text style={styles.clubDayTitle}>{dayGroup.label}</Text>
+                            {renderClubRows(dayGroup.rows, dayGroup.key)}
+                          </View>
+                        ))
+                      : renderClubRows(weekGroup.rows, weekGroup.key)}
+                  </View>
+                ))}
+              </View>
+            ))
+          )}
         </View>
       ))}
     </View>
@@ -3025,7 +3338,7 @@ export default function ActivityScreen() {
                 : activeTab === "family"
                   ? familyMembersLoading || familyLeaderboardLoading
                   : activeTab === "club"
-                    ? clubLoading
+                    ? clubLeaderboardLoading
                     : isLoading
             }
             onRefresh={() => {
@@ -3040,7 +3353,7 @@ export default function ActivityScreen() {
                 return Promise.all([refetchFamilyMembers(), refetchFamilyLeaderboard()]);
               }
               if (activeTab === "club") {
-                return selectedClubIsSmartFit ? refetchSmartFitClub() : refetchClub();
+                return refetchClubLeaderboard();
               }
               return refetch();
             }}
@@ -3126,7 +3439,7 @@ export default function ActivityScreen() {
                 <Text style={styles.emptySubtext}>Add RunNation Family Codes, then Family activity will appear by year, month, and week.</Text>
               </View>
             ) : (
-              renderFamilyLeaderboard(familyLeaderboardGroups)
+              renderGroupedLeaderboard(familyLeaderboardGroups)
             )}
           </>
         ) : activeTab === "club" ? (
@@ -3136,40 +3449,27 @@ export default function ActivityScreen() {
               <Text style={styles.emptyText}>No Club Membership</Text>
               <Text style={styles.emptySubtext}>You are not a member of any running or special club yet</Text>
             </View>
-          ) : clubError ? (
+          ) : clubLeaderboardError ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyEmoji}>⚠️</Text>
               <Text style={styles.emptyText}>Connection Error</Text>
               <Text style={styles.emptySubtext}>Check your internet connection</Text>
-              <TouchableOpacity style={styles.retryButton} onPress={() => refetchClub()}>
+              <TouchableOpacity style={styles.retryButton} onPress={() => refetchClubLeaderboard()}>
                 <Text style={styles.retryButtonText}>Retry</Text>
               </TouchableOpacity>
             </View>
-          ) : (selectedClubIsSmartFit ? smartFitClubLoading : clubLoading) &&
-            (selectedClubIsSmartFit ? smartFitClubRows.length === 0 : sortedClubData.length === 0) ? (
+          ) : clubLeaderboardLoading && clubLeaderboardGroups.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>Loading club members...</Text>
             </View>
-          ) : selectedClubIsSmartFit ? (
-            smartFitClubRows.length === 0 ? (
-              <View style={styles.emptyContainer}>
-                <Text style={styles.emptyEmoji}>!</Text>
-                <Text style={styles.emptyText}>No SmartFit data yet</Text>
-                <Text style={styles.emptySubtext}>SmartFit members will appear here after logging smart watch health data.</Text>
-              </View>
-            ) : (
-              renderSmartFitClubTable(smartFitClubRows)
-            )
-          ) : sortedClubData.length === 0 ? (
+          ) : clubLeaderboardGroups.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyEmoji}>🏃‍♂️</Text>
-              <Text style={styles.emptyText}>No club members yet</Text>
-              <Text style={styles.emptySubtext}>Club members will appear here as soon as they join your club.</Text>
+              <Text style={styles.emptyText}>No club activity yet</Text>
+              <Text style={styles.emptySubtext}>Club activity will appear here by year, month, and week.</Text>
             </View>
           ) : (
-            selectedClubIsPara
-              ? renderParaClubLeaderboardTable(sortedClubData)
-              : renderLeaderboardTable(sortedClubData, { showClub: false, showAge: selectedClubShowsAge })
+            renderClubLeaderboard(clubLeaderboardGroups)
           )
         ) : activeTab === "community" ? (
           communityLeaderboardView === "activity_club" ? (
@@ -4123,6 +4423,16 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginHorizontal: 8,
     marginBottom: 6,
+  },
+  clubDayGroup: {
+    marginBottom: 8,
+  },
+  clubDayTitle: {
+    fontSize: 11,
+    fontWeight: "800" as const,
+    color: colors.primary,
+    marginHorizontal: 8,
+    marginBottom: 4,
   },
   familyTable: {
     minWidth: 430,

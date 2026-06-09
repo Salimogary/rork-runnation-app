@@ -23,6 +23,11 @@ import SubscriptionGate from "@/components/SubscriptionGate";
 import { getServerClient } from "@/lib/server-client";
 import { trpc } from "@/lib/trpc";
 import { getActivityVoiceAssistantEnabled } from "@/utils/activityVoice";
+import {
+  enqueueOfflineWorkout,
+  getOfflineWorkoutQueueCount,
+  syncOfflineWorkouts,
+} from "@/utils/offlineWorkoutQueue";
 import MyWorkouts from "@/components/MyWorkouts";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -110,14 +115,14 @@ const MIN_DISTANCE_ACTIVITY = 0.5;
 const MIN_DISTANCE_WALK = MIN_DISTANCE_ACTIVITY;
 const MIN_DISTANCE_RUN = MIN_DISTANCE_ACTIVITY;
 const MIN_ACTIVITY_DURATION_MINUTES = 5;
-const MAX_DAILY_ACTIVITIES = 5;
 const KM_VOICE_ANNOUNCEMENT_INTERVAL = 1;
-const AUTO_PAUSE_STATIONARY_SECONDS = 90;
+const AUTO_PAUSE_STATIONARY_SECONDS = 7;
 const AUTO_PAUSE_MAX_SPEED_KMH = 1.2;
-const AUTO_RESUME_MIN_SPEED_KMH = 3;
-const AUTO_RESUME_MIN_DISTANCE_KM = 0.015;
+const AUTO_RESUME_MIN_SPEED_KMH = 1.5;
+const AUTO_RESUME_MIN_DISTANCE_KM = 0.004;
 const BACKGROUND_LOCATION_TASK = "runnation-background-location";
 const ACTIVE_WORKOUT_SESSION_KEY = "runnation_active_workout_session";
+const REGISTERED_EVENTS_CACHE_PREFIX = "runnation_registered_events";
 const WORKOUT_COUNTDOWN_MS = 3200;
 const RUNNATION_ANDROID_APK_LINK = "https://expo.dev/artifacts/eas/27LbCHM76M74izfEPYt1pN.apk";
 
@@ -129,6 +134,7 @@ type PersistedWorkoutStatus = "pending" | "running" | "paused" | "finished";
 
 type PersistedWorkoutSession = {
   id: string;
+  registrationId?: string;
   status: PersistedWorkoutStatus;
   exerciseType: Exclude<ExerciseType, null>;
   eventRun: RegisteredEventRun | null;
@@ -140,6 +146,8 @@ type PersistedWorkoutSession = {
   totalPauseDuration: number;
   pauseDurationSeconds: number;
   autoPaused: boolean;
+  stationaryStartTimestamp?: number | null;
+  autoPauseAnchorPoint?: LocationPoint | null;
   distance: number;
   coords: Coordinates[];
   lastValidPoint: LocationPoint | null;
@@ -225,6 +233,89 @@ async function processPersistedBackgroundLocation(location: Location.LocationObj
     timestamp: location.timestamp,
   };
 
+  if (point.accuracy !== null && point.accuracy > GPS_ACCURACY_THRESHOLD) {
+    session.filteredPointCount += 1;
+    session.lastProcessedLocationTimestamp = location.timestamp;
+    await setPersistedWorkoutSession(session);
+    return;
+  }
+
+  const movementAnchor = session.autoPauseAnchorPoint ?? session.lastValidPoint;
+  const movementDistanceKm = movementAnchor
+    ? calculateDistance(
+        { latitude: movementAnchor.latitude, longitude: movementAnchor.longitude },
+        { latitude: point.latitude, longitude: point.longitude }
+      )
+    : 0;
+  const movementHours = movementAnchor
+    ? (point.timestamp - movementAnchor.timestamp) / (1000 * 3600)
+    : 0;
+  const calculatedSpeedKmh = movementHours > 0 ? movementDistanceKm / movementHours : null;
+  const nativeSpeedKmh =
+    typeof location.coords.speed === "number" && location.coords.speed >= 0
+      ? location.coords.speed * 3.6
+      : null;
+  const isMoving =
+    nativeSpeedKmh !== null
+      ? nativeSpeedKmh >= AUTO_RESUME_MIN_SPEED_KMH
+      : movementDistanceKm >= AUTO_RESUME_MIN_DISTANCE_KM ||
+        (calculatedSpeedKmh !== null && calculatedSpeedKmh >= AUTO_RESUME_MIN_SPEED_KMH);
+  const isStationary =
+    nativeSpeedKmh !== null
+      ? nativeSpeedKmh <= AUTO_PAUSE_MAX_SPEED_KMH
+      : movementDistanceKm < AUTO_RESUME_MIN_DISTANCE_KM &&
+        (calculatedSpeedKmh === null || calculatedSpeedKmh <= AUTO_PAUSE_MAX_SPEED_KMH);
+
+  session.autoPauseAnchorPoint = point;
+
+  if (isMoving) {
+    session.stationaryStartTimestamp = null;
+    if (session.autoPaused) {
+      if (session.pauseStartTimestamp !== null) {
+        session.totalPauseDuration += Math.max(0, point.timestamp - session.pauseStartTimestamp);
+      }
+      session.pauseStartTimestamp = null;
+      session.runningStartTimestamp = point.timestamp;
+      session.autoPaused = false;
+      session.status = "running";
+      session.lastValidPoint = point;
+      session.lastProcessedLocationTimestamp = location.timestamp;
+      session.coords = [...session.coords, { latitude: point.latitude, longitude: point.longitude }].slice(-5000);
+      await setPersistedWorkoutSession(session);
+      return;
+    }
+  } else if (isStationary && !session.autoPaused && session.status === "running") {
+    if (session.stationaryStartTimestamp == null) {
+      session.stationaryStartTimestamp = point.timestamp;
+    } else if (
+      (point.timestamp - session.stationaryStartTimestamp) / 1000 >=
+      AUTO_PAUSE_STATIONARY_SECONDS
+    ) {
+      const pauseStartedAt = session.stationaryStartTimestamp;
+      if (session.runningStartTimestamp !== null) {
+        session.elapsedBeforePause += Math.max(
+          0,
+          Math.floor((pauseStartedAt - session.runningStartTimestamp) / 1000)
+        );
+      }
+      session.runningStartTimestamp = null;
+      session.pauseStartTimestamp = pauseStartedAt;
+      session.autoPaused = true;
+      session.status = "paused";
+      session.lastProcessedLocationTimestamp = location.timestamp;
+      await setPersistedWorkoutSession(session);
+      return;
+    }
+  } else if (!session.autoPaused) {
+    session.stationaryStartTimestamp = null;
+  }
+
+  if (session.autoPaused) {
+    session.lastProcessedLocationTimestamp = location.timestamp;
+    await setPersistedWorkoutSession(session);
+    return;
+  }
+
   if (!isValidPersistedPoint(session, point)) {
     session.filteredPointCount += 1;
     session.lastProcessedLocationTimestamp = location.timestamp;
@@ -233,15 +324,6 @@ async function processPersistedBackgroundLocation(location: Location.LocationObj
   }
 
   const coord = { latitude: point.latitude, longitude: point.longitude };
-  if (session.autoPaused) {
-    if (session.pauseStartTimestamp !== null) {
-      session.totalPauseDuration += Math.max(0, location.timestamp - session.pauseStartTimestamp);
-    }
-    session.pauseStartTimestamp = null;
-    session.runningStartTimestamp = location.timestamp;
-    session.autoPaused = false;
-  }
-
   if (session.lastValidPoint) {
     session.distance += calculateDistance(
       { latitude: session.lastValidPoint.latitude, longitude: session.lastValidPoint.longitude },
@@ -341,6 +423,8 @@ export default function ExerciseScreen() {
   const [treadmillTime, setTreadmillTime] = useState("");
   const [treadmillImage, setTreadmillImage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [pendingWorkoutSyncCount, setPendingWorkoutSyncCount] = useState(0);
+  const [isSyncingWorkouts, setIsSyncingWorkouts] = useState(false);
 
   const [showSmartWatchModal, setShowSmartWatchModal] = useState(false);
   const [smartWatchValues, setSmartWatchValues] = useState<Record<string, string>>({
@@ -372,8 +456,8 @@ export default function ExerciseScreen() {
   });
   const [otherSportsEvidenceImage, setOtherSportsEvidenceImage] = useState<string | null>(null);
   const [isSubmittingOtherSports, setIsSubmittingOtherSports] = useState(false);
-  const completeEventRunMutation = trpc.activities.completeEventRun.useMutation();
-  const { data: registeredEvents = [], refetch: refetchRegisteredEvents } = trpc.events.getRegisteredEvents.useQuery(
+  const [cachedRegisteredEvents, setCachedRegisteredEvents] = useState<RegisteredEventRun[]>([]);
+  const { data: remoteRegisteredEvents = [], refetch: refetchRegisteredEvents } = trpc.events.getRegisteredEvents.useQuery(
     { registrationId: effectiveRegistrationId },
     {
       enabled: !!effectiveRegistrationId,
@@ -382,10 +466,53 @@ export default function ExerciseScreen() {
       refetchOnReconnect: true,
     }
   );
+  const registeredEvents = remoteRegisteredEvents.length > 0
+    ? remoteRegisteredEvents
+    : cachedRegisteredEvents;
+
+  useEffect(() => {
+    if (!effectiveRegistrationId) {
+      setCachedRegisteredEvents([]);
+      return;
+    }
+
+    let active = true;
+    const cacheKey = `${REGISTERED_EVENTS_CACHE_PREFIX}_${effectiveRegistrationId}`;
+
+    void AsyncStorage.getItem(cacheKey)
+      .then((stored) => {
+        if (!active || !stored) return;
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          setCachedRegisteredEvents(parsed as RegisteredEventRun[]);
+        }
+      })
+      .catch((error) => {
+        console.warn("[Workout] Could not restore cached registered events:", error);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [effectiveRegistrationId]);
+
+  useEffect(() => {
+    if (!effectiveRegistrationId || remoteRegisteredEvents.length === 0) return;
+
+    setCachedRegisteredEvents(remoteRegisteredEvents as RegisteredEventRun[]);
+    void AsyncStorage.setItem(
+      `${REGISTERED_EVENTS_CACHE_PREFIX}_${effectiveRegistrationId}`,
+      JSON.stringify(remoteRegisteredEvents)
+    ).catch((error) => {
+      console.warn("[Workout] Could not cache registered events:", error);
+    });
+  }, [effectiveRegistrationId, remoteRegisteredEvents]);
 
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
   const timerInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const workoutSyncInProgress = useRef(false);
   const activeWorkoutSessionId = useRef<string | null>(null);
+  const workoutOwnerRegistrationId = useRef<string | null>(null);
   const elapsedBeforePause = useRef<number>(0);
   const runningStartTimestamp = useRef<number | null>(null);
   const appState = useRef<AppStateStatus>(AppState.currentState);
@@ -469,6 +596,7 @@ export default function ExerciseScreen() {
 
     await setPersistedWorkoutSession({
       id: sessionId,
+      registrationId: workoutOwnerRegistrationId.current ?? (effectiveRegistrationId || undefined),
       status,
       exerciseType: currentExerciseType,
       eventRun: selectedEventRunRef.current,
@@ -480,6 +608,8 @@ export default function ExerciseScreen() {
       totalPauseDuration: totalPauseDuration.current,
       pauseDurationSeconds: pauseDurationSecondsRef.current,
       autoPaused: autoPaused.current,
+      stationaryStartTimestamp: stationaryStartTimestamp.current,
+      autoPauseAnchorPoint: autoPauseAnchorPoint.current,
       distance: distanceRef.current,
       coords: coordsRef.current.slice(-5000),
       lastValidPoint: lastValidPoint.current,
@@ -487,7 +617,44 @@ export default function ExerciseScreen() {
       filteredPointCount: filteredPointCount.current,
       updatedAt: Date.now(),
     });
+  }, [effectiveRegistrationId]);
+
+  const syncQueuedWorkouts = useCallback(async (showResult = false) => {
+    if (workoutSyncInProgress.current) return;
+    workoutSyncInProgress.current = true;
+    setIsSyncingWorkouts(true);
+    try {
+      const result = await syncOfflineWorkouts();
+      setPendingWorkoutSyncCount(result.pending);
+      if (showResult) {
+        if (result.pending === 0) {
+          Alert.alert("Sync Complete", "All locally saved workouts are now synced.");
+        } else {
+          Alert.alert("Still Offline", `${result.pending} workout${result.pending === 1 ? "" : "s"} remain safely saved on this device.`);
+        }
+      }
+    } finally {
+      workoutSyncInProgress.current = false;
+      setIsSyncingWorkouts(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void getOfflineWorkoutQueueCount().then(setPendingWorkoutSyncCount);
+    void syncQueuedWorkouts();
+
+    const interval = setInterval(() => {
+      void syncQueuedWorkouts();
+    }, 30000);
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") void syncQueuedWorkouts();
+    });
+
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+    };
+  }, [syncQueuedWorkouts]);
 
   useEffect(() => {
     void requestLocationPermission();
@@ -832,17 +999,21 @@ export default function ExerciseScreen() {
     }, 1000) as any;
   }, []);
 
-  const autoPauseWorkout = useCallback(() => {
+  const autoPauseWorkout = useCallback((stationarySince: number) => {
     if (autoPaused.current || runningStartTimestamp.current === null) {
       return;
     }
 
     const now = Date.now();
-    elapsedBeforePause.current += Math.max(0, Math.floor((now - runningStartTimestamp.current) / 1000));
+    const pauseStartedAt = Math.min(now, stationarySince);
+    elapsedBeforePause.current += Math.max(
+      0,
+      Math.floor((pauseStartedAt - runningStartTimestamp.current) / 1000)
+    );
     durationRef.current = elapsedBeforePause.current;
     setDuration(elapsedBeforePause.current);
     runningStartTimestamp.current = null;
-    pauseStartTimestamp.current = now;
+    pauseStartTimestamp.current = pauseStartedAt;
     autoPaused.current = true;
     runStateRef.current = "paused";
     setRunState("paused");
@@ -876,18 +1047,24 @@ export default function ExerciseScreen() {
     void persistActiveWorkoutSession("running");
   }, [persistActiveWorkoutSession, speakActivityMessage, startWorkoutTimer]);
 
-  const evaluateAutoPause = useCallback((point: LocationPoint, movementDistanceKm: number, speedKmh: number | null) => {
+  const evaluateAutoPause = useCallback((
+    point: LocationPoint,
+    movementDistanceKm: number,
+    speedKmh: number | null,
+    hasNativeSpeed: boolean
+  ) => {
     if (runStateRef.current !== "running" && !autoPaused.current) {
       return;
     }
 
-    const isMoving =
-      movementDistanceKm >= AUTO_RESUME_MIN_DISTANCE_KM ||
-      (speedKmh !== null && speedKmh >= AUTO_RESUME_MIN_SPEED_KMH);
+    const isMoving = hasNativeSpeed
+      ? speedKmh !== null && speedKmh >= AUTO_RESUME_MIN_SPEED_KMH
+      : movementDistanceKm >= AUTO_RESUME_MIN_DISTANCE_KM ||
+        (speedKmh !== null && speedKmh >= AUTO_RESUME_MIN_SPEED_KMH);
+    autoPauseAnchorPoint.current = point;
 
     if (isMoving) {
       stationaryStartTimestamp.current = null;
-      autoPauseAnchorPoint.current = point;
       if (autoPaused.current) {
         autoResumeWorkout();
       }
@@ -898,13 +1075,13 @@ export default function ExerciseScreen() {
       return;
     }
 
-    const isStationary =
-      movementDistanceKm < AUTO_RESUME_MIN_DISTANCE_KM &&
-      (speedKmh === null || speedKmh <= AUTO_PAUSE_MAX_SPEED_KMH);
+    const isStationary = hasNativeSpeed
+      ? speedKmh === null || speedKmh <= AUTO_PAUSE_MAX_SPEED_KMH
+      : movementDistanceKm < AUTO_RESUME_MIN_DISTANCE_KM &&
+        (speedKmh === null || speedKmh <= AUTO_PAUSE_MAX_SPEED_KMH);
 
     if (!isStationary) {
       stationaryStartTimestamp.current = null;
-      autoPauseAnchorPoint.current = point;
       return;
     }
 
@@ -916,7 +1093,7 @@ export default function ExerciseScreen() {
 
     const stationarySeconds = (point.timestamp - stationaryStartTimestamp.current) / 1000;
     if (stationarySeconds >= AUTO_PAUSE_STATIONARY_SECONDS) {
-      autoPauseWorkout();
+      autoPauseWorkout(stationaryStartTimestamp.current);
     }
   }, [autoPauseWorkout, autoResumeWorkout]);
 
@@ -970,13 +1147,19 @@ export default function ExerciseScreen() {
     setCurrentLocation(newCoord);
 
     if (lastValidPoint.current && (newPoint.accuracy === null || newPoint.accuracy <= GPS_ACCURACY_THRESHOLD)) {
+      const movementAnchor = autoPauseAnchorPoint.current ?? lastValidPoint.current;
       const movementDistanceKm = calculateDistance(
-        { latitude: lastValidPoint.current.latitude, longitude: lastValidPoint.current.longitude },
+        { latitude: movementAnchor.latitude, longitude: movementAnchor.longitude },
         newCoord
       );
-      const movementHours = (newPoint.timestamp - lastValidPoint.current.timestamp) / (1000 * 3600);
-      const speedKmh = movementHours > 0 ? movementDistanceKm / movementHours : null;
-      evaluateAutoPause(newPoint, movementDistanceKm, speedKmh);
+      const movementHours = (newPoint.timestamp - movementAnchor.timestamp) / (1000 * 3600);
+      const calculatedSpeedKmh = movementHours > 0 ? movementDistanceKm / movementHours : null;
+      const nativeSpeedKmh =
+        typeof location.coords.speed === "number" && location.coords.speed >= 0
+          ? location.coords.speed * 3.6
+          : null;
+      const speedKmh = nativeSpeedKmh ?? calculatedSpeedKmh;
+      evaluateAutoPause(newPoint, movementDistanceKm, speedKmh, nativeSpeedKmh !== null);
     }
 
     if (isResuming.current) {
@@ -1039,8 +1222,8 @@ export default function ExerciseScreen() {
 
       await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
         accuracy: Location.Accuracy.BestForNavigation,
-        distanceInterval: 5,
-        timeInterval: 3000,
+        distanceInterval: 1,
+        timeInterval: 1000,
         pausesUpdatesAutomatically: false,
         showsBackgroundLocationIndicator: true,
         foregroundService: {
@@ -1090,8 +1273,8 @@ export default function ExerciseScreen() {
       locationSubscription.current = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.BestForNavigation,
-          distanceInterval: 5,
-          timeInterval: 3000,
+          distanceInterval: 1,
+          timeInterval: 1000,
         },
         (location) => {
           handleLocationUpdate(location, exerciseT);
@@ -1129,6 +1312,7 @@ export default function ExerciseScreen() {
       }
 
       activeWorkoutSessionId.current = session.id;
+      workoutOwnerRegistrationId.current = session.registrationId ?? (effectiveRegistrationId || null);
       elapsedBeforePause.current = session.elapsedBeforePause;
       runningStartTimestamp.current = session.runningStartTimestamp;
       totalPauseDuration.current = session.totalPauseDuration;
@@ -1143,6 +1327,8 @@ export default function ExerciseScreen() {
       startTimeRef.current = startDate;
       pauseDurationSecondsRef.current = session.pauseDurationSeconds;
       autoPaused.current = session.autoPaused === true;
+      stationaryStartTimestamp.current = session.stationaryStartTimestamp ?? null;
+      autoPauseAnchorPoint.current = session.autoPauseAnchorPoint ?? session.lastValidPoint;
       lastAnnouncedKilometer.current = Math.floor(session.distance / KM_VOICE_ANNOUNCEMENT_INTERVAL);
 
       setExerciseType(session.exerciseType);
@@ -1186,10 +1372,15 @@ export default function ExerciseScreen() {
     };
 
     void restoreActiveWorkout();
-  }, [startLocationWatch, startWorkoutTimer]);
+  }, [effectiveRegistrationId, startLocationWatch, startWorkoutTimer]);
 
   const startTracking = useCallback(async (type: ExerciseType, eventRun: RegisteredEventRun | null = null, scheduledStartTimestamp = Date.now()) => {
     if (!type) return;
+    const ownerRegistrationId = effectiveRegistrationId || user?.id || "";
+    if (!ownerRegistrationId) {
+      Alert.alert("Sign In Required", "Sign in once while online before recording offline workouts.");
+      return;
+    }
 
     if (type === "Treadmill") {
       setShowTreadmillModal(true);
@@ -1234,6 +1425,7 @@ export default function ExerciseScreen() {
     const sessionId = uuidv4();
     const startDate = new Date(scheduledStartTimestamp);
     activeWorkoutSessionId.current = sessionId;
+    workoutOwnerRegistrationId.current = ownerRegistrationId;
     runningStartTimestamp.current = scheduledStartTimestamp;
     exerciseTypeRef.current = type;
     selectedEventRunRef.current = eventRun;
@@ -1246,6 +1438,7 @@ export default function ExerciseScreen() {
 
     await setPersistedWorkoutSession({
       id: sessionId,
+      registrationId: ownerRegistrationId,
       status: scheduledStartTimestamp > Date.now() ? "pending" : "running",
       exerciseType: type,
       eventRun,
@@ -1257,6 +1450,8 @@ export default function ExerciseScreen() {
       totalPauseDuration: 0,
       pauseDurationSeconds: 0,
       autoPaused: false,
+      stationaryStartTimestamp: null,
+      autoPauseAnchorPoint: null,
       distance: 0,
       coords: [],
       lastValidPoint: null,
@@ -1292,7 +1487,7 @@ export default function ExerciseScreen() {
     }
 
     startWorkoutTimer();
-  }, [canUseCycleWorkout, cycleWorkoutOnly, ensureForegroundLocationPermission, startLocationWatch, startWorkoutTimer, stopBackgroundLocationWatch]);
+  }, [canUseCycleWorkout, cycleWorkoutOnly, effectiveRegistrationId, ensureForegroundLocationPermission, startLocationWatch, startWorkoutTimer, stopBackgroundLocationWatch, user?.id]);
 
   const playCountdownCue = useCallback((value: string) => {
     if (!activityVoiceAssistantEnabled) {
@@ -1431,8 +1626,8 @@ export default function ExerciseScreen() {
 
     console.log('[Tracking] Stopped. Final distance:', distance.toFixed(3), 'km, duration:', finalDuration, 's, filtered points:', filteredPointCount.current);
 
-    if (!user || !startTime) {
-      console.log('[Tracking] No user or startTime, skipping save');
+    if (!startTime || !workoutOwnerRegistrationId.current) {
+      console.log('[Tracking] Missing local workout identity or start time');
       return;
     }
 
@@ -1493,7 +1688,8 @@ export default function ExerciseScreen() {
       return;
     }
 
-    if (!user || !startTime) {
+    const ownerRegistrationId = workoutOwnerRegistrationId.current || effectiveRegistrationId || user?.id;
+    if (!ownerRegistrationId || !startTime) {
       Alert.alert("Error", "Missing activity details. Please try again.");
       return;
     }
@@ -1502,56 +1698,23 @@ export default function ExerciseScreen() {
     setIsSaving(true);
     try {
       const today = startTime.toISOString().split('T')[0];
-      const { count, error: countError } = await supabase
-        .from("activities")
-        .select("*", { count: "exact", head: true })
-        .eq("registration_id", user.id)
-        .eq("activity_date", today);
+      const calculatedPace = finalDuration > 0 && distance > 0 ? (finalDuration / 60) / distance : 0;
+      const actualEndTime = new Date(startTime.getTime() + ((finalDuration + pauseDurationSeconds) * 1000));
+      const startTimeStr = startTime.toISOString().split('T')[1].split('.')[0];
+      const endTimeStr = actualEndTime.toISOString().split('T')[1].split('.')[0];
+      const nextActivityId = activeWorkoutSessionId.current || uuidv4();
+      const eventIds = selectedEventRun
+        ? selectedEventRun.eventIds?.length
+          ? selectedEventRun.eventIds
+          : [selectedEventRun.eventId]
+        : [];
 
-      if (countError) {
-        console.error('[ActivityLimit] Count error:', countError);
-      }
-
-      let error: { message?: string } | null = null;
-
-      if ((count || 0) >= MAX_DAILY_ACTIVITIES) {
-        if (selectedEventRun) {
-          error = {
-            message: `Daily activity limit reached. The event result will still be saved, but the regular activity log entry will be skipped.`,
-          };
-        } else {
-          Alert.alert(
-            "Daily Limit Reached",
-            `You can only save a maximum of ${MAX_DAILY_ACTIVITIES} activities per day. This activity was not saved.`
-          );
-          setIsSaving(false);
-          return;
-        }
-      }
-
-      if (!error) {
-        const calculatedPace = finalDuration > 0 && distance > 0 ? (finalDuration / 60) / distance : 0;
-
-        const actualEndTime = new Date(startTime.getTime() + ((finalDuration + pauseDurationSeconds) * 1000));
-
-        const startTimeStr = startTime.toISOString().split('T')[1].split('.')[0];
-        const endTimeStr = actualEndTime.toISOString().split('T')[1].split('.')[0];
-
-        const nextActivityId = uuidv4();
-
-        console.log('[Tracking] Saving activity:', {
-          id: nextActivityId,
-          type: exerciseType,
-          distance: distance.toFixed(3),
-          duration: finalDuration,
-          pace: calculatedPace.toFixed(2),
-          startTime: startTimeStr,
-          endTime: endTimeStr,
-        });
-
-        const insertResult = await supabase.from("activities").insert({
+      const pendingCount = await enqueueOfflineWorkout({
+        queueId: nextActivityId,
+        createdAt: new Date().toISOString(),
+        activity: {
           activity_id: nextActivityId,
-          registration_id: user.id,
+          registration_id: ownerRegistrationId,
           activity_date: today,
           exercise_type: exerciseType || "Run",
           distance_km: parseFloat(distance.toFixed(2)),
@@ -1559,61 +1722,33 @@ export default function ExerciseScreen() {
           start_time: startTimeStr,
           end_time: endTimeStr,
           pace_min_per_km: parseFloat(calculatedPace.toFixed(2)),
-        });
+        },
+        eventResults: eventIds.map((eventId) => ({
+          eventId,
+          registrationId: ownerRegistrationId,
+          distanceKm: parseFloat(distance.toFixed(2)),
+          timeSeconds: finalDuration,
+        })),
+        snapshot: {
+          startTimeIso: startTime.toISOString(),
+          durationSeconds: finalDuration,
+          pauseDurationSeconds,
+          distanceKm: distance,
+          coordinates: coordsRef.current.slice(-5000),
+        },
+      });
 
-        error = insertResult.error;
-
-        if (error) {
-          console.error("[Tracking] Error saving activity:", error);
-        } else {
-          console.log("[Tracking] Activity saved successfully with ID:", nextActivityId);
-        }
-      }
-
-      let eventResultSaved = false;
-      let eventResultError = "";
-
-      if (selectedEventRun && effectiveRegistrationId) {
-        try {
-          const eventIds = selectedEventRun.eventIds?.length ? selectedEventRun.eventIds : [selectedEventRun.eventId];
-          await Promise.all(
-            eventIds.map((eventId) =>
-              completeEventRunMutation.mutateAsync({
-                eventId,
-                registrationId: effectiveRegistrationId,
-                distanceKm: parseFloat(distance.toFixed(2)),
-                timeSeconds: finalDuration,
-              })
-            )
-          );
-          eventResultSaved = true;
-        } catch (eventError: any) {
-          eventResultError = eventError?.message || "Failed to save your event result.";
-        }
-      }
-
-      if (!error && selectedEventRun && eventResultSaved) {
-        setActivitySaved(true);
-        Alert.alert("Success", "Activity and event result saved successfully!");
-        speakActivityMessage("Congratulations, activity completed");
-      } else if (!error && selectedEventRun && !eventResultSaved) {
-        setActivitySaved(true);
-        Alert.alert("Saved with Caution", `Your activity was saved, but the event result could not be updated.\n\n${eventResultError}`);
-        speakActivityMessage("Congratulations, activity completed");
-      } else if (!error) {
-        setActivitySaved(true);
-        Alert.alert("Success", "Activity saved successfully!");
-        speakActivityMessage("Congratulations, activity completed");
-      } else if (selectedEventRun && eventResultSaved) {
-        setActivitySaved(true);
-        Alert.alert("Event Saved", "Your event result was saved, but the normal activity log could not be added.");
-        speakActivityMessage("Congratulations, activity completed");
-      } else {
-        Alert.alert("Error", "Failed to save activity");
-      }
+      setActivitySaved(true);
+      setPendingWorkoutSyncCount(pendingCount);
+      speakActivityMessage("Congratulations, activity completed");
+      Alert.alert(
+        "Saved on Device",
+        "Your workout is safe. RunNation will sync it automatically whenever internet access is available."
+      );
+      void syncQueuedWorkouts();
     } catch (err) {
-      console.error("[Tracking] Unexpected error saving:", err);
-      Alert.alert("Error", "Something went wrong while saving your activity.");
+      console.error("[Tracking] Could not save workout locally:", err);
+      Alert.alert("Storage Error", "RunNation could not store this workout on the device. Please keep this screen open and try again.");
     } finally {
       setIsSaving(false);
     }
@@ -1653,6 +1788,7 @@ export default function ExerciseScreen() {
     autoPaused.current = false;
     autoPauseAnchorPoint.current = null;
     activeWorkoutSessionId.current = null;
+    workoutOwnerRegistrationId.current = null;
     if (locationSubscription.current) {
       locationSubscription.current.remove();
       locationSubscription.current = null;
@@ -2653,32 +2789,45 @@ export default function ExerciseScreen() {
           {runState === "finished" && (
             <View style={styles.finishedContainer}>
               <LinearGradient colors={colors.gradient.sunset} style={styles.finishedCard}>
-                <Text style={styles.finishedEmoji}>🎉</Text>
-                <Text style={styles.finishedTitle}>{selectedEventRun ? "Workout Event Complete!" : `${exerciseType} Complete!`}</Text>
+                <View style={styles.finishedBadge}>
+                  <Activity size={18} color="#F97316" />
+                  <Text style={styles.finishedBadgeText}>RUNNATION WORKOUT</Text>
+                </View>
+                <Text style={styles.finishedTitle}>{selectedEventRun ? "Event completed" : `${exerciseType} completed`}</Text>
                 {selectedEventRun ? (
                   <Text style={styles.finishedSubtitle}>{selectedEventRun.eventName}</Text>
                 ) : null}
+                <View style={styles.finishedDistanceRow}>
+                  <Text style={styles.finishedDistanceValue}>{distance.toFixed(2)}</Text>
+                  <Text style={styles.finishedDistanceUnit}>km</Text>
+                </View>
                 <View style={styles.summaryRow}>
                   <View style={styles.summaryItem}>
-                    <Text style={styles.summaryLabel}>Distance</Text>
-                    <Text style={styles.summaryValue}>{distance.toFixed(2)} km</Text>
-                  </View>
-                  <View style={styles.summaryDivider} />
-                  <View style={styles.summaryItem}>
-                    <Text style={styles.summaryLabel}>Time</Text>
+                    <Text style={styles.summaryLabel}>Moving time</Text>
                     <Text style={styles.summaryValue}>{formatTime(duration)}</Text>
                   </View>
                   <View style={styles.summaryDivider} />
                   <View style={styles.summaryItem}>
-                    <Text style={styles.summaryLabel}>Pace</Text>
+                    <Text style={styles.summaryLabel}>Average pace</Text>
                     <Text style={styles.summaryValue}>{formatPaceMinPerKm()} /km</Text>
+                  </View>
+                  <View style={styles.summaryDivider} />
+                  <View style={styles.summaryItem}>
+                    <Text style={styles.summaryLabel}>Paused</Text>
+                    <Text style={styles.summaryValue}>{formatTime(pauseDurationSeconds)}</Text>
                   </View>
                 </View>
               </LinearGradient>
 
               <TouchableOpacity style={styles.resetButton} onPress={() => setShowRunDetailsModal(true)} activeOpacity={0.8}>
                 <LinearGradient colors={colors.gradient.blue} style={styles.resetButtonGradient}>
-                  <Text style={styles.resetButtonText}>{activitySaved ? "View Share Card" : "Review / Save Activity"}</Text>
+                  <Text style={styles.resetButtonText}>
+                    {activitySaved
+                      ? pendingWorkoutSyncCount > 0
+                        ? "Saved Offline / View Card"
+                        : "View Share Card"
+                      : "Review / Save Activity"}
+                  </Text>
                 </LinearGradient>
               </TouchableOpacity>
               
@@ -2741,8 +2890,25 @@ export default function ExerciseScreen() {
                 ]}>
                   <View style={styles.shareDetailsContent}>
                   <View style={styles.shareSheetHandle} />
-                  <View style={styles.shareTopRow}>
-                    <View style={styles.shareRunnerBlock}>
+                  <View style={styles.shareActivityHeader}>
+                    <View style={styles.shareActivityIcon}>
+                      <Activity size={18} color="#FFFFFF" />
+                    </View>
+                    <View style={styles.shareActivityHeaderCopy}>
+                      <Text style={styles.shareActivityKicker}>RUNNATION {String(exerciseType || "Run").toUpperCase()}</Text>
+                      <Text style={[styles.shareActivityTitle, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>
+                        {selectedEventRun?.eventName || "Workout completed"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.shareDistanceHero}>
+                    <Text style={[styles.shareDistanceValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{distance.toFixed(2)}</Text>
+                    <Text style={[styles.shareDistanceUnit, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]}>kilometres</Text>
+                  </View>
+
+                  <View style={styles.shareRunnerStrip}>
+                    <View style={styles.shareRunnerIdentity}>
                       {runnerProfile?.photoUrl ? (
                         <Image source={{ uri: runnerProfile.photoUrl }} style={styles.shareAvatar} resizeMode="cover" />
                       ) : (
@@ -2752,46 +2918,40 @@ export default function ExerciseScreen() {
                           </Text>
                         </View>
                       )}
-                      <Text style={[styles.shareRunnerName, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]} numberOfLines={1}>
-                        {runnerProfile?.name || user?.username || "RunNation Runner"}
-                      </Text>
-                      <Text style={[styles.shareRunnerMeta, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]} numberOfLines={2}>
-                        {getRunDetailsMeta() || "Workout location"}
-                      </Text>
-                    </View>
-                    <View style={styles.shareDistanceBlock}>
-                      {selectedEventRun ? <Text style={styles.shareMedalSymbol}>🏅</Text> : null}
-                      <View style={styles.shareDistanceRow}>
-                        <Text style={[styles.shareDistanceValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{distance.toFixed(2)}</Text>
-                        <Text style={[styles.shareDistanceUnit, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]}>km</Text>
+                      <View style={styles.shareRunnerInfo}>
+                        <Text style={[styles.shareRunnerName, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]} numberOfLines={1}>
+                          {runnerProfile?.name || user?.username || "RunNation Runner"}
+                        </Text>
+                        <Text style={[styles.shareRunnerMeta, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]} numberOfLines={1}>
+                          {getRunDetailsMeta() || "Workout location"}
+                        </Text>
                       </View>
                     </View>
+                    <Text style={[styles.shareDateText, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]}>
+                      {startTime
+                        ? `${startTime.toLocaleDateString(undefined, { day: "numeric", month: "short" })}\n${startTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                        : "-"}
+                    </Text>
                   </View>
 
-                  <Text style={[styles.shareDateText, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]}>
-                    {startTime
-                      ? `${startTime.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}, ${startTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-                      : "-"}
-                  </Text>
-
-                    <View style={styles.shareMetricsGrid}>
-                    <View style={[styles.shareMetric, styles.shareMetricWide]}>
+                  <View style={styles.shareMetricsGrid}>
+                    <View style={[styles.shareMetric, runCardTheme === "dark" ? styles.shareMetricDark : styles.shareMetricLight]}>
+                      <Timer size={17} color="#F97316" />
                       <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{formatTime(duration)}</Text>
-                      <Text style={styles.shareMetricLabel}>Workout Duration</Text>
+                      <Text style={styles.shareMetricLabel}>Moving time</Text>
                     </View>
-                    <View style={[styles.shareMetric, styles.shareMetricWide]}>
+                    <View style={[styles.shareMetric, runCardTheme === "dark" ? styles.shareMetricDark : styles.shareMetricLight]}>
+                      <Gauge size={17} color="#2563EB" />
                       <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{formatPaceMinPerKm()}</Text>
-                      <Text style={styles.shareMetricLabel}>Avg pace/km</Text>
+                      <Text style={styles.shareMetricLabel}>Average pace /km</Text>
                     </View>
-                    <View style={styles.shareMetric}>
+                    <View style={[styles.shareMetric, runCardTheme === "dark" ? styles.shareMetricDark : styles.shareMetricLight]}>
+                      <Pause size={17} color="#8B5CF6" />
                       <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{formatTime(pauseDurationSeconds)}</Text>
-                      <Text style={styles.shareMetricLabel}>Pause Time</Text>
+                      <Text style={styles.shareMetricLabel}>Paused time</Text>
                     </View>
-                    <View style={styles.shareMetric}>
-                      <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{exerciseType || "Run"}</Text>
-                      <Text style={styles.shareMetricLabel}>Activity type</Text>
-                    </View>
-                    <View style={styles.shareMetric}>
+                    <View style={[styles.shareMetric, runCardTheme === "dark" ? styles.shareMetricDark : styles.shareMetricLight]}>
+                      <Flame size={17} color="#10B981" />
                       <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{getWeatherDisplay()}</Text>
                       <Text style={styles.shareMetricLabel}>Weather</Text>
                     </View>
@@ -2815,6 +2975,23 @@ export default function ExerciseScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
+                {pendingWorkoutSyncCount > 0 ? (
+                  <TouchableOpacity
+                    style={styles.workoutSyncNotice}
+                    onPress={() => void syncQueuedWorkouts(true)}
+                    disabled={isSyncingWorkouts}
+                  >
+                    <View style={styles.workoutSyncNoticeCopy}>
+                      <Text style={styles.workoutSyncNoticeTitle}>
+                        {pendingWorkoutSyncCount} workout{pendingWorkoutSyncCount === 1 ? "" : "s"} saved offline
+                      </Text>
+                      <Text style={styles.workoutSyncNoticeText}>
+                        {isSyncingWorkouts ? "Checking connection..." : "Stored safely on this device. Tap to sync now."}
+                      </Text>
+                    </View>
+                    <Upload size={18} color="#F97316" />
+                  </TouchableOpacity>
+                ) : null}
               </View>
             </ScrollView>
 
@@ -2833,7 +3010,15 @@ export default function ExerciseScreen() {
                 onPress={saveFinishedActivity}
                 disabled={isSaving || activitySaved}
               >
-                <Text style={styles.runDetailsActionText}>{activitySaved ? "Saved" : isSaving ? "Saving..." : "Save"}</Text>
+                <Text style={styles.runDetailsActionText}>
+                  {activitySaved
+                    ? pendingWorkoutSyncCount > 0
+                      ? "Saved Offline"
+                      : "Saved"
+                    : isSaving
+                      ? "Saving..."
+                      : "Save"}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -3685,11 +3870,11 @@ const styles = StyleSheet.create({
   },
   shareCard: {
     overflow: "hidden" as const,
-    minHeight: 670,
+    minHeight: 650,
     backgroundColor: "#E5E7EB",
   },
   shareMapHero: {
-    height: 360,
+    height: 310,
     backgroundColor: "#9CA3AF",
   },
   shareMapShade: {
@@ -3734,12 +3919,12 @@ const styles = StyleSheet.create({
     textShadowRadius: 3,
   },
   shareDetailsSheet: {
-    marginTop: -34,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    marginTop: -18,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
     padding: 20,
     paddingTop: 12,
-    minHeight: 330,
+    minHeight: 360,
     overflow: "hidden" as const,
   },
   shareDetailsSheetLight: {
@@ -3764,41 +3949,84 @@ const styles = StyleSheet.create({
     justifyContent: "space-between" as const,
     gap: 10,
   },
+  shareActivityHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(148,163,184,0.28)",
+  },
+  shareActivityIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: "#F97316",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  shareActivityHeaderCopy: {
+    flex: 1,
+  },
+  shareActivityKicker: {
+    color: "#F97316",
+    fontSize: 10,
+    fontWeight: "900" as const,
+  },
+  shareActivityTitle: {
+    marginTop: 2,
+    fontSize: 17,
+    fontWeight: "800" as const,
+  },
+  shareDistanceHero: {
+    alignItems: "center" as const,
+    paddingVertical: 12,
+  },
+  shareRunnerStrip: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    gap: 10,
+    paddingBottom: 12,
+  },
+  shareRunnerIdentity: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 9,
+  },
   shareRunnerBlock: {
     flex: 1,
   },
   shareAvatar: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    borderWidth: 2,
-    borderColor: "#FFFFFF",
-    marginTop: 0,
-    marginBottom: 6,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    borderColor: "#F97316",
   },
   shareAvatarFallback: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center" as const,
     justifyContent: "center" as const,
     backgroundColor: "#F97316",
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: "#FFFFFF",
-    marginTop: 0,
-    marginBottom: 6,
   },
   shareAvatarInitial: {
     color: colors.white,
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: "900" as const,
   },
   shareRunnerInfo: {
     flex: 1,
   },
   shareRunnerName: {
-    fontSize: 23,
-    fontWeight: "500" as const,
+    fontSize: 15,
+    fontWeight: "800" as const,
   },
   shareRunnerMeta: {
     fontSize: 12,
@@ -3833,45 +4061,54 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   shareDistanceValue: {
-    fontSize: 54,
-    fontWeight: "400" as const,
-    lineHeight: 58,
+    fontSize: 58,
+    fontWeight: "900" as const,
+    lineHeight: 62,
   },
   shareDistanceUnit: {
-    fontSize: 20,
-    fontWeight: "500" as const,
-    marginBottom: 7,
+    fontSize: 12,
+    fontWeight: "800" as const,
+    textTransform: "uppercase" as const,
   },
   shareMetricsGrid: {
     flexDirection: "row" as const,
     flexWrap: "wrap" as const,
-    rowGap: 18,
-    marginTop: 20,
+    gap: 8,
   },
   shareMetric: {
-    width: "33.33%",
-    alignItems: "center" as const,
-    paddingHorizontal: 4,
+    width: "48.5%",
+    minHeight: 82,
+    alignItems: "flex-start" as const,
+    justifyContent: "center" as const,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
   },
-  shareMetricWide: {
-    width: "50%",
+  shareMetricLight: {
+    backgroundColor: "#F8FAFC",
+    borderColor: "#E2E8F0",
+  },
+  shareMetricDark: {
+    backgroundColor: "#1F2937",
+    borderColor: "#374151",
   },
   shareMetricLabel: {
     color: "#6B7280",
-    fontSize: 12,
-    fontWeight: "500" as const,
-    textAlign: "center" as const,
-    marginTop: 4,
+    fontSize: 11,
+    fontWeight: "700" as const,
+    marginTop: 2,
   },
   shareMetricValue: {
-    fontSize: 22,
-    fontWeight: "500" as const,
-    textAlign: "center" as const,
+    fontSize: 18,
+    fontWeight: "800" as const,
+    marginTop: 4,
   },
   shareDateText: {
-    fontSize: 14,
-    fontWeight: "500" as const,
-    marginTop: 4,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "700" as const,
+    textAlign: "right" as const,
   },
   shareMap: {
     flex: 1,
@@ -3896,6 +4133,29 @@ const styles = StyleSheet.create({
     flexDirection: "row" as const,
     flexWrap: "wrap" as const,
     gap: 8,
+  },
+  workoutSyncNotice: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 12,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#FED7AA",
+    backgroundColor: "#FFF7ED",
+  },
+  workoutSyncNoticeCopy: {
+    flex: 1,
+  },
+  workoutSyncNoticeTitle: {
+    color: "#9A3412",
+    fontSize: 13,
+    fontWeight: "800" as const,
+  },
+  workoutSyncNoticeText: {
+    color: "#C2410C",
+    fontSize: 11,
+    marginTop: 2,
   },
   runDetailsChip: {
     paddingHorizontal: 12,
@@ -3984,23 +4244,57 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
+  finishedBadge: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    marginBottom: 14,
+  },
+  finishedBadgeText: {
+    color: "#111827",
+    fontSize: 11,
+    fontWeight: "900" as const,
+  },
   finishedEmoji: {
     fontSize: 56,
     marginBottom: 12,
   },
   finishedTitle: {
-    fontSize: 32,
+    fontSize: 25,
     fontWeight: "800" as const,
     color: colors.white,
-    marginBottom: 24,
+    marginBottom: 4,
   },
   finishedSubtitle: {
     fontSize: 14,
     fontWeight: "600" as const,
     color: "rgba(255,255,255,0.92)",
-    marginTop: -10,
-    marginBottom: 20,
+    marginTop: 0,
+    marginBottom: 6,
     textAlign: "center" as const,
+  },
+  finishedDistanceRow: {
+    flexDirection: "row" as const,
+    alignItems: "flex-end" as const,
+    gap: 8,
+    marginTop: 6,
+    marginBottom: 16,
+  },
+  finishedDistanceValue: {
+    color: colors.white,
+    fontSize: 54,
+    lineHeight: 58,
+    fontWeight: "900" as const,
+  },
+  finishedDistanceUnit: {
+    color: "rgba(255,255,255,0.86)",
+    fontSize: 17,
+    fontWeight: "900" as const,
+    marginBottom: 8,
   },
   summaryRow: {
     flexDirection: "row",

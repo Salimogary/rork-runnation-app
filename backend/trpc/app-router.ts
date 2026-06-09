@@ -84,7 +84,11 @@ import reviewClubDeletionRoute from "./routes/admin/review-club-deletion/route";
 import getMilestonesRoute from "./routes/admin/get-milestones/route";
 import upsertMilestoneRoute from "./routes/admin/upsert-milestone/route";
 import getClubStatusReportRoute from "./routes/admin/get-club-status-report/route";
+import getClubActivityReportRoute from "./routes/admin/get-club-activity-report/route";
 import getEventResultsReportRoute from "./routes/admin/get-event-results-report/route";
+import getRegistrationGrowthReportRoute from "./routes/admin/get-registration-growth-report/route";
+import getArchivedAccountsRoute from "./routes/admin/get-archived-accounts/route";
+import deleteArchivedAccountRoute from "./routes/admin/delete-archived-account/route";
 import getMyTeamRoute from "./routes/admin/get-my-team/route";
 import createMagazineNewsArticleRoute from "./routes/admin/create-magazine-news-article/route";
 import updateMagazineEntryRoute from "./routes/admin/update-magazine-entry/route";
@@ -232,7 +236,11 @@ export const appRouter = createTRPCRouter({
     getMilestones: getMilestonesRoute,
     upsertMilestone: upsertMilestoneRoute,
     getClubStatusReport: getClubStatusReportRoute,
+    getClubActivityReport: getClubActivityReportRoute,
     getEventResultsReport: getEventResultsReportRoute,
+    getRegistrationGrowthReport: getRegistrationGrowthReportRoute,
+    getArchivedAccounts: getArchivedAccountsRoute,
+    deleteArchivedAccount: deleteArchivedAccountRoute,
     getMyTeam: getMyTeamRoute,
     createMagazineNewsArticle: createMagazineNewsArticleRoute,
     updateMagazineEntry: updateMagazineEntryRoute,

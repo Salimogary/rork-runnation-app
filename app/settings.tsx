@@ -1,5 +1,5 @@
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, TextInput, ActivityIndicator, Share, useWindowDimensions } from "react-native";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIcon, MessageSquare, Paperclip, EyeOff, Eye, Lock, Trash2, AlertTriangle, Star, Share2, Download, Crown, HelpCircle, Phone, Globe, Volume2, VolumeX, Info, Handshake, Check, HeartPulse, Watch } from "lucide-react-native";
 import { Linking } from "react-native";
@@ -250,9 +250,16 @@ export default function SettingsScreen() {
     undefined,
     { enabled: showFaqModal }
   );
-  const { data: appLinks } = trpc.support.getAppLinks.useQuery(undefined, {
-    staleTime: 5 * 60 * 1000,
+  const { data: appLinks, refetch: refetchAppLinks } = trpc.support.getAppLinks.useQuery(undefined, {
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnReconnect: true,
   });
+  useFocusEffect(
+    useCallback(() => {
+      void refetchAppLinks();
+    }, [refetchAppLinks])
+  );
   const displayedFaqEntries = useMemo(() => {
     const rows = Array.isArray(faqEntries) ? faqEntries : [];
     const existingQuestions = new Set(
@@ -756,14 +763,12 @@ export default function SettingsScreen() {
     let androidLink = APP_DOWNLOAD_LINK;
     let iosLink = APP_STORE_URL;
 
-    if (!androidLink && !iosLink) {
-      try {
-        const latestLinks = await getServerClient().support.getAppLinks.query();
-        androidLink = latestLinks.androidApkUrl || "";
-        iosLink = latestLinks.iosAppUrl || "";
-      } catch (error) {
-        console.warn("[Share App] Could not refresh app links:", error);
-      }
+    try {
+      const latestLinks = await getServerClient().support.getAppLinks.query();
+      androidLink = latestLinks.androidApkUrl || androidLink;
+      iosLink = latestLinks.iosAppUrl || iosLink;
+    } catch (error) {
+      console.warn("[Share App] Could not refresh app links:", error);
     }
 
     const link = androidLink || iosLink;

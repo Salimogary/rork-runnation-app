@@ -926,6 +926,12 @@ export default function AdminScreen() {
   const [auditStartDate, setAuditStartDate] = useState<string>(getDefaultAuditStartDate());
   const [auditEndDate, setAuditEndDate] = useState<string>(toDateInputValue(new Date()));
   const [auditUserType, setAuditUserType] = useState<AuditLogUserType>("all");
+  const [registrationReportStartDate, setRegistrationReportStartDate] = useState<string>(getDefaultAuditStartDate());
+  const [registrationReportEndDate, setRegistrationReportEndDate] = useState<string>(toDateInputValue(new Date()));
+  const [clubActivityStartDate, setClubActivityStartDate] = useState<string>(getDefaultAuditStartDate());
+  const [clubActivityEndDate, setClubActivityEndDate] = useState<string>(toDateInputValue(new Date()));
+  const [selectedActivityReportClubId, setSelectedActivityReportClubId] = useState<string>("");
+  const [isExportingClubActivity, setIsExportingClubActivity] = useState(false);
   const [isDownloadingAuditLog, setIsDownloadingAuditLog] = useState<boolean>(false);
   const [adminTermsAcceptedChecked, setAdminTermsAcceptedChecked] = useState<boolean>(false);
   const [showRoleModal, setShowRoleModal] = useState<boolean>(false);
@@ -1032,7 +1038,7 @@ export default function AdminScreen() {
     isClubCoordinator ||
     isSpecialClubCoordinator ||
     isEventOrganizer;
-  const protectedTabs: AdminTab[] = ["orders", "events", "enrollments", "payments", "whatsapp", "clubAdmin", "clubRequests", "activityUploads", "externalActivities", "moderation", "adminTerms", "roles", "dataHealth", "auditLog", "milestones", "reports", "myTeam", "myArticles"];
+  const protectedTabs: AdminTab[] = ["orders", "events", "enrollments", "payments", "whatsapp", "clubAdmin", "clubRequests", "activityUploads", "externalActivities", "moderation", "adminTerms", "roles", "dataHealth", "auditLog", "milestones", "reports", "myTeam", "myArticles", "archive"];
 
   const allowedTabs = useMemo<AdminTab[]>(() => {
     if (isSuperAdmin) {
@@ -1042,7 +1048,7 @@ export default function AdminScreen() {
       return ["orders", "stock", "events", "enrollments", "payments", "whatsapp", "clubAdmin", "clubRequests", "activityUploads", "externalActivities", "magazine", "reports", "adminTerms", "resign"];
     }
     if (isCountryCoordinator) {
-      return ["orders", "stock", "approvals", "events", "enrollments", "payments", "whatsapp", "clubAdmin", "clubRequests", "activityUploads", "externalActivities", "magazine", "reports", "myTeam", "adminTerms", "resign"];
+      return ["orders", "stock", "approvals", "events", "enrollments", "payments", "whatsapp", "clubAdmin", "clubRequests", "activityUploads", "externalActivities", "magazine", "reports", "myTeam", "adminTerms", "archive", "resign"];
     }
     if (isClubCoordinator) {
       if (needsClubProfileSetup) {
@@ -1231,6 +1237,46 @@ export default function AdminScreen() {
     }
   );
 
+  const {
+    data: registrationGrowthReport,
+    isLoading: registrationGrowthReportLoading,
+    error: registrationGrowthReportError,
+    refetch: refetchRegistrationGrowthReport,
+  } = trpc.admin.getRegistrationGrowthReport.useQuery(
+    {
+      startDate: registrationReportStartDate,
+      endDate: registrationReportEndDate,
+    },
+    {
+      enabled:
+        canUseProtectedAdminRoutes &&
+        activeTab === "reports" &&
+        (isSuperAdmin || isCountryCoordinator),
+      refetchOnMount: true,
+    }
+  );
+
+  const {
+    data: clubActivityReport,
+    isLoading: clubActivityReportLoading,
+    error: clubActivityReportError,
+    refetch: refetchClubActivityReport,
+  } = trpc.admin.getClubActivityReport.useQuery(
+    {
+      clubId: selectedActivityReportClubId,
+      startDate: clubActivityStartDate,
+      endDate: clubActivityEndDate,
+    },
+    {
+      enabled:
+        canUseProtectedAdminRoutes &&
+        activeTab === "reports" &&
+        !!selectedActivityReportClubId &&
+        (isSuperAdmin || isCountryCoordinator || isClubCoordinator || isSpecialClubCoordinator),
+      refetchOnMount: true,
+    }
+  );
+
   const { data: activityUploads, isLoading: activityUploadsLoading, error: activityUploadsError, refetch: refetchActivityUploads } = trpc.admin.getActivityUploads.useQuery(
     undefined,
     { 
@@ -1272,145 +1318,31 @@ export default function AdminScreen() {
     country?: string | null;
   }
 
-  interface InactiveUser {
-    registration_id: string;
-    first_name: string | null;
-    other_names: string | null;
-    created_at: string;
-    subscription: number | null;
-    lastActivityDate: string | null;
-    activityCount: number;
-  }
-
-  const { data: inactiveUsers = [], isLoading: archiveLoading, refetch: refetchArchive } = useQuery<InactiveUser[]>({
-    queryKey: ['adminArchiveCandidates'],
-    queryFn: async () => {
-      console.log('[Archive] Fetching inactive expired users...');
-      const cutoffDate180 = new Date();
-      cutoffDate180.setDate(cutoffDate180.getDate() - 180);
-      const cutoff180Str = cutoffDate180.toISOString().split('T')[0];
-
-      const { data: expiredUsers, error: regError } = await supabase
-        .from('registrations')
-        .select('registration_id, first_name, other_names, created_at, subscription')
-        .eq('subscription', 2)
-        .lt('created_at', cutoff180Str);
-
-      if (regError) {
-        console.error('[Archive] Error fetching expired registrations:', JSON.stringify(regError, null, 2));
-        throw new Error(regError.message || JSON.stringify(regError));
-      }
-
-      if (!expiredUsers || expiredUsers.length === 0) {
-        console.log('[Archive] No expired users found older than 180 days');
-        return [];
-      }
-
-      console.log('[Archive] Found', expiredUsers.length, 'expired registrations older than 180 days');
-
-      const regIds = expiredUsers.map((u: any) => u.registration_id);
-
-      const { data: activities, error: actError } = await supabase
-        .from('activities')
-        .select('registration_id, activity_date')
-        .in('registration_id', regIds)
-        .order('activity_date', { ascending: false });
-
-      if (actError) {
-        console.error('[Archive] Error fetching activities:', JSON.stringify(actError, null, 2));
-        throw new Error(actError.message || JSON.stringify(actError));
-      }
-
-      const activityMap = new Map<string, { lastDate: string; count: number }>();
-      (activities || []).forEach((a: any) => {
-        const existing = activityMap.get(a.registration_id);
-        if (!existing) {
-          activityMap.set(a.registration_id, { lastDate: a.activity_date, count: 1 });
-        } else {
-          existing.count++;
-          if (a.activity_date > existing.lastDate) {
-            existing.lastDate = a.activity_date;
-          }
-        }
-      });
-
-      const result: InactiveUser[] = [];
-      for (const user of expiredUsers) {
-        const actInfo = activityMap.get((user as any).registration_id);
-        const lastDate = actInfo?.lastDate || null;
-        const hasRecentActivity = lastDate && lastDate > cutoff180Str;
-
-        if (!hasRecentActivity) {
-          result.push({
-            registration_id: (user as any).registration_id,
-            first_name: (user as any).first_name,
-            other_names: (user as any).other_names,
-            created_at: (user as any).created_at,
-            subscription: (user as any).subscription,
-            lastActivityDate: lastDate,
-            activityCount: actInfo?.count || 0,
-          });
-        }
-      }
-
-      console.log('[Archive] Found', result.length, 'users eligible for archiving');
-      return result;
-    },
-    enabled: isAuthenticated && activeTab === 'archive',
+  const {
+    data: inactiveUsers = [],
+    isLoading: archiveLoading,
+    refetch: refetchArchive,
+  } = trpc.admin.getArchivedAccounts.useQuery(undefined, {
+    enabled: isAuthenticated && activeTab === "archive",
   });
+  const deleteArchivedAccountMutation = trpc.admin.deleteArchivedAccount.useMutation();
 
   const archiveMutation = useMutation({
     mutationFn: async (registrationIds: string[]) => {
-      console.log('[Archive] Archiving activities for', registrationIds.length, 'users');
-
       for (const regId of registrationIds) {
-        const { data: userActivities, error: fetchErr } = await supabase
-          .from('activities')
-          .select('*')
-          .eq('registration_id', regId);
-
-        if (fetchErr) {
-          console.error('[Archive] Error fetching activities for', regId, fetchErr);
-          throw new Error(`Failed to fetch activities for ${regId}: ${fetchErr.message}`);
-        }
-
-        if (userActivities && userActivities.length > 0) {
-          const { error: insertErr } = await supabase
-            .from('activities_archive')
-            .insert(userActivities);
-
-          if (insertErr) {
-            console.error('[Archive] Error inserting into archive for', regId, insertErr);
-            throw new Error(`Failed to archive activities for ${regId}: ${insertErr.message}`);
-          }
-
-          const { error: deleteErr } = await supabase
-            .from('activities')
-            .delete()
-            .eq('registration_id', regId);
-
-          if (deleteErr) {
-            console.error('[Archive] Error deleting activities for', regId, deleteErr);
-            throw new Error(`Failed to delete archived activities for ${regId}: ${deleteErr.message}`);
-          }
-
-          console.log('[Archive] Archived', userActivities.length, 'activities for', regId);
-        } else {
-          console.log('[Archive] No activities to archive for', regId);
-        }
+        await deleteArchivedAccountMutation.mutateAsync({ registrationId: regId });
       }
-
       return registrationIds;
     },
-    onSuccess: (archivedIds) => {
-      void queryClient.invalidateQueries({ queryKey: ['adminArchiveCandidates'] });
+    onSuccess: (deletedIds) => {
+      void refetchArchive();
       setSelectedArchiveIds([]);
       setArchiveConfirmVisible(false);
-      Alert.alert('Success', `Archived activities for ${archivedIds.length} user(s) successfully.`);
+      Alert.alert('Accounts Deleted', `${deletedIds.length} archived account(s) were permanently deleted.`);
     },
     onError: (error: any) => {
-      console.error('[Archive] Archive mutation error:', error);
-      Alert.alert('Error', error.message || 'Failed to archive activities');
+      console.error('[Archive] Delete mutation error:', error);
+      Alert.alert('Error', error.message || 'Failed to delete archived accounts');
     },
   });
 
@@ -1424,7 +1356,7 @@ export default function AdminScreen() {
     if (selectedArchiveIds.length === inactiveUsers.length) {
       setSelectedArchiveIds([]);
     } else {
-      setSelectedArchiveIds(inactiveUsers.map(u => u.registration_id));
+      setSelectedArchiveIds(inactiveUsers.map(u => u.registrationId));
     }
   };
 
@@ -2495,6 +2427,14 @@ export default function AdminScreen() {
       setSelectedReportEventId(completedReportEvents[0].event_id || completedReportEvents[0].eventId || "");
     }
   }, [activeTab, completedReportEvents, selectedReportEventId]);
+
+  useEffect(() => {
+    if (activeTab !== "reports") return;
+    const clubs = clubStatusReport?.clubs ?? [];
+    if (!selectedActivityReportClubId && clubs.length > 0) {
+      setSelectedActivityReportClubId(clubs[0].clubId);
+    }
+  }, [activeTab, clubStatusReport?.clubs, selectedActivityReportClubId]);
 
   useEffect(() => {
     if (mustAcceptAdminTerms) {
@@ -4284,6 +4224,7 @@ const getStatusLabel = (status: string) => {
         "magazine",
         "reports",
         "myTeam",
+        "archive",
         "adminTerms",
         "resign",
       ],
@@ -4394,6 +4335,63 @@ const getStatusLabel = (status: string) => {
       return "administration";
     }
     return "operations";
+  };
+
+  const handleExportClubActivityReport = async () => {
+    const rows = (clubActivityReport?.rows ?? []) as any[];
+    if (!selectedActivityReportClubId) {
+      Alert.alert("Select Club", "Choose a club before downloading activity.");
+      return;
+    }
+    if (rows.length === 0) {
+      Alert.alert("No Data", "There is no club activity in the selected date range.");
+      return;
+    }
+
+    setIsExportingClubActivity(true);
+    try {
+      const headers = [
+        "Activity date",
+        "Member",
+        "Sex",
+        "Country",
+        "Town",
+        "Activity type",
+        "Distance km",
+        "Duration minutes",
+        "Pace min/km",
+        "Start time",
+        "End time",
+        "Paused seconds",
+      ];
+      const csvRows = rows.map((row) => [
+        String(row.activityDate || "").slice(0, 10),
+        row.memberName,
+        row.sex,
+        row.country,
+        row.town,
+        row.exerciseType,
+        Number(row.distanceKm || 0).toFixed(2),
+        Number(row.durationMinutes || 0).toFixed(2),
+        Number(row.paceMinPerKm || 0).toFixed(2),
+        row.startTime,
+        row.endTime,
+        row.pauseSeconds,
+      ]);
+      const csvContent = [headers, ...csvRows].map((row) => row.map(csvEscape).join(",")).join("\n");
+      const safeClubName = String(clubActivityReport?.clubName || "club")
+        .replace(/[^a-z0-9]+/gi, "_")
+        .toLowerCase();
+      await exportCsvFile(
+        `${safeClubName}_activity_${clubActivityStartDate}_to_${clubActivityEndDate}.csv`,
+        csvContent,
+        "Export Club Activity CSV"
+      );
+    } catch (error: any) {
+      Alert.alert("Export Error", error.message || "Could not export club activity.");
+    } finally {
+      setIsExportingClubActivity(false);
+    }
   };
 
   const groupedMenuSections = useMemo(() => {
@@ -5303,6 +5301,206 @@ const getStatusLabel = (status: string) => {
         renderResignContent()
       ) : activeTab === "reports" ? (
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          {isSuperAdmin || isCountryCoordinator ? (
+            <View style={styles.auditFilterCard}>
+              <View style={styles.auditFilterHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.auditFilterTitle}>New User Registrations</Text>
+                  <Text style={styles.auditFilterSubtitle}>
+                    Daily onboarding totals by country. Country Coordinators only see registrations from their assigned country.
+                  </Text>
+                </View>
+                <View style={styles.healthSeverityBadge}>
+                  <Text style={styles.healthSeverityText}>
+                    {registrationGrowthReport?.totalRegistrations ?? 0} total
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.auditDateRow}>
+                <View style={styles.auditDateInputWrap}>
+                  <Text style={styles.label}>Start Date</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={registrationReportStartDate}
+                    onChangeText={setRegistrationReportStartDate}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor="#9ca3af"
+                  />
+                </View>
+                <View style={styles.auditDateInputWrap}>
+                  <Text style={styles.label}>End Date</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={registrationReportEndDate}
+                    onChangeText={setRegistrationReportEndDate}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor="#9ca3af"
+                  />
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.retryButton, registrationGrowthReportLoading && styles.disabledButton]}
+                onPress={() => refetchRegistrationGrowthReport()}
+                disabled={registrationGrowthReportLoading}
+              >
+                <Text style={styles.retryButtonText}>
+                  {registrationGrowthReportLoading ? "Loading..." : "Apply Dates"}
+                </Text>
+              </TouchableOpacity>
+
+              {registrationGrowthReportError ? (
+                <View style={styles.emptyContainer}>
+                  <Text style={styles.errorText}>Could not load registration totals</Text>
+                  <Text style={styles.errorSubtext}>
+                    {registrationGrowthReportError.message || "Try refreshing the report."}
+                  </Text>
+                </View>
+              ) : registrationGrowthReportLoading ? (
+                <View style={styles.emptyContainer}>
+                  <Text style={styles.emptyText}>Loading registrations...</Text>
+                </View>
+              ) : !(registrationGrowthReport?.rows ?? []).length ? (
+                <View style={styles.emptyContainer}>
+                  <Text style={styles.emptyText}>No new registrations</Text>
+                  <Text style={styles.emptySubtext}>Try a different date range.</Text>
+                </View>
+              ) : (
+                <View style={styles.adminDataTable}>
+                  <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                    <View style={[styles.adminDataCell, { flex: 1.1 }]}>
+                      <Text style={styles.adminDataHeaderText}>Date</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { flex: 1.7 }]}>
+                      <Text style={styles.adminDataHeaderText}>Country</Text>
+                    </View>
+                    <View style={[styles.adminDataCell, { flex: 1 }]}>
+                      <Text style={styles.adminDataHeaderText}>New Users</Text>
+                    </View>
+                  </View>
+                  {(registrationGrowthReport?.rows ?? []).map((row) => (
+                    <View key={`${row.date}-${row.countryCode}`} style={styles.adminDataRow}>
+                      <View style={[styles.adminDataCell, { flex: 1.1 }]}>
+                        <Text style={styles.adminDataCellText}>{formatDate(row.date)}</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { flex: 1.7 }]}>
+                        <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>
+                          {getCountryFlag(row.countryCode)} {row.countryName}
+                        </Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { flex: 1 }]}>
+                        <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]}>{row.count}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          ) : null}
+
+          {isSuperAdmin || isCountryCoordinator || isClubCoordinator || isSpecialClubCoordinator ? (
+            <View style={styles.auditFilterCard}>
+              <View style={styles.auditFilterHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.auditFilterTitle}>Club Activity Download</Text>
+                  <Text style={styles.auditFilterSubtitle}>
+                    Export each recorded activity for a selected club and date range. Club Coordinators only see their own club.
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.downloadButton,
+                    (!selectedActivityReportClubId || clubActivityReportLoading || isExportingClubActivity) &&
+                      styles.disabledButton,
+                  ]}
+                  onPress={handleExportClubActivityReport}
+                  disabled={!selectedActivityReportClubId || clubActivityReportLoading || isExportingClubActivity}
+                >
+                  <Download size={18} color="#fff" />
+                  <Text style={styles.downloadButtonText}>
+                    {isExportingClubActivity ? "Preparing..." : "Download CSV"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {(clubStatusReport?.clubs ?? []).length > 0 ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.eventFilterScroll}>
+                  {(clubStatusReport?.clubs ?? []).map((club) => (
+                    <TouchableOpacity
+                      key={club.clubId}
+                      style={[
+                        styles.eventFilterChip,
+                        selectedActivityReportClubId === club.clubId && styles.eventFilterChipActive,
+                      ]}
+                      onPress={() => setSelectedActivityReportClubId(club.clubId)}
+                    >
+                      <Text
+                        style={[
+                          styles.eventFilterChipText,
+                          selectedActivityReportClubId === club.clubId && styles.eventFilterChipTextActive,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {club.clubName}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              ) : clubStatusReportLoading ? (
+                <Text style={styles.auditFilterSubtitle}>Loading clubs...</Text>
+              ) : (
+                <Text style={styles.auditFilterSubtitle}>No clubs are available in your admin scope.</Text>
+              )}
+
+              <View style={styles.auditDateRow}>
+                <View style={styles.auditDateInputWrap}>
+                  <Text style={styles.label}>Start Date</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={clubActivityStartDate}
+                    onChangeText={setClubActivityStartDate}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor="#9ca3af"
+                  />
+                </View>
+                <View style={styles.auditDateInputWrap}>
+                  <Text style={styles.label}>End Date</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={clubActivityEndDate}
+                    onChangeText={setClubActivityEndDate}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor="#9ca3af"
+                  />
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.retryButton, clubActivityReportLoading && styles.disabledButton]}
+                onPress={() => refetchClubActivityReport()}
+                disabled={!selectedActivityReportClubId || clubActivityReportLoading}
+              >
+                <Text style={styles.retryButtonText}>
+                  {clubActivityReportLoading ? "Loading..." : "Apply Dates"}
+                </Text>
+              </TouchableOpacity>
+
+              {clubActivityReportError ? (
+                <View style={styles.emptyContainer}>
+                  <Text style={styles.errorText}>Could not load club activity</Text>
+                  <Text style={styles.errorSubtext}>
+                    {clubActivityReportError.message || "Check the club and date range, then try again."}
+                  </Text>
+                </View>
+              ) : selectedActivityReportClubId && !clubActivityReportLoading ? (
+                <Text style={styles.auditFilterSubtitle}>
+                  {(clubActivityReport?.rows ?? []).length} activities ready to download
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+
           {(isClubCoordinator || isSpecialClubCoordinator || isSuperAdmin || isCountryAdmin || isCountryCoordinator) ? (
             <View style={styles.auditFilterCard}>
               <View style={styles.auditFilterHeader}>
@@ -7821,7 +8019,7 @@ const getStatusLabel = (status: string) => {
             <View style={{ flex: 1 }}>
               <Text style={styles.archiveHeaderTitle}>Inactive Users</Text>
               <Text style={styles.archiveHeaderSubtitle}>
-                Subscription expired 90+ days &bull; No activity 180+ days
+                Trial expired and not renewed after 15 days
               </Text>
             </View>
             {inactiveUsers.length > 0 && (
@@ -7846,7 +8044,7 @@ const getStatusLabel = (status: string) => {
                 <Archive size={64} color="#d1d5db" />
                 <Text style={styles.emptyText}>No users eligible for archiving</Text>
                 <Text style={styles.emptySubtext}>
-                  No expired users with 180+ days of inactivity found
+                  No archived expired-trial accounts were found
                 </Text>
                 <TouchableOpacity style={styles.retryButton} onPress={() => refetchArchive()}>
                   <Text style={styles.retryButtonText}>Refresh</Text>
@@ -7863,12 +8061,12 @@ const getStatusLabel = (status: string) => {
                 </View>
 
                 {inactiveUsers.map((user) => {
-                  const isSelected = selectedArchiveIds.includes(user.registration_id);
+                  const isSelected = selectedArchiveIds.includes(user.registrationId);
                   return (
                     <TouchableOpacity
-                      key={user.registration_id}
+                      key={user.registrationId}
                       style={[styles.archiveUserCard, isSelected && styles.archiveUserCardSelected]}
-                      onPress={() => toggleArchiveSelection(user.registration_id)}
+                      onPress={() => toggleArchiveSelection(user.registrationId)}
                       activeOpacity={0.7}
                     >
                       <View style={[styles.archiveCheckbox, isSelected && styles.archiveCheckboxSelected]}>
@@ -7876,18 +8074,22 @@ const getStatusLabel = (status: string) => {
                       </View>
                       <View style={{ flex: 1, gap: 6 }}>
                         <Text style={styles.archiveUserName}>
-                          {`${user.first_name || ''} ${user.other_names || ''}`.trim() || 'Unknown'}
+                          {user.displayName || user.username || 'Unknown'}
                         </Text>
-                        <Text style={styles.archiveRegId}>{user.registration_id}</Text>
+                        <Text style={styles.archiveRegId}>
+                          {user.registrationId}{user.country ? ` | ${user.country}` : ""}
+                        </Text>
                         <View style={styles.archiveMetaRow}>
                           <View style={styles.archiveMetaItem}>
-                            <Text style={styles.archiveMetaLabel}>Registered</Text>
-                            <Text style={styles.archiveMetaValue}>{formatDate(user.created_at)}</Text>
+                            <Text style={styles.archiveMetaLabel}>Trial ended</Text>
+                            <Text style={styles.archiveMetaValue}>
+                              {user.trialEndedAt ? formatDate(user.trialEndedAt) : "-"}
+                            </Text>
                           </View>
                           <View style={styles.archiveMetaItem}>
-                            <Text style={styles.archiveMetaLabel}>Last Activity</Text>
+                            <Text style={styles.archiveMetaLabel}>Archived</Text>
                             <Text style={styles.archiveMetaValue}>
-                              {user.lastActivityDate ? formatDate(user.lastActivityDate) : 'Never'}
+                              {formatDate(user.archivedAt)}
                             </Text>
                           </View>
                           <View style={styles.archiveMetaItem}>
@@ -7913,8 +8115,8 @@ const getStatusLabel = (status: string) => {
                 <Trash2 size={20} color="#fff" />
                 <Text style={styles.archiveActionBtnText}>
                   {archiveMutation.isPending
-                    ? 'Archiving...'
-                    : `Archive ${selectedArchiveIds.length} User${selectedArchiveIds.length !== 1 ? 's' : ''}`}
+                    ? 'Deleting...'
+                    : `Delete ${selectedArchiveIds.length} Account${selectedArchiveIds.length !== 1 ? 's' : ''}`}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -8458,7 +8660,7 @@ const getStatusLabel = (status: string) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Confirm Archive</Text>
+              <Text style={styles.modalTitle}>Confirm Account Deletion</Text>
               <TouchableOpacity onPress={() => setArchiveConfirmVisible(false)}>
                 <X size={24} color="#6b7280" />
               </TouchableOpacity>
@@ -8467,10 +8669,10 @@ const getStatusLabel = (status: string) => {
             <View style={styles.archiveConfirmBody}>
               <AlertTriangle size={40} color="#f59e0b" />
               <Text style={styles.archiveConfirmText}>
-                This will move all activities for {selectedArchiveIds.length} user{selectedArchiveIds.length !== 1 ? 's' : ''} from the live activities table to activities_archive.
+                Permanently delete {selectedArchiveIds.length} archived account{selectedArchiveIds.length !== 1 ? 's' : ''} and its retained data?
               </Text>
               <Text style={styles.archiveConfirmWarning}>
-                This action cannot be easily undone.
+                This cannot be undone. Only accounts already moved out of live tables can be deleted here.
               </Text>
             </View>
 
@@ -8487,7 +8689,7 @@ const getStatusLabel = (status: string) => {
                 disabled={archiveMutation.isPending}
               >
                 <Text style={styles.confirmButtonText}>
-                  {archiveMutation.isPending ? 'Archiving...' : 'Confirm Archive'}
+                  {archiveMutation.isPending ? 'Deleting...' : 'Confirm Delete'}
                 </Text>
               </TouchableOpacity>
             </View>
