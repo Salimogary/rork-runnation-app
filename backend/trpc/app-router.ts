@@ -143,6 +143,7 @@ import getFaqEntriesRoute from "./routes/support/get-faq-entries/route";
 import getAboutStatsRoute from "./routes/support/get-about-stats/route";
 import getAppLinksRoute from "./routes/support/get-app-links/route";
 import submitDonationRoute from "./routes/support/submit-donation/route";
+import submitCrashReportsRoute from "./routes/support/submit-crash-reports/route";
 import getServiceTeamRolesRoute from "./routes/service-team/get-service-roles/route";
 import requestServiceTeamRoleRoute from "./routes/service-team/request-role/route";
 import getFamilyMembersRoute from "./routes/family/get-family-members/route";
@@ -319,6 +320,7 @@ export const appRouter = createTRPCRouter({
     getAboutStats: getAboutStatsRoute,
     getAppLinks: getAppLinksRoute,
     submitDonation: submitDonationRoute,
+    submitCrashReports: submitCrashReportsRoute,
   }),
   serviceTeam: createTRPCRouter({
     getRoles: getServiceTeamRolesRoute,

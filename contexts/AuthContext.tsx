@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { clearPersistedQueryCache } from '@/lib/query-cache';
+import { setCrashReporterRegistrationId } from '@/utils/crashReporter';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
@@ -198,6 +199,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isRoleSessionLoading, setIsRoleSessionLoading] = useState(false);
   const [privateMode, setPrivateModeState] = useState(false);
   const [loginAttempts, setLoginAttempts] = useState<Record<string, { count: number; timestamp: number }>>({});
+
+  useEffect(() => {
+    setCrashReporterRegistrationId(user?.id ?? null);
+  }, [user?.id]);
 
   const cacheUser = useCallback(async (nextUser: UserData | null) => {
     try {

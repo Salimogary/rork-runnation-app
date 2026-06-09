@@ -52,7 +52,8 @@
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE",
         "USE_BIOMETRIC",
-        "USE_FINGERPRINT"
+        "USE_FINGERPRINT",
+        "REQUEST_INSTALL_PACKAGES"
       ]
     },
     "web": {

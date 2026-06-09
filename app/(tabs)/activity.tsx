@@ -90,20 +90,11 @@ interface FamilyYearGroup {
   months: FamilyMonthGroup[];
 }
 
-interface ClubDayGroup {
-  key: string;
-  label: string;
-  rows: FamilyLeaderboardRow[];
-}
-
-interface ClubWeekGroup extends FamilyWeekGroup {
-  days?: ClubDayGroup[];
-}
-
 interface ClubMonthGroup {
   key: string;
   label: string;
   weeks: ClubWeekGroup[];
+  monthlyRows?: FamilyLeaderboardRow[];
 }
 
 interface ClubLeaderboardYearGroup {
@@ -111,6 +102,8 @@ interface ClubLeaderboardYearGroup {
   months: ClubMonthGroup[];
   annualRows?: FamilyLeaderboardRow[];
 }
+
+type ClubWeekGroup = FamilyWeekGroup;
 
 interface RegisteredEvent {
   eventId: string;
@@ -466,7 +459,7 @@ export default function ActivityScreen() {
   const { colors: themeColors } = useTheme();
   const { isSubscribed } = useSubscription();
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>("family");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("community");
   const [communityLeaderboardView, setCommunityLeaderboardView] = useState<CommunityLeaderboardView>("activity_indv");
   const [showLeaderboardFilters, setShowLeaderboardFilters] = useState(false);
   const [showLeaderboardSearch, setShowLeaderboardSearch] = useState(false);
@@ -1342,7 +1335,6 @@ export default function ActivityScreen() {
                 {
                   label: string;
                   stats: Map<string, { days: Set<string>; distance: number; time: number }>;
-                  dayStats: Map<string, Map<string, { distance: number; time: number }>>;
                 }
               >;
             }
@@ -1372,7 +1364,6 @@ export default function ActivityScreen() {
         const weekGroup = monthGroup.weeks.get(weekKey) || {
           label: `Week ${weekNumber}`,
           stats: new Map(),
-          dayStats: new Map(),
         };
         const stats = weekGroup.stats.get(registrationId) || {
           days: new Set<string>(),
@@ -1385,13 +1376,6 @@ export default function ActivityScreen() {
         stats.time += getActivityDurationMinutes(activity);
         weekGroup.stats.set(registrationId, stats);
 
-        const dayStats = weekGroup.dayStats.get(dateOnly) || new Map();
-        const runnerDayStats = dayStats.get(registrationId) || { distance: 0, time: 0 };
-        runnerDayStats.distance += Number(activity.distance_km || 0);
-        runnerDayStats.time += getActivityDurationMinutes(activity);
-        dayStats.set(registrationId, runnerDayStats);
-        weekGroup.dayStats.set(dateOnly, dayStats);
-
         monthGroup.weeks.set(weekKey, weekGroup);
         yearGroup.months.set(monthKey, monthGroup);
         years.set(year, yearGroup);
@@ -1399,7 +1383,6 @@ export default function ActivityScreen() {
 
       const now = new Date();
       const currentYear = String(now.getFullYear());
-      const currentMonthKey = `${currentYear}-${String(now.getMonth() + 1).padStart(2, "0")}`;
       const toRows = (
         stats: Map<string, { days?: Set<string>; distance: number; time: number }>,
         fixedDays?: number
@@ -1448,31 +1431,44 @@ export default function ActivityScreen() {
             year,
             months: Array.from(yearGroup.months.entries())
             .sort(([a], [b]) => b.localeCompare(a))
-            .map(([monthKey, monthGroup]) => ({
-              key: monthKey,
-              label: monthGroup.label,
-              weeks: Array.from(monthGroup.weeks.entries())
-                .sort(([a], [b]) => b.localeCompare(a))
-                .map(([weekKey, weekGroup]) => ({
-                  key: weekKey,
-                  label: weekGroup.label,
-                  rows: monthKey === currentMonthKey ? [] : toRows(weekGroup.stats),
-                  days:
-                    monthKey === currentMonthKey
-                      ? Array.from(weekGroup.dayStats.entries())
-                          .sort(([a], [b]) => b.localeCompare(a))
-                          .map(([dayKey, dayStats]) => ({
-                            key: dayKey,
-                            label: new Date(`${dayKey}T00:00:00`).toLocaleDateString("en-GB", {
-                              weekday: "short",
-                              day: "2-digit",
-                              month: "short",
-                            }),
-                            rows: toRows(dayStats, 1),
-                          }))
-                      : undefined,
-                })),
-            })),
+            .map(([monthKey, monthGroup]) => {
+              const monthNumber = Number(monthKey.slice(5, 7));
+              const monthAge = now.getMonth() + 1 - monthNumber;
+              if (monthAge >= 3) {
+                const monthlyStats = new Map<string, { days: Set<string>; distance: number; time: number }>();
+                monthGroup.weeks.forEach((weekGroup) => {
+                  weekGroup.stats.forEach((stats, registrationId) => {
+                    const total = monthlyStats.get(registrationId) || {
+                      days: new Set<string>(),
+                      distance: 0,
+                      time: 0,
+                    };
+                    stats.days.forEach((day) => total.days.add(day));
+                    total.distance += stats.distance;
+                    total.time += stats.time;
+                    monthlyStats.set(registrationId, total);
+                  });
+                });
+                return {
+                  key: monthKey,
+                  label: monthGroup.label,
+                  weeks: [],
+                  monthlyRows: toRows(monthlyStats),
+                };
+              }
+
+              return {
+                key: monthKey,
+                label: monthGroup.label,
+                weeks: Array.from(monthGroup.weeks.entries())
+                  .sort(([a], [b]) => b.localeCompare(a))
+                  .map(([weekKey, weekGroup]) => ({
+                    key: weekKey,
+                    label: weekGroup.label,
+                    rows: toRows(weekGroup.stats),
+                  })),
+              };
+            }),
           };
         });
     },
@@ -2619,19 +2615,19 @@ export default function ActivityScreen() {
             yearGroup.months.map((monthGroup) => (
               <View key={monthGroup.key} style={styles.familyMonthGroup}>
                 <Text style={styles.runsMonthTitle}>{monthGroup.label}</Text>
-                {monthGroup.weeks.map((weekGroup) => (
-                  <View key={weekGroup.key} style={styles.familyWeekGroup}>
-                    <Text style={styles.familyWeekTitle}>{weekGroup.label}</Text>
-                    {weekGroup.days?.length
-                      ? weekGroup.days.map((dayGroup) => (
-                          <View key={dayGroup.key} style={styles.clubDayGroup}>
-                            <Text style={styles.clubDayTitle}>{dayGroup.label}</Text>
-                            {renderClubRows(dayGroup.rows, dayGroup.key)}
-                          </View>
-                        ))
-                      : renderClubRows(weekGroup.rows, weekGroup.key)}
+                {monthGroup.monthlyRows ? (
+                  <View style={styles.familyWeekGroup}>
+                    <Text style={styles.familyWeekTitle}>Month total</Text>
+                    {renderClubRows(monthGroup.monthlyRows, `${monthGroup.key}-total`)}
                   </View>
-                ))}
+                ) : (
+                  monthGroup.weeks.map((weekGroup) => (
+                    <View key={weekGroup.key} style={styles.familyWeekGroup}>
+                      <Text style={styles.familyWeekTitle}>{weekGroup.label}</Text>
+                      {renderClubRows(weekGroup.rows, weekGroup.key)}
+                    </View>
+                  ))
+                )}
               </View>
             ))
           )}
@@ -3079,13 +3075,22 @@ export default function ActivityScreen() {
         <View style={styles.reportTabsRow}>
           <View style={styles.toggleContainer}>
             <TouchableOpacity
-              style={[styles.toggleButton, activeTab === "family" && styles.toggleButtonActive]}
-              onPress={() => setActiveTab("family")}
+              style={[styles.toggleButton, activeTab === "community" && styles.toggleButtonActive, !isSubscribed && styles.toggleButtonLocked]}
+              onPress={() => {
+                if (!isSubscribed) {
+                  Alert.alert('Subscription Expired', 'Renew your subscription to access Community.', [{ text: 'OK' }]);
+                  return;
+                }
+                setActiveTab("community");
+              }}
               activeOpacity={0.7}
             >
-              <Text style={[styles.toggleText, activeTab === "family" && styles.toggleTextActive]}>
-                Family
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Text style={[styles.toggleText, activeTab === "community" && styles.toggleTextActive, !isSubscribed && styles.toggleTextLocked]}>
+                  Community
+                </Text>
+                {!isSubscribed && <Lock size={12} color="#9CA3AF" />}
+              </View>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.toggleButton, activeTab === "club" && styles.toggleButtonActive, !isSubscribed && styles.toggleButtonLocked]}
@@ -3106,22 +3111,13 @@ export default function ActivityScreen() {
               </View>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.toggleButton, activeTab === "community" && styles.toggleButtonActive, !isSubscribed && styles.toggleButtonLocked]}
-              onPress={() => {
-                if (!isSubscribed) {
-                  Alert.alert('Subscription Expired', 'Renew your subscription to access Community.', [{ text: 'OK' }]);
-                  return;
-                }
-                setActiveTab("community");
-              }}
+              style={[styles.toggleButton, activeTab === "family" && styles.toggleButtonActive]}
+              onPress={() => setActiveTab("family")}
               activeOpacity={0.7}
             >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Text style={[styles.toggleText, activeTab === "community" && styles.toggleTextActive, !isSubscribed && styles.toggleTextLocked]}>
-                  Community
-                </Text>
-                {!isSubscribed && <Lock size={12} color="#9CA3AF" />}
-              </View>
+              <Text style={[styles.toggleText, activeTab === "family" && styles.toggleTextActive]}>
+                Family
+              </Text>
             </TouchableOpacity>
           </View>
 

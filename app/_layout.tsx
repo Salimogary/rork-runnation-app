@@ -13,6 +13,7 @@ import * as SplashScreen from "expo-splash-screen";
 import * as Linking from "expo-linking";
 import { LogBox, Platform, View, Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { initializeCrashReporter, recordCrash } from "@/utils/crashReporter";
 
 LogBox.ignoreLogs([
   "AuthApiError: Invalid Refresh Token",
@@ -245,8 +246,13 @@ class ErrorBoundary extends React.Component<
     return { hasError: true, message: error.message };
   }
 
-  componentDidCatch(error: Error) {
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error("[ErrorBoundary] Caught error:", error.message);
+    void recordCrash(error, {
+      fatal: true,
+      source: "react_error_boundary",
+      componentStack: info.componentStack,
+    });
   }
 
   render() {
@@ -263,6 +269,8 @@ export default function RootLayout() {
       console.log("[Layout] SplashScreen hide failed");
     });
   }, []);
+
+  useEffect(() => initializeCrashReporter(), []);
 
   useDeepLinkHandler();
 

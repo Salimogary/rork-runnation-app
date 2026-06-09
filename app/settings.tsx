@@ -25,6 +25,7 @@ import { WORLD_COUNTRIES } from "@/constants/countries";
 import { getActivityVoiceAssistantEnabled, setActivityVoiceAssistantEnabled as saveActivityVoiceAssistantEnabled } from "@/utils/activityVoice";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import * as IntentLauncher from "expo-intent-launcher";
 import Constants from "expo-constants";
 
 function normalizeSettingsCountryCode(country: string | null | undefined): string | null {
@@ -184,6 +185,7 @@ export default function SettingsScreen() {
   const [deletePin, setDeletePin] = useState('');
   const [deletePinError, setDeletePinError] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
   const [deleteStep, setDeleteStep] = useState<'confirm' | 'pin'>('confirm');
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [selectedRating, setSelectedRating] = useState<number>(0);
@@ -823,12 +825,42 @@ export default function SettingsScreen() {
       return;
     }
 
-    if (latestBuild > 0 && installedAndroidBuildNumber >= latestBuild) {
-      Alert.alert("App Up To Date", "You already have the latest RunNation test APK installed.");
-      return;
-    }
+    const installApk = async () => {
+      setIsInstallingUpdate(true);
+      try {
+        const buildLabel = latestBuild > 0 ? latestBuild : Date.now();
+        const destination = `${FileSystem.cacheDirectory}RunNation-build-${buildLabel}.apk`;
+        const download = await FileSystem.downloadAsync(androidLink, destination);
+        const contentUri = await FileSystem.getContentUriAsync(download.uri);
+        await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
+          data: contentUri,
+          type: "application/vnd.android.package-archive",
+          flags: 268435457,
+        });
+      } catch (error) {
+        console.warn("[App Update] Installer launch failed, opening APK link:", error);
+        try {
+          await Linking.openURL(androidLink);
+        } catch {
+          Alert.alert("Update Failed", "The APK could not be downloaded. Please try again when connected.");
+        }
+      } finally {
+        setIsInstallingUpdate(false);
+      }
+    };
 
-    await Linking.openURL(androidLink);
+    const isCurrentBuild =
+      latestBuild > 0 && installedAndroidBuildNumber >= latestBuild;
+    Alert.alert(
+      isCurrentBuild ? "Reinstall RunNation" : "Install RunNation Update",
+      isCurrentBuild
+        ? "This is the latest advertised build. Download and reinstall it?"
+        : `Download${latestBuild > 0 ? ` build ${latestBuild}` : " the latest build"} and open the Android installer?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Install", onPress: () => void installApk() },
+      ]
+    );
   };
 
   const getRatingLabel = (rating: number): string => {
@@ -1247,24 +1279,33 @@ export default function SettingsScreen() {
             styles.settingItem,
             {
               backgroundColor: themeColors.cardBackground,
-              opacity: Platform.OS === "ios" || androidUpdateAvailable ? 1 : 0.65,
+              opacity: isInstallingUpdate ? 0.65 : 1,
             },
           ]}
           onPress={handleUpdateApp}
+          disabled={isInstallingUpdate}
         >
           <View style={styles.settingLeft}>
             <View style={[styles.iconContainer, { backgroundColor: androidUpdateAvailable ? '#ECFDF5' : isDark ? '#1F2937' : '#F3F4F6' }]}>
-              <Download size={22} color={androidUpdateAvailable ? "#10b981" : themeColors.iconMuted} />
+              {isInstallingUpdate ? (
+                <ActivityIndicator size="small" color={themeColors.primary} />
+              ) : (
+                <Download size={22} color={androidUpdateAvailable ? "#10b981" : themeColors.iconMuted} />
+              )}
             </View>
             <View style={styles.settingTextContainer}>
               <Text style={[styles.settingTitle, { color: themeColors.text }]}>App Update</Text>
               <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>
                 {Platform.OS === "ios"
                   ? "iOS TestFlight coming soon"
+                  : isInstallingUpdate
+                    ? "Downloading latest APK..."
                   : androidUpdateAvailable
                     ? `New APK available: build ${latestAndroidBuildNumber}`
-                    : latestAndroidBuildNumber > 0
-                      ? `Current build ${installedAndroidBuildNumber} is up to date`
+                    : APP_DOWNLOAD_LINK
+                      ? latestAndroidBuildNumber > 0
+                        ? `Install RunNation APK build ${latestAndroidBuildNumber}`
+                        : "Install latest RunNation APK"
                       : "Checking latest APK"}
               </Text>
             </View>
