@@ -3998,6 +3998,7 @@ const getStatusLabel = (status: string) => {
         "Subscription",
         "RunNation tier",
         "Runs (last 30 days)",
+        "Declaration",
         "Has service role",
         "Other club membership",
       ];
@@ -4010,6 +4011,7 @@ const getStatusLabel = (status: string) => {
         row.subscription,
         row.runNationTier,
         row.runsLast30Days,
+        row.declaration,
         row.hasServiceRole,
         row.otherClubMembership,
       ]);
@@ -5603,6 +5605,7 @@ const getStatusLabel = (status: string) => {
                           <View style={[styles.adminDataCell, { width: 110 }]}><Text style={styles.adminDataHeaderText}>Subscription</Text></View>
                           <View style={[styles.adminDataCell, { width: 115 }]}><Text style={styles.adminDataHeaderText}>RunNation tier</Text></View>
                           <View style={[styles.adminDataCell, { width: 100 }]}><Text style={styles.adminDataHeaderText}>Runs 30d</Text></View>
+                          <View style={[styles.adminDataCell, { width: 240 }]}><Text style={styles.adminDataHeaderText}>Declaration</Text></View>
                           <View style={[styles.adminDataCell, { width: 95 }]}><Text style={styles.adminDataHeaderText}>Service role</Text></View>
                           <View style={[styles.adminDataCell, { width: 115 }]}><Text style={styles.adminDataHeaderText}>Other club</Text></View>
                         </View>
@@ -5629,6 +5632,7 @@ const getStatusLabel = (status: string) => {
                             </View>
                             <View style={[styles.adminDataCell, { width: 115 }]}><Text style={styles.adminDataCellText}>{row.runNationTier || "-"}</Text></View>
                             <View style={[styles.adminDataCell, { width: 100 }]}><Text style={styles.adminDataCellText}>{row.runsLast30Days}</Text></View>
+                            <View style={[styles.adminDataCell, { width: 240 }]}><Text style={styles.adminDataCellText} numberOfLines={3}>{row.declaration || "-"}</Text></View>
                             <View style={[styles.adminDataCell, { width: 95 }]}><Text style={styles.adminDataCellText}>{row.hasServiceRole}</Text></View>
                             <View style={[styles.adminDataCell, { width: 115 }]}><Text style={styles.adminDataCellText}>{row.otherClubMembership}</Text></View>
                           </View>

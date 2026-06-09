@@ -427,11 +427,16 @@ export default function GoalsScreen() {
 
   const goalNameToKey = useCallback((goalName: string): string | null => {
     const name = goalName.toLowerCase().trim();
-    if (name.includes("just want to run") || name.includes("daily run")) return "dailyRun";
+    if (name.includes("just want to run") || name.includes("daily run") || name.includes("keep active")) return "dailyRun";
     if (name.includes("fitness") || name.includes("pace")) return "fitness";
     if (name.includes("weight")) return "weight";
     if (name.includes("health")) return "health";
-    if (name.includes("habit") || name.includes("discipline") || name.includes("training plan")) return "dailyRun";
+    if (
+      name.includes("habit") ||
+      name.includes("discipline") ||
+      name.includes("training plan") ||
+      name.includes("planned runs")
+    ) return "dailyRun";
     if (name.includes("medal")) return "medals";
     if (name.includes("community") || name.includes("compete")) return "community";
     if (name.includes("event")) return "events";
@@ -2401,7 +2406,7 @@ export default function GoalsScreen() {
       },
       dailyRun: {
         key: "dailyRun",
-        label: "I Just Want to Run",
+        label: "Keep active",
         isTracked: hasRunningGoal,
         icon: "calendar",
         overview: "This keeps the goal simple: decide how often you want to run, then check whether you are keeping that commitment.",
@@ -2550,10 +2555,10 @@ export default function GoalsScreen() {
       <TouchableOpacity style={[styles.setupGoalCard, styles.combinedHabitCard]} onPress={openEditHabit} activeOpacity={0.8}>
         <LinearGradient colors={["#0D9488", "#14B8A6"]} style={styles.setupGoalGradient}>
           <Flame size={32} color={colors.white} />
-          <Text style={styles.setupGoalTitle}>Add a Training Plan</Text>
-          <Text style={styles.setupGoalSubtext}>Commit to a training amount and track consistency under I Just Want to Run.</Text>
+          <Text style={styles.setupGoalTitle}>Add planned runs</Text>
+          <Text style={styles.setupGoalSubtext}>Declare a training amount and track consistency under Keep active.</Text>
           <View style={styles.setupGoalButton}>
-            <Text style={[styles.setupGoalButtonText, { color: "#0D9488" }]}>Set Training Plan</Text>
+            <Text style={[styles.setupGoalButtonText, { color: "#0D9488" }]}>Set planned runs</Text>
             <ChevronRight size={16} color="#0D9488" />
           </View>
         </LinearGradient>
@@ -2667,7 +2672,7 @@ export default function GoalsScreen() {
                 <TouchableOpacity style={styles.setGoalActionCard} onPress={openDailyRunGoalForm} activeOpacity={0.85}>
                   <Calendar size={22} color="#0EA5E9" />
                   <View style={styles.setGoalActionInfo}>
-                    <Text style={styles.setGoalActionTitle}>I Just Want to Run</Text>
+                    <Text style={styles.setGoalActionTitle}>Keep active</Text>
                     <Text style={styles.setGoalActionText}>
                       {dailyRunGoal ? "Update your running days target." : "Set your running days target."}
                     </Text>
@@ -2686,9 +2691,9 @@ export default function GoalsScreen() {
                 >
                   <Flame size={22} color="#0D9488" />
                   <View style={styles.setGoalActionInfo}>
-                    <Text style={styles.setGoalActionTitle}>Training Plan</Text>
+                    <Text style={styles.setGoalActionTitle}>Have planned runs</Text>
                     <Text style={styles.setGoalActionText}>
-                      {habitDeclaration ? "Update your training declaration." : "Add a training plan to this running goal."}
+                      {habitDeclaration ? "Update your planned runs declaration." : "Add planned runs to this goal."}
                     </Text>
                   </View>
                   <ChevronRight size={16} color={colors.textLight} />
@@ -2893,7 +2898,7 @@ export default function GoalsScreen() {
               <View key="dailyRun" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Calendar size={18} color="#0EA5E9" />
-                  <Text style={styles.sectionTitle}>I Just Want to Run</Text>
+                  <Text style={styles.sectionTitle}>Keep active</Text>
                   <TouchableOpacity onPress={openDailyRunGoalForm} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -2963,7 +2968,7 @@ export default function GoalsScreen() {
               <View key="dailyRun" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Calendar size={18} color="#0EA5E9" />
-                  <Text style={styles.sectionTitle}>I Just Want to Run</Text>
+                  <Text style={styles.sectionTitle}>Keep active</Text>
                   <TouchableOpacity onPress={openEditHabit} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -2990,7 +2995,7 @@ export default function GoalsScreen() {
               <View key="dailyRun" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Calendar size={18} color="#0EA5E9" />
-                  <Text style={styles.sectionTitle}>I Just Want to Run</Text>
+                  <Text style={styles.sectionTitle}>Keep active</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={openDailyRunGoalForm} activeOpacity={0.8}>
                   <LinearGradient colors={["#0EA5E9", "#38BDF8"]} style={styles.setupGoalGradient}>
@@ -3328,7 +3333,7 @@ export default function GoalsScreen() {
               <View key="habit" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Flame size={18} color="#0D9488" />
-                  <Text style={styles.sectionTitle}>Commit to a Training Plan</Text>
+                  <Text style={styles.sectionTitle}>Have planned runs</Text>
                   <TouchableOpacity onPress={openEditHabit} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -3393,17 +3398,17 @@ export default function GoalsScreen() {
               <View key="habit" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Flame size={18} color="#0D9488" />
-                  <Text style={styles.sectionTitle}>Commit to a Training Plan</Text>
+                  <Text style={styles.sectionTitle}>Have planned runs</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={() => { resetHabitForm(); setShowHabitModal(true); }} activeOpacity={0.8}>
                   <LinearGradient colors={["#0D9488", "#14B8A6"]} style={styles.setupGoalGradient}>
                     <Flame size={32} color={colors.white} />
-                    <Text style={styles.setupGoalTitle}>Commit to a Training Plan</Text>
+                    <Text style={styles.setupGoalTitle}>Have planned runs</Text>
                     <Text style={styles.setupGoalSubtext}>
-                      Set your training plan and track your consistency
+                      Declare your planned runs and track your consistency
                     </Text>
                     <View style={styles.setupGoalButton}>
-                      <Text style={[styles.setupGoalButtonText, { color: "#0D9488" }]}>Set Training Plan</Text>
+                      <Text style={[styles.setupGoalButtonText, { color: "#0D9488" }]}>Set planned runs</Text>
                       <ChevronRight size={16} color="#0D9488" />
                     </View>
                   </LinearGradient>

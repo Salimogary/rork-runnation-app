@@ -26,6 +26,16 @@ function runNationTier(registration: any, subscription: any): string {
   return status ? status.charAt(0).toUpperCase() + status.slice(1) : "";
 }
 
+function plannedRunsDeclaration(declaration: any): string {
+  if (!declaration) return "";
+  const activity = String(declaration.activity_type || "").trim().toLowerCase();
+  const amount = Number(declaration.target_amount);
+  const unit = String(declaration.unit || "").trim().toLowerCase();
+  const frequency = String(declaration.frequency || "").trim().toLowerCase();
+  if (!activity || !Number.isFinite(amount) || !unit || !frequency) return "";
+  return `I ${activity} ${amount} ${unit} ${frequency}`;
+}
+
 function daysSince(value: string | null | undefined): number {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) return 0;
@@ -173,6 +183,7 @@ export default publicProcedure.query(async ({ ctx }) => {
     paymentItemsResult,
     paymentRecordsResult,
     allMembershipsResult,
+    declarationsResult,
   ] = await Promise.all([
     ctx.supabase
       .from("registrations")
@@ -207,6 +218,10 @@ export default publicProcedure.query(async ({ ctx }) => {
       .eq("request_type", "membership")
       .neq("status", "rejected")
       .in("registration_id", registrationIds),
+    ctx.supabase
+      .from("habit_declarations")
+      .select("registration_id, activity_type, target_amount, unit, frequency")
+      .in("registration_id", registrationIds),
   ]);
 
   if (registrationsResult.error) throw new Error(registrationsResult.error.message || "Could not load member profiles.");
@@ -216,9 +231,11 @@ export default publicProcedure.query(async ({ ctx }) => {
   if (paymentItemsResult.error) throw new Error(paymentItemsResult.error.message || "Could not load club subscriptions.");
   if (paymentRecordsResult.error) throw new Error(paymentRecordsResult.error.message || "Could not load club subscription records.");
   if (allMembershipsResult.error) throw new Error(allMembershipsResult.error.message || "Could not load other memberships.");
+  if (declarationsResult.error) throw new Error(declarationsResult.error.message || "Could not load planned runs declarations.");
 
   const registrationMap = new Map((registrationsResult.data ?? []).map((row: any) => [row.registration_id, row]));
   const subscriptionMap = new Map((subscriptionsResult.data ?? []).map((row: any) => [row.registration_id, row]));
+  const declarationMap = new Map((declarationsResult.data ?? []).map((row: any) => [row.registration_id, row]));
   const profileMap = new Map((profilesResult.data ?? []).map((row: any) => [row.registration_id, row.profile_id]));
   const runsByRegistration = new Map<string, number>();
   for (const activity of activitiesResult.data ?? []) {
@@ -284,6 +301,7 @@ export default publicProcedure.query(async ({ ctx }) => {
       subscription: subscriptionPaid === null ? "" : subscriptionPaid ? "Y" : "N",
       runNationTier: runNationTier(registration, subscriptionMap.get(pair.registrationId)),
       runsLast30Days: runsByRegistration.get(pair.registrationId) ?? 0,
+      declaration: plannedRunsDeclaration(declarationMap.get(pair.registrationId)),
       hasServiceRole: profileId && serviceRoleProfileIds.has(profileId) ? "Y" : "N",
       otherClubMembership: hasOtherMembership ? "Y" : "N",
     };
