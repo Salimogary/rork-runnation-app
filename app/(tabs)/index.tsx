@@ -23,6 +23,9 @@ import SubscriptionGate from "@/components/SubscriptionGate";
 import { getServerClient } from "@/lib/server-client";
 import { trpc } from "@/lib/trpc";
 import { getActivityVoiceAssistantEnabled } from "@/utils/activityVoice";
+import { getWorkoutAutoPauseEnabled } from "@/utils/workoutPreferences";
+import { getEarnedBadgeCount } from "@/utils/badges";
+import { checkAndNotifyWorkoutMilestones } from "@/utils/notifications";
 import {
   enqueueOfflineWorkout,
   getOfflineWorkoutQueueCount,
@@ -116,13 +119,18 @@ const MIN_DISTANCE_WALK = MIN_DISTANCE_ACTIVITY;
 const MIN_DISTANCE_RUN = MIN_DISTANCE_ACTIVITY;
 const MIN_ACTIVITY_DURATION_MINUTES = 5;
 const KM_VOICE_ANNOUNCEMENT_INTERVAL = 1;
-const AUTO_PAUSE_STATIONARY_SECONDS = 7;
+const AUTO_PAUSE_STATIONARY_SECONDS = 10;
 const AUTO_PAUSE_MAX_SPEED_KMH = 1.2;
 const AUTO_RESUME_MIN_SPEED_KMH = 1.5;
 const AUTO_RESUME_MIN_DISTANCE_KM = 0.004;
 const BACKGROUND_LOCATION_TASK = "runnation-background-location";
 const ACTIVE_WORKOUT_SESSION_KEY = "runnation_active_workout_session";
 const REGISTERED_EVENTS_CACHE_PREFIX = "runnation_registered_events";
+const MAX_ROUTE_POINTS = 5000;
+const FOREGROUND_LOCATION_INTERVAL_MS = 3000;
+const FOREGROUND_LOCATION_DISTANCE_METERS = 3;
+const BACKGROUND_LOCATION_INTERVAL_MS = 5000;
+const BACKGROUND_LOCATION_DISTANCE_METERS = 5;
 const WORKOUT_COUNTDOWN_MS = 3200;
 const RUNNATION_ANDROID_APK_LINK = "https://expo.dev/artifacts/eas/27LbCHM76M74izfEPYt1pN.apk";
 
@@ -146,6 +154,7 @@ type PersistedWorkoutSession = {
   totalPauseDuration: number;
   pauseDurationSeconds: number;
   autoPaused: boolean;
+  autoPauseEnabled?: boolean;
   stationaryStartTimestamp?: number | null;
   autoPauseAnchorPoint?: LocationPoint | null;
   distance: number;
@@ -157,6 +166,33 @@ type PersistedWorkoutSession = {
 };
 
 let backgroundLocationHandler: ((location: Location.LocationObject) => void) | null = null;
+let pendingPersistedWorkoutSession: PersistedWorkoutSession | null = null;
+let persistedWorkoutWritePromise: Promise<void> | null = null;
+
+function startPersistedWorkoutWrite(): Promise<void> {
+  if (persistedWorkoutWritePromise) {
+    return persistedWorkoutWritePromise;
+  }
+
+  persistedWorkoutWritePromise = (async () => {
+    while (pendingPersistedWorkoutSession) {
+      const session = pendingPersistedWorkoutSession;
+      pendingPersistedWorkoutSession = null;
+      try {
+        await AsyncStorage.setItem(ACTIVE_WORKOUT_SESSION_KEY, JSON.stringify(session));
+      } catch (error) {
+        console.warn("[Workout Persistence] Could not persist active workout:", error);
+      }
+    }
+  })().finally(() => {
+    persistedWorkoutWritePromise = null;
+    if (pendingPersistedWorkoutSession) {
+      void startPersistedWorkoutWrite();
+    }
+  });
+
+  return persistedWorkoutWritePromise;
+}
 
 async function getPersistedWorkoutSession(): Promise<PersistedWorkoutSession | null> {
   try {
@@ -170,15 +206,20 @@ async function getPersistedWorkoutSession(): Promise<PersistedWorkoutSession | n
 }
 
 async function setPersistedWorkoutSession(session: PersistedWorkoutSession): Promise<void> {
-  try {
-    await AsyncStorage.setItem(ACTIVE_WORKOUT_SESSION_KEY, JSON.stringify({ ...session, updatedAt: Date.now() }));
-  } catch (error) {
-    console.warn("[Workout Persistence] Could not persist active workout:", error);
-  }
+  pendingPersistedWorkoutSession = {
+    ...session,
+    coords: session.coords.slice(-MAX_ROUTE_POINTS),
+    updatedAt: Date.now(),
+  };
+  await startPersistedWorkoutWrite();
 }
 
 async function clearPersistedWorkoutSession(): Promise<void> {
   try {
+    pendingPersistedWorkoutSession = null;
+    if (persistedWorkoutWritePromise) {
+      await persistedWorkoutWritePromise;
+    }
     await AsyncStorage.removeItem(ACTIVE_WORKOUT_SESSION_KEY);
   } catch (error) {
     console.warn("[Workout Persistence] Could not clear active workout:", error);
@@ -280,11 +321,11 @@ async function processPersistedBackgroundLocation(location: Location.LocationObj
       session.status = "running";
       session.lastValidPoint = point;
       session.lastProcessedLocationTimestamp = location.timestamp;
-      session.coords = [...session.coords, { latitude: point.latitude, longitude: point.longitude }].slice(-5000);
+      session.coords = [...session.coords, { latitude: point.latitude, longitude: point.longitude }].slice(-MAX_ROUTE_POINTS);
       await setPersistedWorkoutSession(session);
       return;
     }
-  } else if (isStationary && !session.autoPaused && session.status === "running") {
+  } else if (session.autoPauseEnabled !== false && isStationary && !session.autoPaused && session.status === "running") {
     if (session.stationaryStartTimestamp == null) {
       session.stationaryStartTimestamp = point.timestamp;
     } else if (
@@ -334,7 +375,7 @@ async function processPersistedBackgroundLocation(location: Location.LocationObj
   session.status = "running";
   session.lastValidPoint = point;
   session.lastProcessedLocationTimestamp = location.timestamp;
-  session.coords = [...session.coords, coord].slice(-5000);
+  session.coords = [...session.coords, coord].slice(-MAX_ROUTE_POINTS);
   await setPersistedWorkoutSession(session);
 }
 
@@ -527,6 +568,7 @@ export default function ExerciseScreen() {
   const stationaryStartTimestamp = useRef<number | null>(null);
   const autoPaused = useRef<boolean>(false);
   const autoPauseAnchorPoint = useRef<LocationPoint | null>(null);
+  const autoPauseEnabled = useRef<boolean>(true);
   const runStateRef = useRef<RunState>("idle");
   const distanceRef = useRef(0);
   const durationRef = useRef(0);
@@ -542,6 +584,16 @@ export default function ExerciseScreen() {
   useEffect(() => {
     runStateRef.current = runState;
   }, [runState]);
+
+  useEffect(() => {
+    void getWorkoutAutoPauseEnabled().then((enabled) => {
+      autoPauseEnabled.current = enabled;
+      if (!enabled) {
+        stationaryStartTimestamp.current = null;
+        autoPauseAnchorPoint.current = null;
+      }
+    });
+  }, []);
 
   useEffect(() => {
     distanceRef.current = distance;
@@ -608,10 +660,11 @@ export default function ExerciseScreen() {
       totalPauseDuration: totalPauseDuration.current,
       pauseDurationSeconds: pauseDurationSecondsRef.current,
       autoPaused: autoPaused.current,
+      autoPauseEnabled: autoPauseEnabled.current,
       stationaryStartTimestamp: stationaryStartTimestamp.current,
       autoPauseAnchorPoint: autoPauseAnchorPoint.current,
       distance: distanceRef.current,
-      coords: coordsRef.current.slice(-5000),
+      coords: coordsRef.current.slice(-MAX_ROUTE_POINTS),
       lastValidPoint: lastValidPoint.current,
       lastProcessedLocationTimestamp: lastProcessedLocationTimestamp.current,
       filteredPointCount: filteredPointCount.current,
@@ -1053,6 +1106,11 @@ export default function ExerciseScreen() {
     speedKmh: number | null,
     hasNativeSpeed: boolean
   ) => {
+    if (!autoPauseEnabled.current) {
+      stationaryStartTimestamp.current = null;
+      autoPauseAnchorPoint.current = point;
+      return;
+    }
     if (runStateRef.current !== "running" && !autoPaused.current) {
       return;
     }
@@ -1167,7 +1225,7 @@ export default function ExerciseScreen() {
       lastValidPoint.current = newPoint;
       isResuming.current = false;
       setCoords((prev) => {
-        const next = [...prev, newCoord];
+        const next = [...prev, newCoord].slice(-MAX_ROUTE_POINTS);
         coordsRef.current = next;
         return next;
       });
@@ -1196,34 +1254,34 @@ export default function ExerciseScreen() {
 
     lastValidPoint.current = newPoint;
     setCoords((prev) => {
-      const next = [...prev, newCoord];
+      const next = [...prev, newCoord].slice(-MAX_ROUTE_POINTS);
       coordsRef.current = next;
       return next;
     });
     void persistActiveWorkoutSession("running");
   }, [announceKilometerSplitIfNeeded, evaluateAutoPause, isValidGpsPoint, persistActiveWorkoutSession]);
 
-  const startBackgroundLocationWatch = useCallback(async (exerciseT: ExerciseType) => {
+  const startBackgroundLocationWatch = useCallback(async (exerciseT: ExerciseType): Promise<boolean> => {
     if (Platform.OS === "web" || !exerciseT) {
-      return;
+      return false;
     }
 
     try {
       const backgroundPermission = await Location.requestBackgroundPermissionsAsync();
       if (backgroundPermission.status !== "granted") {
         console.warn("[Background Location] Permission not granted; lock-screen tracking may pause.");
-        return;
+        return false;
       }
 
       const alreadyStarted = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
       if (alreadyStarted) {
-        return;
+        await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
       }
 
       await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-        accuracy: Location.Accuracy.BestForNavigation,
-        distanceInterval: 1,
-        timeInterval: 1000,
+        accuracy: Location.Accuracy.High,
+        distanceInterval: BACKGROUND_LOCATION_DISTANCE_METERS,
+        timeInterval: BACKGROUND_LOCATION_INTERVAL_MS,
         pausesUpdatesAutomatically: false,
         showsBackgroundLocationIndicator: true,
         foregroundService: {
@@ -1234,8 +1292,10 @@ export default function ExerciseScreen() {
         },
       });
       console.log("[Background Location] Started lock-screen tracking for", exerciseT);
+      return true;
     } catch (error) {
       console.warn("[Background Location] Could not start background tracking:", error);
+      return false;
     }
   }, []);
 
@@ -1269,12 +1329,19 @@ export default function ExerciseScreen() {
       handleLocationUpdate(location, exerciseT);
     };
 
+    if (Platform.OS === "android") {
+      const backgroundStarted = await startBackgroundLocationWatch(exerciseT);
+      if (backgroundStarted) {
+        return;
+      }
+    }
+
     try {
       locationSubscription.current = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.BestForNavigation,
-          distanceInterval: 1,
-          timeInterval: 1000,
+          distanceInterval: FOREGROUND_LOCATION_DISTANCE_METERS,
+          timeInterval: FOREGROUND_LOCATION_INTERVAL_MS,
         },
         (location) => {
           handleLocationUpdate(location, exerciseT);
@@ -1285,7 +1352,9 @@ export default function ExerciseScreen() {
       throw error;
     }
 
-    void startBackgroundLocationWatch(exerciseT);
+    if (Platform.OS !== "android") {
+      void startBackgroundLocationWatch(exerciseT);
+    }
   }, [handleLocationUpdate, startBackgroundLocationWatch]);
 
   useEffect(() => {
@@ -1321,12 +1390,13 @@ export default function ExerciseScreen() {
       lastProcessedLocationTimestamp.current = session.lastProcessedLocationTimestamp;
       filteredPointCount.current = session.filteredPointCount;
       distanceRef.current = session.distance;
-      coordsRef.current = session.coords;
+      coordsRef.current = session.coords.slice(-MAX_ROUTE_POINTS);
       exerciseTypeRef.current = session.exerciseType;
       selectedEventRunRef.current = session.eventRun;
       startTimeRef.current = startDate;
       pauseDurationSecondsRef.current = session.pauseDurationSeconds;
       autoPaused.current = session.autoPaused === true;
+      autoPauseEnabled.current = session.autoPauseEnabled !== false;
       stationaryStartTimestamp.current = session.stationaryStartTimestamp ?? null;
       autoPauseAnchorPoint.current = session.autoPauseAnchorPoint ?? session.lastValidPoint;
       lastAnnouncedKilometer.current = Math.floor(session.distance / KM_VOICE_ANNOUNCEMENT_INTERVAL);
@@ -1335,7 +1405,7 @@ export default function ExerciseScreen() {
       setSelectedEventRun(session.eventRun);
       setStartTime(startDate);
       setDistance(session.distance);
-      setCoords(session.coords);
+      setCoords(session.coords.slice(-MAX_ROUTE_POINTS));
       setPauseDurationSeconds(session.pauseDurationSeconds);
 
       const restoredState: RunState = session.status === "paused" ? "paused" : "running";
@@ -1423,6 +1493,7 @@ export default function ExerciseScreen() {
     autoPauseAnchorPoint.current = null;
     elapsedBeforePause.current = 0;
     const sessionId = uuidv4();
+    autoPauseEnabled.current = await getWorkoutAutoPauseEnabled();
     const startDate = new Date(scheduledStartTimestamp);
     activeWorkoutSessionId.current = sessionId;
     workoutOwnerRegistrationId.current = ownerRegistrationId;
@@ -1450,6 +1521,7 @@ export default function ExerciseScreen() {
       totalPauseDuration: 0,
       pauseDurationSeconds: 0,
       autoPaused: false,
+      autoPauseEnabled: autoPauseEnabled.current,
       stationaryStartTimestamp: null,
       autoPauseAnchorPoint: null,
       distance: 0,
@@ -1734,13 +1806,32 @@ export default function ExerciseScreen() {
           durationSeconds: finalDuration,
           pauseDurationSeconds,
           distanceKm: distance,
-          coordinates: coordsRef.current.slice(-5000),
+          coordinates: coordsRef.current.slice(-MAX_ROUTE_POINTS),
         },
       });
 
       setActivitySaved(true);
       setPendingWorkoutSyncCount(pendingCount);
       speakActivityMessage("Congratulations, activity completed");
+      const { data: savedActivities } = await supabase
+        .from("activities")
+        .select("activity_id, distance_km")
+        .eq("registration_id", ownerRegistrationId);
+      const alreadySynced = (savedActivities || []).some((activity: any) => activity.activity_id === nextActivityId);
+      const totalDistance = (savedActivities || []).reduce((sum: number, activity: any) => sum + (Number(activity.distance_km) || 0), 0)
+        + (alreadySynced ? 0 : distance);
+      const totalActivities = (savedActivities?.length || 0) + (alreadySynced ? 0 : 1);
+      const previousDistance = totalDistance - (alreadySynced ? 0 : distance);
+      const previousActivities = totalActivities - (alreadySynced ? 0 : 1);
+      void checkAndNotifyWorkoutMilestones(
+        ownerRegistrationId,
+        totalDistance,
+        totalActivities,
+        getEarnedBadgeCount(totalDistance, totalActivities),
+        previousDistance,
+        previousActivities,
+        getEarnedBadgeCount(previousDistance, previousActivities)
+      );
       Alert.alert(
         "Saved on Device",
         "Your workout is safe. RunNation will sync it automatically whenever internet access is available."

@@ -1,7 +1,7 @@
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, Platform, Modal, TextInput, ActivityIndicator, Share, useWindowDimensions } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIcon, MessageSquare, Paperclip, EyeOff, Eye, Lock, Trash2, AlertTriangle, Star, Share2, Download, Crown, HelpCircle, Phone, Globe, Volume2, VolumeX, Info, Handshake, Check, HeartPulse, Watch } from "lucide-react-native";
+import { LogOut, Bell, MapPin, Moon, Sun, Mail, FileText, ChevronRight, X as XIcon, MessageSquare, Paperclip, EyeOff, Eye, Lock, Trash2, AlertTriangle, Star, Share2, Download, Crown, HelpCircle, Phone, Globe, Volume2, VolumeX, Info, Handshake, Check, HeartPulse, Watch, PauseCircle } from "lucide-react-native";
 import { Linking } from "react-native";
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -23,6 +23,7 @@ import { hasAdminPortalAccess as getHasAdminPortalAccess } from "@/lib/role-sess
 import { formatCountryName } from "@/constants/country-utils";
 import { WORLD_COUNTRIES } from "@/constants/countries";
 import { getActivityVoiceAssistantEnabled, setActivityVoiceAssistantEnabled as saveActivityVoiceAssistantEnabled } from "@/utils/activityVoice";
+import { getWorkoutAutoPauseEnabled, setWorkoutAutoPauseEnabled as saveWorkoutAutoPauseEnabled } from "@/utils/workoutPreferences";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as IntentLauncher from "expo-intent-launcher";
@@ -170,10 +171,12 @@ export default function SettingsScreen() {
   const { width } = useWindowDimensions();
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [activityVoiceAssistantEnabled, setActivityVoiceAssistantEnabled] = useState(true);
+  const [workoutAutoPauseEnabled, setWorkoutAutoPauseEnabled] = useState(true);
 
   useEffect(() => {
     void getNotificationsEnabled().then(setNotificationsEnabled);
     void getActivityVoiceAssistantEnabled().then(setActivityVoiceAssistantEnabled);
+    void getWorkoutAutoPauseEnabled().then(setWorkoutAutoPauseEnabled);
   }, []);
   const [locationEnabled, setLocationEnabled] = useState(true);
   const { isDark, setDarkMode, colors: themeColors } = useTheme();
@@ -1116,6 +1119,31 @@ export default function SettingsScreen() {
             </View>
           </View>
           <ChevronRight size={20} color={themeColors.iconMuted} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
+          onPress={() => {
+            const next = !workoutAutoPauseEnabled;
+            setWorkoutAutoPauseEnabled(next);
+            void saveWorkoutAutoPauseEnabled(next);
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          }}
+        >
+          <View style={styles.settingLeft}>
+            <View style={[styles.iconContainer, { backgroundColor: workoutAutoPauseEnabled ? "#FFF7ED" : "#F3F4F6" }]}>
+              <PauseCircle size={22} color={workoutAutoPauseEnabled ? "#F97316" : "#6b7280"} />
+            </View>
+            <View style={styles.settingTextContainer}>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Workout Auto-Pause</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>
+                {workoutAutoPauseEnabled ? "Pause after 10 seconds without movement" : "Workouts continue until you pause manually"}
+              </Text>
+            </View>
+          </View>
+          <View style={[styles.radioButton, workoutAutoPauseEnabled && styles.radioButtonActive]}>
+            {workoutAutoPauseEnabled && <View style={styles.radioButtonInner} />}
+          </View>
         </TouchableOpacity>
 
         <TouchableOpacity

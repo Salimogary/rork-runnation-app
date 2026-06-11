@@ -455,9 +455,10 @@ async function getJuniorSpecialClubRegistrationIds(registrationIds: string[]): P
 }
 
 export default function ActivityScreen() {
-  const { user, privateMode } = useAuth();
+  const { user, privateMode, roleSession } = useAuth();
   const { colors: themeColors } = useTheme();
   const { isSubscribed } = useSubscription();
+  const currentRegistrationId = roleSession.registrationId || user?.id || null;
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("community");
   const [communityLeaderboardView, setCommunityLeaderboardView] = useState<CommunityLeaderboardView>("activity_indv");
@@ -960,7 +961,7 @@ export default function ActivityScreen() {
   });
 
   const { data: userClubs = [] } = useQuery<UserClubTab[]>({
-    queryKey: ["user-clubs", user?.id],
+    queryKey: ["user-clubs", currentRegistrationId, roleSession.clubCoordinatorScopes],
     queryFn: async () => {
       const familyTab: UserClubTab = {
         key: "__family__",
@@ -971,12 +972,12 @@ export default function ActivityScreen() {
         specialClubCode: null,
         isFamily: true,
       };
-      if (!user?.id) return [];
+      if (!currentRegistrationId) return [];
       try {
         const { data: membershipRows, error: membershipError } = await supabase
           .from("club_membership_request")
           .select("club, club_id, request_type, status")
-          .eq("registration_id", user.id)
+          .eq("registration_id", currentRegistrationId)
           .eq("request_type", "membership")
           .neq("status", "rejected")
           .order("created_at", { ascending: true });
@@ -989,9 +990,12 @@ export default function ActivityScreen() {
         const { data: legacyMemberships } = await supabase
           .from("club_members")
           .select("coordinator_id")
-          .eq("registration_id", user.id);
+          .eq("registration_id", currentRegistrationId);
 
-        const clubIds = Array.from(new Set((membershipRows || []).map((row: any) => row.club_id).filter(Boolean)));
+        const clubIds = Array.from(new Set([
+          ...(membershipRows || []).map((row: any) => row.club_id),
+          ...roleSession.clubCoordinatorScopes,
+        ].filter(Boolean)));
         const coordinatorIds = Array.from(new Set((legacyMemberships || []).map((row: any) => row.coordinator_id).filter(Boolean)));
 
         if (clubIds.length === 0 && coordinatorIds.length === 0) {
@@ -1050,6 +1054,19 @@ export default function ActivityScreen() {
           });
         });
 
+        roleSession.clubCoordinatorScopes.forEach((clubId) => {
+          const club = clubById.get(clubId);
+          if (!club?.club_id || tabs.has(String(club.club_id))) return;
+          tabs.set(String(club.club_id), {
+            key: String(club.club_id),
+            clubId: club.club_id,
+            clubName: club.club_name || "Club",
+            coordinatorId: club.coordinator_id || null,
+            isSpecial: club.is_special_club === true || Boolean(club.special_club_code),
+            specialClubCode: club.special_club_code || null,
+          });
+        });
+
         return [familyTab, ...tabs.values()].sort((a, b) => {
           if (a.isFamily) return -1;
           if (b.isFamily) return 1;
@@ -1061,7 +1078,7 @@ export default function ActivityScreen() {
         return [familyTab];
       }
     },
-    enabled: !!user?.id,
+    enabled: !!currentRegistrationId,
     staleTime: 60000,
   });
 
@@ -1130,6 +1147,10 @@ export default function ActivityScreen() {
           }
         }
 
+        if (currentRegistrationId && selectedClub.clubId && roleSession.clubCoordinatorScopes.includes(selectedClub.clubId)) {
+          idSet.add(currentRegistrationId);
+        }
+
         if (selectedClub.coordinatorId) {
           const { data, error } = await supabase
             .from("club_members")
@@ -1170,6 +1191,7 @@ export default function ActivityScreen() {
   const familyCodeReady = familyMembersData?.familyCodeReady !== false;
 
   const familyRegistrationIds = useMemo(() => {
+    if (familyMembers.length === 0) return [];
     return Array.from(new Set([user?.id, ...familyMembers.map((member) => member.registrationId)].filter(Boolean))) as string[];
   }, [familyMembers, user?.id]);
 
@@ -1737,6 +1759,7 @@ export default function ActivityScreen() {
         const fullName = [firstName, otherNames].filter(n => n).join(" ") || "Unknown";
 
         const activeDays = stats.activeDays.size;
+        if (stats.totalDistance < 3 || stats.totalTime < 30) return;
         result.push({
           registrationId: regId,
           Name: fullName,
@@ -2409,6 +2432,11 @@ export default function ActivityScreen() {
     });
   }, [applyLeaderboardFilters, applyLeaderboardSearch, communityData]);
 
+  const currentUserQualifiesForCommunity = useMemo(
+    () => Boolean(currentRegistrationId && communityData?.some((row) => row.registrationId === currentRegistrationId)),
+    [communityData, currentRegistrationId]
+  );
+
   const sortedCommunityClubActivityData = useMemo(() => {
     if (!communityClubActivityData) return [];
     const searched = applyLeaderboardSearch(communityClubActivityData);
@@ -2553,9 +2581,9 @@ export default function ActivityScreen() {
                         <View style={styles.familyPaceColumn}><Text style={styles.leaderTableHeaderText}>Pace</Text></View>
                       </View>
                       {weekGroup.rows.map((row, index) => (
-                        <View key={`${weekGroup.key}-${row.registrationId}`} style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt]}>
+                        <View key={`${weekGroup.key}-${row.registrationId}`} style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt, row.registrationId === currentRegistrationId && styles.currentUserLeaderboardRow]}>
                           <View style={styles.familyRankColumn}><Text style={styles.leaderTableCellText}>{index + 1}</Text></View>
-                          <View style={styles.familyNameColumn}><Text style={styles.leaderTableCellText} numberOfLines={1}>{row.name}</Text></View>
+                          <View style={styles.familyNameColumn}><Text style={[styles.leaderTableCellText, row.registrationId === currentRegistrationId && styles.currentUserLeaderboardText]} numberOfLines={1}>{row.name}</Text></View>
                           <View style={styles.familyDaysColumn}><Text style={styles.leaderTableCellText}>{row.days}</Text></View>
                           <View style={styles.familyDistanceColumn}><Text style={styles.leaderTableCellText}>{row.distance.toFixed(1)} km</Text></View>
                           <View style={styles.familyTimeColumn}><Text style={styles.leaderTableCellText}>{formatTime(row.time)}</Text></View>
@@ -2587,10 +2615,10 @@ export default function ActivityScreen() {
         {rows.map((row, index) => (
           <View
             key={`${keyPrefix}-${row.registrationId}`}
-            style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt]}
+            style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt, row.registrationId === currentRegistrationId && styles.currentUserLeaderboardRow]}
           >
             <View style={styles.familyRankColumn}><Text style={styles.leaderTableCellText}>{index + 1}</Text></View>
-            <View style={styles.familyNameColumn}><Text style={styles.leaderTableCellText} numberOfLines={1}>{row.name}</Text></View>
+            <View style={styles.familyNameColumn}><Text style={[styles.leaderTableCellText, row.registrationId === currentRegistrationId && styles.currentUserLeaderboardText]} numberOfLines={1}>{row.name}</Text></View>
             <View style={styles.familyDaysColumn}><Text style={styles.leaderTableCellText}>{row.days}</Text></View>
             <View style={styles.familyDistanceColumn}><Text style={styles.leaderTableCellText}>{row.distance.toFixed(1)} km</Text></View>
             <View style={styles.familyTimeColumn}><Text style={styles.leaderTableCellText}>{formatTime(row.time)}</Text></View>
@@ -2678,13 +2706,13 @@ export default function ActivityScreen() {
           </View>
         </View>
         {rows.map((item, index) => (
-          <View key={item.registrationId} style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt]}>
+          <View key={item.registrationId} style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt, item.registrationId === currentRegistrationId && styles.currentUserLeaderboardRow]}>
             <View style={[styles.leaderRankColumn, styles.leaderRankCell]}>
               <Text style={styles.leaderFlagText}>{getCountryFlag(item.Country)}</Text>
               <Text style={styles.leaderTableCellText}>{index + 1}</Text>
             </View>
             <View style={styles.leaderNameColumn}>
-              <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.Name}</Text>
+              <Text style={[styles.leaderTableCellText, item.registrationId === currentRegistrationId && styles.currentUserLeaderboardText]} numberOfLines={1}>{item.Name}</Text>
             </View>
             {showClub ? (
               <View style={styles.leaderClubColumn}>
@@ -2770,13 +2798,13 @@ export default function ActivityScreen() {
           </View>
         </View>
         {rows.map((item, index) => (
-          <View key={item.registrationId} style={[styles.leaderboardTableRow, styles.medalLeaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt]}>
+          <View key={item.registrationId} style={[styles.leaderboardTableRow, styles.medalLeaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt, item.registrationId === currentRegistrationId && styles.currentUserLeaderboardRow]}>
             <View style={[styles.medalRankColumn, styles.leaderRankCell]}>
               <Text style={styles.leaderFlagText}>{getCountryFlag(item.Country)}</Text>
               <Text style={styles.leaderTableCellText}>{index + 1}</Text>
             </View>
             <View style={styles.medalNameColumn}>
-              <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.Name}</Text>
+              <Text style={[styles.leaderTableCellText, item.registrationId === currentRegistrationId && styles.currentUserLeaderboardText]} numberOfLines={1}>{item.Name}</Text>
             </View>
             <View style={styles.medalSexColumn}>
               <Text style={styles.leaderTableCellText}>
@@ -2931,7 +2959,7 @@ export default function ActivityScreen() {
                 {groupRows.map((row, index) => (
                   <View
                     key={`${row.ageGroup}-${row.registrationId}`}
-                    style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt]}
+                    style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt, row.registrationId === currentRegistrationId && styles.currentUserLeaderboardRow]}
                   >
                     <View style={styles.smartFitFlagColumn}>
                       <Text style={styles.leaderFlagText}>{row.flag || "-"}</Text>
@@ -2940,7 +2968,7 @@ export default function ActivityScreen() {
                       <Text style={styles.leaderTableCellText}>{row.rank}</Text>
                     </View>
                     <View style={styles.smartFitNameColumn}>
-                      <Text style={styles.leaderTableCellText} numberOfLines={1}>{row.name}</Text>
+                      <Text style={[styles.leaderTableCellText, row.registrationId === currentRegistrationId && styles.currentUserLeaderboardText]} numberOfLines={1}>{row.name}</Text>
                     </View>
                     <View style={styles.smartFitSexColumn}>
                       <Text style={styles.leaderTableCellText}>{row.sex === "Male" ? "M" : row.sex === "Female" ? "F" : "-"}</Text>
@@ -3424,9 +3452,18 @@ export default function ActivityScreen() {
         {activeTab === "family" ? (
           <>
             {renderFamilyManager()}
-            {familyMembersLoading || familyLeaderboardLoading ? (
+            {familyMembersLoading ? (
               <View style={styles.emptyContainer}>
                 <Text style={styles.emptyText}>Loading Family data...</Text>
+              </View>
+            ) : familyMembers.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>No family members added yet</Text>
+                <Text style={styles.emptySubtext}>Use the Family Code input above to add a family member. The leaderboard will stay blank until you add someone.</Text>
+              </View>
+            ) : familyLeaderboardLoading ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>Loading Family activity...</Text>
               </View>
             ) : familyLeaderboardGroups.length === 0 ? (
               <View style={styles.emptyContainer}>
@@ -3564,12 +3601,22 @@ export default function ActivityScreen() {
             </View>
           ) : sortedCommunityData.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyEmoji}>🏃‍♂️</Text>
-              <Text style={styles.emptyText}>No registered runners yet</Text>
-              <Text style={styles.emptySubtext}>Runners will appear here even before they record their first run.</Text>
+              <Text style={styles.emptyText}>No qualifying runners yet</Text>
+              <Text style={styles.emptySubtext}>
+                Community ranking requires at least 3 km and 30 minutes of total workouts.
+              </Text>
             </View>
           ) : (
-              renderLeaderboardTable(sortedCommunityData)
+            <>
+              {!currentUserQualifiesForCommunity ? (
+                <View style={styles.communityQualificationNotice}>
+                  <Text style={styles.communityQualificationNoticeText} numberOfLines={2}>
+                    Not ranked yet: community ranking requires at least 3 km and 30 minutes of total workouts.
+                  </Text>
+                </View>
+              ) : null}
+              {renderLeaderboardTable(sortedCommunityData)}
+            </>
           )
         ) : activeTab === "runs" ? (
           activitiesError ? (
@@ -4185,6 +4232,30 @@ const styles = StyleSheet.create({
   },
   leaderboardTableRowAlt: {
     backgroundColor: "rgba(255, 107, 53, 0.04)",
+  },
+  currentUserLeaderboardRow: {
+    backgroundColor: "rgba(255, 107, 53, 0.18)",
+    borderLeftWidth: 4,
+    borderLeftColor: colors.primary,
+    borderTopWidth: 1,
+    borderTopColor: colors.primary,
+    borderBottomColor: colors.primary,
+  },
+  currentUserLeaderboardText: {
+    color: colors.primary,
+    fontWeight: "900" as const,
+  },
+  communityQualificationNotice: {
+    marginHorizontal: 6,
+    marginBottom: 0,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  communityQualificationNoticeText: {
+    color: colors.textSecondary,
+    fontSize: 9,
+    lineHeight: 11,
+    textAlign: "center" as const,
   },
   leaderTableHeaderText: {
     color: colors.white,

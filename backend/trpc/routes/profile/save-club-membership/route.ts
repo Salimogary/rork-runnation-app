@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
+import { requireRegistrationOwner } from "../../../rbac";
+import { findDirectoryMatches } from "../../../club-member-directory";
 
 const CREATOR_REQUEST_TYPES = new Set(["start_club", "event_organizer"]);
 
@@ -79,6 +81,7 @@ export default publicProcedure
     })
   )
   .mutation(async ({ input, ctx }) => {
+    await requireRegistrationOwner(ctx, input.registrationId);
     const { data: existingRows, error: existingError } = await ctx.supabase
       .from("club_membership_request")
       .select("registration_id, request_type, status")
@@ -97,6 +100,7 @@ export default publicProcedure
         ? [{ club: input.club, clubId: input.clubId }]
         : [];
     const selectedClubById = new Map<string, any>();
+    const directoryMatchByClubId = new Map<string, any>();
 
     if ((input.requestType === "membership" || !input.requestType) && membershipInputs.length > 0) {
       const [{ data: registration }, { data: selectedClubs, error: clubError }, { data: userGoals }, { data: countries }] = await Promise.all([
@@ -130,6 +134,12 @@ export default publicProcedure
       if (normalCount > 1 || new Set(specialCodes).size !== specialCodes.length) {
         throw new Error("Please choose at most one normal club and one of each special club.");
       }
+      const matches = await findDirectoryMatches(
+        ctx,
+        input.registrationId,
+        selectedClubs.filter((club: any) => !isSpecialClub(club)).map((club: any) => club.club_id)
+      );
+      matches.forEach((match: any) => directoryMatchByClubId.set(match.club_id, match));
     }
 
     if (CREATOR_REQUEST_TYPES.has(input.requestType)) {
@@ -172,7 +182,7 @@ export default publicProcedure
             club_id: membership.clubId,
             new_member: input.newMember,
             request_type: "membership",
-            status: isSpecialClub(selectedClubById.get(membership.clubId)) ? "approved" : "pending",
+            status: isSpecialClub(selectedClubById.get(membership.clubId)) || directoryMatchByClubId.has(membership.clubId) ? "approved" : "pending",
           }))
         );
         if (insertError) {
@@ -188,7 +198,7 @@ export default publicProcedure
           new_member: input.newMember,
           request_type: input.requestType,
           status:
-            input.requestType === "membership" && isSpecialClub(selectedClubById.get(input.clubId ?? ""))
+            input.requestType === "membership" && (isSpecialClub(selectedClubById.get(input.clubId ?? "")) || directoryMatchByClubId.has(input.clubId ?? ""))
               ? "approved"
               : "pending",
           proposed_club_name: input.proposedClubName?.trim() || null,
@@ -216,7 +226,7 @@ export default publicProcedure
           new_member: input.newMember,
           request_type: input.requestType,
           status:
-            input.requestType === "membership" && isSpecialClub(selectedClubById.get(input.clubId ?? ""))
+            input.requestType === "membership" && (isSpecialClub(selectedClubById.get(input.clubId ?? "")) || directoryMatchByClubId.has(input.clubId ?? ""))
               ? "approved"
               : "pending",
           proposed_club_name: input.proposedClubName?.trim() || null,
@@ -228,5 +238,12 @@ export default publicProcedure
       }
     }
 
-    return { success: true };
+    for (const match of directoryMatchByClubId.values()) {
+      await ctx.supabase
+        .from("club_member_directory")
+        .update({ linked_registration_id: input.registrationId, updated_at: new Date().toISOString() })
+        .eq("member_id", match.member_id);
+    }
+
+    return { success: true, autoApprovedClubIds: Array.from(directoryMatchByClubId.keys()) };
   });

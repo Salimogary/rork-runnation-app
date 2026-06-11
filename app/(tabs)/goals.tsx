@@ -1651,7 +1651,7 @@ export default function GoalsScreen() {
       try {
         const { data: activities, error: activityError } = await supabase
           .from("activities")
-          .select("registration_id, activity_date, distance_km, start_time, end_time, pace_min_per_km");
+          .select("registration_id, activity_date, distance_km, start_time, end_time, pause_duration_seconds, pace_min_per_km");
         if (activityError) {
           console.error("[Goals] Community rank activity fetch error:", JSON.stringify(activityError));
           throw activityError;
@@ -1666,6 +1666,7 @@ export default function GoalsScreen() {
         const regMap = new Map(registrations?.map((r: any) => [r.registration_id, r]));
         const userStats = new Map<string, {
           totalDistance: number;
+          totalTime: number;
           paceSum: number;
           activityCount: number;
           activeDays: Set<string>;
@@ -1674,9 +1675,10 @@ export default function GoalsScreen() {
           const regId = activity.registration_id;
           if (!regId) return;
           const existing = userStats.get(regId) || {
-            totalDistance: 0, paceSum: 0, activityCount: 0, activeDays: new Set<string>(),
+            totalDistance: 0, totalTime: 0, paceSum: 0, activityCount: 0, activeDays: new Set<string>(),
           };
           existing.totalDistance += activity.distance_km || 0;
+          existing.totalTime += getActivityDurationMinutes(activity) || 0;
           existing.paceSum += activity.pace_min_per_km || 0;
           existing.activityCount += 1;
           existing.activeDays.add(activity.activity_date);
@@ -1684,6 +1686,7 @@ export default function GoalsScreen() {
         });
         const result: CommunityRankData[] = [];
         userStats.forEach((stats, regId) => {
+          if (stats.totalDistance < 3 || stats.totalTime < 30) return;
           const registration = regMap.get(regId) as any;
           if (!registration) return;
           if (registration.has_disability === true && registration.para_uses_equipment === true) return;
@@ -1722,6 +1725,7 @@ export default function GoalsScreen() {
         .select("member_registration_id")
         .eq("owner_registration_id", ownerRegistrationId);
       if (membershipError) throw membershipError;
+      if ((memberships || []).length === 0) return null;
 
       const familyIds = Array.from(new Set([ownerRegistrationId, ...(memberships || []).map((row: any) => row.member_registration_id)].filter(Boolean)));
       if (familyIds.length === 0) return null;
@@ -3597,7 +3601,9 @@ export default function GoalsScreen() {
                     <Users size={28} color={colors.textLight} />
                     <Text style={styles.noActivitiesTitle}>Not Ranked Yet</Text>
                     <Text style={styles.noActivitiesText}>
-                      Complete your first activity to appear on the community leaderboard and start tracking your rank
+                      {(activitySummary?.totalDistance || 0) < 3 || (activitySummary?.totalTime || 0) < 30
+                        ? `Community ranking starts after at least 3 km and 30 minutes of total workouts. You currently have ${(activitySummary?.totalDistance || 0).toFixed(1)} km and ${Math.round(activitySummary?.totalTime || 0)} minutes.`
+                        : "Complete an eligible activity to appear on the community leaderboard and start tracking your rank."}
                     </Text>
                   </View>
                 </View>

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
 import { requireRegistrationOwner } from "../../../rbac";
+import { findDirectoryMatches } from "../../../club-member-directory";
 
 const CREATOR_REQUEST_TYPES = new Set(["start_club", "event_organizer"]);
 
@@ -80,6 +81,7 @@ export default publicProcedure
     await requireRegistrationOwner(ctx, input.registrationId);
 
     let selectedMembershipClub: any = null;
+    let directoryMatch: any = null;
 
     if ((input.requestType === "membership" || !input.requestType) && input.newMember === "Yes" && !input.clubRulesAccepted) {
       throw new Error("Please read and accept the club membership terms before sending your join request.");
@@ -113,6 +115,9 @@ export default publicProcedure
         buildCountryAliases(countries)
       );
       selectedMembershipClub = selectedClub;
+      if (!isSpecialClub(selectedClub)) {
+        [directoryMatch] = await findDirectoryMatches(ctx, input.registrationId, [input.clubId]);
+      }
     }
 
     if (CREATOR_REQUEST_TYPES.has(input.requestType)) {
@@ -155,7 +160,7 @@ export default publicProcedure
       new_member: input.newMember,
       request_type: input.requestType,
       status:
-        input.requestType === "membership" && isSpecialClub(selectedMembershipClub)
+        input.requestType === "membership" && (isSpecialClub(selectedMembershipClub) || Boolean(directoryMatch))
           ? "approved"
           : "pending",
       proposed_club_name: input.proposedClubName?.trim() || null,
@@ -167,5 +172,12 @@ export default publicProcedure
       throw new Error(error.message || "Failed to save club membership request");
     }
 
-    return { success: true };
+    if (directoryMatch?.member_id) {
+      await ctx.supabase
+        .from("club_member_directory")
+        .update({ linked_registration_id: input.registrationId, updated_at: new Date().toISOString() })
+        .eq("member_id", directoryMatch.member_id);
+    }
+
+    return { success: true, autoApproved: Boolean(directoryMatch) };
   });

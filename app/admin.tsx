@@ -483,6 +483,50 @@ async function readArticleFileText(asset: DocumentPicker.DocumentPickerAsset): P
   return FileSystem.readAsStringAsync(asset.uri, { encoding: "utf8" });
 }
 
+function parseClubMemberCsv(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === '"') {
+      if (quoted && text[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === "," && !quoted) {
+      row.push(cell.trim());
+      cell = "";
+    } else if ((character === "\n" || character === "\r") && !quoted) {
+      if (character === "\r" && text[index + 1] === "\n") index += 1;
+      row.push(cell.trim());
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += character;
+    }
+  }
+  row.push(cell.trim());
+  if (row.some(Boolean)) rows.push(row);
+  if (rows.length < 2) throw new Error("The CSV needs a header row and at least one member.");
+
+  const headers = rows[0].map((value) => value.trim().toLowerCase());
+  const column = (name: string) => headers.indexOf(name);
+  if (column("name") === -1 || column("phone") === -1 || column("email") === -1) {
+    throw new Error("CSV columns must include name, nickname, phone, and email.");
+  }
+  return rows.slice(1).map((values) => ({
+    name: values[column("name")] || "",
+    nickname: column("nickname") >= 0 ? values[column("nickname")] || null : null,
+    phone: values[column("phone")] || null,
+    email: values[column("email")] || null,
+  })).filter((member) => member.name && (member.phone || member.email));
+}
+
 interface PendingActivity {
   pending_activity_id: string;
   registration_id: string;
@@ -986,6 +1030,12 @@ export default function AdminScreen() {
   const [serviceTeamWhatsappInput, setServiceTeamWhatsappInput] = useState<string>("");
   const [adminWhatsappInput, setAdminWhatsappInput] = useState<string>("");
   const [clubRequestStatusFilter, setClubRequestStatusFilter] = useState<ClubRequestStatusFilter>("pending");
+  const [directoryClubId, setDirectoryClubId] = useState("");
+  const [directoryMemberId, setDirectoryMemberId] = useState<string | null>(null);
+  const [directoryName, setDirectoryName] = useState("");
+  const [directoryNickname, setDirectoryNickname] = useState("");
+  const [directoryPhone, setDirectoryPhone] = useState("");
+  const [directoryEmail, setDirectoryEmail] = useState("");
   const [clubRequestCountryFilter, setClubRequestCountryFilter] = useState<string>("all");
   const [clubProfileName, setClubProfileName] = useState<string>("");
   const [clubProfileLocation, setClubProfileLocation] = useState<string>("");
@@ -1971,6 +2021,55 @@ export default function AdminScreen() {
     () => sortedMagazineReviewRows.filter((row) => getMagazineReviewStatusGroup(row.status) === magazineReviewStatusFilter),
     [getMagazineReviewStatusGroup, magazineReviewStatusFilter, sortedMagazineReviewRows]
   );
+
+  useEffect(() => {
+    if (!directoryClubId && roleSession.clubCoordinatorScopes.length > 0) {
+      setDirectoryClubId(roleSession.clubCoordinatorScopes[0]);
+    }
+  }, [directoryClubId, roleSession.clubCoordinatorScopes]);
+
+  const {
+    data: clubMemberDirectory = [],
+    isLoading: clubMemberDirectoryLoading,
+    refetch: refetchClubMemberDirectory,
+  } = trpc.admin.getClubMemberDirectory.useQuery(
+    { clubId: directoryClubId },
+    { enabled: Boolean(directoryClubId) && activeTab === "clubRequests" }
+  );
+
+  const upsertClubMemberDirectoryMutation = trpc.admin.upsertClubMemberDirectory.useMutation({
+    onSuccess: (result) => {
+      void refetchClubMemberDirectory();
+      setDirectoryName("");
+      setDirectoryMemberId(null);
+      setDirectoryNickname("");
+      setDirectoryPhone("");
+      setDirectoryEmail("");
+      Alert.alert("Member List Updated", `${result.count} member${result.count === 1 ? "" : "s"} saved.`);
+    },
+    onError: (error) => Alert.alert("Member List Error", error.message),
+  });
+
+  const deleteClubMemberDirectoryMutation = trpc.admin.deleteClubMemberDirectory.useMutation({
+    onSuccess: () => void refetchClubMemberDirectory(),
+    onError: (error) => Alert.alert("Member List Error", error.message),
+  });
+
+  const handleClubDirectoryCsvImport = async () => {
+    if (!directoryClubId) return;
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["text/csv", "text/comma-separated-values", "text/plain"],
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      const members = parseClubMemberCsv(await readArticleFileText(result.assets[0]));
+      if (members.length === 0) throw new Error("No valid members were found in the CSV.");
+      upsertClubMemberDirectoryMutation.mutate({ clubId: directoryClubId, members });
+    } catch (error) {
+      Alert.alert("CSV Import Error", error instanceof Error ? error.message : "Could not import the CSV file.");
+    }
+  };
   const sortedMyMagazineArticles = useMemo(() => sortMagazineRowsByDate(myMagazineArticles as any[]), [myMagazineArticles, sortMagazineRowsByDate]);
 
   const getRoleRequestScope = useCallback((request: PendingRoleRequest) => {
@@ -6595,6 +6694,106 @@ const getStatusLabel = (status: string) => {
         </ScrollView>
       ) : activeTab === "clubRequests" ? (
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          {isClubCoordinator && roleSession.clubCoordinatorScopes.length > 0 ? (
+            <View style={styles.auditFilterCard}>
+              <View style={{ gap: 6 }}>
+                <Text style={styles.paymentPanelTitle}>Pre-approved Club Member List</Text>
+                <Text style={styles.emptySubtext}>
+                  Import a CSV with name, nickname, phone, and email columns, or maintain the list manually. Matching new accounts can join immediately after confirming their club.
+                </Text>
+              </View>
+              {roleSession.clubCoordinatorScopes.length > 1 ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  {roleSession.clubCoordinatorScopes.map((clubId, index) => (
+                    <TouchableOpacity
+                      key={clubId}
+                      style={[styles.eventFilterChip, directoryClubId === clubId && styles.eventFilterChipActive]}
+                      onPress={() => setDirectoryClubId(clubId)}
+                    >
+                      <Text style={[styles.eventFilterChipText, directoryClubId === clubId && styles.eventFilterChipTextActive]}>
+                        Club {index + 1}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              ) : null}
+              <TouchableOpacity
+                style={[styles.approveButton, upsertClubMemberDirectoryMutation.isPending && styles.disabledButton]}
+                onPress={() => void handleClubDirectoryCsvImport()}
+                disabled={upsertClubMemberDirectoryMutation.isPending}
+              >
+                <Upload size={18} color="#fff" />
+                <Text style={styles.actionButtonText}>Import Member CSV</Text>
+              </TouchableOpacity>
+              <View style={styles.formRow}>
+                <View style={styles.formGroupHalf}>
+                  <Text style={styles.inputLabel}>Name *</Text>
+                  <TextInput style={styles.input} value={directoryName} onChangeText={setDirectoryName} placeholder="Member name" />
+                </View>
+                <View style={styles.formGroupHalf}>
+                  <Text style={styles.inputLabel}>Nickname</Text>
+                  <TextInput style={styles.input} value={directoryNickname} onChangeText={setDirectoryNickname} placeholder="Optional" />
+                </View>
+              </View>
+              <View style={styles.formRow}>
+                <View style={styles.formGroupHalf}>
+                  <Text style={styles.inputLabel}>Phone</Text>
+                  <TextInput style={styles.input} value={directoryPhone} onChangeText={setDirectoryPhone} placeholder="+256..." keyboardType="phone-pad" />
+                </View>
+                <View style={styles.formGroupHalf}>
+                  <Text style={styles.inputLabel}>Email</Text>
+                  <TextInput style={styles.input} value={directoryEmail} onChangeText={setDirectoryEmail} placeholder="member@email.com" keyboardType="email-address" autoCapitalize="none" />
+                </View>
+              </View>
+              <TouchableOpacity
+                style={[styles.approveButton, (!directoryName.trim() || (!directoryPhone.trim() && !directoryEmail.trim())) && styles.disabledButton]}
+                disabled={!directoryName.trim() || (!directoryPhone.trim() && !directoryEmail.trim()) || upsertClubMemberDirectoryMutation.isPending}
+                onPress={() => upsertClubMemberDirectoryMutation.mutate({
+                  clubId: directoryClubId,
+                  members: [{
+                    memberId: directoryMemberId,
+                    name: directoryName,
+                    nickname: directoryNickname || null,
+                    phone: directoryPhone || null,
+                    email: directoryEmail || null,
+                  }],
+                })}
+              >
+                <Save size={18} color="#fff" />
+                <Text style={styles.actionButtonText}>{directoryMemberId ? "Update Member" : "Add Member"}</Text>
+              </TouchableOpacity>
+              {clubMemberDirectoryLoading ? (
+                <Text style={styles.emptySubtext}>Loading member list...</Text>
+              ) : clubMemberDirectory.length === 0 ? (
+                <Text style={styles.emptySubtext}>No pre-approved members have been added.</Text>
+              ) : (
+                clubMemberDirectory.map((member) => (
+                  <View key={member.member_id} style={styles.paymentStatusRow}>
+                    <TouchableOpacity
+                      style={{ flex: 1 }}
+                      onPress={() => {
+                        setDirectoryMemberId(member.member_id);
+                        setDirectoryName(member.name);
+                        setDirectoryNickname(member.nickname || "");
+                        setDirectoryPhone(member.phone || "");
+                        setDirectoryEmail(member.email || "");
+                      }}
+                    >
+                      <Text style={styles.paymentStatusName}>{member.name}{member.nickname ? ` (${member.nickname})` : ""}</Text>
+                      <Text style={styles.paymentStatusMeta}>{member.phone || "No phone"} - {member.email || "No email"}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.adminDataActionButton, styles.adminDataActionReject]}
+                      onPress={() => deleteClubMemberDirectoryMutation.mutate({ clubId: directoryClubId, memberId: member.member_id })}
+                    >
+                      <Trash2 size={14} color="#fff" />
+                      <Text style={styles.adminDataActionText}>Remove</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </View>
+          ) : null}
           <View style={styles.auditFilterCard}>
             <View style={styles.auditSegment}>
               {[

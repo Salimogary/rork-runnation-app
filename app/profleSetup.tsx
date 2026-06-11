@@ -13,6 +13,7 @@ import {
   Modal,
   Share,
   Image,
+  ImageBackground,
   Animated,
 } from 'react-native';
 import { useRouter, Link } from 'expo-router';
@@ -68,6 +69,15 @@ interface RegistrationData {
 interface ContactData {
   phone: string;
   email: string;
+}
+
+interface ClubDirectoryMatch {
+  memberId: string;
+  clubId: string;
+  clubName: string;
+  country: string | null;
+  location: string | null;
+  matchedName: string;
 }
 
 interface ClubStartRequestData {
@@ -331,6 +341,7 @@ export default function RegisterScreen() {
   const [selectedNormalClubId, setSelectedNormalClubId] = useState<string | null>(null);
   const [selectedSpecialClubIds, setSelectedSpecialClubIds] = useState<string[]>([]);
   const [clubChoice, setClubChoice] = useState<ClubChoice>(null);
+  const [clubDirectoryMatches, setClubDirectoryMatches] = useState<ClubDirectoryMatch[]>([]);
   const [showClubTermsModal, setShowClubTermsModal] = useState(false);
   const [clubTermsAccepted, setClubTermsAccepted] = useState(false);
   const [distancePreference, setDistancePreference] = useState<DistancePreference>(savedDistanceUnit);
@@ -988,6 +999,8 @@ export default function RegisterScreen() {
         phone: contactData.phone,
         email: normalizedEmail,
       });
+      const matches = await getServerClient().auth.getClubMemberMatches.query({ registrationId });
+      setClubDirectoryMatches(matches);
 
       console.log('[Register] Contacts saved, moving to goals');
       setEmailConfirmationSent(false);
@@ -1907,6 +1920,28 @@ export default function RegisterScreen() {
 
     return (
       <View style={styles.clubChoiceList}>
+        {clubDirectoryMatches.map((match) => (
+          <View key={match.memberId} style={styles.clubTermsNotice}>
+            <UserCheck size={20} color="#fff" />
+            <View style={styles.clubChoiceTextWrap}>
+              <Text style={styles.clubChoiceLabel}>Are you a member of {match.clubName}?</Text>
+              <Text style={styles.clubChoiceDesc}>
+                Your phone or email appears on the coordinator&apos;s member list. Confirm to join without waiting for approval.
+              </Text>
+              <TouchableOpacity
+                style={[styles.button, styles.primaryButton, { marginTop: 10 }]}
+                onPress={() => {
+                  setClubChoice('existing');
+                  setSelectedNormalClubId(match.clubId);
+                  setSelectedSpecialClubIds([]);
+                }}
+                disabled={isLoading}
+              >
+                <Text style={styles.buttonText}>Yes, join {match.clubName}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ))}
         {options.map((opt) => {
           const isSelected = clubChoice === opt.key;
           return (
@@ -2392,10 +2427,17 @@ export default function RegisterScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <LinearGradient
-        colors={['#C74E1A', '#D4691E', '#CC8800']}
-        style={styles.gradient}
+      <ImageBackground
+        source={require('../assets/images/auth-background-v2.png')}
+        style={styles.authBackground}
+        imageStyle={styles.authBackgroundImage}
+        resizeMode="cover"
       >
+        <LinearGradient
+          colors={['rgba(2,7,29,0.20)', 'rgba(4,12,46,0.52)', 'rgba(19,5,31,0.36)']}
+          locations={[0, 0.58, 1]}
+          style={styles.gradient}
+        >
         <SafeAreaView edges={Platform.OS === 'android' ? ['bottom'] : []} style={styles.safeContent}>
           <ScrollView
             style={styles.safeScroll}
@@ -2587,7 +2629,8 @@ export default function RegisterScreen() {
           </ScrollView>
         </SafeAreaView>
         {renderClubTermsModal()}
-      </LinearGradient>
+        </LinearGradient>
+      </ImageBackground>
     </KeyboardAvoidingView>
   );
 }
@@ -2595,6 +2638,14 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#030821',
+  },
+  authBackground: {
+    flex: 1,
+    backgroundColor: '#030821',
+  },
+  authBackgroundImage: {
+    opacity: 0.98,
   },
   gradient: {
     flex: 1,
@@ -2608,45 +2659,63 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    paddingVertical: 40,
+    paddingVertical: 30,
   },
   content: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: 32,
+    paddingHorizontal: 22,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 22,
   },
   logoWrap: {
-    width: 86,
-    height: 86,
+    width: 82,
+    height: 82,
     overflow: 'hidden',
-    borderRadius: 22,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
     backgroundColor: '#001623',
+    borderWidth: 1,
+    borderColor: 'rgba(255,126,43,0.65)',
+    shadowColor: '#FF5A12',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.38,
+    shadowRadius: 18,
+    elevation: 10,
   },
   logoImage: {
     width: '100%',
     height: '100%',
   },
   title: {
-    fontSize: 36,
-    fontWeight: 'bold' as const,
+    fontSize: 35,
+    fontWeight: '800' as const,
     color: '#FFFFFF',
-    marginBottom: 8,
+    marginBottom: 6,
+    letterSpacing: -0.7,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#FFFFFF',
-    opacity: 0.9,
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.82)',
     textAlign: 'center',
   },
   form: {
     width: '100%',
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingVertical: 20,
+    backgroundColor: 'rgba(4,10,35,0.76)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.34,
+    shadowRadius: 24,
+    elevation: 10,
   },
   stepIndicatorContainer: {
     flexDirection: 'row',
@@ -2735,12 +2804,14 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   input: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    backgroundColor: 'rgba(248,250,255,0.96)',
+    borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
-    color: '#1a1a1a',
+    color: '#07122F',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.65)',
   },
   passwordField: {
     position: 'relative',
@@ -2783,8 +2854,10 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(255,92,18,0.18)',
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,126,43,0.35)',
   },
   biometricText: {
     fontSize: 12,
@@ -2797,7 +2870,7 @@ const styles = StyleSheet.create({
   },
   socialAuthButton: {
     minHeight: 52,
-    borderRadius: 14,
+    borderRadius: 15,
     paddingHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
@@ -2806,7 +2879,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
   },
   googleButton: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'rgba(255,255,255,0.97)',
     borderColor: 'rgba(255,255,255,0.9)',
   },
   googleMark: {
@@ -2828,8 +2901,8 @@ const styles = StyleSheet.create({
     fontWeight: '700' as const,
   },
   appleButtonComingSoon: {
-    backgroundColor: 'rgba(28,28,28,0.34)',
-    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(255,255,255,0.16)',
   },
   appleComingSoonText: {
     color: 'rgba(255,255,255,0.72)',
@@ -2870,7 +2943,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   button: {
-    borderRadius: 12,
+    borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
     shadowColor: '#000',
@@ -2880,12 +2953,14 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   primaryButton: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#F04A1D',
+    borderWidth: 1,
+    borderColor: '#FF7A32',
   },
   secondaryButton: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: '#1a1a1a',
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.7)',
   },
   buttonDisabled: {
     opacity: 0.6,
@@ -2901,7 +2976,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   secondaryButtonText: {
-    color: '#1a1a1a',
+    color: '#FFFFFF',
     fontSize: 18,
     fontWeight: 'bold' as const,
   },

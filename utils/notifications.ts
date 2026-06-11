@@ -14,6 +14,12 @@ const STORAGE_KEYS = {
   SCHEDULED_REMINDERS: 'notif_scheduled_reminders',
   NOTIFICATIONS_ENABLED: 'notif_enabled',
   TRIAL_NOTIFIED_MILESTONES: 'notif_trial_milestones',
+  MORNING_DIGEST_DATE: 'notif_morning_digest_date',
+};
+
+export type MorningNotificationItem = {
+  type: 'incomplete_profile' | 'app_update' | 'new_event' | 'goals_not_set' | 'event_reminder';
+  message: string;
 };
 
 type RegisteredEventReminder = {
@@ -370,6 +376,74 @@ export async function checkAndNotifyGoalProgress(
   } catch (error) {
     console.error('[Notifications] Goal progress check error:', error);
   }
+}
+
+export async function sendMorningDigestOnce(
+  userId: string,
+  items: MorningNotificationItem[]
+): Promise<void> {
+  if (items.length === 0) return;
+  const now = new Date();
+  if (now.getHours() < 5 || now.getHours() >= 12) return;
+
+  const dateKey = toDateOnlyKey(now);
+  const storageKey = `${STORAGE_KEYS.MORNING_DIGEST_DATE}_${userId}`;
+  if (await AsyncStorage.getItem(storageKey) === dateKey) return;
+
+  const visibleItems = items.slice(0, 3);
+  const extraCount = items.length - visibleItems.length;
+  const body = `${visibleItems.map((item) => item.message).join(' ')}${extraCount > 0 ? ` Plus ${extraCount} more update${extraCount === 1 ? '' : 's'} in the app.` : ''}`;
+  await sendLocalNotification(
+    'RunNation morning update',
+    body,
+    { type: 'morning_digest', categories: items.map((item) => item.type) }
+  );
+  await AsyncStorage.setItem(storageKey, dateKey);
+}
+
+export async function checkAndNotifyWorkoutMilestones(
+  userId: string,
+  totalDistanceKm: number,
+  totalActivities: number,
+  badgeCount: number,
+  previousDistanceKm: number,
+  previousActivities: number,
+  previousBadgeCount: number
+): Promise<void> {
+  const key = `${STORAGE_KEYS.LAST_ACTIVITY_MILESTONES}_${userId}`;
+  const badgeKey = `${STORAGE_KEYS.LAST_BADGE_COUNT}_${userId}`;
+  const [storedMilestones, storedBadgeCount] = await Promise.all([
+    AsyncStorage.getItem(key),
+    AsyncStorage.getItem(badgeKey),
+  ]);
+  const notified = new Set<string>(storedMilestones ? JSON.parse(storedMilestones) : []);
+  const lastStoredBadgeCount = storedBadgeCount ? Number(storedBadgeCount) : previousBadgeCount;
+  const distanceMilestones = [5, 10, 21, 42, 100, 250, 500, 1000, 2500, 5000];
+  const activityMilestones = [5, 10, 25, 50, 100, 250, 500, 1000];
+  const distanceHit = distanceMilestones.find((value) => previousDistanceKm < value && totalDistanceKm >= value && !notified.has(`distance:${value}`));
+  const activityHit = activityMilestones.find((value) => previousActivities < value && totalActivities >= value && !notified.has(`activities:${value}`));
+  const newBadges = Math.max(0, badgeCount - Math.max(previousBadgeCount, lastStoredBadgeCount));
+
+  const messages = [
+    newBadges > 0 ? `${newBadges} new badge${newBadges === 1 ? '' : 's'} earned.` : null,
+    distanceHit ? `${distanceHit.toLocaleString()} km milestone reached.` : null,
+    activityHit ? `${activityHit.toLocaleString()} workouts completed.` : null,
+  ].filter(Boolean);
+
+  if (messages.length > 0) {
+    await sendLocalNotification('Workout milestone achieved', messages.join(' '), {
+      type: 'workout_milestone',
+      badgeCount,
+      distanceMilestone: distanceHit ?? null,
+      activityMilestone: activityHit ?? null,
+    });
+  }
+  if (distanceHit) notified.add(`distance:${distanceHit}`);
+  if (activityHit) notified.add(`activities:${activityHit}`);
+  await Promise.all([
+    AsyncStorage.setItem(key, JSON.stringify(Array.from(notified))),
+    AsyncStorage.setItem(badgeKey, String(badgeCount)),
+  ]);
 }
 
 export async function scheduleRegisteredEventReminders(

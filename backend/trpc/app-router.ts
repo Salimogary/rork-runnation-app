@@ -95,6 +95,9 @@ import updateMagazineEntryRoute from "./routes/admin/update-magazine-entry/route
 import createClubProfileRoute from "./routes/admin/create-club-profile/route";
 import getAdminProfileRoute from "./routes/admin/get-admin-profile/route";
 import updateAdminProfileRoute from "./routes/admin/update-admin-profile/route";
+import getClubMemberDirectoryRoute from "./routes/admin/get-club-member-directory/route";
+import upsertClubMemberDirectoryRoute from "./routes/admin/upsert-club-member-directory/route";
+import deleteClubMemberDirectoryRoute from "./routes/admin/delete-club-member-directory/route";
 import registerRoute from "./routes/auth/register/route";
 import saveContactsRoute from "./routes/auth/save-contacts/route";
 import saveGoalsRoute from "./routes/auth/save-goals/route";
@@ -105,6 +108,7 @@ import getClubsRoute from "./routes/auth/get-clubs/route";
 import createAuthUserRoute from "./routes/auth/create-auth-user/route";
 import ensureOauthRegistrationRoute from "./routes/auth/ensure-oauth-registration/route";
 import syncSocialContactEmailRoute from "./routes/auth/sync-social-contact-email/route";
+import getClubMemberMatchesRoute from "./routes/auth/get-club-member-matches/route";
 import submitSuggestionRoute from "./routes/feedback/submit-suggestion/route";
 import submitRatingRoute from "./routes/feedback/submit-rating/route";
 import createSocialPostRoute from "./routes/social/create-post/route";
@@ -201,6 +205,9 @@ export const appRouter = createTRPCRouter({
     deleteMagazinePictorial: deleteMagazinePictorialRoute,
     getClubMembershipRequests: getClubMembershipRequestsRoute,
     updateClubMembershipRequest: updateClubMembershipRequestRoute,
+    getClubMemberDirectory: getClubMemberDirectoryRoute,
+    upsertClubMemberDirectory: upsertClubMemberDirectoryRoute,
+    deleteClubMemberDirectory: deleteClubMemberDirectoryRoute,
     getAuditLogs: getAuditLogsRoute,
     getAccountLinkHealth: getAccountLinkHealthRoute,
     repairAccountLink: repairAccountLinkRoute,
@@ -268,6 +275,7 @@ export const appRouter = createTRPCRouter({
     createAuthUser: createAuthUserRoute,
     ensureOauthRegistration: ensureOauthRegistrationRoute,
     syncSocialContactEmail: syncSocialContactEmailRoute,
+    getClubMemberMatches: getClubMemberMatchesRoute,
   }),
   feedback: createTRPCRouter({
     submitSuggestion: submitSuggestionRoute,
