@@ -915,8 +915,10 @@ export default function SettingsScreen() {
                       : 'Subscribe'}
               </Text>
               <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>
-                {subscriptionStatus === 'active' && subscription?.expires_at
-                  ? `Expires ${new Date(subscription.expires_at).toLocaleDateString()}`
+                {subscriptionStatus === 'active'
+                  ? subscription?.expires_at
+                    ? `Expires ${new Date(subscription.expires_at).toLocaleDateString()}`
+                    : 'Your premium plan is active'
                   : subscriptionStatus === 'trial'
                     ? `${trialDaysRemaining} day${trialDaysRemaining !== 1 ? 's' : ''} remaining`
                     : subscriptionStatus === 'pending'

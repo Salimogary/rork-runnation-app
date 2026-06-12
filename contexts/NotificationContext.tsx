@@ -1,11 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 import createContextHook from "@nkzw/create-context-hook";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
-import { calculateProfileCompletion } from "@/utils/profileCompletion";
+import { calculateProfileCompletion, fetchProfileCompletionInputs } from "@/utils/profileCompletion";
+import { hasFreeAdminSubscriptionAccess } from "@/lib/role-session";
 import { sendMorningDigestOnce, setupNotifications, type MorningNotificationItem } from "@/utils/notifications";
 
 function dateOnly(value: string | null | undefined): string | null {
@@ -16,7 +17,8 @@ function dateOnly(value: string | null | undefined): string | null {
 }
 
 export const [NotificationProvider, useNotifications] = createContextHook(() => {
-  const { user } = useAuth();
+  const { user, roleSession } = useAuth();
+  const hasFreeAdminAccess = hasFreeAdminSubscriptionAccess(roleSession);
   const setupDone = useRef(false);
 
   useEffect(() => {
@@ -28,46 +30,31 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
   }, []);
 
   const { data: morningItems = [], refetch } = useQuery<MorningNotificationItem[]>({
-    queryKey: ["quiet-morning-notifications", user?.id],
+    queryKey: ["quiet-morning-notifications", user?.id, hasFreeAdminAccess],
     queryFn: async () => {
       if (!user?.id) return [];
       const [
         profileResult,
-        photoResult,
         goalsResult,
         fitnessTargetResult,
         weightTargetResult,
-        clubResult,
-        activitiesResult,
         enrollmentResult,
         participantsResult,
         appSettingsResult,
+        completionInputs,
       ] = await Promise.all([
-        supabase.from("registrations").select("first_name, other_names, username, email, sex, city_town_district, country, dob").eq("registration_id", user.id).maybeSingle(),
-        supabase.from("user_photos").select("file_path").eq("registration_id", user.id).eq("is_profile_photo", true).maybeSingle(),
+        supabase.from("registrations").select("country").eq("registration_id", user.id).maybeSingle(),
         supabase.from("user_goals").select("user_goals_id").eq("registration_id", user.id),
         supabase.from("fitness_goal").select("fitness_goal_id").eq("registration_id", user.id).limit(1),
         supabase.from("weight_target_goal").select("weight_target_goal_id").eq("registration_id", user.id).limit(1),
-        supabase.from("club_membership_request").select("club").eq("registration_id", user.id).limit(1),
-        supabase.from("activities").select("distance_km").eq("registration_id", user.id),
         supabase.from("event_enrollments").select("event_id, status").eq("registration_id", user.id).in("status", ["approved", "registered", "paid"]),
         supabase.from("events_participants").select("event_id").eq("registration_id", user.id),
         supabase.from("app_settings").select("key, value").in("key", ["android_apk_build_number", "ios_build_number"]),
+        fetchProfileCompletionInputs(user.id, hasFreeAdminAccess),
       ]);
 
       const profile = profileResult.data as any;
-      const activities = activitiesResult.data || [];
-      const completion = calculateProfileCompletion({
-        allFieldsFilled: Boolean(profile?.first_name && profile?.other_names && profile?.username && profile?.email && profile?.sex && profile?.city_town_district && profile?.country && profile?.dob),
-        hasProfilePhoto: Boolean(photoResult.data?.file_path),
-        hasGoal: (goalsResult.data?.length || 0) > 0,
-        hasClub: Boolean(clubResult.data?.length),
-        hasFiveActivities: activities.length >= 5,
-        hasSubscription: true,
-        hasTargets: (fitnessTargetResult.data?.length || 0) > 0 || (weightTargetResult.data?.length || 0) > 0,
-        hasEventEnrollment: (enrollmentResult.data?.length || 0) > 0,
-        hasAtLeastOneBadge: false,
-      });
+      const completion = calculateProfileCompletion(completionInputs);
       const items: MorningNotificationItem[] = [];
       if (completion.percentage < 100) {
         items.push({ type: "incomplete_profile", message: `Your profile is ${completion.percentage}% complete.` });

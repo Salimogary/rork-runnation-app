@@ -19,7 +19,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { hasFreeAdminSubscriptionAccess } from "@/lib/role-session";
 import { getEarnedBadgeCount } from "@/utils/badges";
-import { calculateProfileCompletion } from "@/utils/profileCompletion";
+import { calculateProfileCompletion, fetchProfileCompletionInputs } from "@/utils/profileCompletion";
 import type { ProfileCompletionInputs } from "@/utils/profileCompletion";
 
 
@@ -129,120 +129,7 @@ export default function HeaderProfile() {
         };
       }
 
-      const [
-        profileRes,
-        photoRes,
-        goalsRes,
-        clubRes,
-        activitiesRes,
-        subscriptionRes,
-        fitnessGoalRes,
-        weightTargetRes,
-        enrollmentRes,
-      ] = await Promise.all([
-        supabase
-          .from("registrations")
-          .select('first_name, other_names, username, sex, city_town_district, country, dob, email_verified, contacts(email)')
-          .eq("registration_id", user.id)
-          .maybeSingle(),
-        supabase
-          .from("user_photos")
-          .select("file_path")
-          .eq("registration_id", user.id)
-          .eq("is_profile_photo", true)
-          .maybeSingle(),
-        supabase
-          .from("user_goals")
-          .select("user_goals_id")
-          .eq("registration_id", user.id)
-          .limit(1),
-        supabase
-          .from("club_membership_request")
-          .select("club")
-          .eq("registration_id", user.id)
-          .maybeSingle(),
-        supabase
-          .from("activities")
-          .select("distance_km, exercise_type")
-          .eq("registration_id", user.id),
-        supabase
-          .from("subscriptions")
-          .select("status, expires_at")
-          .eq("registration_id", user.id)
-          .maybeSingle(),
-        supabase
-          .from("fitness_goal")
-          .select("fitness_goal_id")
-          .eq("registration_id", user.id)
-          .limit(1),
-        supabase
-          .from("weight_target_goal")
-          .select("weight_target_goal_id")
-          .eq("registration_id", user.id)
-          .limit(1),
-        supabase
-          .from("event_enrollments")
-          .select("event_enrollment_id")
-          .eq("registration_id", user.id)
-          .limit(1),
-      ]);
-
-      const rawP = profileRes.data as any;
-      const contactEmail = rawP?.contacts?.[0]?.email ?? rawP?.contacts?.email ?? undefined;
-      const p: HeaderUserProfile | null = rawP ? { ...rawP, email: contactEmail } : null;
-      const allFieldsFilled = !!(
-        p &&
-        p.first_name &&
-        p.other_names &&
-        p.username &&
-        p.email &&
-        p.sex &&
-        p.city_town_district &&
-        p.country &&
-        p.dob
-      );
-
-      const hasProfilePhoto = !!photoRes.data?.file_path;
-      const hasGoal = (goalsRes.data?.length ?? 0) > 0;
-      const hasClub = !!(clubRes.data?.club && clubRes.data.club !== "");
-
-      const validTypes = ["Run", "Walk", "Treadmill", "Tredmill"];
-      const filteredActivities = (activitiesRes.data || []).filter((a: any) =>
-        validTypes.includes(a.exercise_type || "")
-      );
-      const hasFiveActivities = filteredActivities.length >= 5;
-
-      const totalDistance = filteredActivities.reduce((sum: number, a: any) => sum + (a.distance_km || 0), 0);
-      const totalActivities = filteredActivities.length;
-      const hasAtLeastOneBadge = getEarnedBadgeCount(totalDistance, totalActivities) > 0;
-
-      const sub = subscriptionRes.data;
-      let hasPaidSubscription = false;
-      if (sub && sub.status === "active") {
-        if (sub.expires_at) {
-          hasPaidSubscription = new Date(sub.expires_at) > new Date();
-        } else {
-          hasPaidSubscription = true;
-        }
-      }
-      const hasSubscription = hasFreeAdminAccess || hasPaidSubscription;
-
-      const hasTargets =
-        (fitnessGoalRes.data?.length ?? 0) > 0 ||
-        (weightTargetRes.data?.length ?? 0) > 0;
-
-      const hasEventEnrollment = (enrollmentRes.data?.length ?? 0) > 0;
-      return {
-        allFieldsFilled,
-        hasProfilePhoto,
-        hasGoal,
-        hasClub,
-        hasFiveActivities,
-        hasSubscription,
-        hasTargets,
-        hasEventEnrollment,
-        hasAtLeastOneBadge,
-      };
+      return fetchProfileCompletionInputs(user.id, hasFreeAdminAccess);
     },
     enabled: !!user,
     staleTime: 30000,

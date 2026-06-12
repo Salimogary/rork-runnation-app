@@ -257,7 +257,9 @@ export default function SubscriptionScreen() {
 
           <Text style={styles.heroTitle}>Go Premium</Text>
           <Text style={styles.heroSubtitle}>
-            {trialExpired
+            {subscriptionStatus === 'active'
+              ? 'Your premium plan is active.'
+              : trialExpired
               ? 'Your free plan has ended. Subscribe to continue using all features.'
               : `You have ${trialDaysRemaining} day${trialDaysRemaining !== 1 ? 's' : ''} left on your free plan.`}
           </Text>

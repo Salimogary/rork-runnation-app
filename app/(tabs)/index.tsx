@@ -2,7 +2,7 @@ import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Platform, Modal, 
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge, Watch, Smartphone, ChevronRight, Heart, Activity, Droplets, Flame, Stethoscope, Bike, ArrowLeft } from "lucide-react-native";
+import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge, Watch, Smartphone, ChevronRight, Heart, Activity, Droplets, Flame, Stethoscope, Bike, ArrowLeft, Share2, Save, Check } from "lucide-react-native";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import * as ImagePicker from "expo-image-picker";
@@ -109,7 +109,7 @@ const calculateDistance = (coord1: Coordinates, coord2: Coordinates): number => 
   return R * c;
 };
 
-const GPS_ACCURACY_THRESHOLD = 25;
+const GPS_ACCURACY_THRESHOLD = 50;
 const MAX_SPEED_KMH_RUN = 45;
 const MAX_SPEED_KMH_WALK = 15;
 const MAX_SPEED_KMH_CYCLE = 70;
@@ -165,7 +165,7 @@ type PersistedWorkoutSession = {
   updatedAt: number;
 };
 
-let backgroundLocationHandler: ((location: Location.LocationObject) => void) | null = null;
+let backgroundLocationHandler: ((location: Location.LocationObject) => Promise<void>) | null = null;
 let pendingPersistedWorkoutSession: PersistedWorkoutSession | null = null;
 let persistedWorkoutWritePromise: Promise<void> | null = null;
 
@@ -388,8 +388,9 @@ if (Platform.OS !== "web" && !TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK
 
     const locations = data?.locations ?? [];
     for (const location of locations) {
-      backgroundLocationHandler?.(location);
-      if (!backgroundLocationHandler) {
+      if (backgroundLocationHandler) {
+        await backgroundLocationHandler(location);
+      } else {
         await processPersistedBackgroundLocation(location);
       }
     }
@@ -1172,7 +1173,7 @@ export default function ExerciseScreen() {
     );
   }, [formatDurationForVoice, formatPaceForVoice, speakActivityMessage]);
 
-  const handleLocationUpdate = useCallback((location: Location.LocationObject, exerciseT: ExerciseType) => {
+  const handleLocationUpdate = useCallback(async (location: Location.LocationObject, exerciseT: ExerciseType) => {
     const activityStartTime = startTimeRef.current;
     if (activityStartTime && location.timestamp < activityStartTime.getTime()) {
       setCurrentLocation({
@@ -1224,17 +1225,15 @@ export default function ExerciseScreen() {
       console.log('[GPS] First point after resume — skipping distance, updating anchor');
       lastValidPoint.current = newPoint;
       isResuming.current = false;
-      setCoords((prev) => {
-        const next = [...prev, newCoord].slice(-MAX_ROUTE_POINTS);
-        coordsRef.current = next;
-        return next;
-      });
-      void persistActiveWorkoutSession("running");
+      const nextCoords = [...coordsRef.current, newCoord].slice(-MAX_ROUTE_POINTS);
+      coordsRef.current = nextCoords;
+      setCoords(nextCoords);
+      await persistActiveWorkoutSession("running");
       return;
     }
 
     if (!isValidGpsPoint(newPoint, exerciseT)) {
-      void persistActiveWorkoutSession(runStateRef.current === "paused" ? "paused" : "running");
+      await persistActiveWorkoutSession(runStateRef.current === "paused" ? "paused" : "running");
       return;
     }
 
@@ -1244,21 +1243,17 @@ export default function ExerciseScreen() {
         newCoord
       );
       console.log('[GPS] Valid point, distance delta:', (dist * 1000).toFixed(1), 'm, accuracy:', newPoint.accuracy?.toFixed(1), 'm');
-      setDistance((prevDist) => {
-        const next = prevDist + dist;
-        distanceRef.current = next;
-        announceKilometerSplitIfNeeded(next);
-        return next;
-      });
+      const nextDistance = distanceRef.current + dist;
+      distanceRef.current = nextDistance;
+      setDistance(nextDistance);
+      announceKilometerSplitIfNeeded(nextDistance);
     }
 
     lastValidPoint.current = newPoint;
-    setCoords((prev) => {
-      const next = [...prev, newCoord].slice(-MAX_ROUTE_POINTS);
-      coordsRef.current = next;
-      return next;
-    });
-    void persistActiveWorkoutSession("running");
+    const nextCoords = [...coordsRef.current, newCoord].slice(-MAX_ROUTE_POINTS);
+    coordsRef.current = nextCoords;
+    setCoords(nextCoords);
+    await persistActiveWorkoutSession("running");
   }, [announceKilometerSplitIfNeeded, evaluateAutoPause, isValidGpsPoint, persistActiveWorkoutSession]);
 
   const startBackgroundLocationWatch = useCallback(async (exerciseT: ExerciseType): Promise<boolean> => {
@@ -1279,7 +1274,7 @@ export default function ExerciseScreen() {
       }
 
       await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-        accuracy: Location.Accuracy.High,
+        accuracy: Location.Accuracy.BestForNavigation,
         distanceInterval: BACKGROUND_LOCATION_DISTANCE_METERS,
         timeInterval: BACKGROUND_LOCATION_INTERVAL_MS,
         pausesUpdatesAutomatically: false,
@@ -1325,9 +1320,7 @@ export default function ExerciseScreen() {
       locationSubscription.current = null;
     }
 
-    backgroundLocationHandler = (location) => {
-      handleLocationUpdate(location, exerciseT);
-    };
+    backgroundLocationHandler = (location) => handleLocationUpdate(location, exerciseT);
 
     if (Platform.OS === "android") {
       const backgroundStarted = await startBackgroundLocationWatch(exerciseT);
@@ -1344,7 +1337,7 @@ export default function ExerciseScreen() {
           timeInterval: FOREGROUND_LOCATION_INTERVAL_MS,
         },
         (location) => {
-          handleLocationUpdate(location, exerciseT);
+          void handleLocationUpdate(location, exerciseT);
         }
       );
     } catch (error) {
@@ -3086,30 +3079,33 @@ export default function ExerciseScreen() {
               </View>
             </ScrollView>
 
-            <View style={[styles.runDetailsActions, { borderTopColor: themeColors.border, paddingBottom: runDetailsActionsBottomPadding }]}>
+            <View style={[styles.runDetailsActions, { paddingBottom: runDetailsActionsBottomPadding }]}>
               <TouchableOpacity
-                style={[styles.runDetailsActionButton, styles.runDetailsCloseButton]}
+                style={styles.runDetailsActionButton}
                 onPress={() => setShowRunDetailsModal(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Close workout details"
               >
-                <Text style={styles.runDetailsCloseText}>Close</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.runDetailsActionButton, styles.runDetailsShareButton]} onPress={shareRunDetails}>
-                <Text style={styles.runDetailsActionText}>Share</Text>
+                <X size={22} color={themeColors.text} />
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.runDetailsActionButton, styles.runDetailsSaveButton, (isSaving || activitySaved) && styles.runDetailsDisabledButton]}
+                style={styles.runDetailsActionButton}
+                onPress={shareRunDetails}
+                accessibilityRole="button"
+                accessibilityLabel="Share workout"
+              >
+                <Share2 size={22} color="#2563EB" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.runDetailsActionButton, (isSaving || activitySaved) && styles.runDetailsDisabledButton]}
                 onPress={saveFinishedActivity}
                 disabled={isSaving || activitySaved}
+                accessibilityRole="button"
+                accessibilityLabel={activitySaved ? "Workout saved" : "Save workout"}
               >
-                <Text style={styles.runDetailsActionText}>
-                  {activitySaved
-                    ? pendingWorkoutSyncCount > 0
-                      ? "Saved Offline"
-                      : "Saved"
-                    : isSaving
-                      ? "Saving..."
-                      : "Save"}
-                </Text>
+                {activitySaved
+                  ? <Check size={22} color="#10B981" />
+                  : <Save size={22} color="#10B981" />}
               </TouchableOpacity>
             </View>
           </View>
@@ -4267,37 +4263,23 @@ const styles = StyleSheet.create({
   },
   runDetailsActions: {
     flexDirection: "row" as const,
-    gap: 10,
-    padding: 14,
-    borderTopWidth: 1,
+    justifyContent: "center" as const,
+    alignItems: "center" as const,
+    gap: 28,
+    paddingTop: 8,
+    paddingHorizontal: 14,
+    backgroundColor: "transparent",
   },
   runDetailsActionButton: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 13,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center" as const,
-  },
-  runDetailsCloseButton: {
-    backgroundColor: "#E5E7EB",
-  },
-  runDetailsShareButton: {
-    backgroundColor: "#2563EB",
-  },
-  runDetailsSaveButton: {
-    backgroundColor: "#10B981",
+    justifyContent: "center" as const,
+    backgroundColor: "rgba(255,255,255,0.72)",
   },
   runDetailsDisabledButton: {
     opacity: 0.65,
-  },
-  runDetailsActionText: {
-    color: colors.white,
-    fontSize: 15,
-    fontWeight: "900" as const,
-  },
-  runDetailsCloseText: {
-    color: "#374151",
-    fontSize: 15,
-    fontWeight: "900" as const,
   },
   countdownOverlay: {
     flex: 1,
