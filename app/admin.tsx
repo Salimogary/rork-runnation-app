@@ -5401,7 +5401,11 @@ const getStatusLabel = (status: string) => {
       ) : activeTab === "resign" ? (
         renderResignContent()
       ) : activeTab === "reports" ? (
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          nestedScrollEnabled
+        >
           {isSuperAdmin || isCountryCoordinator ? (
             <View style={styles.auditFilterCard}>
               <View style={styles.auditFilterHeader}>
@@ -5468,33 +5472,46 @@ const getStatusLabel = (status: string) => {
                   <Text style={styles.emptySubtext}>Try a different date range.</Text>
                 </View>
               ) : (
-                <View style={styles.adminDataTable}>
-                  <View style={[styles.adminDataRow, styles.adminDataHeader]}>
-                    <View style={[styles.adminDataCell, { flex: 1.1 }]}>
-                      <Text style={styles.adminDataHeaderText}>Date</Text>
-                    </View>
-                    <View style={[styles.adminDataCell, { flex: 1.7 }]}>
-                      <Text style={styles.adminDataHeaderText}>Country</Text>
-                    </View>
-                    <View style={[styles.adminDataCell, { flex: 1 }]}>
-                      <Text style={styles.adminDataHeaderText}>New Users</Text>
-                    </View>
-                  </View>
-                  {(registrationGrowthReport?.rows ?? []).map((row) => (
-                    <View key={`${row.date}-${row.countryCode}`} style={styles.adminDataRow}>
-                      <View style={[styles.adminDataCell, { flex: 1.1 }]}>
-                        <Text style={styles.adminDataCellText}>{formatDate(row.date)}</Text>
+                <View>
+                  <Text style={styles.mobileTableSwipeHint}>Swipe table left or right to see all columns</Text>
+                  <ScrollView
+                    horizontal
+                    nestedScrollEnabled
+                    directionalLockEnabled
+                    showsHorizontalScrollIndicator
+                    persistentScrollbar
+                    style={styles.adminDataTableScroll}
+                    contentContainerStyle={styles.adminDataTableScrollContent}
+                  >
+                    <View style={[styles.adminDataTable, styles.registrationGrowthTable]}>
+                      <View style={[styles.adminDataRow, styles.adminDataHeader]}>
+                        <View style={[styles.adminDataCell, { width: 140 }]}>
+                          <Text style={styles.adminDataHeaderText}>Date</Text>
+                        </View>
+                        <View style={[styles.adminDataCell, { width: 260 }]}>
+                          <Text style={styles.adminDataHeaderText}>Country</Text>
+                        </View>
+                        <View style={[styles.adminDataCell, { width: 130 }]}>
+                          <Text style={styles.adminDataHeaderText}>New Users</Text>
+                        </View>
                       </View>
-                      <View style={[styles.adminDataCell, { flex: 1.7 }]}>
-                        <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>
-                          {getCountryFlag(row.countryCode)} {row.countryName}
-                        </Text>
-                      </View>
-                      <View style={[styles.adminDataCell, { flex: 1 }]}>
-                        <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]}>{row.count}</Text>
-                      </View>
+                      {(registrationGrowthReport?.rows ?? []).map((row) => (
+                        <View key={`${row.date}-${row.countryCode}`} style={styles.adminDataRow}>
+                          <View style={[styles.adminDataCell, { width: 140 }]}>
+                            <Text style={styles.adminDataCellText}>{formatDate(row.date)}</Text>
+                          </View>
+                          <View style={[styles.adminDataCell, { width: 260 }]}>
+                            <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]} numberOfLines={2}>
+                              {getCountryFlag(row.countryCode)} {row.countryName}
+                            </Text>
+                          </View>
+                          <View style={[styles.adminDataCell, { width: 130 }]}>
+                            <Text style={[styles.adminDataCellText, styles.adminDataCellStrong]}>{row.count}</Text>
+                          </View>
+                        </View>
+                      ))}
                     </View>
-                  ))}
+                  </ScrollView>
                 </View>
               )}
             </View>
@@ -10270,6 +10287,18 @@ const styles = StyleSheet.create({
   },
   adminDataTableScroll: {
     flexGrow: 0,
+  },
+  adminDataTableScrollContent: {
+    flexGrow: 0,
+  },
+  registrationGrowthTable: {
+    minWidth: 530,
+  },
+  mobileTableSwipeHint: {
+    marginBottom: 6,
+    color: "#6b7280",
+    fontSize: 10,
+    fontWeight: "700" as const,
   },
   adminDataTable: {
     minWidth: 760,

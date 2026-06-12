@@ -36,6 +36,7 @@ type Slide = {
   title: string;
   description: string;
   gradient: readonly [string, string, ...string[]];
+  accent: string;
   cta?: string;
 };
 
@@ -46,7 +47,8 @@ const slides: Slide[] = [
     title: 'Runners from every nation belong here.',
     description:
       'RunNation warmly welcomes everyday runners, walkers, clubs, schools, institutions, charities, and event communities from all nations.',
-    gradient: ['#FF6B35', '#F97316', '#C2410C'] as const,
+    gradient: ['#020617', '#07153D', '#7C1229', '#F04A0C'] as const,
+    accent: '#FF7A1A',
   },
   {
     id: 'inclusive',
@@ -54,7 +56,8 @@ const slides: Slide[] = [
     title: 'A running home for every kind of runner.',
     description:
       'Beyond the usual road runners, RunNation makes space for juniors, golden age runners, para runners, indoor runners, beginners, and comeback stories.',
-    gradient: ['#0F766E', '#0891B2', '#1D4ED8'] as const,
+    gradient: ['#020617', '#0A1E52', '#31216F', '#B51D35'] as const,
+    accent: '#F43F5E',
   },
   {
     id: 'goals',
@@ -62,7 +65,8 @@ const slides: Slide[] = [
     title: 'Turn effort into visible progress.',
     description:
       'Set targets, build streaks, follow weight and wellness progress, and see how each workout moves you closer to the version of yourself you are building.',
-    gradient: ['#2563EB', '#7C3AED', '#C026D3'] as const,
+    gradient: ['#030712', '#111B55', '#52206E', '#D1273C'] as const,
+    accent: '#A855F7',
   },
   {
     id: 'clubs',
@@ -70,7 +74,8 @@ const slides: Slide[] = [
     title: 'Find your people and run with them.',
     description:
       'Join clubs in your country, help your club come onto RunNation, or take up a service role that grows your local running community.',
-    gradient: ['#059669', '#16A34A', '#65A30D'] as const,
+    gradient: ['#020617', '#08204E', '#4B174F', '#D83323'] as const,
+    accent: '#FB5B20',
   },
   {
     id: 'leaderboards',
@@ -78,7 +83,8 @@ const slides: Slide[] = [
     title: 'Compete, compare, and celebrate fairly.',
     description:
       'Follow reports for your runs, club, community, and events with clear distance, time, pace, days, finishers, and participant progress.',
-    gradient: ['#B45309', '#EA580C', '#DC2626'] as const,
+    gradient: ['#050816', '#191348', '#761730', '#F0440C'] as const,
+    accent: '#FF8A16',
   },
   {
     id: 'social',
@@ -86,7 +92,8 @@ const slides: Slide[] = [
     title: 'Share the journey, not just the finish.',
     description:
       'Post activity moments, talk with other runners, discover people with similar goals, and help keep the community respectful and safe.',
-    gradient: ['#DB2777', '#9333EA', '#4F46E5'] as const,
+    gradient: ['#020617', '#151447', '#5D185C', '#C51F3B'] as const,
+    accent: '#EC4899',
   },
   {
     id: 'events',
@@ -94,7 +101,8 @@ const slides: Slide[] = [
     title: 'Show up for runs that matter.',
     description:
       'Discover one-day, recurring, and multiday events, join challenges, chase medals, support causes, and keep your results in one RunNation story.',
-    gradient: ['#111827', '#334155', '#0F766E'] as const,
+    gradient: ['#01040F', '#07173F', '#4B153E', '#E53B0B'] as const,
+    accent: '#FF6B16',
     cta: 'Join RunNation',
   },
 ];
@@ -304,6 +312,19 @@ function SlideVisual({ id }: { id: SlideId }) {
   }
 }
 
+function ThemeStreaks() {
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <View style={[styles.themeGlow, styles.themeGlowTop]} />
+      <View style={[styles.themeGlow, styles.themeGlowBottom]} />
+      <View style={[styles.themeStreak, styles.themeStreakOne]} />
+      <View style={[styles.themeStreak, styles.themeStreakTwo]} />
+      <View style={[styles.themeStreak, styles.themeStreakThree]} />
+      <View style={[styles.themeStreak, styles.themeStreakFour]} />
+    </View>
+  );
+}
+
 function OnboardingSlide({ slide, isActive }: { slide: Slide; isActive: boolean }) {
   const contentOpacity = useRef(new Animated.Value(isActive ? 1 : 0.75)).current;
   const contentShift = useRef(new Animated.Value(isActive ? 0 : 14)).current;
@@ -349,12 +370,13 @@ function OnboardingSlide({ slide, isActive }: { slide: Slide; isActive: boolean 
   }, [isActive, visualFloat]);
 
   return (
-    <View style={styles.slide}>
-      <LinearGradient colors={slide.gradient} style={styles.heroSection}>
+    <LinearGradient colors={slide.gradient} style={styles.slide}>
+      <ThemeStreaks />
+      <View style={styles.heroSection}>
         <Animated.View style={{ transform: [{ translateY: visualFloat }] }}>
           <SlideVisual id={slide.id} />
         </Animated.View>
-      </LinearGradient>
+      </View>
 
       <View style={styles.contentSection}>
         <Animated.View
@@ -366,12 +388,14 @@ function OnboardingSlide({ slide, isActive }: { slide: Slide; isActive: boolean 
             },
           ]}
         >
-          <Text style={styles.pillar}>{slide.pillar}</Text>
+          <Text style={[styles.pillar, { color: slide.accent, borderColor: `${slide.accent}66` }]}>
+            {slide.pillar}
+          </Text>
           <Text style={styles.title}>{slide.title}</Text>
           <Text style={styles.description}>{slide.description}</Text>
         </Animated.View>
       </View>
-    </View>
+    </LinearGradient>
   );
 }
 
@@ -430,11 +454,22 @@ export default function OnboardingScreen() {
       <View style={styles.footer}>
         <View style={styles.pagination}>
           {slides.map((slide, index) => (
-            <View key={slide.id} style={[styles.dot, index === currentIndex && styles.activeDot]} />
+            <View
+              key={slide.id}
+              style={[
+                styles.dot,
+                index === currentIndex && styles.activeDot,
+                index === currentIndex && { backgroundColor: slides[currentIndex]?.accent },
+              ]}
+            />
           ))}
         </View>
 
-        <TouchableOpacity style={styles.nextButton} onPress={handleNext} activeOpacity={0.9}>
+        <TouchableOpacity
+          style={[styles.nextButton, { backgroundColor: slides[currentIndex]?.accent }]}
+          onPress={handleNext}
+          activeOpacity={0.9}
+        >
           <Text style={styles.nextButtonText}>
             {slides[currentIndex]?.cta || (currentIndex === slides.length - 1 ? 'Get Started' : 'Next')}
           </Text>
@@ -448,14 +483,16 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#020617',
   },
   skipButton: {
     position: 'absolute',
     top: 54,
     right: 20,
     zIndex: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(3,7,24,0.44)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 999,
@@ -471,27 +508,28 @@ const styles = StyleSheet.create({
   slide: {
     width: SCREEN_WIDTH,
     minHeight: SCREEN_HEIGHT,
+    overflow: 'hidden',
   },
   heroSection: {
-    height: SCREEN_HEIGHT * 0.5,
-    overflow: 'hidden',
+    height: SCREEN_HEIGHT * 0.46,
     justifyContent: 'center',
     alignItems: 'center',
   },
   contentSection: {
     flex: 1,
-    marginTop: -26,
+    marginTop: -20,
     paddingHorizontal: 20,
     paddingBottom: 124,
   },
   contentCard: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingTop: 28,
+    backgroundColor: 'rgba(3,7,24,0.72)',
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    paddingTop: 24,
     paddingHorizontal: 24,
-    shadowColor: '#111827',
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: -8 },
     shadowOpacity: 0.08,
     shadowRadius: 18,
@@ -499,27 +537,27 @@ const styles = StyleSheet.create({
   },
   pillar: {
     alignSelf: 'flex-start',
-    backgroundColor: '#FFF7ED',
-    color: '#C2410C',
+    backgroundColor: 'rgba(255,255,255,0.09)',
+    borderWidth: 1,
     fontSize: 13,
     fontWeight: '900',
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 999,
-    marginBottom: 16,
+    marginBottom: 13,
   },
   title: {
-    fontSize: 34,
-    lineHeight: 41,
+    fontSize: 31,
+    lineHeight: 37,
     fontWeight: '900',
-    color: '#111827',
+    color: '#FFFFFF',
     letterSpacing: 0,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   description: {
-    fontSize: 17,
-    lineHeight: 27,
-    color: '#4B5563',
+    fontSize: 16,
+    lineHeight: 24,
+    color: 'rgba(255,255,255,0.78)',
   },
   footer: {
     position: 'absolute',
@@ -539,14 +577,12 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 999,
-    backgroundColor: 'rgba(17,24,39,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.3)',
   },
   activeDot: {
     width: 28,
-    backgroundColor: '#111827',
   },
   nextButton: {
-    backgroundColor: '#111827',
     borderRadius: 18,
     paddingHorizontal: 22,
     paddingVertical: 18,
@@ -554,6 +590,59 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.26,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  themeGlow: {
+    position: 'absolute',
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,82,20,0.14)',
+  },
+  themeGlowTop: {
+    width: 280,
+    height: 280,
+    top: -120,
+    left: -110,
+  },
+  themeGlowBottom: {
+    width: 420,
+    height: 420,
+    right: -190,
+    bottom: -170,
+    backgroundColor: 'rgba(255,74,12,0.22)',
+  },
+  themeStreak: {
+    position: 'absolute',
+    height: 3,
+    borderRadius: 999,
+    right: -90,
+    backgroundColor: 'rgba(255,77,18,0.42)',
+    transform: [{ rotate: '-38deg' }],
+  },
+  themeStreakOne: {
+    width: 470,
+    top: '13%',
+  },
+  themeStreakTwo: {
+    width: 560,
+    top: '20%',
+    height: 5,
+    backgroundColor: 'rgba(225,30,62,0.3)',
+  },
+  themeStreakThree: {
+    width: 620,
+    bottom: '25%',
+    height: 2,
+    backgroundColor: 'rgba(255,126,23,0.52)',
+  },
+  themeStreakFour: {
+    width: 520,
+    bottom: '18%',
+    height: 6,
+    backgroundColor: 'rgba(230,37,37,0.25)',
   },
   nextButtonText: {
     color: '#FFFFFF',
@@ -562,7 +651,7 @@ const styles = StyleSheet.create({
   },
   visualStage: {
     width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT * 0.5,
+    height: SCREEN_HEIGHT * 0.46,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
