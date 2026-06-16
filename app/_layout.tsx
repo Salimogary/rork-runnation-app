@@ -153,6 +153,7 @@ function NavigationGuard() {
       currentSegment === "magazine" ||
       currentSegment === "participants" ||
       currentSegment === "medal-list" ||
+      currentSegment === "activity-complete" ||
       currentSegment === "policy" ||
       currentSegment === "about-us" ||
       currentSegment === "subscription";
@@ -211,6 +212,7 @@ function RootLayoutNav() {
         <Stack.Screen name="magazine/pictorial-submit" options={{ presentation: "modal", title: "Submit Pictorial" }} />
         <Stack.Screen name="participants" options={{ title: "Participants" }} />
         <Stack.Screen name="medal-list" options={{ title: "Medal List" }} />
+        <Stack.Screen name="activity-complete" options={{ headerShown: false, presentation: "modal" }} />
         <Stack.Screen name="policy" options={{ presentation: "modal", title: "Policy & Terms" }} />
         <Stack.Screen name="about-us" options={{ presentation: "modal", title: "About Us" }} />
         <Stack.Screen name="subscription" options={{ presentation: "modal", title: "Subscription" }} />

@@ -155,6 +155,9 @@ import addFamilyMemberRoute from "./routes/family/add-family-member/route";
 import removeFamilyMemberRoute from "./routes/family/remove-family-member/route";
 import getWearableProvidersRoute from "./routes/wearables/get-providers/route";
 import startWearableConnectionRoute from "./routes/wearables/start-connection/route";
+import createSubscriptionPaymentRoute from "./routes/payments/create-subscription-payment/route";
+import createFlutterwaveClubPaymentRoute from "./routes/payments/create-club-payment/route";
+import createDonationPaymentRoute from "./routes/payments/create-donation-payment/route";
 
 export const appRouter = createTRPCRouter({
   example: createTRPCRouter({
@@ -342,6 +345,11 @@ export const appRouter = createTRPCRouter({
   wearables: createTRPCRouter({
     getProviders: getWearableProvidersRoute,
     startConnection: startWearableConnectionRoute,
+  }),
+  payments: createTRPCRouter({
+    createSubscriptionPayment: createSubscriptionPaymentRoute,
+    createClubPayment: createFlutterwaveClubPaymentRoute,
+    createDonationPayment: createDonationPaymentRoute,
   }),
 });
 

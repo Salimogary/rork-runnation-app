@@ -71,6 +71,7 @@ interface FamilyLeaderboardRow {
   pace: number;
   sex?: string;
   country?: string;
+  distanceCounts?: Record<MedalBand, number>;
 }
 
 interface FamilyWeekGroup {
@@ -188,6 +189,7 @@ type ActiveTab = "runs" | "family" | "club" | "community";
 type CommunityLeaderboardView = "activity_indv" | "activity_club" | "medals_indv" | "medals_club";
 type CommunityBoardMode = "activity" | "medals";
 type CommunityBoardScope = "individual" | "clubs";
+type ClubLeaderboardView = "normal" | "distance_count";
 type FilterSexOption = "all" | "Male" | "Female";
 type LeaderboardTab = "club" | "community";
 type LeaderboardFilters = {
@@ -462,6 +464,7 @@ export default function ActivityScreen() {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("community");
   const [communityLeaderboardView, setCommunityLeaderboardView] = useState<CommunityLeaderboardView>("activity_indv");
+  const [clubLeaderboardView, setClubLeaderboardView] = useState<ClubLeaderboardView>("normal");
   const [showLeaderboardFilters, setShowLeaderboardFilters] = useState(false);
   const [showLeaderboardSearch, setShowLeaderboardSearch] = useState(false);
   const [leaderboardSearchQuery, setLeaderboardSearchQuery] = useState("");
@@ -1356,7 +1359,7 @@ export default function ActivityScreen() {
                 string,
                 {
                   label: string;
-                  stats: Map<string, { days: Set<string>; distance: number; time: number }>;
+                  stats: Map<string, { days: Set<string>; distance: number; time: number; distanceCounts: Record<MedalBand, number> }>;
                 }
               >;
             }
@@ -1391,11 +1394,17 @@ export default function ActivityScreen() {
           days: new Set<string>(),
           distance: 0,
           time: 0,
+          distanceCounts: { ...EMPTY_MEDAL_COUNTS },
         };
 
         stats.days.add(dateOnly);
-        stats.distance += Number(activity.distance_km || 0);
+        const activityDistance = Number(activity.distance_km || 0);
+        stats.distance += activityDistance;
         stats.time += getActivityDurationMinutes(activity);
+        const distanceBand = getMedalBand(activityDistance);
+        if (distanceBand) {
+          stats.distanceCounts[distanceBand.key] += 1;
+        }
         weekGroup.stats.set(registrationId, stats);
 
         monthGroup.weeks.set(weekKey, weekGroup);
@@ -1406,7 +1415,7 @@ export default function ActivityScreen() {
       const now = new Date();
       const currentYear = String(now.getFullYear());
       const toRows = (
-        stats: Map<string, { days?: Set<string>; distance: number; time: number }>,
+        stats: Map<string, { days?: Set<string>; distance: number; time: number; distanceCounts: Record<MedalBand, number> }>,
         fixedDays?: number
       ) =>
         Array.from(stats.entries())
@@ -1422,6 +1431,7 @@ export default function ActivityScreen() {
               distance: values.distance,
               time: values.time,
               pace: values.distance > 0 ? values.time / values.distance : 0,
+              distanceCounts: values.distanceCounts,
             };
           })
           .sort((a, b) => b.distance - a.distance || b.days - a.days || a.pace - b.pace);
@@ -1430,7 +1440,7 @@ export default function ActivityScreen() {
         .sort(([a], [b]) => b.localeCompare(a))
         .map(([year, yearGroup]) => {
           if (year !== currentYear) {
-            const annualStats = new Map<string, { days: Set<string>; distance: number; time: number }>();
+            const annualStats = new Map<string, { days: Set<string>; distance: number; time: number; distanceCounts: Record<MedalBand, number> }>();
             yearGroup.months.forEach((monthGroup) => {
               monthGroup.weeks.forEach((weekGroup) => {
                 weekGroup.stats.forEach((stats, registrationId) => {
@@ -1438,10 +1448,14 @@ export default function ActivityScreen() {
                     days: new Set<string>(),
                     distance: 0,
                     time: 0,
+                    distanceCounts: { ...EMPTY_MEDAL_COUNTS },
                   };
                   stats.days.forEach((day) => total.days.add(day));
                   total.distance += stats.distance;
                   total.time += stats.time;
+                  MEDAL_DISPLAY_BANDS.forEach((band) => {
+                    total.distanceCounts[band.key] += stats.distanceCounts[band.key] || 0;
+                  });
                   annualStats.set(registrationId, total);
                 });
               });
@@ -1457,17 +1471,21 @@ export default function ActivityScreen() {
               const monthNumber = Number(monthKey.slice(5, 7));
               const monthAge = now.getMonth() + 1 - monthNumber;
               if (monthAge >= 3) {
-                const monthlyStats = new Map<string, { days: Set<string>; distance: number; time: number }>();
+                const monthlyStats = new Map<string, { days: Set<string>; distance: number; time: number; distanceCounts: Record<MedalBand, number> }>();
                 monthGroup.weeks.forEach((weekGroup) => {
                   weekGroup.stats.forEach((stats, registrationId) => {
                     const total = monthlyStats.get(registrationId) || {
                       days: new Set<string>(),
                       distance: 0,
                       time: 0,
+                      distanceCounts: { ...EMPTY_MEDAL_COUNTS },
                     };
                     stats.days.forEach((day) => total.days.add(day));
                     total.distance += stats.distance;
                     total.time += stats.time;
+                    MEDAL_DISPLAY_BANDS.forEach((band) => {
+                      total.distanceCounts[band.key] += stats.distanceCounts[band.key] || 0;
+                    });
                     monthlyStats.set(registrationId, total);
                   });
                 });
@@ -2629,6 +2647,66 @@ export default function ActivityScreen() {
     </ScrollView>
   );
 
+  const renderClubDistanceCountRows = (rows: FamilyLeaderboardRow[], keyPrefix: string) => (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      <View style={styles.clubDistanceCountTable}>
+        <View style={[styles.leaderboardTableHeader, styles.medalLeaderboardTableHeader]}>
+          <View style={styles.medalRankColumn}><Text style={styles.leaderTableHeaderText}>#</Text></View>
+          <View style={styles.medalNameColumn}><Text style={styles.leaderTableHeaderText}>Name</Text></View>
+          <View style={styles.medalSexColumn}><Text style={styles.leaderTableHeaderText}>Sex</Text></View>
+          {MEDAL_DISPLAY_BANDS.map((band) => (
+            <View key={band.key} style={styles.medalCountColumn}>
+              <Text style={styles.leaderTableHeaderText}>{band.key}</Text>
+            </View>
+          ))}
+          <View style={styles.clubDistanceTotalColumn}><Text style={styles.leaderTableHeaderText}>Total km</Text></View>
+        </View>
+        {rows.map((row, index) => (
+          <View
+            key={`${keyPrefix}-${row.registrationId}`}
+            style={[
+              styles.leaderboardTableRow,
+              styles.medalLeaderboardTableRow,
+              index % 2 === 1 && styles.leaderboardTableRowAlt,
+              row.registrationId === currentRegistrationId && styles.currentUserLeaderboardRow,
+            ]}
+          >
+            <View style={[styles.medalRankColumn, styles.leaderRankCell]}>
+              <Text style={styles.leaderFlagText}>{getCountryFlag(row.country)}</Text>
+              <Text style={styles.leaderTableCellText}>{index + 1}</Text>
+            </View>
+            <View style={styles.medalNameColumn}>
+              <Text
+                style={[styles.leaderTableCellText, row.registrationId === currentRegistrationId && styles.currentUserLeaderboardText]}
+                numberOfLines={1}
+              >
+                {row.name}
+              </Text>
+            </View>
+            <View style={styles.medalSexColumn}>
+              <Text style={styles.leaderTableCellText}>
+                {row.sex === "Male" ? "M" : row.sex === "Female" ? "F" : row.sex || "-"}
+              </Text>
+            </View>
+            {MEDAL_DISPLAY_BANDS.map((band) => (
+              <View key={band.key} style={styles.medalCountColumn}>
+                <Text style={styles.leaderTableCellText}>{row.distanceCounts?.[band.key] || 0}</Text>
+              </View>
+            ))}
+            <View style={styles.clubDistanceTotalColumn}>
+              <Text style={styles.leaderTableCellText}>{row.distance.toFixed(1)}</Text>
+            </View>
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+  );
+
+  const renderClubPeriodRows = (rows: FamilyLeaderboardRow[], keyPrefix: string) =>
+    clubLeaderboardView === "distance_count"
+      ? renderClubDistanceCountRows(rows, keyPrefix)
+      : renderClubRows(rows, keyPrefix);
+
   const renderClubLeaderboard = (groups: ClubLeaderboardYearGroup[]) => (
     <View style={styles.familyLeaderboardContainer}>
       {groups.map((yearGroup) => (
@@ -2637,7 +2715,7 @@ export default function ActivityScreen() {
           {yearGroup.annualRows ? (
             <View style={styles.familyWeekGroup}>
               <Text style={styles.familyWeekTitle}>Year total</Text>
-              {renderClubRows(yearGroup.annualRows, `${yearGroup.year}-total`)}
+              {renderClubPeriodRows(yearGroup.annualRows, `${yearGroup.year}-total`)}
             </View>
           ) : (
             yearGroup.months.map((monthGroup) => (
@@ -2646,13 +2724,13 @@ export default function ActivityScreen() {
                 {monthGroup.monthlyRows ? (
                   <View style={styles.familyWeekGroup}>
                     <Text style={styles.familyWeekTitle}>Month total</Text>
-                    {renderClubRows(monthGroup.monthlyRows, `${monthGroup.key}-total`)}
+                    {renderClubPeriodRows(monthGroup.monthlyRows, `${monthGroup.key}-total`)}
                   </View>
                 ) : (
                   monthGroup.weeks.map((weekGroup) => (
                     <View key={weekGroup.key} style={styles.familyWeekGroup}>
                       <Text style={styles.familyWeekTitle}>{weekGroup.label}</Text>
-                      {renderClubRows(weekGroup.rows, weekGroup.key)}
+                      {renderClubPeriodRows(weekGroup.rows, weekGroup.key)}
                     </View>
                   ))
                 )}
@@ -3180,6 +3258,31 @@ export default function ActivityScreen() {
                 </TouchableOpacity>
               ))}
             </ScrollView>
+            <View style={styles.clubLeaderboardViewTabs}>
+              {([
+                { key: "normal", label: "Normal" },
+                { key: "distance_count", label: "Distance Count" },
+              ] as const).map((view) => (
+                <TouchableOpacity
+                  key={view.key}
+                  style={[
+                    styles.clubLeaderboardViewTab,
+                    clubLeaderboardView === view.key && styles.clubLeaderboardViewTabActive,
+                  ]}
+                  onPress={() => setClubLeaderboardView(view.key)}
+                  activeOpacity={0.75}
+                >
+                  <Text
+                    style={[
+                      styles.clubLeaderboardViewTabText,
+                      clubLeaderboardView === view.key && styles.clubLeaderboardViewTabTextActive,
+                    ]}
+                  >
+                    {view.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
         )}
 
@@ -4222,6 +4325,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     paddingVertical: 4,
   },
+  clubDistanceCountTable: {
+    minWidth: 680,
+    margin: 6,
+    marginBottom: 10,
+    borderRadius: 8,
+    overflow: "hidden" as const,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.divider,
+  },
+  clubDistanceTotalColumn: {
+    width: 54,
+  },
   leaderboardTableRow: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
@@ -5174,6 +5290,33 @@ const styles = StyleSheet.create({
   clubTabsRow: {
     gap: 6,
     paddingRight: 4,
+  },
+  clubLeaderboardViewTabs: {
+    flexDirection: "row" as const,
+    gap: 6,
+    marginTop: 7,
+  },
+  clubLeaderboardViewTab: {
+    flex: 1,
+    minHeight: 30,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.32)",
+    backgroundColor: "rgba(255,255,255,0.1)",
+  },
+  clubLeaderboardViewTabActive: {
+    backgroundColor: colors.white,
+    borderColor: colors.white,
+  },
+  clubLeaderboardViewTabText: {
+    color: "rgba(255,255,255,0.84)",
+    fontSize: 10,
+    fontWeight: "800" as const,
+  },
+  clubLeaderboardViewTabTextActive: {
+    color: colors.primary,
   },
   clubTabChip: {
     minHeight: 34,

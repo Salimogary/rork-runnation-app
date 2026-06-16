@@ -9,12 +9,12 @@ import {
   TextInput,
   ActivityIndicator,
   Animated,
+  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import type { SubscriptionPlan, PaymentMethod } from '@/contexts/SubscriptionContext';
-import { supabase } from '@/lib/supabase';
 import { trpc } from '@/lib/trpc';
 import { useMutation } from '@tanstack/react-query';
 import { useState, useRef, useEffect, useCallback } from 'react';
@@ -46,6 +46,30 @@ const FEATURES = [
   { icon: Shield, text: 'Full event participation', color: '#10B981' },
 ];
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message && error.message !== '[object Object]') {
+    return error.message;
+  }
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, any>;
+    const candidate =
+      record.message ||
+      record.data?.message ||
+      record.shape?.message ||
+      record.cause?.message ||
+      record.error?.message;
+    if (typeof candidate === 'string' && candidate && candidate !== '[object Object]') {
+      return candidate;
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return 'Failed to submit subscription. Please try again.';
+    }
+  }
+  return typeof error === 'string' && error ? error : 'Failed to submit subscription. Please try again.';
+}
+
 export default function SubscriptionScreen() {
   const router = useRouter();
   const { user } = useAuth();
@@ -68,6 +92,7 @@ export default function SubscriptionScreen() {
     { registrationId: user?.id ?? '00000000-0000-0000-0000-000000000000' },
     { enabled: !!user?.id && showClubPayments }
   );
+  const createSubscriptionPaymentMutation = trpc.payments.createSubscriptionPayment.useMutation();
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -119,52 +144,40 @@ export default function SubscriptionScreen() {
       phone: string;
     }) => {
       if (!user) throw new Error('Not signed in');
-
-      const now = new Date();
-      const expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
-
-      const { error } = await supabase.from('subscriptions').upsert(
-        {
-          registration_id: user.id,
-          status: 'pending',
-          payment_method: plan.paymentMethod,
-          payment_reference: phone || null,
-          amount: plan.price,
-          currency: plan.currency,
-          started_at: now.toISOString(),
-          expires_at: expiresAt.toISOString(),
-        },
-        { onConflict: 'registration_id' }
-      );
-
-      if (error) throw error;
-
-      const { error: regError } = await supabase
-        .from('registrations')
-        .update({ subscription: 3 })
-        .eq('registration_id', user.id);
-
-      if (regError) {
-        console.log('[Subscription] Error updating registration subscription column:', regError);
+      if (plan.paymentMethod === 'credit_card') {
+        throw new Error('Card payments are not available in Flutterwave sandbox yet. Please use mobile money for testing.');
       }
+
+      return await createSubscriptionPaymentMutation.mutateAsync({
+        registrationId: user.id,
+        planId: plan.id,
+        paymentMethod: plan.paymentMethod,
+        amount: plan.price,
+        currency: plan.currency,
+        phoneNumber: phone,
+      });
     },
-    onSuccess: () => {
+    onSuccess: (payment) => {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       refreshSubscription();
       setShowPaymentForm(false);
       setSelectedPlan(null);
       setPhoneNumber('');
-      const msg =
-        'Your subscription request has been submitted! You will receive a payment prompt shortly. Once payment is confirmed, your subscription will be activated.';
+      if (payment?.checkoutUrl) {
+        void Linking.openURL(payment.checkoutUrl);
+      }
+      const msg = payment?.paymentInstruction
+        ? payment.paymentInstruction
+        : 'Your Flutterwave payment has been started. Approve the prompt on your phone. Once Flutterwave confirms it, your subscription will be activated automatically.';
       if (Platform.OS !== 'web') {
-        Alert.alert('Subscription Submitted', msg);
+        Alert.alert('Payment Started', msg);
       } else {
         alert(msg);
       }
     },
     onError: (error) => {
       console.error('[Subscription] Error:', error);
-      const msg = 'Failed to submit subscription. Please try again.';
+      const msg = getErrorMessage(error);
       if (Platform.OS !== 'web') {
         Alert.alert('Error', msg);
       } else {
@@ -453,17 +466,19 @@ export default function SubscriptionScreen() {
               style={[
                 styles.subscribeButton,
                 (subscribeMutation.isPending ||
+                  createSubscriptionPaymentMutation.isPending ||
                   (isMobilePayment && phoneNumber.trim().length < 9)) &&
                   styles.subscribeButtonDisabled,
               ]}
               onPress={handleSubscribe}
               disabled={
                 subscribeMutation.isPending ||
+                createSubscriptionPaymentMutation.isPending ||
                 (isMobilePayment && phoneNumber.trim().length < 9)
               }
               activeOpacity={0.8}
             >
-              {subscribeMutation.isPending ? (
+              {subscribeMutation.isPending || createSubscriptionPaymentMutation.isPending ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <Text style={styles.subscribeButtonText}>

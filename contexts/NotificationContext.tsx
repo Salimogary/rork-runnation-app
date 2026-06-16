@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Platform } from "react-native";
 import Constants from "expo-constants";
+import { useRouter } from "expo-router";
 import createContextHook from "@nkzw/create-context-hook";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { calculateProfileCompletion, fetchProfileCompletionInputs } from "@/utils/profileCompletion";
 import { hasFreeAdminSubscriptionAccess } from "@/lib/role-session";
-import { sendMorningDigestOnce, setupNotifications, type MorningNotificationItem } from "@/utils/notifications";
+import { registerDevicePushToken, sendLocalNotification, sendMorningDigestOnce, setupNotifications, type MorningNotificationItem } from "@/utils/notifications";
 
 function dateOnly(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -18,8 +19,18 @@ function dateOnly(value: string | null | undefined): string | null {
 
 export const [NotificationProvider, useNotifications] = createContextHook(() => {
   const { user, roleSession } = useAuth();
+  const router = useRouter();
   const hasFreeAdminAccess = hasFreeAdminSubscriptionAccess(roleSession);
   const setupDone = useRef(false);
+  const registrationId = roleSession.registrationId || user?.id || null;
+
+  const openNotification = useCallback((data?: Record<string, unknown>) => {
+    if (data?.type !== "activity_approved" || !data.activityId) return;
+    router.push({
+      pathname: "/activity-complete",
+      params: { activityId: String(data.activityId) },
+    } as never);
+  }, [router]);
 
   useEffect(() => {
     const isExpoGoAndroid = Platform.OS === "android" && Constants.appOwnership === "expo";
@@ -28,6 +39,98 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
       void setupNotifications();
     }
   }, []);
+
+  useEffect(() => {
+    if (!registrationId || Platform.OS === "web") return;
+    void setupNotifications().then((ready) => {
+      if (ready) void registerDevicePushToken(registrationId);
+    });
+  }, [registrationId]);
+
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const isExpoGoAndroid = Platform.OS === "android" && Constants.appOwnership === "expo";
+    if (isExpoGoAndroid) return;
+
+    let responseSubscription: { remove: () => void } | null = null;
+    let mounted = true;
+
+    void import("expo-notifications").then(async (Notifications) => {
+      if (!mounted) return;
+      responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
+        openNotification(response.notification.request.content.data as Record<string, unknown>);
+      });
+      const initialResponse = await Notifications.getLastNotificationResponseAsync();
+      if (mounted && initialResponse) {
+        openNotification(initialResponse.notification.request.content.data as Record<string, unknown>);
+        await Notifications.clearLastNotificationResponseAsync();
+      }
+    }).catch((error) => {
+      console.error("[Notifications] Response listener error:", error);
+    });
+
+    return () => {
+      mounted = false;
+      responseSubscription?.remove();
+    };
+  }, [openNotification]);
+
+  const deliverApprovedActivities = useCallback(async () => {
+    if (!registrationId || Platform.OS === "web") return;
+    const { data, error } = await supabase
+      .from("activity_approval_notifications")
+      .select("notification_id, activity_id, source_label")
+      .eq("registration_id", registrationId)
+      .is("delivered_at", null)
+      .order("created_at", { ascending: true })
+      .limit(10);
+
+    if (error) {
+      console.error("[Notifications] Could not load approved activities:", error);
+      return;
+    }
+
+    for (const item of data || []) {
+      const sourceLabel = String(item.source_label || "submitted source");
+      const sent = await sendLocalNotification(
+        "Workout approved",
+        `Your ${sourceLabel} workout has been approved. Tap to view your completed activity.`,
+        { type: "activity_approved", activityId: item.activity_id }
+      );
+      if (!sent) continue;
+      await supabase
+        .from("activity_approval_notifications")
+        .update({ delivered_at: new Date().toISOString() })
+        .eq("notification_id", item.notification_id);
+    }
+  }, [registrationId]);
+
+  useEffect(() => {
+    if (!registrationId) return;
+    void deliverApprovedActivities();
+
+    const interval = setInterval(() => {
+      void deliverApprovedActivities();
+    }, 60_000);
+    const channel = supabase
+      .channel(`activity-approvals-${registrationId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "activity_approval_notifications",
+          filter: `registration_id=eq.${registrationId}`,
+        },
+        () => void deliverApprovedActivities()
+      )
+      .subscribe();
+
+    return () => {
+      clearInterval(interval);
+      void supabase.removeChannel(channel);
+    };
+  }, [deliverApprovedActivities, registrationId]);
 
   const { data: morningItems = [], refetch } = useQuery<MorningNotificationItem[]>({
     queryKey: ["quiet-morning-notifications", user?.id, hasFreeAdminAccess],

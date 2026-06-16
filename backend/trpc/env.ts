@@ -54,6 +54,7 @@ function readCorsOrigins(runtimeEnv: RuntimeEnv): string[] {
 }
 
 const runtimeEnv = readRuntimeEnv();
+const flutterwaveEnv = process.env.FLW_ENV?.trim() === "production" ? "production" : "sandbox";
 
 export const env = {
   nodeEnv: runtimeEnv,
@@ -67,4 +68,16 @@ export const env = {
   rateLimitGeneralMax: readOptionalNumber("RATE_LIMIT_GENERAL_MAX", 300),
   rateLimitSensitiveMax: readOptionalNumber("RATE_LIMIT_SENSITIVE_MAX", 25),
   inputMaxStringLength: readOptionalNumber("INPUT_MAX_STRING_LENGTH", 10000),
+  flutterwave: {
+    environment: flutterwaveEnv,
+    clientId: process.env.FLW_CLIENT_ID?.trim() || "",
+    clientSecret: process.env.FLW_CLIENT_SECRET?.trim() || "",
+    encryptionKey: process.env.FLW_ENCRYPTION_KEY?.trim() || "",
+    webhookSecretHash: process.env.FLW_WEBHOOK_SECRET_HASH?.trim() || "",
+    redirectUrl: process.env.FLW_REDIRECT_URL?.trim() || "",
+    apiBaseUrl:
+      flutterwaveEnv === "production"
+        ? "https://api.flutterwave.com"
+        : "https://developersandbox-api.flutterwave.com",
+  },
 };

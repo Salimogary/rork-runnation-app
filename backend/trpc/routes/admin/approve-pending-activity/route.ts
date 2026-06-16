@@ -2,6 +2,7 @@ import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
 import { requireAdminPermission } from "../../../rbac";
 import { ACTIVITY_UPLOADS_BUCKET } from "../../../storage";
+import { sendActivityApprovalPush } from "../../../push-notifications";
 
 function normalizeClubName(value: string | null | undefined): string {
   return String(value || "").trim().toLowerCase();
@@ -84,7 +85,7 @@ export default publicProcedure
     const startTime = new Date(endTime.getTime() - totalMinutes * 60 * 1000);
     const calculatedPace = totalMinutes > 0 && distanceKm > 0 ? totalMinutes / distanceKm : 0;
 
-    const { error: insertError } = await ctx.supabase
+    const { data: approvedActivity, error: insertError } = await ctx.supabase
       .from("activities")
       .insert({
         registration_id: activity.registration_id,
@@ -94,10 +95,36 @@ export default publicProcedure
         start_time: startTime.toISOString().split("T")[1].split(".")[0],
         end_time: endTime.toISOString().split("T")[1].split(".")[0],
         pace_min_per_km: calculatedPace,
-      });
+      })
+      .select("activity_id")
+      .single();
 
     if (insertError) {
       throw new Error(insertError.message || "Failed to approve activity");
+    }
+
+    const { error: notificationError } = await ctx.supabase
+      .from("activity_approval_notifications")
+      .insert({
+        registration_id: activity.registration_id,
+        activity_id: approvedActivity.activity_id,
+        source_label: "Treadmill",
+      });
+
+    if (notificationError) {
+      console.error("[Approve Pending Activity] Notification error:", notificationError);
+    } else {
+      const pushSent = await sendActivityApprovalPush(ctx, {
+        registrationId: activity.registration_id,
+        activityId: approvedActivity.activity_id,
+        sourceLabel: "Treadmill",
+      });
+      if (pushSent) {
+        await ctx.supabase
+          .from("activity_approval_notifications")
+          .update({ delivered_at: new Date().toISOString() })
+          .eq("activity_id", approvedActivity.activity_id);
+      }
     }
 
     const { error: deleteError } = await ctx.supabase

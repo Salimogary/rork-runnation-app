@@ -1,8 +1,8 @@
 import { initTRPC } from "@trpc/server";
 import superjson from "superjson";
-import { createClient } from "@supabase/supabase-js";
 import { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import { env } from "./env";
+import { createServerSupabaseClient } from "./supabase-server";
 
 function getBearerToken(req: CreateExpressContextOptions["req"]): string | null {
   const rawHeader = req.headers.authorization;
@@ -21,18 +21,52 @@ function getBearerToken(req: CreateExpressContextOptions["req"]): string | null 
   return token;
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getAuthUserIdWithRetry(
+  supabase: ReturnType<typeof createServerSupabaseClient>,
+  bearerToken: string
+): Promise<string | null> {
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const { data, error } = await supabase.auth.getUser(bearerToken);
+      if (error) {
+        console.warn("[Auth] Could not verify bearer token:", error.message);
+        return null;
+      }
+      return data.user?.id ?? null;
+    } catch (error) {
+      lastError = error;
+      console.warn(
+        `[Auth] Supabase token verification attempt ${attempt} failed:`,
+        error instanceof Error ? error.message : error
+      );
+      if (attempt < 3) {
+        await wait(350 * attempt);
+      }
+    }
+  }
+
+  throw new Error(
+    lastError instanceof Error
+      ? `Could not verify your session with Supabase Auth: ${lastError.message}`
+      : "Could not verify your session with Supabase Auth."
+  );
+}
+
 // ✅ Correct context for Express
 export const createContext = async ({ req }: CreateExpressContextOptions) => {
-  const supabase = createClient(env.supabaseUrl, env.supabaseServiceRoleKey);
+  const supabase = createServerSupabaseClient();
 
   let authUserId: string | null = null;
   const bearerToken = getBearerToken(req);
 
   if (bearerToken) {
-    const { data, error } = await supabase.auth.getUser(bearerToken);
-    if (!error) {
-      authUserId = data.user?.id ?? null;
-    }
+    authUserId = await getAuthUserIdWithRetry(supabase, bearerToken);
   }
 
   return {

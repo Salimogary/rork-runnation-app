@@ -118,6 +118,8 @@ const MIN_DISTANCE_ACTIVITY = 0.5;
 const MIN_DISTANCE_WALK = MIN_DISTANCE_ACTIVITY;
 const MIN_DISTANCE_RUN = MIN_DISTANCE_ACTIVITY;
 const MIN_ACTIVITY_DURATION_MINUTES = 5;
+const ABNORMAL_SPEED_MIN_DISTANCE_KM = 1;
+const ABNORMAL_SPEED_KM_PER_MINUTE = 2.3;
 const KM_VOICE_ANNOUNCEMENT_INTERVAL = 1;
 const AUTO_PAUSE_STATIONARY_SECONDS = 10;
 const AUTO_PAUSE_MAX_SPEED_KMH = 1.2;
@@ -230,6 +232,16 @@ function maxSpeedForExercise(exerciseT: ExerciseType): number {
   if (exerciseT === "Walk") return MAX_SPEED_KMH_WALK;
   if (exerciseT === "Cycle") return MAX_SPEED_KMH_CYCLE;
   return MAX_SPEED_KMH_RUN;
+}
+
+function isAbnormallyFastWalkOrRun(
+  exerciseT: ExerciseType,
+  distanceKm: number,
+  durationSeconds: number
+): boolean {
+  if (exerciseT !== "Walk" && exerciseT !== "Run") return false;
+  if (distanceKm <= ABNORMAL_SPEED_MIN_DISTANCE_KM || durationSeconds <= 0) return false;
+  return distanceKm / (durationSeconds / 60) > ABNORMAL_SPEED_KM_PER_MINUTE;
 }
 
 function isValidPersistedPoint(session: PersistedWorkoutSession, point: LocationPoint): boolean {
@@ -580,7 +592,8 @@ export default function ExerciseScreen() {
   const startTimeRef = useRef<Date | null>(null);
   const androidBottomInset = Platform.OS === "android" ? Math.max(insets.bottom, 48) : insets.bottom;
   const workoutBottomPadding = runState === "finished" ? androidBottomInset + 48 : androidBottomInset + 24;
-  const runDetailsActionsBottomPadding = androidBottomInset + 14;
+  const runDetailsActionsBottomPadding = Math.max(insets.bottom, Platform.OS === "android" ? 8 : 12) + 8;
+  const hasAbnormalWorkoutSpeed = isAbnormallyFastWalkOrRun(exerciseType, distance, duration);
 
   useEffect(() => {
     runStateRef.current = runState;
@@ -1697,6 +1710,28 @@ export default function ExerciseScreen() {
     }
 
     const durationMinutes = finalDuration / 60;
+    if (isAbnormallyFastWalkOrRun(exerciseType, distance, finalDuration)) {
+      if (pauseStartTimestamp.current === null) {
+        pauseStartTimestamp.current = Date.now();
+      }
+      runStateRef.current = "paused";
+      setRunState("paused");
+      if (timerInterval.current) {
+        clearInterval(timerInterval.current);
+      }
+      if (locationSubscription.current) {
+        locationSubscription.current.remove();
+        locationSubscription.current = null;
+      }
+      void stopBackgroundLocationWatch();
+      void persistActiveWorkoutSession("paused");
+      Alert.alert(
+        "Abnormally High Speed",
+        "This Run or Walk is over 1 km and its average speed is above 2.3 km/min. It cannot be finished or saved. Resume to continue recording, or close it without saving."
+      );
+      return;
+    }
+
     const requiredDistance = exerciseType === "Walk" ? MIN_DISTANCE_WALK : MIN_DISTANCE_RUN;
     const needsDistance = (exerciseType === "Walk" || exerciseType === "Run" || exerciseType === "Cycle") && distance < requiredDistance;
     const needsTime = (exerciseType === "Walk" || exerciseType === "Run" || exerciseType === "Cycle") && durationMinutes < MIN_ACTIVITY_DURATION_MINUTES;
@@ -1750,6 +1785,14 @@ export default function ExerciseScreen() {
   const saveFinishedActivity = async () => {
     if (activitySaved) {
       Alert.alert("Already Saved", "This activity has already been saved.");
+      return;
+    }
+
+    if (isAbnormallyFastWalkOrRun(exerciseType, distance, duration)) {
+      Alert.alert(
+        "Workout Cannot Be Saved",
+        "This Run or Walk was flagged for abnormally high average speed. Continue recording or close it without saving."
+      );
       return;
     }
 
@@ -1889,6 +1932,24 @@ export default function ExerciseScreen() {
   const closeFinishedActivity = () => {
     resetTracking();
     router.replace("/(tabs)/activity" as any);
+  };
+
+  const closeAbnormalWorkoutWithoutSaving = () => {
+    Alert.alert(
+      "Close Without Saving?",
+      "This workout will be permanently discarded and will not count toward leaderboards or events.",
+      [
+        { text: "Keep Workout", style: "cancel" },
+        {
+          text: "Close Without Saving",
+          style: "destructive",
+          onPress: () => {
+            resetTracking();
+            router.replace("/(tabs)/activity" as any);
+          },
+        },
+      ]
+    );
   };
 
   const getRunShareMessage = () => {
@@ -2843,8 +2904,16 @@ export default function ExerciseScreen() {
                 </LinearGradient>
               </TouchableOpacity>
               
-              <TouchableOpacity style={styles.actionButton} onPress={stopTracking} disabled={isSaving} activeOpacity={0.8}>
-                <LinearGradient colors={['#EF4444', '#F87171']} style={styles.actionButtonGradient}>
+              <TouchableOpacity
+                style={[styles.actionButton, hasAbnormalWorkoutSpeed && styles.actionButtonDisabled]}
+                onPress={stopTracking}
+                disabled={isSaving || hasAbnormalWorkoutSpeed}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={hasAbnormalWorkoutSpeed ? ['#6B7280', '#9CA3AF'] : ['#EF4444', '#F87171']}
+                  style={styles.actionButtonGradient}
+                >
                   <Square size={28} color={colors.white} />
                   <Text style={styles.actionButtonText}>{isSaving ? "Saving..." : "Finish"}</Text>
                 </LinearGradient>
@@ -2852,21 +2921,63 @@ export default function ExerciseScreen() {
             </View>
           )}
 
+          {runState === "running" && hasAbnormalWorkoutSpeed && (
+            <View style={styles.abnormalSpeedNotice}>
+              <Text style={styles.abnormalSpeedTitle}>Abnormally high speed detected</Text>
+              <Text style={styles.abnormalSpeedText}>
+                This Run or Walk is over 1 km and above 2.3 km/min. Finish is disabled. Keep recording or close without saving.
+              </Text>
+              <TouchableOpacity
+                style={styles.closeWithoutSavingButton}
+                onPress={closeAbnormalWorkoutWithoutSaving}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.closeWithoutSavingButtonText}>Close Without Saving</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {runState === "paused" && (
-            <View style={styles.buttonRow}>
-              <TouchableOpacity style={styles.actionButton} onPress={resumeTracking} activeOpacity={0.8}>
-                <LinearGradient colors={colors.gradient.teal} style={styles.actionButtonGradient}>
-                  <Play size={28} color={colors.white} />
-                  <Text style={styles.actionButtonText}>Resume</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.actionButton} onPress={stopTracking} disabled={isSaving} activeOpacity={0.8}>
-                <LinearGradient colors={['#EF4444', '#F87171']} style={styles.actionButtonGradient}>
-                  <Square size={28} color={colors.white} />
-                  <Text style={styles.actionButtonText}>{isSaving ? "Saving..." : "Finish"}</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+            <View style={styles.pausedActions}>
+              <View style={styles.buttonRow}>
+                <TouchableOpacity style={styles.actionButton} onPress={resumeTracking} activeOpacity={0.8}>
+                  <LinearGradient colors={colors.gradient.teal} style={styles.actionButtonGradient}>
+                    <Play size={28} color={colors.white} />
+                    <Text style={styles.actionButtonText}>Resume</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionButton, hasAbnormalWorkoutSpeed && styles.actionButtonDisabled]}
+                  onPress={stopTracking}
+                  disabled={isSaving || hasAbnormalWorkoutSpeed}
+                  activeOpacity={0.8}
+                >
+                  <LinearGradient
+                    colors={hasAbnormalWorkoutSpeed ? ['#6B7280', '#9CA3AF'] : ['#EF4444', '#F87171']}
+                    style={styles.actionButtonGradient}
+                  >
+                    <Square size={28} color={colors.white} />
+                    <Text style={styles.actionButtonText}>{isSaving ? "Saving..." : "Finish"}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+
+              {hasAbnormalWorkoutSpeed && (
+                <View style={styles.abnormalSpeedNotice}>
+                  <Text style={styles.abnormalSpeedTitle}>Abnormally high speed detected</Text>
+                  <Text style={styles.abnormalSpeedText}>
+                    Resume to continue recording, or close this workout without saving it.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.closeWithoutSavingButton}
+                    onPress={closeAbnormalWorkoutWithoutSaving}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.closeWithoutSavingButtonText}>Close Without Saving</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           )}
 
@@ -2938,7 +3049,7 @@ export default function ExerciseScreen() {
         onRequestClose={() => setShowRunDetailsModal(false)}
       >
         <View style={[styles.runDetailsOverlay, { backgroundColor: themeColors.modalOverlay }]}>
-          <View style={[styles.runDetailsShell, { backgroundColor: themeColors.surface }]}>
+          <View style={styles.runDetailsShell}>
             <ScrollView contentContainerStyle={styles.runDetailsScroll}>
               <View style={styles.shareCard}>
                 <View style={styles.shareMapHero}>
@@ -3086,7 +3197,7 @@ export default function ExerciseScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Close workout details"
               >
-                <X size={22} color={themeColors.text} />
+                <X size={22} color="#FFFFFF" />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.runDetailsActionButton}
@@ -3097,11 +3208,20 @@ export default function ExerciseScreen() {
                 <Share2 size={22} color="#2563EB" />
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.runDetailsActionButton, (isSaving || activitySaved) && styles.runDetailsDisabledButton]}
+                style={[
+                  styles.runDetailsActionButton,
+                  (isSaving || activitySaved || hasAbnormalWorkoutSpeed) && styles.runDetailsDisabledButton,
+                ]}
                 onPress={saveFinishedActivity}
-                disabled={isSaving || activitySaved}
+                disabled={isSaving || activitySaved || hasAbnormalWorkoutSpeed}
                 accessibilityRole="button"
-                accessibilityLabel={activitySaved ? "Workout saved" : "Save workout"}
+                accessibilityLabel={
+                  activitySaved
+                    ? "Workout saved"
+                    : hasAbnormalWorkoutSpeed
+                      ? "Save disabled because of abnormally high speed"
+                      : "Save workout"
+                }
               >
                 {activitySaved
                   ? <Check size={22} color="#10B981" />
@@ -3920,6 +4040,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 16,
   },
+  pausedActions: {
+    gap: 14,
+  },
   actionButton: {
     flex: 1,
     borderRadius: 16,
@@ -3929,6 +4052,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 5,
+  },
+  actionButtonDisabled: {
+    opacity: 0.62,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   actionButtonGradient: {
     padding: 20,
@@ -3941,6 +4069,39 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "700" as const,
   },
+  abnormalSpeedNotice: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: "#9CA3AF",
+    borderRadius: 16,
+    padding: 16,
+    backgroundColor: "#F3F4F6",
+  },
+  abnormalSpeedTitle: {
+    color: "#374151",
+    fontSize: 16,
+    fontWeight: "800" as const,
+  },
+  abnormalSpeedText: {
+    marginTop: 6,
+    color: "#4B5563",
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: "600" as const,
+  },
+  closeWithoutSavingButton: {
+    alignSelf: "flex-start",
+    marginTop: 12,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: "#4B5563",
+  },
+  closeWithoutSavingButtonText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "800" as const,
+  },
   runDetailsOverlay: {
     flex: 1,
     justifyContent: "flex-end" as const,
@@ -3950,9 +4111,11 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     overflow: "hidden" as const,
+    backgroundColor: "transparent",
   },
   runDetailsScroll: {
     padding: 0,
+    paddingBottom: 68,
     gap: 14,
   },
   shareCard: {
@@ -4262,11 +4425,15 @@ const styles = StyleSheet.create({
     color: colors.white,
   },
   runDetailsActions: {
+    position: "absolute" as const,
+    left: 0,
+    right: 0,
+    bottom: 0,
     flexDirection: "row" as const,
     justifyContent: "center" as const,
     alignItems: "center" as const,
     gap: 28,
-    paddingTop: 8,
+    paddingTop: 6,
     paddingHorizontal: 14,
     backgroundColor: "transparent",
   },
@@ -4276,7 +4443,14 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     alignItems: "center" as const,
     justifyContent: "center" as const,
-    backgroundColor: "rgba(255,255,255,0.72)",
+    backgroundColor: "rgba(3,7,24,0.76)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.38)",
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.24,
+    shadowRadius: 4,
+    elevation: 4,
   },
   runDetailsDisabledButton: {
     opacity: 0.65,

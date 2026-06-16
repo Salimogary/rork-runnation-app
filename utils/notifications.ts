@@ -232,27 +232,66 @@ export async function setupNotifications(): Promise<boolean> {
   }
 }
 
+export async function registerDevicePushToken(registrationId: string): Promise<boolean> {
+  try {
+    if (Platform.OS === "web" || !registrationId) return false;
+    const Notifications = await getNotificationsModule();
+    if (!Notifications) return false;
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ||
+      Constants.easConfig?.projectId;
+    if (!projectId) {
+      console.error("[Notifications] Missing EAS project ID for push token registration");
+      return false;
+    }
+
+    const permission = await Notifications.getPermissionsAsync();
+    if (permission.status !== "granted") return false;
+    const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+    if (!token) return false;
+
+    const { supabase } = await import("@/lib/supabase");
+    const { error } = await supabase
+      .from("device_push_tokens")
+      .upsert({
+        push_token: token,
+        registration_id: registrationId,
+        platform: Platform.OS,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "push_token" });
+
+    if (error) {
+      console.error("[Notifications] Push token registration error:", error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error("[Notifications] Push token registration failed:", error);
+    return false;
+  }
+}
+
 export async function sendLocalNotification(
   title: string,
   body: string,
   data?: Record<string, unknown>
-): Promise<void> {
+): Promise<boolean> {
   try {
     if (Platform.OS === 'web') {
       console.log('[Notifications] Web — skipping local notification:', title);
-      return;
+      return false;
     }
 
     const Notifications = await getNotificationsModule();
     if (!Notifications) {
       console.log("[Notifications] Expo Go Android — skipping local notification:", title);
-      return;
+      return false;
     }
 
     const enabled = await getNotificationsEnabled();
     if (!enabled) {
       console.log('[Notifications] Notifications disabled, skipping:', title);
-      return;
+      return false;
     }
 
     await Notifications.scheduleNotificationAsync({
@@ -265,8 +304,10 @@ export async function sendLocalNotification(
       trigger: null,
     } as any);
     console.log('[Notifications] Sent:', title);
+    return true;
   } catch (error) {
     console.error('[Notifications] Send error:', error);
+    return false;
   }
 }
 

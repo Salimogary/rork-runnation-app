@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
 import { requireAdminPermission } from "../../../rbac";
+import { sendActivityApprovalPush } from "../../../push-notifications";
 
 function getDateOnly(value?: string | null) {
   return String(value || "").slice(0, 10);
@@ -54,7 +55,7 @@ export default publicProcedure
       const paceMinPerKm = totalDurationMinutes > 0 && submission.distance_km > 0 ? totalDurationMinutes / submission.distance_km : 0;
       const timeSeconds = Math.round(totalDurationMinutes * 60);
 
-      const { error: insertError } = await ctx.supabase
+      const { data: approvedActivity, error: insertError } = await ctx.supabase
         .from("activities")
         .insert({
           registration_id: submission.registration_id,
@@ -64,11 +65,41 @@ export default publicProcedure
           start_time: submission.start_time,
           end_time: endTime,
           pace_min_per_km: paceMinPerKm,
-        });
+        })
+        .select("activity_id")
+        .single();
 
       if (insertError) {
         console.error("[Approve External Submission] Insert error:", insertError);
         throw new Error(insertError.message || "Failed to create activity");
+      }
+
+      const { error: notificationError } = await ctx.supabase
+        .from("activity_approval_notifications")
+        .insert({
+          registration_id: submission.registration_id,
+          activity_id: approvedActivity.activity_id,
+          source_label: submission.source_label || (
+            submission.source_type === "smart_watch" ? "Smart Watch" : "Sports App"
+          ),
+        });
+
+      if (notificationError) {
+        console.error("[Approve External Submission] Notification error:", notificationError);
+      } else {
+        const pushSent = await sendActivityApprovalPush(ctx, {
+          registrationId: submission.registration_id,
+          activityId: approvedActivity.activity_id,
+          sourceLabel: submission.source_label || (
+            submission.source_type === "smart_watch" ? "Smart Watch" : "Sports App"
+          ),
+        });
+        if (pushSent) {
+          await ctx.supabase
+            .from("activity_approval_notifications")
+            .update({ delivered_at: new Date().toISOString() })
+            .eq("activity_id", approvedActivity.activity_id);
+        }
       }
 
       if (submission.evidence_path) {
