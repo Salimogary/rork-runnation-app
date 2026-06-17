@@ -300,13 +300,11 @@ export default function SubscriptionScreen() {
         </View>
 
         <View style={styles.pricingSection}>
-          <Text style={styles.sectionLabel}>ANNUAL SUBSCRIPTION</Text>
+          <Text style={styles.sectionLabel}>RUNNATION SUBSCRIPTION</Text>
           <Text style={styles.pricingNote}>
             {userRegion === 'uganda'
               ? 'Pay with MTN Mobile Money or Airtel Money'
-              : userRegion === 'kenya'
-                ? 'Pay with M-Pesa'
-                : 'Pay with Credit Card'}
+              : 'Pay with Credit Card in USD'}
           </Text>
 
           {availablePlans.map((plan) => {
@@ -335,7 +333,7 @@ export default function SubscriptionScreen() {
                   </View>
                   <View style={styles.planInfo}>
                     <Text style={styles.planName}>{plan.name}</Text>
-                    <Text style={styles.planPeriod}>per year</Text>
+                    <Text style={styles.planPeriod}>{plan.periodLabel}</Text>
                   </View>
                 </View>
                 <View style={styles.planRight}>
@@ -426,7 +424,7 @@ export default function SubscriptionScreen() {
             <View style={styles.paymentSummary}>
               <Text style={styles.paymentSummaryLabel}>Amount</Text>
               <Text style={styles.paymentSummaryValue}>
-                {selectedPlan.displayPrice}/year
+                {selectedPlan.displayPrice} {selectedPlan.periodLabel}
               </Text>
             </View>
 
@@ -457,7 +455,7 @@ export default function SubscriptionScreen() {
                 <CreditCard size={24} color="#1E40AF" />
                 <Text style={styles.stripeNoticeText}>
                   You will be redirected to a secure payment page powered by
-                  Stripe to complete your payment.
+                  Flutterwave to complete your payment.
                 </Text>
               </View>
             )}
@@ -494,8 +492,8 @@ export default function SubscriptionScreen() {
         <View style={styles.securityNote}>
           <Shield size={16} color="#999" />
           <Text style={styles.securityText}>
-            Payments are processed securely. Your subscription auto-renews
-            annually. Cancel anytime via settings.
+            Payments are processed securely. Your access period follows the
+            plan you choose. Cancel anytime via settings.
           </Text>
         </View>
 

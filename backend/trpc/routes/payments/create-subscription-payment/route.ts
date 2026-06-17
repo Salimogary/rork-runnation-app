@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
-import { createFlutterwaveMobileMoneyPayment } from "../../../flutterwave";
+import { createFlutterwaveMobileMoneyPayment, getSubscriptionPlanDetails } from "../../../flutterwave";
 import { requireRegistrationOwner } from "../../../rbac";
 
 const paymentMethodSchema = z.enum(["mtn_mobile_money", "airtel_money", "mpesa"]);
@@ -19,16 +19,21 @@ export default publicProcedure
   .mutation(async ({ input, ctx }) => {
     await requireRegistrationOwner(ctx, input.registrationId);
 
+    const plan = getSubscriptionPlanDetails(input.planId);
+    if (normalizePaymentMethodPlanPrefix(input.paymentMethod) !== normalizePaymentMethodPlanPrefix(input.planId)) {
+      throw new Error("Selected payment method does not match the subscription plan.");
+    }
+
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(now.getTime() + plan.durationDays * 24 * 60 * 60 * 1000);
     await ctx.supabase.from("subscriptions").upsert(
       {
         registration_id: input.registrationId,
         status: "pending",
         payment_method: input.paymentMethod,
         payment_reference: null,
-        amount: input.amount,
-        currency: input.currency.trim().toUpperCase(),
+        amount: plan.amount,
+        currency: plan.currency,
         started_at: now.toISOString(),
         expires_at: expiresAt.toISOString(),
       },
@@ -39,13 +44,14 @@ export default publicProcedure
       registrationId: input.registrationId,
       purpose: "subscription",
       purposeId: input.planId,
-      amount: input.amount,
-      currency: input.currency,
+      amount: plan.amount,
+      currency: plan.currency,
       paymentMethod: input.paymentMethod,
       phoneNumber: input.phoneNumber,
-      description: `RunNation annual subscription - ${input.planId}`,
+      description: `${plan.label} - ${input.planId}`,
       metadata: {
         plan_id: input.planId,
+        subscription_duration_days: plan.durationDays,
       },
     });
 
@@ -54,3 +60,9 @@ export default publicProcedure
       ...payment,
     };
   });
+
+function normalizePaymentMethodPlanPrefix(value: string): string {
+  if (value === "mtn_mobile_money") return "ug_mtn";
+  if (value === "airtel_money") return "ug_airtel";
+  return value.split("_").slice(0, 2).join("_");
+}

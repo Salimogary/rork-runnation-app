@@ -4,6 +4,67 @@ import { env } from "./env";
 
 type PaymentPurpose = "subscription" | "shop_order" | "event_enrollment" | "club_payment" | "donation";
 
+type SubscriptionPlanDetails = {
+  planId: string;
+  amount: number;
+  currency: string;
+  durationDays: number;
+  label: string;
+};
+
+const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlanDetails> = {
+  ug_mtn_quarterly: {
+    planId: "ug_mtn_quarterly",
+    amount: 20000,
+    currency: "UGX",
+    durationDays: 90,
+    label: "RunNation quarterly subscription",
+  },
+  ug_airtel_quarterly: {
+    planId: "ug_airtel_quarterly",
+    amount: 20000,
+    currency: "UGX",
+    durationDays: 90,
+    label: "RunNation quarterly subscription",
+  },
+  ug_mtn_yearly: {
+    planId: "ug_mtn_yearly",
+    amount: 60000,
+    currency: "UGX",
+    durationDays: 365,
+    label: "RunNation yearly subscription",
+  },
+  ug_airtel_yearly: {
+    planId: "ug_airtel_yearly",
+    amount: 60000,
+    currency: "UGX",
+    durationDays: 365,
+    label: "RunNation yearly subscription",
+  },
+  intl_card_quarterly: {
+    planId: "intl_card_quarterly",
+    amount: 5,
+    currency: "USD",
+    durationDays: 90,
+    label: "RunNation quarterly subscription",
+  },
+  intl_card_yearly: {
+    planId: "intl_card_yearly",
+    amount: 15,
+    currency: "USD",
+    durationDays: 365,
+    label: "RunNation yearly subscription",
+  },
+};
+
+export function getSubscriptionPlanDetails(planId: string): SubscriptionPlanDetails {
+  const plan = SUBSCRIPTION_PLANS[planId];
+  if (!plan) {
+    throw new Error("Unknown subscription plan. Please update the app and try again.");
+  }
+  return plan;
+}
+
 type FlutterwaveToken = {
   accessToken: string;
   expiresAtMs: number;
@@ -504,7 +565,15 @@ export async function applySuccessfulPayment(supabase: SupabaseClient, payment: 
 
   if (intent.purpose === "subscription") {
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
+    let durationDays = 365;
+    if (intent.purpose_id) {
+      try {
+        durationDays = getSubscriptionPlanDetails(String(intent.purpose_id)).durationDays;
+      } catch {
+        durationDays = 365;
+      }
+    }
+    const expiresAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
     await supabase.from("subscriptions").upsert(
       {
         registration_id: intent.registration_id,

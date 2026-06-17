@@ -14,7 +14,9 @@ export interface SubscriptionPlan {
   price: number;
   currency: string;
   displayPrice: string;
-  region: 'uganda' | 'kenya' | 'international';
+  period: 'quarterly' | 'yearly';
+  periodLabel: string;
+  region: 'uganda' | 'international';
   icon: string;
 }
 
@@ -38,7 +40,7 @@ interface SubscriptionContextValue {
   trialExpired: boolean;
   isSubscribed: boolean;
   subscription: SubscriptionData | null;
-  userRegion: 'uganda' | 'kenya' | 'international';
+  userRegion: 'uganda' | 'international';
   availablePlans: SubscriptionPlan[];
   refreshSubscription: () => void;
 }
@@ -47,52 +49,83 @@ const TRIAL_DURATION_DAYS = 90;
 
 const ALL_PLANS: SubscriptionPlan[] = [
   {
-    id: 'ug_mtn',
-    name: 'MTN Mobile Money',
+    id: 'ug_mtn_quarterly',
+    name: 'MTN Mobile Money - Quarterly',
     paymentMethod: 'mtn_mobile_money',
-    price: 25000,
+    price: 20000,
     currency: 'UGX',
-    displayPrice: 'UGX 25,000',
+    displayPrice: 'UGX 20,000',
+    period: 'quarterly',
+    periodLabel: 'per quarter',
     region: 'uganda',
     icon: '📱',
   },
   {
-    id: 'ug_airtel',
-    name: 'Airtel Money',
+    id: 'ug_airtel_quarterly',
+    name: 'Airtel Money - Quarterly',
     paymentMethod: 'airtel_money',
-    price: 25000,
+    price: 20000,
     currency: 'UGX',
-    displayPrice: 'UGX 25,000',
+    displayPrice: 'UGX 20,000',
+    period: 'quarterly',
+    periodLabel: 'per quarter',
     region: 'uganda',
     icon: '📱',
   },
   {
-    id: 'ke_mpesa',
-    name: 'M-Pesa',
-    paymentMethod: 'mpesa',
-    price: 1000,
-    currency: 'KES',
-    displayPrice: 'KES 1,000',
-    region: 'kenya',
+    id: 'ug_mtn_yearly',
+    name: 'MTN Mobile Money - Yearly',
+    paymentMethod: 'mtn_mobile_money',
+    price: 60000,
+    currency: 'UGX',
+    displayPrice: 'UGX 60,000',
+    period: 'yearly',
+    periodLabel: 'per year',
+    region: 'uganda',
     icon: '📱',
   },
   {
-    id: 'intl_card',
-    name: 'Credit Card',
+    id: 'ug_airtel_yearly',
+    name: 'Airtel Money - Yearly',
+    paymentMethod: 'airtel_money',
+    price: 60000,
+    currency: 'UGX',
+    displayPrice: 'UGX 60,000',
+    period: 'yearly',
+    periodLabel: 'per year',
+    region: 'uganda',
+    icon: '📱',
+  },
+  {
+    id: 'intl_card_quarterly',
+    name: 'Card - Quarterly',
     paymentMethod: 'credit_card',
-    price: 7,
+    price: 5,
     currency: 'USD',
-    displayPrice: 'USD 7',
+    displayPrice: 'USD 5',
+    period: 'quarterly',
+    periodLabel: 'per quarter',
+    region: 'international',
+    icon: '💳',
+  },
+  {
+    id: 'intl_card_yearly',
+    name: 'Card - Yearly',
+    paymentMethod: 'credit_card',
+    price: 15,
+    currency: 'USD',
+    displayPrice: 'USD 15',
+    period: 'yearly',
+    periodLabel: 'per year',
     region: 'international',
     icon: '💳',
   },
 ];
 
-function getRegionFromCountry(country: string | undefined): 'uganda' | 'kenya' | 'international' {
+function getRegionFromCountry(country: string | undefined): 'uganda' | 'international' {
   if (!country) return 'international';
   const lower = country.toLowerCase().trim();
   if (lower === 'uganda') return 'uganda';
-  if (lower === 'kenya') return 'kenya';
   return 'international';
 }
 
@@ -195,13 +228,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const isSubscribed = hasFreeAdminAccess || subscriptionStatus === 'active' || subscriptionStatus === 'trial';
 
   const availablePlans = useMemo(() => {
-    const regionPlans = ALL_PLANS.filter(p => p.region === userRegion);
-    const cardPlan = ALL_PLANS.find(p => p.paymentMethod === 'credit_card');
-    if (userRegion === 'international') return regionPlans;
-    if (cardPlan && !regionPlans.find(p => p.paymentMethod === 'credit_card')) {
-      return [...regionPlans, cardPlan];
-    }
-    return regionPlans;
+    return ALL_PLANS.filter(p => p.region === userRegion);
   }, [userRegion]);
 
   const refreshSubscription = useCallback(() => {
