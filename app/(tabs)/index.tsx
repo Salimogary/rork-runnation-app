@@ -109,7 +109,7 @@ const calculateDistance = (coord1: Coordinates, coord2: Coordinates): number => 
   return R * c;
 };
 
-const GPS_ACCURACY_THRESHOLD = 50;
+const GPS_ACCURACY_THRESHOLD = 100;
 const MAX_SPEED_KMH_RUN = 45;
 const MAX_SPEED_KMH_WALK = 15;
 const MAX_SPEED_KMH_CYCLE = 70;
@@ -1335,13 +1335,6 @@ export default function ExerciseScreen() {
 
     backgroundLocationHandler = (location) => handleLocationUpdate(location, exerciseT);
 
-    if (Platform.OS === "android") {
-      const backgroundStarted = await startBackgroundLocationWatch(exerciseT);
-      if (backgroundStarted) {
-        return;
-      }
-    }
-
     try {
       locationSubscription.current = await Location.watchPositionAsync(
         {
@@ -1358,9 +1351,7 @@ export default function ExerciseScreen() {
       throw error;
     }
 
-    if (Platform.OS !== "android") {
-      void startBackgroundLocationWatch(exerciseT);
-    }
+    void startBackgroundLocationWatch(exerciseT);
   }, [handleLocationUpdate, startBackgroundLocationWatch]);
 
   useEffect(() => {

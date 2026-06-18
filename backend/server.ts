@@ -26,7 +26,12 @@ app.use(
 
 app.post(
   "/api/flutterwave/webhook",
-  express.json({ limit: "2mb" }),
+  express.json({
+    limit: "2mb",
+    verify: (req, _res, buf) => {
+      (req as any).rawBody = buf.toString("utf8");
+    },
+  }),
   handleFlutterwaveWebhook
 );
 
