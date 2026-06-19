@@ -2738,25 +2738,23 @@ export default function GoalsScreen() {
               )}
 
               {hasSelectedGoal("medals") && (
-                <TouchableOpacity style={styles.setGoalActionCard} onPress={() => router.push("/events" as any)} activeOpacity={0.85}>
-                  <Trophy size={22} color="#D97706" />
+                <View style={[styles.setGoalActionCard, styles.setGoalActionCardDisabled]}>
+                  <Trophy size={22} color={colors.textLight} />
                   <View style={styles.setGoalActionInfo}>
-                    <Text style={styles.setGoalActionTitle}>Earn Medals</Text>
-                    <Text style={styles.setGoalActionText}>Enroll in eligible races and track medal progress.</Text>
+                    <Text style={[styles.setGoalActionTitle, styles.setGoalActionTitleDisabled]}>Earn Medals</Text>
+                    <Text style={styles.setGoalActionText}>No target setup required. Medal progress is measured from eligible event participation.</Text>
                   </View>
-                  <ChevronRight size={16} color={colors.textLight} />
-                </TouchableOpacity>
+                </View>
               )}
 
               {hasSelectedGoal("community") && (
-                <TouchableOpacity style={styles.setGoalActionCard} onPress={() => router.push("/activity" as any)} activeOpacity={0.85}>
-                  <Users size={22} color="#0EA5E9" />
+                <View style={[styles.setGoalActionCard, styles.setGoalActionCardDisabled]}>
+                  <Users size={22} color={colors.textLight} />
                   <View style={styles.setGoalActionInfo}>
-                    <Text style={styles.setGoalActionTitle}>Compete in Community</Text>
-                    <Text style={styles.setGoalActionText}>Review your available community and club rankings.</Text>
+                    <Text style={[styles.setGoalActionTitle, styles.setGoalActionTitleDisabled]}>Compete in Community</Text>
+                    <Text style={styles.setGoalActionText}>No target setup required. Rankings update automatically from eligible activities.</Text>
                   </View>
-                  <ChevronRight size={16} color={colors.textLight} />
-                </TouchableOpacity>
+                </View>
               )}
             </View>
           </View>
@@ -4406,6 +4404,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  setGoalActionCardDisabled: {
+    backgroundColor: colors.extraLightGray,
+    borderColor: colors.divider,
+    opacity: 0.75,
+  },
   setGoalActionInfo: {
     flex: 1,
     minWidth: 0,
@@ -4414,6 +4417,9 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800" as const,
     color: colors.text,
+  },
+  setGoalActionTitleDisabled: {
+    color: colors.textSecondary,
   },
   setGoalActionText: {
     fontSize: 12,

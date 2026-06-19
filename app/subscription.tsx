@@ -21,13 +21,11 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import * as Haptics from 'expo-haptics';
 import {
   Crown,
-  Check,
   CreditCard,
   Smartphone,
   ChevronRight,
   Shield,
-  Zap,
-  Trophy,
+  CalendarDays,
   X,
 } from 'lucide-react-native';
 import colors from '@/constants/colors';
@@ -39,12 +37,7 @@ const PAYMENT_ICONS: Record<PaymentMethod, { icon: typeof Smartphone; color: str
   mpesa: { icon: Smartphone, color: '#4CAF50', bg: '#F0FDF4' },
   credit_card: { icon: CreditCard, color: '#1E40AF', bg: '#EFF6FF' },
 };
-
-const FEATURES = [
-  { icon: Zap, text: 'Unlimited activity tracking', color: '#FF6B35' },
-  { icon: Trophy, text: 'Community rankings & medals', color: '#F59E0B' },
-  { icon: Shield, text: 'Full event participation', color: '#10B981' },
-];
+type MobilePaymentMethod = Exclude<PaymentMethod, 'credit_card'>;
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message && error.message !== '[object Object]') {
@@ -70,6 +63,35 @@ function getErrorMessage(error: unknown): string {
   return typeof error === 'string' && error ? error : 'Failed to submit subscription. Please try again.';
 }
 
+function formatDateLabel(value?: string | null): string {
+  if (!value) return 'Not set';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'Not set';
+  return parsed.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function addDays(value: Date, days: number): Date {
+  const next = new Date(value);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function getPlanDurationDays(plan: SubscriptionPlan | null): number {
+  if (!plan) return 0;
+  return plan.period === 'yearly' ? 365 : 90;
+}
+
+function inferUgandaMobileMoneyMethod(phone: string): MobilePaymentMethod {
+  const digits = phone.replace(/\D/g, "");
+  const local = digits.startsWith("256") ? digits.slice(3) : digits.replace(/^0/, "");
+  if (local.startsWith("70") || local.startsWith("75")) return "airtel_money";
+  return "mtn_mobile_money";
+}
+
 export default function SubscriptionScreen() {
   const router = useRouter();
   const { user } = useAuth();
@@ -80,6 +102,8 @@ export default function SubscriptionScreen() {
     trialExpired,
     availablePlans,
     userRegion,
+    userCountry,
+    subscription,
     refreshSubscription,
   } = useSubscription();
 
@@ -147,11 +171,15 @@ export default function SubscriptionScreen() {
       if (plan.paymentMethod === 'credit_card') {
         throw new Error('Card payments are not available in Flutterwave sandbox yet. Please use mobile money for testing.');
       }
+      const paymentMethod: MobilePaymentMethod =
+        userRegion === 'uganda'
+          ? inferUgandaMobileMoneyMethod(phone)
+          : (plan.paymentMethod as MobilePaymentMethod);
 
       return await createSubscriptionPaymentMutation.mutateAsync({
         registrationId: user.id,
         planId: plan.id,
-        paymentMethod: plan.paymentMethod,
+        paymentMethod,
         amount: plan.price,
         currency: plan.currency,
         phoneNumber: phone,
@@ -205,6 +233,7 @@ export default function SubscriptionScreen() {
 
   const getPhonePlaceholder = useCallback(() => {
     if (!selectedPlan) return '';
+    if (userRegion === 'uganda') return '0770 or 0750 000 000';
     switch (selectedPlan.paymentMethod) {
       case 'mtn_mobile_money':
         return '0770 000 000';
@@ -215,10 +244,21 @@ export default function SubscriptionScreen() {
       default:
         return '';
     }
-  }, [selectedPlan]);
+  }, [selectedPlan, userRegion]);
 
   const isMobilePayment =
     selectedPlan?.paymentMethod !== 'credit_card';
+  const selectedDurationDays = getPlanDurationDays(selectedPlan);
+  const currentExpiryDate = subscription?.expires_at ? new Date(subscription.expires_at) : null;
+  const renewalBaseDate =
+    currentExpiryDate && currentExpiryDate > new Date()
+      ? currentExpiryDate
+      : new Date();
+  const renewalExpiryDate = selectedPlan ? addDays(renewalBaseDate, selectedDurationDays) : null;
+  const regionPriceSummary =
+    userRegion === 'uganda'
+      ? 'UGX 20,000 per quarter or UGX 60,000 per year'
+      : `${availablePlans[0]?.displayPrice || 'USD 5'} per quarter or ${availablePlans[1]?.displayPrice || 'USD 15'} per year`;
 
   if (subscriptionStatus === 'pending') {
     return (
@@ -278,38 +318,47 @@ export default function SubscriptionScreen() {
           </Text>
         </Animated.View>
 
-        <View style={styles.featuresSection}>
-          <Text style={styles.sectionLabel}>WHAT YOU GET</Text>
-          {FEATURES.map((feature, index) => {
-            const IconComponent = feature.icon;
-            return (
-              <View key={index} style={styles.featureRow}>
-                <View
-                  style={[
-                    styles.featureIconWrap,
-                    { backgroundColor: feature.color + '18' },
-                  ]}
-                >
-                  <IconComponent size={20} color={feature.color} />
-                </View>
-                <Text style={styles.featureText}>{feature.text}</Text>
-                <Check size={18} color={colors.success} />
-              </View>
-            );
-          })}
+        <View style={styles.datesCard}>
+          <View style={styles.datesHeader}>
+            <View style={styles.datesIconWrap}>
+              <CalendarDays size={20} color={colors.primary} />
+            </View>
+            <View style={styles.datesTitleWrap}>
+              <Text style={styles.datesTitle}>Subscription dates</Text>
+              <Text style={styles.datesText}>
+                Choose a plan below to preview your renewal date.
+              </Text>
+            </View>
+          </View>
+          <View style={styles.dateRows}>
+            <View style={styles.dateRow}>
+              <Text style={styles.dateLabel}>Current expiry</Text>
+              <Text style={styles.dateValue}>
+                {subscriptionStatus === 'trial'
+                  ? `${trialDaysRemaining} day${trialDaysRemaining !== 1 ? 's' : ''} trial left`
+                  : formatDateLabel(subscription?.expires_at)}
+              </Text>
+            </View>
+            <View style={styles.dateRow}>
+              <Text style={styles.dateLabel}>Renewed until</Text>
+              <Text style={[styles.dateValue, selectedPlan && styles.dateValueActive]}>
+                {renewalExpiryDate ? formatDateLabel(renewalExpiryDate.toISOString()) : 'Select Quarterly or Yearly'}
+              </Text>
+            </View>
+          </View>
         </View>
 
         <View style={styles.pricingSection}>
-          <Text style={styles.sectionLabel}>RUNNATION SUBSCRIPTION</Text>
+          <View style={styles.pricingHeader}>
+            <Text style={styles.sectionLabel}>RUNNATION SUBSCRIPTION</Text>
+            <Text style={styles.pricingBadge}>{userRegion === 'uganda' ? 'Uganda' : userCountry || 'Rest of world'}</Text>
+          </View>
           <Text style={styles.pricingNote}>
-            {userRegion === 'uganda'
-              ? 'Pay with MTN Mobile Money or Airtel Money'
-              : 'Pay with Credit Card in USD'}
+            {regionPriceSummary}. For non-Uganda countries, this is the local currency equivalent of USD 5 quarterly or USD 15 yearly where a local currency is configured.
           </Text>
 
           {availablePlans.map((plan) => {
             const paymentConfig = PAYMENT_ICONS[plan.paymentMethod];
-            const IconComp = paymentConfig.icon;
             const isSelected = selectedPlan?.id === plan.id;
 
             return (
@@ -329,11 +378,13 @@ export default function SubscriptionScreen() {
                       { backgroundColor: paymentConfig.bg },
                     ]}
                   >
-                    <IconComp size={24} color={paymentConfig.color} />
+                    <CalendarDays size={23} color={paymentConfig.color} />
                   </View>
                   <View style={styles.planInfo}>
                     <Text style={styles.planName}>{plan.name}</Text>
-                    <Text style={styles.planPeriod}>{plan.periodLabel}</Text>
+                    <Text style={styles.planPeriod}>
+                      {plan.period === 'yearly' ? '12 months access' : '3 months access'}
+                    </Text>
                   </View>
                 </View>
                 <View style={styles.planRight}>
@@ -409,7 +460,7 @@ export default function SubscriptionScreen() {
           <View style={styles.paymentFormSection}>
             <View style={styles.paymentFormHeader}>
               <Text style={styles.paymentFormTitle}>
-                Pay with {selectedPlan.name}
+                {selectedPlan.name} subscription
               </Text>
               <TouchableOpacity
                 onPress={() => {
@@ -427,16 +478,13 @@ export default function SubscriptionScreen() {
                 {selectedPlan.displayPrice} {selectedPlan.periodLabel}
               </Text>
             </View>
+            <Text style={styles.paymentProviderText}>
+              Processed by Flutterwave. Available payment methods depend on your country and Flutterwave account settings.
+            </Text>
 
             {isMobilePayment ? (
               <View style={styles.phoneInputSection}>
-                <Text style={styles.inputLabel}>
-                  {selectedPlan.paymentMethod === 'mpesa'
-                    ? 'M-Pesa Phone Number'
-                    : selectedPlan.paymentMethod === 'mtn_mobile_money'
-                      ? 'MTN Phone Number'
-                      : 'Airtel Phone Number'}
-                </Text>
+                <Text style={styles.inputLabel}>Mobile money phone number</Text>
                 <TextInput
                   style={styles.phoneInput}
                   placeholder={getPhonePlaceholder()}
@@ -481,8 +529,8 @@ export default function SubscriptionScreen() {
               ) : (
                 <Text style={styles.subscribeButtonText}>
                   {isMobilePayment
-                    ? 'Request Payment'
-                    : 'Pay with Card'}
+                    ? 'Continue to Flutterwave'
+                    : 'Pay with Flutterwave'}
                 </Text>
               )}
             </TouchableOpacity>
@@ -560,10 +608,10 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     paddingHorizontal: 16,
   },
-  featuresSection: {
+  datesCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 20,
+    padding: 16,
     marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -571,34 +619,94 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 2,
   },
+  datesHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 12,
+    marginBottom: 14,
+  },
+  datesIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#FFF3E8',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  datesTitleWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  datesTitle: {
+    fontSize: 16,
+    fontWeight: '800' as const,
+    color: '#1A1A1A',
+  },
+  datesText: {
+    fontSize: 12,
+    color: '#777',
+    lineHeight: 17,
+  },
+  dateRows: {
+    gap: 8,
+  },
+  dateRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    gap: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  dateLabel: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: '#666',
+  },
+  dateValue: {
+    flex: 1,
+    textAlign: 'right' as const,
+    fontSize: 13,
+    fontWeight: '800' as const,
+    color: '#1A1A1A',
+  },
+  dateValueActive: {
+    color: colors.primary,
+  },
   sectionLabel: {
     fontSize: 12,
     fontWeight: '700' as const,
     color: '#999',
     letterSpacing: 1,
-    marginBottom: 16,
-  },
-  featureRow: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    gap: 12,
-    paddingVertical: 10,
-  },
-  featureIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-  },
-  featureText: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '500' as const,
-    color: '#333',
+    marginBottom: 0,
   },
   pricingSection: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
     marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  pricingHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    gap: 12,
+    marginBottom: 10,
+  },
+  pricingBadge: {
+    borderRadius: 999,
+    backgroundColor: '#FFF3E8',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    fontSize: 11,
+    fontWeight: '800' as const,
+    color: colors.primary,
   },
   otherPaymentsSection: {
     backgroundColor: '#fff',
@@ -703,21 +811,21 @@ const styles = StyleSheet.create({
     color: '#B91C1C',
   },
   pricingNote: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#666',
-    marginBottom: 12,
-    marginTop: -8,
+    marginBottom: 14,
+    lineHeight: 19,
   },
   planCard: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'space-between' as const,
     backgroundColor: '#fff',
-    padding: 16,
+    padding: 14,
     borderRadius: 14,
     marginBottom: 10,
-    borderWidth: 2,
-    borderColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
@@ -742,6 +850,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center' as const,
   },
   planInfo: {
+    flex: 1,
     gap: 2,
   },
   planName: {
@@ -757,9 +866,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     gap: 8,
+    flexShrink: 0,
   },
   planPrice: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700' as const,
     color: colors.primary,
   },
@@ -793,6 +903,12 @@ const styles = StyleSheet.create({
     padding: 14,
     borderRadius: 10,
     marginBottom: 16,
+  },
+  paymentProviderText: {
+    fontSize: 12,
+    color: '#777',
+    lineHeight: 18,
+    marginBottom: 14,
   },
   paymentSummaryLabel: {
     fontSize: 14,

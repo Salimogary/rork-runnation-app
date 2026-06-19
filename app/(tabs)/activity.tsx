@@ -720,45 +720,39 @@ export default function ActivityScreen() {
 
     setIsSaving(true);
     try {
-      const headers = ['Date', 'Type', 'Distance (km)', 'Start Time', 'End Time', 'Pause Time', 'Pace (min/km)'];
-      const rows = sortedActivities.map((a) => [
-        a.activity_date,
-        a.exercise_type,
-        a.distance_km.toFixed(2),
-        a.start_time,
-        a.end_time,
-        formatPauseDuration(a.pause_duration_seconds || 0),
-        formatPaceMinPerKm(a.pace_min_per_km),
-      ]);
-
-      const csvContent = [headers, ...rows].map((row) => row.join(',')).join('\n');
-
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'my_activities.csv';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      } else {
-        const { File: FSFile, Paths: FSPaths } = await import('expo-file-system/next');
-        const file = new FSFile(FSPaths.cache, 'my_activities.csv');
-        file.write(csvContent);
-        const sharingModule = await import('expo-sharing');
-        await sharingModule.shareAsync(file.uri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Save Activity CSV',
-          UTI: 'public.comma-separated-values-text',
-        });
-      }
+      await saveCsvFile(buildWorkoutCsv(sortedActivities), 'my_activities.csv', 'Your activity export was saved to:');
 
       console.log('[ActivityCSV] Export successful');
     } catch (error: any) {
       console.error('[ActivityCSV] Export failed:', error);
       Alert.alert('Error', 'Failed to export activities. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveWorkoutCSV = async (activity: ActivityData) => {
+    if (!isSubscribed) {
+      Alert.alert(
+        'Premium Feature',
+        'Downloading a workout as CSV is available only on a subscribed plan. Please upgrade to access this feature.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const datePart = String(activity.activity_date || 'workout').slice(0, 10);
+      await saveCsvFile(
+        buildWorkoutCsv([activity]),
+        `runnation_workout_${datePart}_${activity.activity_id}.csv`,
+        'This workout CSV was saved to:'
+      );
+      console.log('[ActivityCSV] Single workout export successful', { activityId: activity.activity_id });
+    } catch (error: any) {
+      console.error('[ActivityCSV] Single workout export failed:', error);
+      Alert.alert('Error', 'Failed to export this workout. Please try again.');
     } finally {
       setIsSaving(false);
     }
@@ -2383,6 +2377,52 @@ export default function ActivityScreen() {
     return `${minutes}'${seconds.toString().padStart(2, '0')}"`;
   };
 
+  const escapeCsvValue = (value: string | number): string => {
+    const text = String(value ?? "");
+    if (/[",\n\r]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  };
+
+  const saveCsvFile = async (csvContent: string, fileName: string, successMessage: string) => {
+    if (Platform.OS === 'web') {
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    const { File: FSFile, Paths: FSPaths } = await import('expo-file-system/next');
+    const file = new FSFile(FSPaths.document, fileName);
+    file.write(csvContent);
+    Alert.alert('CSV Saved', `${successMessage}\n${file.uri}`);
+  };
+
+  const buildWorkoutCsv = (workouts: ActivityData[]): string => {
+    const headers = ['Date', 'Type', 'Distance (km)', 'Start Time', 'End Time', 'Duration', 'Pause Time', 'Pace (min/km)'];
+    const rows = workouts.map((activity) => [
+      activity.activity_date,
+      activity.exercise_type,
+      activity.distance_km.toFixed(2),
+      activity.start_time,
+      activity.end_time,
+      calculateDuration(activity.start_time, activity.end_time, activity.pause_duration_seconds || 0),
+      formatPauseDuration(activity.pause_duration_seconds || 0),
+      formatPaceMinPerKm(activity.pace_min_per_km),
+    ]);
+
+    return [headers, ...rows]
+      .map((row) => row.map(escapeCsvValue).join(','))
+      .join('\n');
+  };
+
   const availableCountries = useMemo(() => {
     const source = activeTab === "club"
       ? clubLeaderboardGroups.flatMap((year) =>
@@ -3181,6 +3221,15 @@ export default function ActivityScreen() {
         <View style={styles.reportTabsRow}>
           <View style={styles.toggleContainer}>
             <TouchableOpacity
+              style={[styles.toggleButton, activeTab === "runs" && styles.toggleButtonActive]}
+              onPress={() => setActiveTab("runs")}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.toggleText, activeTab === "runs" && styles.toggleTextActive]}>
+                Runs
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               style={[styles.toggleButton, activeTab === "community" && styles.toggleButtonActive, !isSubscribed && styles.toggleButtonLocked]}
               onPress={() => {
                 if (!isSubscribed) {
@@ -3226,6 +3275,22 @@ export default function ActivityScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+
+          {activeTab === "runs" && (
+            <TouchableOpacity
+              style={[styles.saveIconButton, (!isSubscribed || isSaving || sortedActivities.length === 0) && styles.saveIconButtonDisabled]}
+              onPress={handleSaveCSV}
+              activeOpacity={0.8}
+              disabled={isSaving}
+              accessibilityLabel="Download all workouts as CSV"
+            >
+              {isSaving ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Download size={18} color={isSubscribed && sortedActivities.length > 0 ? colors.primary : "#9CA3AF"} />
+              )}
+            </TouchableOpacity>
+          )}
 
           {activeTab === "club" && (
             <TouchableOpacity
@@ -3769,6 +3834,7 @@ export default function ActivityScreen() {
                         <Text style={[styles.runsTableHeaderText, styles.runsTimeColumn]}>Time</Text>
                         <Text style={[styles.runsTableHeaderText, styles.runsPaceColumn]}>Pace</Text>
                         <Text style={[styles.runsTableHeaderText, styles.runsPauseColumn]}>Pause</Text>
+                        <Text style={[styles.runsTableHeaderText, styles.runsDownloadHeader]}>CSV</Text>
                       </View>
                       {monthGroup.activities.map((activity, index) => (
                         <View key={activity.activity_id} style={[styles.runsTableRow, index % 2 === 1 && styles.runsTableRowAlt]}>
@@ -3784,6 +3850,17 @@ export default function ActivityScreen() {
                           <Text style={[styles.runsTableCellText, styles.runsPauseColumn]} numberOfLines={1}>
                             {(activity.pause_duration_seconds || 0) > 0 ? formatPauseDuration(activity.pause_duration_seconds || 0) : "-"}
                           </Text>
+                          <View style={styles.runsDownloadColumn}>
+                            <TouchableOpacity
+                              style={[styles.workoutCsvButton, (!isSubscribed || isSaving) && styles.workoutCsvButtonDisabled]}
+                              onPress={() => handleSaveWorkoutCSV(activity)}
+                              activeOpacity={0.75}
+                              disabled={isSaving}
+                              accessibilityLabel={`Download ${activity.exercise_type} from ${formatDate(activity.activity_date)} as CSV`}
+                            >
+                              <Download size={12} color={isSubscribed ? colors.primary : "#9CA3AF"} />
+                            </TouchableOpacity>
+                          </View>
                         </View>
                       ))}
                     </View>
@@ -4073,6 +4150,9 @@ const styles = StyleSheet.create({
   saveIconButtonActive: {
     borderWidth: 2,
     borderColor: colors.primary,
+  },
+  saveIconButtonDisabled: {
+    opacity: 0.65,
   },
   saveButtonLocked: {
     backgroundColor: "rgba(255,255,255,0.7)",
@@ -4944,9 +5024,33 @@ const styles = StyleSheet.create({
     textAlign: "right" as const,
   },
   runsPauseColumn: {
-    flex: 0.82,
-    minWidth: 34,
+    flex: 0.76,
+    minWidth: 31,
     textAlign: "right" as const,
+  },
+  runsDownloadHeader: {
+    flex: 0.5,
+    minWidth: 24,
+    textAlign: "center" as const,
+  },
+  runsDownloadColumn: {
+    flex: 0.5,
+    minWidth: 24,
+    alignItems: "center" as const,
+  },
+  workoutCsvButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+  },
+  workoutCsvButtonDisabled: {
+    backgroundColor: "#F3F4F6",
+    borderColor: "#E5E7EB",
   },
   activityCard: {
     backgroundColor: colors.white,

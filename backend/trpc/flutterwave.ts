@@ -13,6 +13,34 @@ type SubscriptionPlanDetails = {
 };
 
 const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlanDetails> = {
+  ug_quarterly: {
+    planId: "ug_quarterly",
+    amount: 20000,
+    currency: "UGX",
+    durationDays: 90,
+    label: "RunNation quarterly subscription",
+  },
+  ug_yearly: {
+    planId: "ug_yearly",
+    amount: 60000,
+    currency: "UGX",
+    durationDays: 365,
+    label: "RunNation yearly subscription",
+  },
+  intl_quarterly: {
+    planId: "intl_quarterly",
+    amount: 5,
+    currency: "USD",
+    durationDays: 90,
+    label: "RunNation quarterly subscription",
+  },
+  intl_yearly: {
+    planId: "intl_yearly",
+    amount: 15,
+    currency: "USD",
+    durationDays: 365,
+    label: "RunNation yearly subscription",
+  },
   ug_mtn_quarterly: {
     planId: "ug_mtn_quarterly",
     amount: 20000,
@@ -57,11 +85,52 @@ const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlanDetails> = {
   },
 };
 
+const INTERNATIONAL_EQUIVALENT_PRICES: Record<string, { quarterly: number; yearly: number }> = {
+  USD: { quarterly: 5, yearly: 15 },
+  KES: { quarterly: 650, yearly: 1950 },
+  TZS: { quarterly: 13000, yearly: 39000 },
+  RWF: { quarterly: 7000, yearly: 21000 },
+  NGN: { quarterly: 8000, yearly: 24000 },
+  GHS: { quarterly: 60, yearly: 180 },
+  ZAR: { quarterly: 90, yearly: 270 },
+  ZMW: { quarterly: 140, yearly: 420 },
+  MWK: { quarterly: 9000, yearly: 27000 },
+};
+
 export function getSubscriptionPlanDetails(planId: string): SubscriptionPlanDetails {
   const plan = SUBSCRIPTION_PLANS[planId];
   if (!plan) {
     throw new Error("Unknown subscription plan. Please update the app and try again.");
   }
+  return plan;
+}
+
+export function getSubscriptionChargeDetails(
+  planId: string,
+  requestedAmount: number,
+  requestedCurrency: string
+): SubscriptionPlanDetails {
+  const plan = getSubscriptionPlanDetails(planId);
+  const currency = requestedCurrency.trim().toUpperCase();
+  const amount = Number(requestedAmount);
+
+  if (planId === "intl_quarterly" || planId === "intl_yearly") {
+    const period = planId === "intl_yearly" ? "yearly" : "quarterly";
+    const equivalentAmount = INTERNATIONAL_EQUIVALENT_PRICES[currency]?.[period];
+    if (!equivalentAmount || amount !== equivalentAmount) {
+      throw new Error("Selected subscription price is not available. Please refresh the app and try again.");
+    }
+    return {
+      ...plan,
+      amount: equivalentAmount,
+      currency,
+    };
+  }
+
+  if (plan.amount !== amount || plan.currency !== currency) {
+    throw new Error("Selected subscription price does not match the current plan.");
+  }
+
   return plan;
 }
 

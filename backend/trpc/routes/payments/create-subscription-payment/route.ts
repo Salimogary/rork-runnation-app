@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
-import { createFlutterwaveMobileMoneyPayment, getSubscriptionPlanDetails } from "../../../flutterwave";
+import { createFlutterwaveMobileMoneyPayment, getSubscriptionChargeDetails } from "../../../flutterwave";
 import { requireRegistrationOwner } from "../../../rbac";
 
 const paymentMethodSchema = z.enum(["mtn_mobile_money", "airtel_money", "mpesa"]);
@@ -19,8 +19,8 @@ export default publicProcedure
   .mutation(async ({ input, ctx }) => {
     await requireRegistrationOwner(ctx, input.registrationId);
 
-    const plan = getSubscriptionPlanDetails(input.planId);
-    if (normalizePaymentMethodPlanPrefix(input.paymentMethod) !== normalizePaymentMethodPlanPrefix(input.planId)) {
+    const plan = getSubscriptionChargeDetails(input.planId, input.amount, input.currency);
+    if (!paymentMethodMatchesPlan(input.paymentMethod, input.planId)) {
       throw new Error("Selected payment method does not match the subscription plan.");
     }
 
@@ -61,8 +61,16 @@ export default publicProcedure
     };
   });
 
+function paymentMethodMatchesPlan(paymentMethod: string, planId: string): boolean {
+  if (planId === "ug_quarterly" || planId === "ug_yearly") {
+    return paymentMethod === "mtn_mobile_money" || paymentMethod === "airtel_money";
+  }
+  return normalizePaymentMethodPlanPrefix(paymentMethod) === normalizePaymentMethodPlanPrefix(planId);
+}
+
 function normalizePaymentMethodPlanPrefix(value: string): string {
   if (value === "mtn_mobile_money") return "ug_mtn";
   if (value === "airtel_money") return "ug_airtel";
+  if (value === "intl_quarterly" || value === "intl_yearly") return "intl_card";
   return value.split("_").slice(0, 2).join("_");
 }

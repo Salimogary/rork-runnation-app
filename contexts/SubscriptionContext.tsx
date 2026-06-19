@@ -41,16 +41,50 @@ interface SubscriptionContextValue {
   isSubscribed: boolean;
   subscription: SubscriptionData | null;
   userRegion: 'uganda' | 'international';
+  userCountry: string | null;
   availablePlans: SubscriptionPlan[];
   refreshSubscription: () => void;
 }
 
 const TRIAL_DURATION_DAYS = 90;
+const INTERNATIONAL_QUARTERLY_USD = 5;
+const INTERNATIONAL_YEARLY_USD = 15;
+
+type LocalCurrencyConfig = {
+  currency: string;
+  quarterly: number;
+  yearly: number;
+};
+
+const LOCAL_EQUIVALENT_PRICES_BY_COUNTRY: Record<string, LocalCurrencyConfig> = {
+  kenya: { currency: 'KES', quarterly: 650, yearly: 1950 },
+  tanzania: { currency: 'TZS', quarterly: 13000, yearly: 39000 },
+  'united republic of tanzania': { currency: 'TZS', quarterly: 13000, yearly: 39000 },
+  rwanda: { currency: 'RWF', quarterly: 7000, yearly: 21000 },
+  nigeria: { currency: 'NGN', quarterly: 8000, yearly: 24000 },
+  ghana: { currency: 'GHS', quarterly: 60, yearly: 180 },
+  'south africa': { currency: 'ZAR', quarterly: 90, yearly: 270 },
+  zambia: { currency: 'ZMW', quarterly: 140, yearly: 420 },
+  malawi: { currency: 'MWK', quarterly: 9000, yearly: 27000 },
+};
+
+function formatMoney(currency: string, amount: number): string {
+  return `${currency} ${amount.toLocaleString()}`;
+}
+
+function getLocalEquivalentConfig(country: string | null | undefined): LocalCurrencyConfig {
+  const normalized = String(country || '').trim().toLowerCase();
+  return LOCAL_EQUIVALENT_PRICES_BY_COUNTRY[normalized] || {
+    currency: 'USD',
+    quarterly: INTERNATIONAL_QUARTERLY_USD,
+    yearly: INTERNATIONAL_YEARLY_USD,
+  };
+}
 
 const ALL_PLANS: SubscriptionPlan[] = [
   {
-    id: 'ug_mtn_quarterly',
-    name: 'MTN Mobile Money - Quarterly',
+    id: 'ug_quarterly',
+    name: 'Quarterly',
     paymentMethod: 'mtn_mobile_money',
     price: 20000,
     currency: 'UGX',
@@ -61,20 +95,8 @@ const ALL_PLANS: SubscriptionPlan[] = [
     icon: '📱',
   },
   {
-    id: 'ug_airtel_quarterly',
-    name: 'Airtel Money - Quarterly',
-    paymentMethod: 'airtel_money',
-    price: 20000,
-    currency: 'UGX',
-    displayPrice: 'UGX 20,000',
-    period: 'quarterly',
-    periodLabel: 'per quarter',
-    region: 'uganda',
-    icon: '📱',
-  },
-  {
-    id: 'ug_mtn_yearly',
-    name: 'MTN Mobile Money - Yearly',
+    id: 'ug_yearly',
+    name: 'Yearly',
     paymentMethod: 'mtn_mobile_money',
     price: 60000,
     currency: 'UGX',
@@ -83,44 +105,38 @@ const ALL_PLANS: SubscriptionPlan[] = [
     periodLabel: 'per year',
     region: 'uganda',
     icon: '📱',
-  },
-  {
-    id: 'ug_airtel_yearly',
-    name: 'Airtel Money - Yearly',
-    paymentMethod: 'airtel_money',
-    price: 60000,
-    currency: 'UGX',
-    displayPrice: 'UGX 60,000',
-    period: 'yearly',
-    periodLabel: 'per year',
-    region: 'uganda',
-    icon: '📱',
-  },
-  {
-    id: 'intl_card_quarterly',
-    name: 'Card - Quarterly',
-    paymentMethod: 'credit_card',
-    price: 5,
-    currency: 'USD',
-    displayPrice: 'USD 5',
-    period: 'quarterly',
-    periodLabel: 'per quarter',
-    region: 'international',
-    icon: '💳',
-  },
-  {
-    id: 'intl_card_yearly',
-    name: 'Card - Yearly',
-    paymentMethod: 'credit_card',
-    price: 15,
-    currency: 'USD',
-    displayPrice: 'USD 15',
-    period: 'yearly',
-    periodLabel: 'per year',
-    region: 'international',
-    icon: '💳',
   },
 ];
+
+function buildInternationalPlans(country: string | null | undefined): SubscriptionPlan[] {
+  const local = getLocalEquivalentConfig(country);
+  return [
+    {
+      id: 'intl_quarterly',
+      name: 'Quarterly',
+      paymentMethod: 'credit_card',
+      price: local.quarterly,
+      currency: local.currency,
+      displayPrice: formatMoney(local.currency, local.quarterly),
+      period: 'quarterly',
+      periodLabel: 'per quarter',
+      region: 'international',
+      icon: '💳',
+    },
+    {
+      id: 'intl_yearly',
+      name: 'Yearly',
+      paymentMethod: 'credit_card',
+      price: local.yearly,
+      currency: local.currency,
+      displayPrice: formatMoney(local.currency, local.yearly),
+      period: 'yearly',
+      periodLabel: 'per year',
+      region: 'international',
+      icon: '💳',
+    },
+  ];
+}
 
 function getRegionFromCountry(country: string | undefined): 'uganda' | 'international' {
   if (!country) return 'international';
@@ -228,8 +244,11 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const isSubscribed = hasFreeAdminAccess || subscriptionStatus === 'active' || subscriptionStatus === 'trial';
 
   const availablePlans = useMemo(() => {
-    return ALL_PLANS.filter(p => p.region === userRegion);
-  }, [userRegion]);
+    if (userRegion === 'uganda') {
+      return ALL_PLANS.filter(p => p.region === 'uganda');
+    }
+    return buildInternationalPlans(userProfileQuery.data?.country ?? null);
+  }, [userProfileQuery.data?.country, userRegion]);
 
   const refreshSubscription = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['subscription', user?.id] });
@@ -246,9 +265,10 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
     isSubscribed,
     subscription: subscriptionQuery.data ?? null,
     userRegion,
+    userCountry: userProfileQuery.data?.country ?? null,
     availablePlans,
     refreshSubscription,
-  }), [subscriptionStatus, isLoading, trialDaysRemaining, trialExpired, isSubscribed, subscriptionQuery.data, userRegion, availablePlans, refreshSubscription]);
+  }), [subscriptionStatus, isLoading, trialDaysRemaining, trialExpired, isSubscribed, subscriptionQuery.data, userRegion, userProfileQuery.data?.country, availablePlans, refreshSubscription]);
 
   return (
     <SubscriptionContext.Provider value={value}>
@@ -265,6 +285,7 @@ const defaultSubscriptionValue: SubscriptionContextValue = {
   isSubscribed: true,
   subscription: null,
   userRegion: 'international',
+  userCountry: null,
   availablePlans: [],
   refreshSubscription: () => {},
 };

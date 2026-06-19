@@ -69,6 +69,9 @@ export async function fetchProfileCompletionInputs(
     subscriptionResult,
     fitnessTargetResult,
     weightTargetResult,
+    dailyRunTargetResult,
+    habitTargetResult,
+    healthTargetResult,
     enrollmentResult,
   ] = await Promise.all([
     supabase
@@ -88,6 +91,9 @@ export async function fetchProfileCompletionInputs(
     supabase.from("subscriptions").select("status, expires_at").eq("registration_id", registrationId).maybeSingle(),
     supabase.from("fitness_goal").select("fitness_goal_id").eq("registration_id", registrationId).limit(1),
     supabase.from("weight_target_goal").select("weight_target_goal_id").eq("registration_id", registrationId).limit(1),
+    supabase.from("daily_run_goal").select("daily_run_goal_id").eq("registration_id", registrationId).limit(1),
+    supabase.from("habit_declarations").select("declaration_id").eq("registration_id", registrationId).eq("is_active", true).limit(1),
+    supabase.from("health_goal").select("health_id").eq("registration_id", registrationId).limit(1),
     supabase.from("event_enrollments").select("event_enrollment_id").eq("registration_id", registrationId).limit(1),
   ]);
 
@@ -124,7 +130,10 @@ export async function fetchProfileCompletionInputs(
     hasSubscription: hasFreeAdminAccess || hasPaidSubscription,
     hasTargets:
       (fitnessTargetResult.data?.length || 0) > 0 ||
-      (weightTargetResult.data?.length || 0) > 0,
+      (weightTargetResult.data?.length || 0) > 0 ||
+      (dailyRunTargetResult.data?.length || 0) > 0 ||
+      (habitTargetResult.data?.length || 0) > 0 ||
+      (healthTargetResult.data?.length || 0) > 0,
     hasEventEnrollment: (enrollmentResult.data?.length || 0) > 0,
     hasAtLeastOneBadge: getEarnedBadgeCount(totalDistance, eligibleActivities.length) > 0,
   };

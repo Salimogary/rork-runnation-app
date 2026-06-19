@@ -4025,14 +4025,9 @@ const getStatusLabel = (status: string) => {
     }
 
     const { File: FSFile, Paths: FSPaths } = await import("expo-file-system/next");
-    const file = new FSFile(FSPaths.cache, fileName);
+    const file = new FSFile(FSPaths.document, fileName);
     file.write(csvContent);
-    const sharingModule = await import("expo-sharing");
-    await sharingModule.shareAsync(file.uri, {
-      mimeType: "text/csv",
-      dialogTitle,
-      UTI: "public.comma-separated-values-text",
-    });
+    Alert.alert(dialogTitle, `CSV saved to:\n${file.uri}`);
   };
 
   const handleExportMilestones = async () => {

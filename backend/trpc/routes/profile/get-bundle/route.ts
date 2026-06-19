@@ -94,6 +94,9 @@ export default publicProcedure
       subscriptionRes,
       fitnessGoalRes,
       weightTargetRes,
+      dailyRunGoalRes,
+      habitDeclarationRes,
+      healthGoalRes,
       enrollmentRes,
       profileRes,
     ] = await Promise.all([
@@ -112,6 +115,9 @@ export default publicProcedure
       ctx.supabase.from("subscriptions").select("status, expires_at").eq("registration_id", registrationId).maybeSingle(),
       ctx.supabase.from("fitness_goal").select("fitness_goal_id").eq("registration_id", registrationId).limit(1),
       ctx.supabase.from("weight_target_goal").select("weight_target_goal_id").eq("registration_id", registrationId).limit(1),
+      ctx.supabase.from("daily_run_goal").select("daily_run_goal_id").eq("registration_id", registrationId).limit(1),
+      ctx.supabase.from("habit_declarations").select("declaration_id").eq("registration_id", registrationId).eq("is_active", true).limit(1),
+      ctx.supabase.from("health_goal").select("health_id").eq("registration_id", registrationId).limit(1),
       ctx.supabase.from("event_enrollments").select("event_enrollment_id").eq("registration_id", registrationId).limit(1),
       ctx.supabase.from("profiles").select("profile_id").eq("registration_id", registrationId).maybeSingle(),
     ]);
@@ -205,7 +211,12 @@ export default publicProcedure
       sub.status === "active" &&
       (!sub.expires_at || new Date(sub.expires_at) > new Date())
     );
-    const hasTargets = (fitnessGoalRes.data?.length ?? 0) > 0 || (weightTargetRes.data?.length ?? 0) > 0;
+    const hasTargets =
+      (fitnessGoalRes.data?.length ?? 0) > 0 ||
+      (weightTargetRes.data?.length ?? 0) > 0 ||
+      (dailyRunGoalRes.data?.length ?? 0) > 0 ||
+      (habitDeclarationRes.data?.length ?? 0) > 0 ||
+      (healthGoalRes.data?.length ?? 0) > 0;
     const hasEventEnrollment = (enrollmentRes.data?.length ?? 0) > 0;
     let requiresAdminTerms = false;
     let hasAcceptedAdminTerms = false;
