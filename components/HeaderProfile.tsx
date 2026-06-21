@@ -9,18 +9,28 @@ import {
   Platform,
   Alert,
   ScrollView,
+  TextInput,
+  Linking,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { Edit2, LogOut, Check, Circle, X } from "lucide-react-native";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { hasFreeAdminSubscriptionAccess } from "@/lib/role-session";
 import { getEarnedBadgeCount } from "@/utils/badges";
 import { calculateProfileCompletion, fetchProfileCompletionInputs } from "@/utils/profileCompletion";
 import type { ProfileCompletionInputs } from "@/utils/profileCompletion";
+import { getServerClient } from "@/lib/server-client";
+import * as StoreReview from "expo-store-review";
+import {
+  getAppRatingPromptState,
+  isWithinAppRatingCooldown,
+  setAppRatingPromptState,
+  type AppRatingSentiment,
+} from "@/utils/appRatingPrompt";
 
 
 interface HeaderUserProfile {
@@ -28,6 +38,7 @@ interface HeaderUserProfile {
   other_names?: string;
   username?: string;
   email?: string;
+  created_at?: string;
   sex?: string;
   city_town_district?: string;
   country?: string;
@@ -39,8 +50,15 @@ export default function HeaderProfile() {
   const { user, signOut, roleSession } = useAuth();
   const router = useRouter();
   const { colors: themeColors, isDark } = useTheme();
+  const queryClient = useQueryClient();
   const [menuVisible, setMenuVisible] = useState(false);
   const [checklistVisible, setChecklistVisible] = useState(false);
+  const [ratingSentimentVisible, setRatingSentimentVisible] = useState(false);
+  const [ratingAskVisible, setRatingAskVisible] = useState(false);
+  const [ratingFeedbackVisible, setRatingFeedbackVisible] = useState(false);
+  const [ratingFeedbackText, setRatingFeedbackText] = useState("");
+  const [ratingSentiment, setRatingSentiment] = useState<AppRatingSentiment | null>(null);
+  const ratingPromptChecked = React.useRef(false);
 
 
   const { data: profile } = useQuery<HeaderUserProfile>({
@@ -49,7 +67,7 @@ export default function HeaderProfile() {
       if (!user) throw new Error("Not authenticated");
       const { data, error } = await supabase
         .from("registrations")
-        .select('first_name, other_names, username, sex, city_town_district, country, dob, email_verified, contacts(email)')
+        .select('first_name, other_names, username, created_at, sex, city_town_district, country, dob, email_verified, contacts(email)')
         .eq("registration_id", user.id)
         .maybeSingle();
       if (error) {
@@ -126,6 +144,7 @@ export default function HeaderProfile() {
           hasTargets: false,
           hasEventEnrollment: false,
           hasAtLeastOneBadge: false,
+          hasRatedApp: false,
         };
       }
 
@@ -133,6 +152,50 @@ export default function HeaderProfile() {
     },
     enabled: !!user,
     staleTime: 30000,
+  });
+
+  const { data: existingRating, isLoading: existingRatingLoading } = useQuery<{ rating_id: number } | null>({
+    queryKey: ["appRatingCompletion", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      const { data, error } = await supabase
+        .from("app_ratings")
+        .select("rating_id")
+        .eq("registration_id", user.id)
+        .maybeSingle();
+      if (error) {
+        console.warn("[App Rating] Could not load rating state:", error);
+        return null;
+      }
+      return data as { rating_id: number } | null;
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
+  const submitRatingMutation = useMutation({
+    mutationFn: async ({ rating, feedback }: { rating: number; feedback: string | null }) => {
+      if (!user?.id) throw new Error("Not signed in");
+      await getServerClient().feedback.submitRating.mutate({
+        registrationId: user.id,
+        rating,
+        feedback,
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["appRatingCompletion", user?.id] });
+      void queryClient.invalidateQueries({ queryKey: ["profileCompletion", user?.id] });
+    },
+  });
+
+  const submitFeedbackMutation = useMutation({
+    mutationFn: async (feedback: string) => {
+      if (!user?.id) throw new Error("Not signed in");
+      await getServerClient().feedback.submitSuggestion.mutate({
+        registrationId: user.id,
+        suggestion: `[APP RATING FEEDBACK] ${feedback}`,
+      });
+    },
   });
 
   const completion = useMemo(() => {
@@ -178,6 +241,135 @@ export default function HeaderProfile() {
   const firstName = profile?.first_name || "User";
   const firstLetter = firstName[0]?.toUpperCase() || "U";
   const percentage = completion?.percentage ?? 0;
+
+  const recordRatingPromptState = React.useCallback(async (state: Parameters<typeof setAppRatingPromptState>[1]) => {
+    if (!user?.id) return;
+    await setAppRatingPromptState(user.id, state);
+  }, [user?.id]);
+
+  React.useEffect(() => {
+    if (
+      ratingPromptChecked.current ||
+      !user?.id ||
+      !profile ||
+      !badgeStats ||
+      existingRatingLoading ||
+      existingRating
+    ) {
+      return;
+    }
+
+    const accountCreatedAt = new Date(profile.created_at || user.createdAt || "");
+    if (Number.isNaN(accountCreatedAt.getTime())) return;
+
+    const accountAgeDays = (Date.now() - accountCreatedAt.getTime()) / (24 * 60 * 60 * 1000);
+    if (accountAgeDays < 7 || badgeStats.totalActivities < 5 || badgeStats.totalDistance < 30) {
+      return;
+    }
+
+    ratingPromptChecked.current = true;
+    void getAppRatingPromptState(user.id).then((state) => {
+      if (state.lastSubmittedAt || isWithinAppRatingCooldown(state.lastPromptedAt)) {
+        return;
+      }
+      void setAppRatingPromptState(user.id, { lastPromptedAt: new Date().toISOString() });
+      setRatingSentimentVisible(true);
+    });
+  }, [badgeStats, existingRating, existingRatingLoading, profile, user?.createdAt, user?.id]);
+
+  const handleRatingSentiment = async (sentiment: AppRatingSentiment) => {
+    setRatingSentiment(sentiment);
+    setRatingSentimentVisible(false);
+    await recordRatingPromptState({
+      lastPromptedAt: new Date().toISOString(),
+      lastSentiment: sentiment,
+    });
+
+    if (sentiment === "needs_improvement") {
+      setRatingFeedbackVisible(true);
+      return;
+    }
+
+    setRatingAskVisible(true);
+  };
+
+  const handleRateRunNation = async () => {
+    const nowIso = new Date().toISOString();
+    const backendRating = ratingSentiment === "love" ? 5 : 4;
+
+    try {
+      if (Platform.OS !== "web") {
+        let openedRatingSurface = false;
+        const isAvailable = await StoreReview.isAvailableAsync();
+        if (isAvailable) {
+          await StoreReview.requestReview();
+          openedRatingSurface = true;
+        } else if (Platform.OS === "android") {
+          const storeUrl = "market://details?id=app.rork.runnation_app";
+          const canOpenStore = await Linking.canOpenURL(storeUrl);
+          if (canOpenStore) {
+            await Linking.openURL(storeUrl);
+            openedRatingSurface = true;
+          }
+        }
+
+        if (!openedRatingSurface) {
+          throw new Error("No native rating surface is available on this device.");
+        }
+      } else {
+        const storeUrl = "https://play.google.com/store/apps/details?id=app.rork.runnation_app";
+        const canOpenStore = await Linking.canOpenURL(storeUrl);
+        if (canOpenStore) {
+          await Linking.openURL(storeUrl);
+        } else {
+          throw new Error("No store rating URL is available on this device.");
+        }
+      }
+
+      await recordRatingPromptState({
+        lastSubmittedAt: nowIso,
+        lastSentiment: ratingSentiment || "good",
+      });
+      submitRatingMutation.mutate({
+        rating: backendRating,
+        feedback: "User accepted the RunNation store rating prompt.",
+      });
+      setRatingAskVisible(false);
+    } catch (error) {
+      console.warn("[App Rating] Store review failed:", error);
+      Alert.alert("Rating Unavailable", "RunNation could not open the rating dialog right now. Please try again later.");
+    }
+  };
+
+  const handleMaybeLaterRating = async () => {
+    await recordRatingPromptState({
+      lastPromptedAt: new Date().toISOString(),
+      lastSentiment: ratingSentiment || "good",
+    });
+    setRatingAskVisible(false);
+  };
+
+  const handleSubmitRatingFeedback = async () => {
+    const feedback = ratingFeedbackText.trim();
+    if (!feedback) {
+      Alert.alert("Feedback Required", "Please tell us what we can improve.");
+      return;
+    }
+
+    try {
+      await submitFeedbackMutation.mutateAsync(feedback);
+      await recordRatingPromptState({
+        lastPromptedAt: new Date().toISOString(),
+        lastSentiment: "needs_improvement",
+      });
+      setRatingFeedbackVisible(false);
+      setRatingFeedbackText("");
+      Alert.alert("Thank You", "Your feedback was sent to the RunNation team.");
+    } catch (error) {
+      console.warn("[App Rating] Feedback submit failed:", error);
+      Alert.alert("Could Not Send", "Please try again from Settings > Feedback.");
+    }
+  };
 
   const getPercentageColor = (pct: number): string => {
     if (pct >= 80) return "#10b981";
@@ -350,6 +542,112 @@ export default function HeaderProfile() {
             </TouchableWithoutFeedback>
           </View>
         </TouchableWithoutFeedback>
+      </Modal>
+
+      <Modal
+        visible={ratingSentimentVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRatingSentimentVisible(false)}
+      >
+        <View style={styles.ratingOverlay}>
+          <View style={[styles.ratingContainer, { backgroundColor: themeColors.modalBackground }]}>
+            <Text style={[styles.ratingTitle, { color: themeColors.text }]}>How are you enjoying RunNation?</Text>
+            <View style={styles.ratingChoiceList}>
+              <TouchableOpacity style={styles.ratingChoiceButton} onPress={() => void handleRatingSentiment("love")}>
+                <Text style={styles.ratingChoiceText}>😀 Love it</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.ratingChoiceButton} onPress={() => void handleRatingSentiment("good")}>
+                <Text style={styles.ratingChoiceText}>🙂 It&apos;s good</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.ratingChoiceButton} onPress={() => void handleRatingSentiment("needs_improvement")}>
+                <Text style={styles.ratingChoiceText}>😕 Needs improvement</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={ratingAskVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => void handleMaybeLaterRating()}
+      >
+        <View style={styles.ratingOverlay}>
+          <View style={[styles.ratingContainer, { backgroundColor: themeColors.modalBackground }]}>
+            <Text style={[styles.ratingTitle, { color: themeColors.text }]}>🏃 Loving your journey?</Text>
+            <Text style={[styles.ratingBodyText, { color: themeColors.textSecondary }]}>
+              Every step you take helps grow the RunNation community. If you&apos;ve enjoyed training,
+              tracking your progress, or connecting with fellow runners, a quick ⭐⭐⭐⭐⭐ rating helps more runners discover us.
+            </Text>
+            <View style={styles.ratingActionRow}>
+              <TouchableOpacity
+                style={[styles.ratingSecondaryButton, { borderColor: themeColors.border }]}
+                onPress={() => void handleMaybeLaterRating()}
+              >
+                <Text style={[styles.ratingSecondaryText, { color: themeColors.text }]}>Maybe Later</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.ratingPrimaryButton}
+                onPress={() => void handleRateRunNation()}
+                disabled={submitRatingMutation.isPending}
+              >
+                <Text style={styles.ratingPrimaryText}>Rate RunNation</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={ratingFeedbackVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRatingFeedbackVisible(false)}
+      >
+        <View style={styles.ratingOverlay}>
+          <View style={[styles.ratingContainer, { backgroundColor: themeColors.modalBackground }]}>
+            <Text style={[styles.ratingTitle, { color: themeColors.text }]}>Help us improve</Text>
+            <Text style={[styles.ratingBodyText, { color: themeColors.textSecondary }]}>
+              Tell the RunNation team what felt off. We will use this feedback before asking you for a store rating.
+            </Text>
+            <TextInput
+              style={[
+                styles.ratingFeedbackInput,
+                {
+                  color: themeColors.text,
+                  borderColor: themeColors.border,
+                  backgroundColor: isDark ? "#111827" : "#F9FAFB",
+                },
+              ]}
+              value={ratingFeedbackText}
+              onChangeText={setRatingFeedbackText}
+              placeholder="What should we improve?"
+              placeholderTextColor={themeColors.textLight}
+              multiline
+              maxLength={600}
+              textAlignVertical="top"
+            />
+            <View style={styles.ratingActionRow}>
+              <TouchableOpacity
+                style={[styles.ratingSecondaryButton, { borderColor: themeColors.border }]}
+                onPress={() => setRatingFeedbackVisible(false)}
+              >
+                <Text style={[styles.ratingSecondaryText, { color: themeColors.text }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.ratingPrimaryButton, submitFeedbackMutation.isPending && styles.ratingButtonDisabled]}
+                onPress={() => void handleSubmitRatingFeedback()}
+                disabled={submitFeedbackMutation.isPending}
+              >
+                <Text style={styles.ratingPrimaryText}>
+                  {submitFeedbackMutation.isPending ? "Sending..." : "Send Feedback"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -555,5 +853,89 @@ const styles = StyleSheet.create({
   checklistLabelDone: {
     color: "#111",
     fontWeight: "600" as const,
+  },
+  ratingOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  ratingContainer: {
+    width: "100%",
+    maxWidth: 380,
+    borderRadius: 20,
+    padding: 20,
+    backgroundColor: "#fff",
+  },
+  ratingTitle: {
+    fontSize: 20,
+    fontWeight: "800" as const,
+    color: "#111",
+    marginBottom: 12,
+  },
+  ratingBodyText: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: "#555",
+    marginBottom: 16,
+  },
+  ratingChoiceList: {
+    gap: 10,
+  },
+  ratingChoiceButton: {
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: "#FFF7ED",
+    borderWidth: 1,
+    borderColor: "#FED7AA",
+  },
+  ratingChoiceText: {
+    fontSize: 16,
+    fontWeight: "700" as const,
+    color: "#111827",
+  },
+  ratingActionRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  ratingPrimaryButton: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FF6B35",
+    paddingHorizontal: 12,
+  },
+  ratingPrimaryText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800" as const,
+  },
+  ratingSecondaryButton: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    paddingHorizontal: 12,
+  },
+  ratingSecondaryText: {
+    fontSize: 14,
+    fontWeight: "700" as const,
+  },
+  ratingFeedbackInput: {
+    minHeight: 120,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 12,
+    fontSize: 14,
+    marginBottom: 14,
+  },
+  ratingButtonDisabled: {
+    opacity: 0.65,
   },
 });

@@ -232,6 +232,13 @@ const usesParaEquipment = (registration: any): boolean =>
 
 const getDateOnly = (value?: string | null): string => String(value || "").slice(0, 10);
 
+const getLocalDateKey = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const addDaysIso = (value: string, days: number): string => {
   const date = new Date(`${value}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
@@ -1457,7 +1464,7 @@ export default function GoalsScreen() {
       for (let i = 0; i < diffDays; i++) {
         const d = new Date(start);
         d.setDate(d.getDate() + i);
-        const dateStr = d.toISOString().split("T")[0];
+        const dateStr = getLocalDateKey(d);
         if ((valueByDate.get(dateStr) || 0) >= target) periodsMet++;
       }
     } else if (habitDeclaration.frequency === "weekly") {
@@ -1470,7 +1477,7 @@ export default function GoalsScreen() {
           if (dayIndex >= diffDays) break;
           const date = new Date(start);
           date.setDate(date.getDate() + dayIndex);
-          const dateStr = date.toISOString().split("T")[0];
+          const dateStr = getLocalDateKey(date);
           weekTotal += valueByDate.get(dateStr) || 0;
         }
         if (weekTotal >= target) periodsMet++;
@@ -1485,7 +1492,7 @@ export default function GoalsScreen() {
         let monthTotal = 0;
         const iter = new Date(monthStart);
         while (iter <= monthEnd) {
-          const dateStr = iter.toISOString().split("T")[0];
+          const dateStr = getLocalDateKey(iter);
           monthTotal += valueByDate.get(dateStr) || 0;
           iter.setDate(iter.getDate() + 1);
         }
@@ -1501,7 +1508,7 @@ export default function GoalsScreen() {
         let yearTotal = 0;
         const iter = new Date(yearStart);
         while (iter <= yearEnd) {
-          const dateStr = iter.toISOString().split("T")[0];
+          const dateStr = getLocalDateKey(iter);
           yearTotal += valueByDate.get(dateStr) || 0;
           iter.setDate(iter.getDate() + 1);
         }
@@ -1600,7 +1607,7 @@ export default function GoalsScreen() {
             checkDate = new Date(latestActivity);
           }
           for (const d of sortedDates) {
-            const dateStr = checkDate.toISOString().split("T")[0];
+            const dateStr = getLocalDateKey(checkDate);
             if (d === dateStr) {
               streakDays++;
               checkDate.setDate(checkDate.getDate() - 1);
@@ -1818,7 +1825,7 @@ export default function GoalsScreen() {
     const saveCurrentRank = async () => {
       try {
         const now = new Date();
-        const todayKey = now.toISOString().split("T")[0];
+        const todayKey = getLocalDateKey(now);
         const previousStored = await AsyncStorage.getItem(`community_rank_${user.id}`);
         if (previousStored) {
           const parsed = JSON.parse(previousStored) as StoredRankSnapshot;
@@ -2184,7 +2191,7 @@ export default function GoalsScreen() {
     const days = [];
     const iter = new Date(start);
     while (iter <= end) {
-      const date = iter.toISOString().split("T")[0];
+      const date = getLocalDateKey(iter);
       const isFuture = iter > today;
       const hasRun = runDateSet.has(date);
       days.push({ date, day: iter.getDate(), isFuture, hasRun });

@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { getAppRatingPromptState } from "@/utils/appRatingPrompt";
 import { getEarnedBadgeCount } from "@/utils/badges";
 
 export interface CompletionItem {
@@ -24,6 +25,7 @@ export interface ProfileCompletionInputs {
   hasTargets: boolean;
   hasEventEnrollment: boolean;
   hasAtLeastOneBadge: boolean;
+  hasRatedApp: boolean;
   requiresAdminTerms?: boolean;
   hasAcceptedAdminTerms?: boolean;
 }
@@ -39,6 +41,7 @@ export function calculateProfileCompletion(inputs: ProfileCompletionInputs): Pro
     { id: "targets", label: "Loaded targets for at least 1 goal", completed: inputs.hasTargets },
     { id: "event", label: "Enrolled for at least 1 event", completed: inputs.hasEventEnrollment },
     { id: "badge", label: "At least one badge", completed: inputs.hasAtLeastOneBadge },
+    { id: "rate_app", label: "Rate app", completed: inputs.hasRatedApp },
   ];
 
   if (inputs.requiresAdminTerms) {
@@ -73,6 +76,8 @@ export async function fetchProfileCompletionInputs(
     habitTargetResult,
     healthTargetResult,
     enrollmentResult,
+    appRatingResult,
+    localRatingState,
   ] = await Promise.all([
     supabase
       .from("registrations")
@@ -95,6 +100,8 @@ export async function fetchProfileCompletionInputs(
     supabase.from("habit_declarations").select("declaration_id").eq("registration_id", registrationId).eq("is_active", true).limit(1),
     supabase.from("health_goal").select("health_id").eq("registration_id", registrationId).limit(1),
     supabase.from("event_enrollments").select("event_enrollment_id").eq("registration_id", registrationId).limit(1),
+    supabase.from("app_ratings").select("rating_id").eq("registration_id", registrationId).limit(1),
+    getAppRatingPromptState(registrationId),
   ]);
 
   const profile = profileResult.data as any;
@@ -136,5 +143,6 @@ export async function fetchProfileCompletionInputs(
       (healthTargetResult.data?.length || 0) > 0,
     hasEventEnrollment: (enrollmentResult.data?.length || 0) > 0,
     hasAtLeastOneBadge: getEarnedBadgeCount(totalDistance, eligibleActivities.length) > 0,
+    hasRatedApp: (appRatingResult.data?.length || 0) > 0 || Boolean(localRatingState.lastSubmittedAt),
   };
 }

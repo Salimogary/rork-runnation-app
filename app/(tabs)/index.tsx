@@ -121,7 +121,7 @@ const MIN_ACTIVITY_DURATION_MINUTES = 5;
 const ABNORMAL_SPEED_MIN_DISTANCE_KM = 1;
 const ABNORMAL_SPEED_KM_PER_MINUTE = 2.3;
 const KM_VOICE_ANNOUNCEMENT_INTERVAL = 1;
-const AUTO_PAUSE_STATIONARY_SECONDS = 10;
+const AUTO_PAUSE_STATIONARY_SECONDS = 60;
 const AUTO_PAUSE_MAX_SPEED_KMH = 1.2;
 const AUTO_RESUME_MIN_SPEED_KMH = 1.5;
 const AUTO_RESUME_MIN_DISTANCE_KM = 0.004;
@@ -313,12 +313,6 @@ async function processPersistedBackgroundLocation(location: Location.LocationObj
       ? nativeSpeedKmh >= AUTO_RESUME_MIN_SPEED_KMH
       : movementDistanceKm >= AUTO_RESUME_MIN_DISTANCE_KM ||
         (calculatedSpeedKmh !== null && calculatedSpeedKmh >= AUTO_RESUME_MIN_SPEED_KMH);
-  const isStationary =
-    nativeSpeedKmh !== null
-      ? nativeSpeedKmh <= AUTO_PAUSE_MAX_SPEED_KMH
-      : movementDistanceKm < AUTO_RESUME_MIN_DISTANCE_KM &&
-        (calculatedSpeedKmh === null || calculatedSpeedKmh <= AUTO_PAUSE_MAX_SPEED_KMH);
-
   session.autoPauseAnchorPoint = point;
 
   if (isMoving) {
@@ -337,29 +331,11 @@ async function processPersistedBackgroundLocation(location: Location.LocationObj
       await setPersistedWorkoutSession(session);
       return;
     }
-  } else if (session.autoPauseEnabled !== false && isStationary && !session.autoPaused && session.status === "running") {
-    if (session.stationaryStartTimestamp == null) {
-      session.stationaryStartTimestamp = point.timestamp;
-    } else if (
-      (point.timestamp - session.stationaryStartTimestamp) / 1000 >=
-      AUTO_PAUSE_STATIONARY_SECONDS
-    ) {
-      const pauseStartedAt = session.stationaryStartTimestamp;
-      if (session.runningStartTimestamp !== null) {
-        session.elapsedBeforePause += Math.max(
-          0,
-          Math.floor((pauseStartedAt - session.runningStartTimestamp) / 1000)
-        );
-      }
-      session.runningStartTimestamp = null;
-      session.pauseStartTimestamp = pauseStartedAt;
-      session.autoPaused = true;
-      session.status = "paused";
-      session.lastProcessedLocationTimestamp = location.timestamp;
-      await setPersistedWorkoutSession(session);
-      return;
-    }
-  } else if (!session.autoPaused) {
+  } else if (session.autoPaused) {
+    session.lastProcessedLocationTimestamp = location.timestamp;
+    await setPersistedWorkoutSession(session);
+    return;
+  } else {
     session.stationaryStartTimestamp = null;
   }
 
@@ -732,7 +708,9 @@ export default function ExerciseScreen() {
         console.log('[Timer] App came to foreground, recalculating duration');
         updateDuration();
       } else if (nextAppState.match(/inactive|background/)) {
-        void persistActiveWorkoutSession(runStateRef.current === "paused" ? "paused" : "running");
+        if (runStateRef.current === "running" || runStateRef.current === "paused") {
+          void persistActiveWorkoutSession(runStateRef.current);
+        }
       }
       appState.current = nextAppState;
     });
@@ -1120,6 +1098,12 @@ export default function ExerciseScreen() {
     speedKmh: number | null,
     hasNativeSpeed: boolean
   ) => {
+    if (appState.current !== "active" && !autoPaused.current) {
+      stationaryStartTimestamp.current = null;
+      autoPauseAnchorPoint.current = point;
+      return;
+    }
+
     if (!autoPauseEnabled.current) {
       stationaryStartTimestamp.current = null;
       autoPauseAnchorPoint.current = point;
@@ -1677,6 +1661,20 @@ export default function ExerciseScreen() {
 
     await startLocationWatch(exerciseType);
     void persistActiveWorkoutSession("running");
+  };
+
+  const resumeFinishedActivity = async () => {
+    if (!exerciseTypeRef.current || !startTimeRef.current || !activeWorkoutSessionId.current) {
+      Alert.alert("Cannot Resume", "RunNation could not find the active workout details for this activity.");
+      return;
+    }
+
+    setShowRunDetailsModal(false);
+    setActivitySaved(false);
+    pauseStartTimestamp.current = Date.now();
+    runStateRef.current = "paused";
+    setRunState("paused");
+    await resumeTracking();
   };
 
   const stopTracking = async () => {
@@ -3016,6 +3014,14 @@ export default function ExerciseScreen() {
                   </Text>
                 </LinearGradient>
               </TouchableOpacity>
+
+              {!activitySaved && (
+                <TouchableOpacity style={styles.resetButton} onPress={() => void resumeFinishedActivity()} activeOpacity={0.8}>
+                  <LinearGradient colors={colors.gradient.teal} style={styles.resetButtonGradient}>
+                    <Text style={styles.resetButtonText}>Resume Activity</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              )}
               
               <TouchableOpacity style={styles.resetButton} onPress={resetTracking} activeOpacity={0.8}>
                 <LinearGradient colors={colors.gradient.orange} style={styles.resetButtonGradient}>
