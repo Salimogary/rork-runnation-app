@@ -187,6 +187,7 @@ const addEventInput = z.object({
   country: z.string().optional(),
   club: z.string().optional(),
   organizerId: z.string().uuid().optional().nullable(),
+  externalOrganizerName: z.string().optional().nullable(),
   eventLocation: z.string().optional().nullable(),
   isVirtual: z.boolean().optional(),
   entry: z.enum(["free", "club_approved", "paid"]).optional(),
@@ -194,6 +195,7 @@ const addEventInput = z.object({
   hasMedal: z.boolean().optional(),
   availableDistancesKm: z.array(z.number().positive()).optional(),
   paymentDetails: z.string().optional(),
+  registrationLink: z.string().optional().nullable(),
   organizerPaymentLink: z.string().optional().nullable(),
   runnationPaymentLinkEnabled: z.boolean().optional(),
   participantLimit: z.number().int().positive().nullable().optional(),
@@ -274,7 +276,8 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
   const normalizedOrganizerId = hasOrganizerOnlyAccess
     ? organizerScopes[0] ?? null
     : input.organizerId ?? null;
-  const normalizedClub = normalizedOrganizerId ? null : input.club?.trim() || null;
+  const normalizedExternalOrganizerName = hasOrganizerOnlyAccess ? null : input.externalOrganizerName?.trim() || null;
+  const normalizedClub = normalizedOrganizerId || normalizedExternalOrganizerName ? null : input.club?.trim() || null;
   const normalizedEventLocation = input.isVirtual === true ? "Virtual" : input.eventLocation?.trim() || null;
   const normalizedEntry = input.entry ?? "free";
   const normalizedEventType = input.eventType;
@@ -307,6 +310,7 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
       ? input.recurrenceWeekOfMonth ?? null
       : null;
   const normalizedPaymentDetails = input.paymentDetails?.trim() || null;
+  const normalizedRegistrationLink = input.registrationLink?.trim() || null;
   const normalizedOrganizerPaymentLink = input.organizerPaymentLink?.trim() || null;
   const normalizedEntryFee =
     normalizedEntry === "paid" && typeof input.entryFee === "number" ? Number(input.entryFee.toFixed(2)) : null;
@@ -348,10 +352,17 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
   }
 
   if (
+    normalizedRegistrationLink &&
+    !/^https?:\/\/\S+\.\S+/i.test(normalizedRegistrationLink)
+  ) {
+    throw new Error("Please enter a valid registration link beginning with http:// or https://.");
+  }
+
+  if (
     normalizedOrganizerPaymentLink &&
     !/^https?:\/\/\S+\.\S+/i.test(normalizedOrganizerPaymentLink)
   ) {
-    throw new Error("Please enter a valid organizer payment link beginning with http:// or https://.");
+    throw new Error("Please enter a valid payment link beginning with http:// or https://.");
   }
 
   if (normalizedMinDailyDistance !== null && (!Number.isFinite(normalizedMinDailyDistance) || normalizedMinDailyDistance <= 0)) {
@@ -382,12 +393,13 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
     throw new Error("Magazine article body must be between 200 and 300 words.");
   }
 
-  if (normalizedOrganizerId && normalizedClub) {
-    throw new Error("Please choose either a club or an event organizer, not both.");
+  const ownerCount = [normalizedOrganizerId, normalizedClub, normalizedExternalOrganizerName].filter(Boolean).length;
+  if (ownerCount > 1) {
+    throw new Error("Please choose either self or another event organizer, not both.");
   }
 
-  if (!normalizedOrganizerId && !normalizedClub) {
-    throw new Error("Please choose a club or an event organizer for this event.");
+  if (ownerCount === 0) {
+    throw new Error("Please choose self or enter the external event organizer name.");
   }
 
   if (input.isVirtual !== true && !normalizedEventLocation) {
@@ -467,6 +479,8 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
       "country_code": resolvedCountryCode,
       "currency_code": normalizedEntry === "paid" ? resolvedCurrencyCode : null,
       "organizer": normalizedOrganizerId,
+      "external_organizer_name": normalizedExternalOrganizerName,
+      "club": normalizedClub,
       "event_location": normalizedEventLocation,
       "is_virtual": input.isVirtual === true,
       "entry": normalizedEntry,
@@ -474,7 +488,8 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
       "has_medal": normalizedHasMedal,
       "available_distances_km": normalizedAvailableDistances,
       "payment_details": normalizedEntry === "paid" ? normalizedPaymentDetails : null,
-      "organizer_payment_link": normalizedEntry === "paid" ? normalizedOrganizerPaymentLink : null,
+      "registration_link": normalizedRegistrationLink,
+      "organizer_payment_link": normalizedOrganizerPaymentLink,
       "runnation_payment_link_enabled": normalizedEntry === "paid" && input.runnationPaymentLinkEnabled === true,
       "participant_limit": normalizedParticipantLimit,
       "approval_status": approvalStatus,
@@ -550,7 +565,9 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
       currencyCode: normalizedEntry === "paid" ? resolvedCurrencyCode : null,
       club: normalizedClub,
       organizerId: normalizedOrganizerId,
-      organizerName,
+      organizerName: organizerName || normalizedExternalOrganizerName,
+      externalOrganizerName: normalizedExternalOrganizerName,
+      registrationLink: normalizedRegistrationLink,
       registrationClosesAt: normalizedRegistrationClosesAt,
       isVirtual: input.isVirtual === true,
       eventLocation: normalizedEventLocation,
@@ -559,7 +576,7 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
       hasMedal: normalizedHasMedal,
       availableDistancesKm: normalizedAvailableDistances,
       paymentDetails: normalizedEntry === "paid" ? normalizedPaymentDetails : null,
-      organizerPaymentLink: normalizedEntry === "paid" ? normalizedOrganizerPaymentLink : null,
+      organizerPaymentLink: normalizedOrganizerPaymentLink,
       runnationPaymentLinkEnabled: normalizedEntry === "paid" && input.runnationPaymentLinkEnabled === true,
       participantLimit: normalizedParticipantLimit,
       approvalStatus,

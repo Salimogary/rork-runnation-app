@@ -105,6 +105,7 @@ type EventEntryMode = "free" | "club_approved" | "paid";
 type EventTypeMode = "same_day" | "recurring" | "multiday";
 type EventRecurrenceFrequency = "weekly" | "monthly";
 type EventMonthlyMode = "day_of_month" | "weekend";
+type EventOrganizerMode = "self" | "other";
 type AdminMenuPurposeGroup = "approvals" | "reporting" | "administration" | "operations";
 type MagazineCreatePage = "News" | "Events" | "Community" | "Columns" | "Gallery";
 type MagazineReviewStatusFilter = "pending" | "accepted" | "rejected";
@@ -919,7 +920,9 @@ export default function AdminScreen() {
   const [endsAt, setEndsAt] = useState<string>("");
   const [registrationClosesAt, setRegistrationClosesAt] = useState<string>("");
   const [eventCountry, setEventCountry] = useState<string>("");
+  const [eventOrganizerMode, setEventOrganizerMode] = useState<EventOrganizerMode>("self");
   const [eventOrganizerId, setEventOrganizerId] = useState<string>("");
+  const [eventExternalOrganizerName, setEventExternalOrganizerName] = useState<string>("");
   const [eventLocation, setEventLocation] = useState<string>("");
   const [eventTypeMode, setEventTypeMode] = useState<EventTypeMode>("same_day");
   const [eventRecurrenceWeekday, setEventRecurrenceWeekday] = useState<number>(3);
@@ -933,6 +936,7 @@ export default function AdminScreen() {
   const [eventHasMedal, setEventHasMedal] = useState<boolean>(false);
   const [eventEntryFee, setEventEntryFee] = useState<string>("");
   const [eventPaymentDetails, setEventPaymentDetails] = useState<string>("");
+  const [eventRegistrationLink, setEventRegistrationLink] = useState<string>("");
   const [eventOrganizerPaymentLink, setEventOrganizerPaymentLink] = useState<string>("");
   const [eventRunNationPaymentLinkEnabled, setEventRunNationPaymentLinkEnabled] = useState<boolean>(false);
   const [eventParticipantLimitEnabled, setEventParticipantLimitEnabled] = useState<boolean>(false);
@@ -1236,7 +1240,7 @@ export default function AdminScreen() {
     error: adminProfileError,
     refetch: refetchAdminProfile,
   } = trpc.admin.getAdminProfile.useQuery(undefined, {
-    enabled: canUseProtectedAdminRoutes && activeTab === "clubAdmin",
+    enabled: canUseProtectedAdminRoutes && (activeTab === "clubAdmin" || activeTab === "events"),
     refetchOnMount: true,
   });
 
@@ -3039,7 +3043,9 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     setEndsAt("");
     setRegistrationClosesAt("");
     setEventCountry("");
+    setEventOrganizerMode("self");
     setEventOrganizerId(isEventOrganizer ? roleSession.eventOrganizerScopes[0] ?? "" : "");
+    setEventExternalOrganizerName("");
     setEventLocation("");
     setEventTypeMode("same_day");
     setEventRecurrenceWeekday(3);
@@ -3053,6 +3059,7 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     setEventHasMedal(false);
     setEventEntryFee("");
     setEventPaymentDetails("");
+    setEventRegistrationLink("");
     setEventOrganizerPaymentLink("");
     setEventRunNationPaymentLinkEnabled(false);
     setEventParticipantLimitEnabled(false);
@@ -3104,8 +3111,40 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     );
   }, [eventOrganizers, eventOrganizerId]);
 
+  const selfEventOwner = useMemo(() => {
+    if (adminProfile?.type === "organizer" && adminProfile.id) {
+      return {
+        organizerId: adminProfile.id,
+        club: null as string | null,
+        label: adminProfile.name || "Organizer Profile",
+      };
+    }
+    if (eventOrganizerId) {
+      const organizer = (eventOrganizers as EventOrganizerRecord[]).find(
+        (item) => item.organizer_id === eventOrganizerId
+      );
+      return {
+        organizerId: eventOrganizerId,
+        club: null as string | null,
+        label: organizer?.organizer_name || adminProfile?.name || "Organizer Profile",
+      };
+    }
+    if (adminProfile?.type === "club" && adminProfile.name) {
+      return {
+        organizerId: null as string | null,
+        club: adminProfile.name,
+        label: adminProfile.name,
+      };
+    }
+    return {
+      organizerId: null as string | null,
+      club: "RunNation",
+      label: "RunNation",
+    };
+  }, [adminProfile, eventOrganizerId, eventOrganizers]);
+
   const resolvedEventCurrencyCode = useMemo(() => {
-    const rawCountry = String(eventCountry || selectedEventOrganizer?.country || "").trim().toLowerCase();
+    const rawCountry = String(eventCountry || selectedEventOrganizer?.country || adminProfile?.country || "").trim().toLowerCase();
     if (!rawCountry) return "";
     const matchedCountry = (countryList as Array<any>).find((country) => {
       return (
@@ -3114,7 +3153,7 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
       );
     });
     return String(matchedCountry?.currency_code || "").trim().toUpperCase();
-  }, [countryList, eventCountry, selectedEventOrganizer?.country]);
+  }, [adminProfile?.country, countryList, eventCountry, selectedEventOrganizer?.country]);
 
   const handleAddEvent = async () => {
     const requiresEndDate = eventTypeMode === "multiday";
@@ -3131,8 +3170,12 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
       Alert.alert("Invalid Date", "Please enter dates in DD-MM-YYYY format.");
       return;
     }
-    if (!eventOrganizerId) {
-      Alert.alert("Missing Organizer", "Please choose the event organizer for this event.");
+    if (eventOrganizerMode === "other" && !eventExternalOrganizerName.trim()) {
+      Alert.alert("Missing Organizer", "Please enter the external organizer name.");
+      return;
+    }
+    if (!eventCountry.trim() && !selectedEventOrganizer?.country && !adminProfile?.country) {
+      Alert.alert("Missing Country", "Please enter the event country.");
       return;
     }
     if (!eventIsVirtual && !eventLocation.trim()) {
@@ -3148,11 +3191,17 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
       return;
     }
     if (
-      eventEntry === "paid" &&
+      eventRegistrationLink.trim() &&
+      !/^https?:\/\/\S+\.\S+/i.test(eventRegistrationLink.trim())
+    ) {
+      Alert.alert("Invalid Registration Link", "Please enter a valid registration link beginning with http:// or https://.");
+      return;
+    }
+    if (
       eventOrganizerPaymentLink.trim() &&
       !/^https?:\/\/\S+\.\S+/i.test(eventOrganizerPaymentLink.trim())
     ) {
-      Alert.alert("Invalid Payment Link", "Please enter a valid organizer payment link beginning with http:// or https://.");
+      Alert.alert("Invalid Payment Link", "Please enter a valid payment link beginning with http:// or https://.");
       return;
     }
     if (!eventPosterPreview && !eventPosterAsset?.uri) {
@@ -3292,6 +3341,7 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
       startsAt: normalizedStartsAt,
       endsAt: normalizedEndsAt,
       registrationClosesAt: normalizedRegistrationClosesAt,
+      country: eventCountry.trim() || selectedEventOrganizer?.country || adminProfile?.country || undefined,
       eventType: eventTypeMode,
       recurrenceFrequency,
       recurrenceWeekday:
@@ -3314,7 +3364,9 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
         eventTypeMode === "recurring" && eventRecurrenceFrequency === "monthly" && eventMonthlyMode === "weekend"
           ? eventRecurrenceWeekOfMonth
           : null,
-      organizerId: eventOrganizerId || null,
+      organizerId: eventOrganizerMode === "self" ? selfEventOwner.organizerId : null,
+      club: eventOrganizerMode === "self" ? selfEventOwner.club || undefined : undefined,
+      externalOrganizerName: eventOrganizerMode === "other" ? eventExternalOrganizerName.trim() : undefined,
       eventLocation: eventIsVirtual ? null : eventLocation.trim(),
       isVirtual: eventIsVirtual,
       entry: eventEntry,
@@ -3322,7 +3374,8 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
       hasMedal: eventHasMedal,
       availableDistancesKm: normalizedMedalDistances,
       paymentDetails: eventEntry === "paid" ? eventPaymentDetails.trim() || undefined : undefined,
-      organizerPaymentLink: eventEntry === "paid" ? eventOrganizerPaymentLink.trim() || undefined : undefined,
+      registrationLink: eventRegistrationLink.trim() || undefined,
+      organizerPaymentLink: eventOrganizerPaymentLink.trim() || undefined,
       runnationPaymentLinkEnabled: eventEntry === "paid" && eventRunNationPaymentLinkEnabled,
       participantLimit: eventParticipantLimitEnabled ? numericParticipantLimit : null,
       posterLink: directPosterLink ?? (shouldNormalizeExistingPoster ? eventPosterPreview : undefined),
@@ -3372,7 +3425,10 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     setEndsAt(existingEventType === "multiday" ? fromApiDate(event.ends_at || event.endsAt) : existingStartDate);
     setRegistrationClosesAt(fromApiDate(event.registration_closes_at || event.registrationClosesAt));
     setEventCountry(event.country || "");
+    const existingExternalOrganizerName = event.external_organizer_name || event.externalOrganizerName || "";
+    setEventOrganizerMode(existingExternalOrganizerName ? "other" : "self");
     setEventOrganizerId(event.organizer || "");
+    setEventExternalOrganizerName(existingExternalOrganizerName);
     setEventLocation(event.event_location || event.eventLocation || "");
     setEventTypeMode(existingEventType);
     setEventRecurrenceWeekday(Number(event.recurrence_weekday ?? event.recurrenceWeekday ?? 3));
@@ -3409,6 +3465,7 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
         : ""
     );
     setEventPaymentDetails(event.payment_details || event.paymentDetails || "");
+    setEventRegistrationLink(event.registration_link || event.registrationLink || "");
     setEventOrganizerPaymentLink(event.organizer_payment_link || event.organizerPaymentLink || "");
     setEventRunNationPaymentLinkEnabled(Boolean(event.runnation_payment_link_enabled ?? event.runnationPaymentLinkEnabled));
     const existingParticipantLimit = event.participant_limit ?? event.participantLimit ?? null;
@@ -3916,8 +3973,14 @@ const getStatusLabel = (status: string) => {
   };
 
   const getEventOrganizerLabel = (event: any): string => {
+    if (event.external_organizer_name || event.externalOrganizerName) {
+      return String(event.external_organizer_name || event.externalOrganizerName);
+    }
     if (event.organizer_name || event.organizerName) {
       return String(event.organizer_name || event.organizerName);
+    }
+    if (event.club) {
+      return String(event.club);
     }
     if (event.organizer) {
       return String(event.organizer);
@@ -9364,23 +9427,80 @@ const getStatusLabel = (status: string) => {
 
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Event Organizer</Text>
-                <View style={styles.roleChipWrap}>
-                  {(eventOrganizers as any[]).map((organizer: any) => (
+                <View style={styles.segmentRow}>
+                  {([
+                    ["self", "Self"],
+                    ["other", "Other"],
+                  ] as Array<[EventOrganizerMode, string]>).map(([value, label]) => (
                     <TouchableOpacity
-                      key={organizer.organizer_id}
-                      style={[styles.roleChip, eventOrganizerId === organizer.organizer_id && styles.roleChipActive]}
-                      onPress={() => setEventOrganizerId(organizer.organizer_id)}
+                      key={value}
+                      style={[styles.segmentChip, eventOrganizerMode === value && styles.segmentChipActive]}
+                      onPress={() => setEventOrganizerMode(value)}
                     >
-                      <Text style={[styles.roleChipText, eventOrganizerId === organizer.organizer_id && styles.roleChipTextActive]}>
-                        {organizer.organizer_name}
+                      <Text style={[styles.segmentChipText, eventOrganizerMode === value && styles.segmentChipTextActive]}>
+                        {label}
                       </Text>
                     </TouchableOpacity>
                   ))}
                 </View>
+                {eventOrganizerMode === "self" ? (
+                  <View style={styles.readOnlyField}>
+                    <Text style={styles.readOnlyFieldText}>{selfEventOwner.label}</Text>
+                  </View>
+                ) : (
+                  <TextInput
+                    style={styles.input}
+                    value={eventExternalOrganizerName}
+                    onChangeText={setEventExternalOrganizerName}
+                    placeholder="External organizer name"
+                    placeholderTextColor="#9ca3af"
+                  />
+                )}
                 <Text style={styles.eventPosterHint}>
-                  {isEventOrganizer
-                    ? "Your event organizer profile is used automatically for events you create."
-                    : "Choose the organizer responsible for this event. Club-owned events should use the club's organizer profile."}
+                  Self uses your club/organizer profile, or RunNation when no profile is attached. Other is for external third-party organizers.
+                </Text>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Event Country</Text>
+                <TextInput
+                  style={styles.input}
+                  value={eventCountry}
+                  onChangeText={setEventCountry}
+                  placeholder={adminProfile?.country || selectedEventOrganizer?.country || "Uganda"}
+                  placeholderTextColor="#9ca3af"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Registration Link</Text>
+                <TextInput
+                  style={styles.input}
+                  value={eventRegistrationLink}
+                  onChangeText={setEventRegistrationLink}
+                  placeholder="https://organizer.com/register"
+                  placeholderTextColor="#9ca3af"
+                  keyboardType="url"
+                  autoCapitalize="none"
+                />
+                <Text style={styles.eventPosterHint}>
+                  Optional. Use this when participants register through an external website.
+                </Text>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Payment Link</Text>
+                <TextInput
+                  style={styles.input}
+                  value={eventOrganizerPaymentLink}
+                  onChangeText={setEventOrganizerPaymentLink}
+                  placeholder="https://payment-provider.com/event"
+                  placeholderTextColor="#9ca3af"
+                  keyboardType="url"
+                  autoCapitalize="none"
+                />
+                <Text style={styles.eventPosterHint}>
+                  Optional. Use this when the organizer or club already has a payment platform.
                 </Text>
               </View>
 
@@ -9470,21 +9590,6 @@ const getStatusLabel = (status: string) => {
                       placeholderTextColor="#9ca3af"
                       multiline
                     />
-                  </View>
-                  <View style={styles.formGroup}>
-                    <Text style={styles.label}>Organizer/Club Payment Link</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={eventOrganizerPaymentLink}
-                      onChangeText={setEventOrganizerPaymentLink}
-                      placeholder="https://payment-provider.com/event"
-                      placeholderTextColor="#9ca3af"
-                      keyboardType="url"
-                      autoCapitalize="none"
-                    />
-                    <Text style={styles.eventPosterHint}>
-                      Optional. Use this when the organizer or club already has a payment platform.
-                    </Text>
                   </View>
                   <View style={styles.formGroup}>
                     <Text style={styles.label}>RunNation Payment Link</Text>

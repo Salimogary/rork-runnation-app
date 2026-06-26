@@ -2,7 +2,7 @@ import { StyleSheet, View, Text, ScrollView, RefreshControl, Animated, Touchable
 import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
-import { Target, TrendingDown, TrendingUp, Award, Calendar, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints, Users, ArrowUp, ArrowDown, Minus, Trophy, Flame } from "lucide-react-native";
+import { Target, TrendingDown, TrendingUp, Award, Calendar, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints, Users, Trophy, Flame } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
@@ -39,8 +39,16 @@ interface FitnessGoal {
   fitness_goal_id: number;
   registration_id: string;
   target_pace_min_per_km: number;
+  start_date?: string | null;
   target_date: string;
+  target_bands?: FitnessPaceBand[] | null;
   created_at: string;
+}
+
+interface FitnessPaceBand {
+  distance_km: number;
+  target_minutes: number;
+  target_pace_min_per_km: number;
 }
 
 interface DailyRunGoal {
@@ -87,10 +95,18 @@ interface GoalItem {
 
 interface RecentActivity {
   pace_min_per_km: number;
+  distance_km?: number | null;
+  exercise_type?: string | null;
   activity_date: string;
   start_time?: string | null;
   end_time?: string | null;
   pause_duration_seconds?: number | null;
+}
+
+interface FitnessGoalSlotInput {
+  distanceKm: string;
+  hours: string;
+  minutes: string;
 }
 
 interface DurationActivity {
@@ -192,16 +208,66 @@ const MEDAL_BANDS: { key: MedalBand; minKm: number; points: number }[] = [
   { key: "3k", minKm: 3, points: 1 },
 ];
 
-const normalizePaceMinPerKm = (paceMinPerKm: number): number => {
-  if (paceMinPerKm <= 0) return 0;
-  return paceMinPerKm;
-};
-
 const formatPaceMinPerKm = (paceMinPerKm: number): string => {
   if (paceMinPerKm <= 0) return "--:--";
   const minutes = Math.floor(paceMinPerKm);
   const seconds = Math.round((paceMinPerKm - minutes) * 60);
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+};
+
+const formatPaceDecimal = (paceMinPerKm: number): string => {
+  if (!Number.isFinite(paceMinPerKm) || paceMinPerKm <= 0) return "0";
+  return paceMinPerKm.toFixed(2);
+};
+
+const formatDistanceDecimal = (distanceKm: number): string => {
+  if (!Number.isFinite(distanceKm) || distanceKm <= 0) return "0";
+  return Number.isInteger(distanceKm) ? distanceKm.toFixed(0) : distanceKm.toFixed(1);
+};
+
+const DEFAULT_FITNESS_GOAL_SLOTS: FitnessGoalSlotInput[] = [
+  { distanceKm: "10", hours: "1", minutes: "0" },
+  { distanceKm: "21", hours: "2", minutes: "15" },
+  { distanceKm: "42", hours: "5", minutes: "30" },
+  { distanceKm: "80", hours: "12", minutes: "0" },
+];
+
+const getFitnessBands = (fitnessGoal?: FitnessGoal | null): FitnessPaceBand[] => {
+  const storedBands = Array.isArray(fitnessGoal?.target_bands) ? fitnessGoal?.target_bands || [] : [];
+  const validBands = storedBands
+    .map((band) => ({
+      distance_km: Number(band.distance_km),
+      target_minutes: Number(band.target_minutes),
+      target_pace_min_per_km: Number(band.target_pace_min_per_km),
+    }))
+    .filter((band) => band.distance_km > 0 && band.target_minutes > 0 && band.target_pace_min_per_km > 0)
+    .sort((a, b) => a.distance_km - b.distance_km);
+
+  if (validBands.length > 0) return validBands;
+  if (fitnessGoal?.target_pace_min_per_km && fitnessGoal.target_pace_min_per_km > 0) {
+    return [{
+      distance_km: 10,
+      target_minutes: fitnessGoal.target_pace_min_per_km * 10,
+      target_pace_min_per_km: fitnessGoal.target_pace_min_per_km,
+    }];
+  }
+  return [];
+};
+
+const getFitnessBandForDistance = (distanceKm: number, bands: FitnessPaceBand[]): FitnessPaceBand | null => {
+  if (bands.length === 0) return null;
+  if (distanceKm <= bands[0].distance_km) return bands[0];
+  const matchingBand = bands.find((band) => distanceKm <= band.distance_km);
+  return matchingBand || bands[bands.length - 1];
+};
+
+const formatFitnessBandSummary = (bands: FitnessPaceBand[]): string => {
+  return bands.map((band, index) => {
+    const distanceLabel = index === 0
+      ? `0-${formatDistanceDecimal(band.distance_km)}k`
+      : `${formatDistanceDecimal(band.distance_km)}k+`;
+    return `${distanceLabel} (${formatPaceDecimal(band.target_pace_min_per_km)} min/km)`;
+  }).join(", ");
 };
 
 const normalizePaceInputMinPerKm = (minPerKm: number): number => {
@@ -375,9 +441,9 @@ export default function GoalsScreen() {
   const queryClient = useQueryClient();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [showGoalForm, setShowGoalForm] = useState(false);
-  const [targetPaceMin, setTargetPaceMin] = useState("");
-  const [targetPaceSec, setTargetPaceSec] = useState("");
+  const [fitnessStartDate, setFitnessStartDate] = useState("");
   const [targetDate, setTargetDate] = useState("");
+  const [fitnessGoalSlots, setFitnessGoalSlots] = useState<FitnessGoalSlotInput[]>(DEFAULT_FITNESS_GOAL_SLOTS);
   const [showDailyRunGoalForm, setShowDailyRunGoalForm] = useState(false);
   const [dailyRunStartDateInput, setDailyRunStartDateInput] = useState("");
   const [dailyRunEndDateInput, setDailyRunEndDateInput] = useState("");
@@ -393,7 +459,7 @@ export default function GoalsScreen() {
   const [healthSleepInput, setHealthSleepInput] = useState("");
   const [healthSpo2Input, setHealthSpo2Input] = useState("");
   const [showHabitModal, setShowHabitModal] = useState(false);
-  const [habitActivityType, setHabitActivityType] = useState<string>("Walk");
+  const [habitActivityType, setHabitActivityType] = useState<string>("Run");
   const [habitAmount, setHabitAmount] = useState<string>("");
   const [habitUnit, setHabitUnit] = useState<string>("kilometers");
   const [habitFrequency, setHabitFrequency] = useState<string>("daily");
@@ -443,7 +509,7 @@ export default function GoalsScreen() {
       name.includes("discipline") ||
       name.includes("training plan") ||
       name.includes("planned runs")
-    ) return "dailyRun";
+    ) return "habit";
     if (name.includes("medal")) return "medals";
     if (name.includes("community") || name.includes("compete")) return "community";
     if (name.includes("event")) return "events";
@@ -453,12 +519,12 @@ export default function GoalsScreen() {
   const orderedGoalKeys = useMemo(() => {
     const keys: string[] = [];
     for (const g of goalOrder) {
-      const key = g.goal_id === 7 ? "dailyRun" : goalNameToKey(g.goal);
+      const key = g.goal_id === 7 ? "habit" : goalNameToKey(g.goal);
       if (key && !keys.includes(key)) {
         keys.push(key);
       }
     }
-    const allKeys = ["fitness", "dailyRun", "weight", "health", "medals", "community", "events"];
+    const allKeys = ["fitness", "dailyRun", "habit", "weight", "health", "medals", "community", "events"];
     for (const k of allKeys) {
       if (!keys.includes(k)) {
         keys.push(k);
@@ -510,13 +576,13 @@ export default function GoalsScreen() {
     staleTime: 30000,
   });
 
-  const { data: dailyRunActivities = [], refetch: refetchDailyRunActivities } = useQuery<{ activity_date: string }[]>({
+  const { data: dailyRunActivities = [], refetch: refetchDailyRunActivities } = useQuery<{ activity_date: string; distance_km?: number | null }[]>({
     queryKey: ["dailyRunActivities", user?.id, dailyRunGoal?.start_date, dailyRunGoal?.end_date],
     queryFn: async () => {
       if (!user?.id || !dailyRunGoal) return [];
       const { data, error } = await supabase
         .from("activities")
-        .select("activity_date")
+        .select("activity_date, distance_km")
         .eq("registration_id", user.id)
         .eq("exercise_type", "Run")
         .gte("activity_date", dailyRunGoal.start_date)
@@ -525,7 +591,7 @@ export default function GoalsScreen() {
         console.error("[Goals] Error fetching daily run activities:", error);
         return [];
       }
-      return (data || []) as { activity_date: string }[];
+      return (data || []) as { activity_date: string; distance_km?: number | null }[];
     },
     enabled: !!user?.id && !!dailyRunGoal,
     staleTime: 30000,
@@ -582,10 +648,11 @@ export default function GoalsScreen() {
       if (!user?.id) return [];
       const { data, error } = await supabase
         .from("activities")
-        .select("pace_min_per_km, activity_date")
+        .select("pace_min_per_km, distance_km, exercise_type, activity_date")
         .eq("registration_id", user.id)
+        .eq("exercise_type", "Run")
         .order("activity_date", { ascending: false })
-        .limit(5);
+        .limit(90);
       if (error) {
         console.error("[Goals] Error fetching recent activities for pace:", error);
         return [];
@@ -620,18 +687,27 @@ export default function GoalsScreen() {
   });
 
   const saveFitnessGoalMutation = useMutation({
-    mutationFn: async ({ paceMinPerKm, date }: { paceMinPerKm: number; date: string }) => {
+    mutationFn: async ({ paceMinPerKm, startDate, endDate, bands }: { paceMinPerKm: number; startDate: string; endDate: string; bands: FitnessPaceBand[] }) => {
       if (!user?.id) throw new Error("Not logged in");
 
-      const { data, error } = await supabase
-        .from("fitness_goal")
-        .insert({
-          registration_id: user.id,
-          target_pace_min_per_km: paceMinPerKm,
-          target_date: date,
-        })
-        .select()
-        .single();
+      const payload = {
+        registration_id: user.id,
+        target_pace_min_per_km: paceMinPerKm,
+        start_date: startDate,
+        target_date: endDate,
+        target_bands: bands,
+      };
+
+      const query = fitnessGoal
+        ? supabase
+          .from("fitness_goal")
+          .update(payload)
+          .eq("fitness_goal_id", fitnessGoal.fitness_goal_id)
+        : supabase
+          .from("fitness_goal")
+          .insert(payload);
+
+      const { data, error } = await query.select().single();
       if (error) {
         console.error("[Goals] Supabase insert error:", JSON.stringify(error));
         throw new Error(error.message || "Failed to save fitness goal");
@@ -641,9 +717,9 @@ export default function GoalsScreen() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["fitnessGoal", user?.id] });
       setShowGoalForm(false);
-      setTargetPaceMin("");
-      setTargetPaceSec("");
+      setFitnessStartDate("");
       setTargetDate("");
+      setFitnessGoalSlots(DEFAULT_FITNESS_GOAL_SLOTS);
       Alert.alert("Success", "Fitness goal saved!");
     },
     onError: (error: any) => {
@@ -653,75 +729,111 @@ export default function GoalsScreen() {
   });
 
   const handleSaveFitnessGoal = useCallback(() => {
-    const mins = parseInt(targetPaceMin, 10);
-    const secs = parseInt(targetPaceSec || "0", 10);
+    const bands = fitnessGoalSlots.map((slot) => {
+      const distanceKm = parseFloat(slot.distanceKm);
+      const hours = parseInt(slot.hours || "0", 10);
+      const minutes = parseInt(slot.minutes || "0", 10);
+      const targetMinutes = hours * 60 + minutes;
+      return {
+        distance_km: distanceKm,
+        target_minutes: targetMinutes,
+        target_pace_min_per_km: distanceKm > 0 ? targetMinutes / distanceKm : 0,
+      };
+    }).filter((band) =>
+      Number.isFinite(band.distance_km) &&
+      Number.isFinite(band.target_minutes) &&
+      band.distance_km > 0 &&
+      band.target_minutes > 0 &&
+      band.target_pace_min_per_km > 0
+    ).sort((a, b) => a.distance_km - b.distance_km);
 
-    if (isNaN(mins) || mins < 0 || mins > 30) {
-      Alert.alert("Error", "Please enter valid minutes (0-30)");
+    if (bands.length === 0) {
+      Alert.alert("Error", "Please enter at least one distance and time target");
       return;
     }
-    if (isNaN(secs) || secs < 0 || secs > 59) {
-      Alert.alert("Error", "Please enter valid seconds (0-59)");
-      return;
-    }
 
-    const totalMinPerKm = mins + secs / 60;
-    if (totalMinPerKm <= 0) {
-      Alert.alert("Error", "Pace must be greater than 0");
+    if (bands.length > 4) {
+      Alert.alert("Error", "You can save up to 4 fitness targets");
       return;
     }
 
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-    if (!dateRegex.test(targetDate)) {
-      Alert.alert("Error", "Please enter date in YYYY-MM-DD format");
+    if (!dateRegex.test(fitnessStartDate) || !dateRegex.test(targetDate)) {
+      Alert.alert("Error", "Please enter start and end dates in YYYY-MM-DD format");
       return;
     }
 
-    const targetDateObj = new Date(targetDate + "T00:00:00");
-    if (isNaN(targetDateObj.getTime())) {
-      Alert.alert("Error", "Please enter a valid date");
+    const startDateObj = new Date(fitnessStartDate + "T00:00:00");
+    const endDateObj = new Date(targetDate + "T00:00:00");
+    if (Number.isNaN(startDateObj.getTime()) || Number.isNaN(endDateObj.getTime())) {
+      Alert.alert("Error", "Please enter valid fitness goal dates");
+      return;
+    }
+    if (endDateObj < startDateObj) {
+      Alert.alert("Error", "End date must be after start date");
       return;
     }
 
-    const paceMinPerKm = normalizePaceInputMinPerKm(totalMinPerKm);
-    saveFitnessGoalMutation.mutate({ paceMinPerKm, date: targetDate });
-  }, [targetPaceMin, targetPaceSec, targetDate, saveFitnessGoalMutation]);
+    const paceMinPerKm = normalizePaceInputMinPerKm(bands[0].target_pace_min_per_km);
+    saveFitnessGoalMutation.mutate({ paceMinPerKm, startDate: fitnessStartDate, endDate: targetDate, bands });
+  }, [fitnessGoalSlots, fitnessStartDate, targetDate, saveFitnessGoalMutation]);
 
-  const fitnessProgress = useMemo(() => {
-    if (!fitnessGoal || recentActivities.length === 0) return null;
+  const updateFitnessGoalSlot = useCallback((index: number, field: keyof FitnessGoalSlotInput, value: string) => {
+    setFitnessGoalSlots((current) => current.map((slot, slotIndex) =>
+      slotIndex === index ? { ...slot, [field]: value } : slot
+    ));
+  }, []);
 
-    const validActivities = recentActivities.filter((a) => a.pace_min_per_km > 0);
-    if (validActivities.length === 0) return null;
+  const fitnessCalendarProgress = useMemo(() => {
+    if (!fitnessGoal) return null;
+    const bands = getFitnessBands(fitnessGoal);
+    if (bands.length === 0) return null;
 
-    const avgpaceMinPerKm = validActivities.reduce((sum, a) => sum + a.pace_min_per_km, 0) / validActivities.length;
-    const lastThreeActivities = validActivities.slice(0, 3);
-    const lastThreeAvgpaceMinPerKm = lastThreeActivities.length > 0
-      ? lastThreeActivities.reduce((sum, a) => sum + a.pace_min_per_km, 0) / lastThreeActivities.length
-      : avgpaceMinPerKm;
-    const targetpaceMinPerKm = fitnessGoal.target_pace_min_per_km;
+    const startDate = fitnessGoal.start_date || fitnessGoal.created_at?.split?.("T")?.[0] || "";
+    const endDate = fitnessGoal.target_date || "";
+    const start = startDate ? new Date(startDate + "T00:00:00") : null;
+    const end = endDate ? new Date(endDate + "T00:00:00") : null;
 
-    const avgMinPerKm = normalizePaceMinPerKm(avgpaceMinPerKm);
-    const targetMinPerKm = normalizePaceMinPerKm(targetpaceMinPerKm);
+    const days = recentActivities
+      .filter((activity) => Number(activity.pace_min_per_km) > 0)
+      .map((activity) => {
+        const distanceKm = Number(activity.distance_km) || bands[0].distance_km;
+        const band = getFitnessBandForDistance(distanceKm, bands);
+        const pace = Number(activity.pace_min_per_km) || 0;
+        const date = String(activity.activity_date || "").split("T")[0];
+        return {
+          date,
+          day: new Date(date + "T00:00:00").getDate(),
+          pace,
+          distanceKm,
+          targetPace: band?.target_pace_min_per_km || 0,
+          isOnTarget: band ? pace <= band.target_pace_min_per_km : false,
+        };
+      })
+      .filter((day) => day.date && Number.isFinite(day.day))
+      .filter((day) => {
+        const date = new Date(day.date + "T00:00:00");
+        if (start && !Number.isNaN(start.getTime()) && date < start) return false;
+        if (end && !Number.isNaN(end.getTime()) && date > end) return false;
+        return true;
+      })
+      .sort((a, b) => a.date.localeCompare(b.date));
 
-    const progressPercent = targetMinPerKm > 0
-      ? Math.min(100, Math.max(0, (targetMinPerKm / avgMinPerKm) * 100))
-      : 0;
-
-    const daysLeft = Math.max(0, Math.ceil((new Date(fitnessGoal.target_date + "T00:00:00").getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
-
-    const isAhead = avgpaceMinPerKm <= targetpaceMinPerKm;
+    const runDays = days.length;
+    const onTargetDays = days.filter((day) => day.isOnTarget).length;
+    const scorePercent = runDays > 0 ? Math.round((onTargetDays / runDays) * 100) : 0;
+    const fastestPace = days.reduce((best, day) => best === 0 ? day.pace : Math.min(best, day.pace), 0);
+    const bandSummary = formatFitnessBandSummary(bands);
 
     return {
-      avgpaceMinPerKm,
-      lastThreeAvgpaceMinPerKm,
-      targetpaceMinPerKm,
-      avgMinPerKm,
-      targetMinPerKm,
-      progressPercent,
-      daysLeft,
-      isAhead,
-      activitiesUsed: validActivities.length,
-      lastThreeActivitiesUsed: lastThreeActivities.length,
+      bands,
+      bandSummary,
+      days,
+      runDays,
+      onTargetDays,
+      scorePercent,
+      fastestPace,
+      isOnTrack: runDays > 0 && onTargetDays === runDays,
     };
   }, [fitnessGoal, recentActivities]);
 
@@ -1398,7 +1510,7 @@ export default function GoalsScreen() {
   });
 
   const resetHabitForm = useCallback(() => {
-    setHabitActivityType("Walk");
+    setHabitActivityType("Run");
     setHabitAmount("");
     setHabitUnit("kilometers");
     setHabitFrequency("daily");
@@ -1430,96 +1542,53 @@ export default function GoalsScreen() {
     });
   }, [habitActivityType, habitAmount, habitUnit, habitFrequency, habitStartDate, saveHabitMutation]);
 
-  const habitCommitment = useMemo(() => {
+  const habitCalendarProgress = useMemo(() => {
     if (!habitDeclaration) return null;
-
     const start = new Date(habitDeclaration.start_date + "T00:00:00");
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    if (Number.isNaN(start.getTime()) || today < start) return null;
 
-    if (today < start) {
-      return { percent: 0, periodsElapsed: 0, periodsMet: 0 };
-    }
+    const targetDistance = habitDeclaration.unit === "kilometers" ? habitDeclaration.target_amount : 0;
+    if (targetDistance <= 0) return null;
 
-    const isSteps = habitDeclaration.unit === "steps";
-    const target = habitDeclaration.target_amount;
-
-    const valueByDate = new Map<string, number>();
+    const distanceByDate = new Map<string, number>();
     habitActivities.forEach((entry: any) => {
-      if (isSteps) {
-        const date = entry.record_date;
-        valueByDate.set(date, (valueByDate.get(date) || 0) + (entry.steps || 0));
-      } else {
-        const date = entry.activity_date?.split?.("T")?.[0] || entry.activity_date;
-        valueByDate.set(date, (valueByDate.get(date) || 0) + (entry.distance_km || 0));
-      }
+      const date = String(entry.activity_date || "").split("T")[0];
+      if (!date) return;
+      distanceByDate.set(date, (distanceByDate.get(date) || 0) + (Number(entry.distance_km) || 0));
     });
 
-    const diffDays = Math.floor((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-    let periodsElapsed = 0;
-    let periodsMet = 0;
-
-    if (habitDeclaration.frequency === "daily") {
-      periodsElapsed = diffDays;
-      for (let i = 0; i < diffDays; i++) {
-        const d = new Date(start);
-        d.setDate(d.getDate() + i);
-        const dateStr = getLocalDateKey(d);
-        if ((valueByDate.get(dateStr) || 0) >= target) periodsMet++;
-      }
-    } else if (habitDeclaration.frequency === "weekly") {
-      const totalWeeks = Math.ceil(diffDays / 7);
-      periodsElapsed = totalWeeks;
-      for (let w = 0; w < totalWeeks; w++) {
-        let weekTotal = 0;
-        for (let d = 0; d < 7; d++) {
-          const dayIndex = w * 7 + d;
-          if (dayIndex >= diffDays) break;
-          const date = new Date(start);
-          date.setDate(date.getDate() + dayIndex);
-          const dateStr = getLocalDateKey(date);
-          weekTotal += valueByDate.get(dateStr) || 0;
-        }
-        if (weekTotal >= target) periodsMet++;
-      }
-    } else if (habitDeclaration.frequency === "monthly") {
-      let current = new Date(start.getFullYear(), start.getMonth(), 1);
-      while (current <= today) {
-        periodsElapsed++;
-        const monthStart = new Date(Math.max(current.getTime(), start.getTime()));
-        const nextMonth = new Date(current.getFullYear(), current.getMonth() + 1, 1);
-        const monthEnd = new Date(Math.min(nextMonth.getTime() - 86400000, today.getTime()));
-        let monthTotal = 0;
-        const iter = new Date(monthStart);
-        while (iter <= monthEnd) {
-          const dateStr = getLocalDateKey(iter);
-          monthTotal += valueByDate.get(dateStr) || 0;
-          iter.setDate(iter.getDate() + 1);
-        }
-        if (monthTotal >= target) periodsMet++;
-        current = nextMonth;
-      }
-    } else if (habitDeclaration.frequency === "yearly") {
-      let currentYear = start.getFullYear();
-      while (currentYear <= today.getFullYear()) {
-        periodsElapsed++;
-        const yearStart = new Date(Math.max(new Date(currentYear, 0, 1).getTime(), start.getTime()));
-        const yearEnd = new Date(Math.min(new Date(currentYear, 11, 31).getTime(), today.getTime()));
-        let yearTotal = 0;
-        const iter = new Date(yearStart);
-        while (iter <= yearEnd) {
-          const dateStr = getLocalDateKey(iter);
-          yearTotal += valueByDate.get(dateStr) || 0;
-          iter.setDate(iter.getDate() + 1);
-        }
-        if (yearTotal >= target) periodsMet++;
-        currentYear++;
-      }
+    const days = [];
+    const iter = new Date(start);
+    while (iter <= today) {
+      const date = getLocalDateKey(iter);
+      const distanceKm = distanceByDate.get(date) || 0;
+      days.push({
+        date,
+        day: iter.getDate(),
+        distanceKm,
+        isOnTarget: distanceKm >= targetDistance,
+      });
+      iter.setDate(iter.getDate() + 1);
     }
 
-    const percent = periodsElapsed > 0 ? Math.round((periodsMet / periodsElapsed) * 100) : 0;
-    return { percent, periodsElapsed, periodsMet };
-  }, [habitDeclaration, habitActivities]);
+    const plannedDays = days.length;
+    const daysMet = days.filter((day) => day.isOnTarget).length;
+    const scorePercent = plannedDays > 0 ? Math.round((daysMet / plannedDays) * 100) : 0;
+    const totalDistance = days.reduce((sum, day) => sum + day.distanceKm, 0);
+
+    return {
+      targetDistance,
+      days,
+      plannedDays,
+      daysMet,
+      missedDays: plannedDays - daysMet,
+      scorePercent,
+      totalDistance,
+      isOnTrack: daysMet >= plannedDays,
+    };
+  }, [habitActivities, habitDeclaration]);
 
   const openEditHabit = useCallback(() => {
     if (habitDeclaration) {
@@ -1533,26 +1602,6 @@ export default function GoalsScreen() {
     }
     setShowHabitModal(true);
   }, [habitDeclaration, resetHabitForm]);
-
-  const getCommitmentColor = (percent: number): string => {
-    if (percent >= 70) return "#0D9488";
-    if (percent >= 40) return "#F59E0B";
-    return "#EF4444";
-  };
-
-  const getCommitmentLabel = (percent: number): string => {
-    if (percent >= 80) return "Excellent";
-    if (percent >= 60) return "Good";
-    if (percent >= 40) return "Fair";
-    return "Needs Work";
-  };
-
-  const getFrequencyPeriodLabel = (frequency: string): string => {
-    if (frequency === "daily") return "days";
-    if (frequency === "weekly") return "weeks";
-    if (frequency === "monthly") return "months";
-    return "years";
-  };
 
   const { data: activitySummary, refetch: refetchActivity } = useQuery<ActivitySummary>({
     queryKey: ["goalActivitySummary", user?.id],
@@ -2188,13 +2237,20 @@ export default function GoalsScreen() {
         .map((activity) => String(activity.activity_date || "").split("T")[0])
         .filter(Boolean)
     );
+    const distanceByDate = new Map<string, number>();
+    dailyRunActivities.forEach((activity) => {
+      const date = String(activity.activity_date || "").split("T")[0];
+      if (!date) return;
+      distanceByDate.set(date, (distanceByDate.get(date) || 0) + (Number(activity.distance_km) || 0));
+    });
     const days = [];
     const iter = new Date(start);
     while (iter <= end) {
       const date = getLocalDateKey(iter);
       const isFuture = iter > today;
       const hasRun = runDateSet.has(date);
-      days.push({ date, day: iter.getDate(), isFuture, hasRun });
+      const distanceKm = distanceByDate.get(date) || 0;
+      days.push({ date, day: iter.getDate(), isFuture, hasRun, distanceKm });
       iter.setDate(iter.getDate() + 1);
     }
 
@@ -2377,22 +2433,25 @@ export default function GoalsScreen() {
 
   const openEditGoalForm = useCallback(() => {
     if (fitnessGoal) {
-      const minPerKm = normalizePaceMinPerKm(fitnessGoal.target_pace_min_per_km);
-      const mins = Math.floor(minPerKm);
-      const secs = Math.round((minPerKm - mins) * 60);
-      setTargetPaceMin(mins.toString());
-      setTargetPaceSec(secs.toString().padStart(2, "0"));
-      setTargetDate(fitnessGoal.target_date);
+      const bands = getFitnessBands(fitnessGoal);
+      const slots = bands.slice(0, 4).map((band) => ({
+        distanceKm: formatDistanceDecimal(band.distance_km),
+        hours: Math.floor(band.target_minutes / 60).toString(),
+        minutes: Math.round(band.target_minutes % 60).toString(),
+      }));
+      setFitnessGoalSlots(slots.length > 0 ? slots : DEFAULT_FITNESS_GOAL_SLOTS);
+      setFitnessStartDate(fitnessGoal.start_date || fitnessGoal.created_at?.split?.("T")?.[0] || getLocalDateKey(new Date()));
+      setTargetDate(fitnessGoal.target_date || getLocalDateKey(new Date()));
     } else {
-      setTargetPaceMin("");
-      setTargetPaceSec("");
-      setTargetDate("");
+      setFitnessStartDate(getLocalDateKey(new Date()));
+      setTargetDate(getLocalDateKey(new Date()));
+      setFitnessGoalSlots(DEFAULT_FITNESS_GOAL_SLOTS);
     }
     setShowGoalForm(true);
   }, [fitnessGoal]);
 
   const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !dailyRunGoal && !fitnessGoalLoading && !dailyRunGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading && !habitDeclaration && !habitDeclarationLoading && communityGoalRanks.length === 0 && !communityRankLoading && !familyRankLoading && !communityMedalRankLoading && !medalGoalData && !medalGoalLoading;
-  const hasRunningGoal = !!dailyRunGoal || !!habitDeclaration;
+  const hasRunningGoal = !!dailyRunGoal;
   const selectedGoalKeys = useMemo(() => {
     const keys = new Set<string>();
     userGoals.forEach((goal) => {
@@ -2412,8 +2471,8 @@ export default function GoalsScreen() {
         label: "Improve Fitness",
         isTracked: !!fitnessGoal,
         icon: "zap",
-        overview: "Set a target pace and date, then compare it with the pace you actually run.",
-        measuredBy: "Measured by target pace against your average pace and the average pace from your last 3 runs.",
+        overview: "Declare distance/time targets, then see each run graded by pace for its distance band.",
+        measuredBy: "Measured by each run day's pace against the target pace calculated from your distance slots.",
       },
       dailyRun: {
         key: "dailyRun",
@@ -2422,6 +2481,14 @@ export default function GoalsScreen() {
         icon: "calendar",
         overview: "This keeps the goal simple: decide how often you want to run, then check whether you are keeping that commitment.",
         measuredBy: "Measured by actual run days between the start date and today against the target runs expected by today.",
+      },
+      habit: {
+        key: "habit",
+        label: "Have planned runs",
+        isTracked: !!habitDeclaration,
+        icon: "flame",
+        overview: "Declare the distance you plan to run and track each committed day against that target.",
+        measuredBy: "Measured by daily run distance against the planned run distance, with missed days recorded as 0 km.",
       },
       weight: {
         key: "weight",
@@ -2457,7 +2524,7 @@ export default function GoalsScreen() {
       },
     };
     return map;
-  }, [communityGoalRanks.length, communityMedalRanking, fitnessGoal, hasRunningGoal, healthEntries, medalGoalData, weightTargetGoal]);
+  }, [communityGoalRanks.length, communityMedalRanking, fitnessGoal, habitDeclaration, hasRunningGoal, healthEntries, medalGoalData, weightTargetGoal]);
 
   const allGoalTypes = useMemo(() => {
     const goalKeys = orderedGoalKeys.filter(k => k !== "events");
@@ -2470,13 +2537,14 @@ export default function GoalsScreen() {
   const hasGoalScore = useCallback((goalKey: string): boolean => {
     if (goalKey === "fitness") return !!fitnessGoal;
     if (goalKey === "dailyRun") return hasRunningGoal;
+    if (goalKey === "habit") return !!habitDeclaration;
     if (goalKey === "weight") return !!weightTargetGoal;
     if (goalKey === "health") return healthEntries.length > 0;
     if (goalKey === "medals") return !!medalGoalData || !!communityMedalRanking;
     if (goalKey === "community") return communityGoalRanks.length > 0;
     if (goalKey === "events") return ongoingEvents.length > 0;
     return false;
-  }, [communityGoalRanks.length, communityMedalRanking, fitnessGoal, hasRunningGoal, healthEntries.length, medalGoalData, ongoingEvents.length, weightTargetGoal]);
+  }, [communityGoalRanks.length, communityMedalRanking, fitnessGoal, habitDeclaration, hasRunningGoal, healthEntries.length, medalGoalData, ongoingEvents.length, weightTargetGoal]);
   const goalsSubPages: { key: GoalsSubPage; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "set", label: "Set Goals" },
@@ -2485,6 +2553,10 @@ export default function GoalsScreen() {
   const openGoalSetup = useCallback((goalKey: string) => {
     if (goalKey === "dailyRun") {
       openDailyRunGoalForm();
+      return;
+    }
+    if (goalKey === "habit") {
+      openEditHabit();
       return;
     }
     if (goalKey === "fitness") {
@@ -2504,79 +2576,7 @@ export default function GoalsScreen() {
       return;
     }
     setActiveGoalsPage("set");
-  }, [openDailyRunGoalForm, openEditGoalForm, openEditWeightTarget, router]);
-  const renderTrainingPlanCard = () => {
-    if (habitDeclaration) {
-      return (
-        <View style={[styles.habitCard, styles.combinedHabitCard]}>
-          <View style={styles.habitDeclarationRow}>
-            <Text style={styles.habitDeclarationText}>
-              I <Text style={styles.habitHighlight}>{habitDeclaration.activity_type}</Text>{" "}
-              <Text style={styles.habitHighlight}>{habitDeclaration.target_amount}</Text>{" "}
-              <Text style={styles.habitHighlight}>{habitDeclaration.unit}</Text>{" "}
-              <Text style={styles.habitHighlight}>{habitDeclaration.frequency}</Text>
-            </Text>
-          </View>
-
-          <View style={styles.habitDateRow}>
-            <Calendar size={14} color={colors.textSecondary} />
-            <Text style={styles.habitDateText}>Since {formatGoalDate(habitDeclaration.start_date)}</Text>
-          </View>
-
-          {habitCommitment ? (
-            <>
-              <View style={styles.habitCommitmentHeader}>
-                <View style={[styles.habitCommitmentPill, { backgroundColor: getCommitmentColor(habitCommitment.percent) + "18" }]}>
-                  <Text style={[styles.habitCommitmentPillText, { color: getCommitmentColor(habitCommitment.percent) }]}>
-                    {getCommitmentLabel(habitCommitment.percent)}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.fitnessProgressSection}>
-                <View style={styles.fitnessProgressInfo}>
-                  <Text style={styles.fitnessProgressLabel}>Training plan commitment</Text>
-                  <Text style={styles.fitnessProgressPercent}>{habitCommitment.percent}%</Text>
-                </View>
-                <View style={styles.fitnessProgressTrack}>
-                  <LinearGradient
-                    colors={habitCommitment.percent >= 70 ? ["#0D9488", "#14B8A6"] : habitCommitment.percent >= 40 ? ["#F59E0B", "#FBBF24"] : ["#EF4444", "#F87171"]}
-                    style={[styles.fitnessProgressFill, { width: `${Math.max(2, habitCommitment.percent)}%` }]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                  />
-                </View>
-              </View>
-              <Text style={styles.habitCommitmentDetail}>
-                {habitCommitment.periodsMet} of {habitCommitment.periodsElapsed} {getFrequencyPeriodLabel(habitDeclaration.frequency)} met
-              </Text>
-            </>
-          ) : (
-            <View style={styles.noActivitiesInfo}>
-              <Flame size={24} color={colors.textLight} />
-              <Text style={styles.noActivitiesText}>Start logging activities to track your training progress</Text>
-            </View>
-          )}
-        </View>
-      );
-    }
-
-    if (activeGoalsPage === "scorecard" || habitDeclarationLoading) return null;
-
-    return (
-      <TouchableOpacity style={[styles.setupGoalCard, styles.combinedHabitCard]} onPress={openEditHabit} activeOpacity={0.8}>
-        <LinearGradient colors={["#0D9488", "#14B8A6"]} style={styles.setupGoalGradient}>
-          <Flame size={32} color={colors.white} />
-          <Text style={styles.setupGoalTitle}>Add planned runs</Text>
-          <Text style={styles.setupGoalSubtext}>Declare a training amount and track consistency under Keep active.</Text>
-          <View style={styles.setupGoalButton}>
-            <Text style={[styles.setupGoalButtonText, { color: "#0D9488" }]}>Set planned runs</Text>
-            <ChevronRight size={16} color="#0D9488" />
-          </View>
-        </LinearGradient>
-      </TouchableOpacity>
-    );
-  };
-
+  }, [openDailyRunGoalForm, openEditGoalForm, openEditHabit, openEditWeightTarget, router]);
   if (!isSubscribed) {
     return (
       <SubscriptionGate featureName="Goals">
@@ -2692,7 +2692,7 @@ export default function GoalsScreen() {
                 </TouchableOpacity>
               )}
 
-              {hasSelectedGoal("dailyRun") && (
+              {hasSelectedGoal("habit") && (
                 <TouchableOpacity
                   style={styles.setGoalActionCard}
                   onPress={() => {
@@ -2772,7 +2772,7 @@ export default function GoalsScreen() {
           if (!hasSelectedGoal(goalKey)) return null;
           if (activeGoalsPage === "scorecard" && !hasGoalScore(goalKey)) return null;
           if (goalKey === "fitness") {
-            return fitnessGoal && fitnessProgress ? (
+            return fitnessGoal && fitnessCalendarProgress ? (
               <View key="fitness" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Zap size={18} color={colors.primary} />
@@ -2782,80 +2782,58 @@ export default function GoalsScreen() {
                     <ChevronRight size={14} color={colors.primary} />
                   </TouchableOpacity>
                 </View>
-                <View style={styles.fitnessCard}>
-                  <View style={styles.paceComparisonRow}>
-                    <View style={styles.paceBlock}>
-                      <Text style={styles.paceBlockLabel}>Current Avg</Text>
-                      <Text style={[styles.paceBlockValue, fitnessProgress.isAhead ? styles.paceGood : styles.paceBehind]}>
-                        {formatPaceMinPerKm(fitnessProgress.avgpaceMinPerKm)}
+                <View style={[styles.dailyRunCard, styles.fitnessScorecard]}>
+                  <View style={styles.dailyRunScoreRow}>
+                    <View>
+                      <Text style={[styles.dailyRunScore, fitnessCalendarProgress.isOnTrack ? styles.paceGood : styles.paceBehind]}>
+                        {fitnessCalendarProgress.scorePercent}%
                       </Text>
-                      <Text style={styles.paceBlockUnit}>min/km</Text>
+                      <Text style={styles.dailyRunScoreLabel}>Pace score</Text>
                     </View>
-                    <View style={styles.paceArrowContainer}>
-                      {fitnessProgress.isAhead ? (
-                        <View style={styles.statusPillGood}>
-                          <TrendingUp size={14} color="#10B981" />
-                          <Text style={styles.statusPillTextGood}>On Track</Text>
-                        </View>
-                      ) : (
-                        <View style={styles.statusPillBehind}>
-                          <TrendingDown size={14} color="#EF4444" />
-                          <Text style={styles.statusPillTextBehind}>Behind</Text>
-                        </View>
-                      )}
-                    </View>
-                    <View style={styles.paceBlock}>
-                      <Text style={styles.paceBlockLabel}>Target</Text>
-                      <Text style={styles.paceBlockValueTarget}>
-                        {formatPaceMinPerKm(fitnessProgress.targetpaceMinPerKm)}
-                      </Text>
-                      <Text style={styles.paceBlockUnit}>min/km</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.scoreGuideRow}>
-                    <View style={styles.scoreGuideItem}>
-                      <Text style={styles.scoreGuideValue}>{formatPaceMinPerKm(fitnessProgress.lastThreeAvgpaceMinPerKm)}</Text>
-                      <Text style={styles.scoreGuideLabel}>Last 3 runs avg pace</Text>
-                    </View>
-                    <View style={styles.scoreGuideItem}>
-                      <Text style={styles.scoreGuideValue}>{fitnessProgress.lastThreeActivitiesUsed}</Text>
-                      <Text style={styles.scoreGuideLabel}>Runs used</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.fitnessProgressSection}>
-                    <View style={styles.fitnessProgressInfo}>
-                      <Text style={styles.fitnessProgressLabel}>Progress</Text>
-                      <Text style={styles.fitnessProgressPercent}>{Math.round(fitnessProgress.progressPercent)}%</Text>
-                    </View>
-                    <View style={styles.fitnessProgressTrack}>
-                      <LinearGradient
-                        colors={fitnessProgress.isAhead ? ["#10B981", "#34D399"] : ["#F59E0B", "#FBBF24"]}
-                        style={[styles.fitnessProgressFill, { width: `${fitnessProgress.progressPercent}%` }]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                      />
-                    </View>
-                  </View>
-
-                  <View style={styles.fitnessMetaRow}>
-                    <View style={styles.fitnessMetaItem}>
-                      <Clock size={12} color={colors.textSecondary} />
-                      <Text style={styles.fitnessMetaText}>
-                        {fitnessProgress.daysLeft > 0 ? `${fitnessProgress.daysLeft} days left` : "Target date passed"}
-                      </Text>
-                    </View>
-                    <View style={styles.fitnessMetaItem}>
-                      <Calendar size={12} color={colors.textSecondary} />
-                      <Text style={styles.fitnessMetaText}>
-                        By {formatGoalDate(fitnessGoal.target_date)}
+                    <View style={[styles.dailyRunTargetPill, fitnessCalendarProgress.isOnTrack ? styles.statusPillGood : styles.statusPillBehind]}>
+                      <Text style={fitnessCalendarProgress.isOnTrack ? styles.statusPillTextGood : styles.statusPillTextBehind}>
+                        {fitnessCalendarProgress.onTargetDays} on target
                       </Text>
                     </View>
                   </View>
 
-                  <Text style={styles.fitnessFootnote}>
-                    Target pace is compared with your overall average pace and the average pace of your last 3 runs.
+                  <View style={styles.communityStatsRow}>
+                    <View style={styles.communityStatItem}>
+                      <Text style={styles.communityStatValue}>{fitnessCalendarProgress.runDays}</Text>
+                      <Text style={styles.communityStatLabel}>Run Days</Text>
+                    </View>
+                    <View style={styles.communityStatDivider} />
+                    <View style={styles.communityStatItem}>
+                      <Text style={styles.communityStatValue}>{fitnessCalendarProgress.onTargetDays}</Text>
+                      <Text style={styles.communityStatLabel}>Within Target</Text>
+                    </View>
+                    <View style={styles.communityStatDivider} />
+                    <View style={styles.communityStatItem}>
+                      <Text style={styles.communityStatValue}>{formatPaceDecimal(fitnessCalendarProgress.fastestPace)}</Text>
+                      <Text style={styles.communityStatLabel}>Best Pace</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.dailyRunCalendarGrid}>
+                    {fitnessCalendarProgress.days.map((day) => (
+                      <View
+                        key={`${day.date}-${day.pace}`}
+                        style={[
+                          styles.dailyRunDayCell,
+                          styles.goalCalendarMetricCell,
+                          day.isOnTarget ? styles.goalCalendarCellGood : styles.goalCalendarCellBad,
+                        ]}
+                      >
+                        <Text style={styles.dailyRunDayNumber}>{day.day}</Text>
+                        <Text style={[styles.dailyRunDayMark, styles.goalCalendarMetricText, day.isOnTarget ? styles.dailyRunDayMarkDone : styles.dailyRunDayMarkMissed]}>
+                          {formatPaceDecimal(day.pace)}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+
+                  <Text style={styles.goalBandSummaryText}>
+                    {fitnessCalendarProgress.bandSummary}
                   </Text>
                 </View>
               </View>
@@ -2971,7 +2949,6 @@ export default function GoalsScreen() {
                     Commitment is measured up to today: actual run days compared with the target runs expected by now.
                   </Text>
                 </View>
-                {renderTrainingPlanCard()}
               </View>
             ) : habitDeclaration ? (
               <View key="dailyRun" style={styles.section}>
@@ -2983,7 +2960,6 @@ export default function GoalsScreen() {
                     <ChevronRight size={14} color={colors.primary} />
                   </TouchableOpacity>
                 </View>
-                {renderTrainingPlanCard()}
                 {activeGoalsPage !== "scorecard" && (
                   <TouchableOpacity style={[styles.setupGoalCard, styles.combinedHabitCard]} onPress={openDailyRunGoalForm} activeOpacity={0.8}>
                     <LinearGradient colors={["#0EA5E9", "#38BDF8"]} style={styles.setupGoalGradient}>
@@ -3019,7 +2995,6 @@ export default function GoalsScreen() {
                     </View>
                   </LinearGradient>
                 </TouchableOpacity>
-                {renderTrainingPlanCard()}
               </View>
             ) : null;
           }
@@ -3348,7 +3323,7 @@ export default function GoalsScreen() {
                     <ChevronRight size={14} color={colors.primary} />
                   </TouchableOpacity>
                 </View>
-                <View style={styles.habitCard}>
+                <View style={[styles.dailyRunCard, styles.plannedRunScorecard]}>
                   <View style={styles.habitDeclarationRow}>
                     <Text style={styles.habitDeclarationText}>
                       I <Text style={styles.habitHighlight}>{habitDeclaration.activity_type}</Text>{" "}
@@ -3360,45 +3335,68 @@ export default function GoalsScreen() {
 
                   <View style={styles.habitDateRow}>
                     <Calendar size={12} color={colors.textSecondary} />
-                    <Text style={styles.habitDateText}>
-                      Since {formatGoalDate(habitDeclaration.start_date)}
-                    </Text>
+                    <Text style={styles.habitDateText}>Since {formatGoalDate(habitDeclaration.start_date)}</Text>
                   </View>
 
-                  {habitCommitment ? (
+                  {habitCalendarProgress ? (
                     <>
-                      <View style={styles.habitCommitmentHeader}>
-                        <View style={[styles.habitCommitmentPill, { backgroundColor: getCommitmentColor(habitCommitment.percent) + "18" }]}>
-                          <Text style={[styles.habitCommitmentPillText, { color: getCommitmentColor(habitCommitment.percent) }]}>
-                            {getCommitmentLabel(habitCommitment.percent)}
+                      <View style={styles.dailyRunScoreRow}>
+                        <View>
+                          <Text style={[styles.dailyRunScore, habitCalendarProgress.isOnTrack ? styles.paceGood : styles.paceBehind]}>
+                            {habitCalendarProgress.scorePercent}%
+                          </Text>
+                          <Text style={styles.dailyRunScoreLabel}>Distance score</Text>
+                        </View>
+                        <View style={[styles.dailyRunTargetPill, habitCalendarProgress.isOnTrack ? styles.statusPillGood : styles.statusPillBehind]}>
+                          <Text style={habitCalendarProgress.isOnTrack ? styles.statusPillTextGood : styles.statusPillTextBehind}>
+                            Target {formatDistanceDecimal(habitCalendarProgress.targetDistance)} km
                           </Text>
                         </View>
                       </View>
-                      <View style={styles.fitnessProgressSection}>
-                        <View style={styles.fitnessProgressInfo}>
-                          <Text style={styles.fitnessProgressLabel}>Commitment</Text>
-                          <Text style={styles.fitnessProgressPercent}>{habitCommitment.percent}%</Text>
+
+                      <View style={styles.communityStatsRow}>
+                        <View style={styles.communityStatItem}>
+                          <Text style={styles.communityStatValue}>{habitCalendarProgress.daysMet}</Text>
+                          <Text style={styles.communityStatLabel}>Target Days</Text>
                         </View>
-                        <View style={styles.fitnessProgressTrack}>
-                          <LinearGradient
-                            colors={habitCommitment.percent >= 70 ? ["#0D9488", "#14B8A6"] : habitCommitment.percent >= 40 ? ["#F59E0B", "#FBBF24"] : ["#EF4444", "#F87171"]}
-                            style={[styles.fitnessProgressFill, { width: `${Math.max(2, habitCommitment.percent)}%` }]}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 0 }}
-                          />
+                        <View style={styles.communityStatDivider} />
+                        <View style={styles.communityStatItem}>
+                          <Text style={styles.communityStatValue}>{habitCalendarProgress.missedDays}</Text>
+                          <Text style={styles.communityStatLabel}>Missed Days</Text>
+                        </View>
+                        <View style={styles.communityStatDivider} />
+                        <View style={styles.communityStatItem}>
+                          <Text style={styles.communityStatValue}>{formatDistanceDecimal(habitCalendarProgress.totalDistance)}</Text>
+                          <Text style={styles.communityStatLabel}>Total Km</Text>
                         </View>
                       </View>
 
-                      <Text style={styles.habitCommitmentDetail}>
-                        {habitCommitment.periodsMet} of {habitCommitment.periodsElapsed} {getFrequencyPeriodLabel(habitDeclaration.frequency)} met
+                      <View style={styles.dailyRunCalendarGrid}>
+                        {habitCalendarProgress.days.map((day) => (
+                          <View
+                            key={day.date}
+                            style={[
+                              styles.dailyRunDayCell,
+                              styles.goalCalendarMetricCell,
+                              day.isOnTarget ? styles.goalCalendarCellGood : styles.goalCalendarCellBad,
+                            ]}
+                          >
+                            <Text style={styles.dailyRunDayNumber}>{day.day}</Text>
+                            <Text style={[styles.dailyRunDayMark, styles.goalCalendarMetricText, day.isOnTarget ? styles.dailyRunDayMarkDone : styles.dailyRunDayMarkMissed]}>
+                              {formatDistanceDecimal(day.distanceKm)}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+
+                      <Text style={styles.fitnessFootnote}>
+                        Daily planned runs show every committed day up to today. Days without a run are recorded as 0 km.
                       </Text>
                     </>
                   ) : (
                     <View style={styles.noActivitiesInfo}>
                       <Flame size={24} color={colors.textLight} />
-                      <Text style={styles.noActivitiesText}>
-                        Start logging activities to track your training progress
-                      </Text>
+                      <Text style={styles.noActivitiesText}>Set a running distance in kilometers to see your planned-run calendar.</Text>
                     </View>
                   )}
                 </View>
@@ -3901,7 +3899,7 @@ export default function GoalsScreen() {
           <View style={styles.modalContent}>
             <LinearGradient colors={colors.gradient.orange} style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
-                {fitnessGoal ? "Update Pace Goal" : "Set Pace Goal"}
+                {fitnessGoal ? "Update Fitness Goal" : "Set Fitness Goal"}
               </Text>
               <TouchableOpacity onPress={() => setShowGoalForm(false)}>
                 <X size={24} color={colors.white} />
@@ -3910,51 +3908,88 @@ export default function GoalsScreen() {
 
             <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
               <Text style={styles.modalSubtitle}>
-                Set your target pace and the date you want to achieve it by
+                Declare up to 4 distance targets. Pace is calculated automatically from the time you set.
               </Text>
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Target Pace (min/km) *</Text>
-                <View style={styles.paceInputRow}>
-                  <View style={styles.paceInputBlock}>
-                    <TextInput
-                      style={styles.paceInput}
-                      placeholder="5"
-                      value={targetPaceMin}
-                      onChangeText={setTargetPaceMin}
-                      keyboardType="number-pad"
-                      maxLength={2}
-                      placeholderTextColor={colors.textLight}
-                    />
-                    <Text style={styles.paceInputLabel}>min</Text>
-                  </View>
-                  <Text style={styles.paceColon}>:</Text>
-                  <View style={styles.paceInputBlock}>
-                    <TextInput
-                      style={styles.paceInput}
-                      placeholder="30"
-                      value={targetPaceSec}
-                      onChangeText={setTargetPaceSec}
-                      keyboardType="number-pad"
-                      maxLength={2}
-                      placeholderTextColor={colors.textLight}
-                    />
-                    <Text style={styles.paceInputLabel}>sec</Text>
-                  </View>
+              <View style={styles.dateInputRow}>
+                <View style={styles.dateInputBlock}>
+                  <Text style={styles.inputLabel}>Start Date *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="YYYY-MM-DD"
+                    value={fitnessStartDate}
+                    onChangeText={setFitnessStartDate}
+                    placeholderTextColor={colors.textLight}
+                  />
                 </View>
-                <Text style={styles.inputHint}>e.g. 5:30 means 5 minutes 30 seconds per km</Text>
+                <View style={styles.dateInputBlock}>
+                  <Text style={styles.inputLabel}>End Date *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="YYYY-MM-DD"
+                    value={targetDate}
+                    onChangeText={setTargetDate}
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
               </View>
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Target Date *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="YYYY-MM-DD (e.g. 2026-06-30)"
-                  value={targetDate}
-                  onChangeText={setTargetDate}
-                  placeholderTextColor={colors.textLight}
-                />
-              </View>
+              {fitnessGoalSlots.map((slot, index) => {
+                const distanceKm = parseFloat(slot.distanceKm);
+                const hours = parseInt(slot.hours || "0", 10);
+                const minutes = parseInt(slot.minutes || "0", 10);
+                const totalMinutes = (Number.isFinite(hours) ? hours : 0) * 60 + (Number.isFinite(minutes) ? minutes : 0);
+                const pace = distanceKm > 0 && totalMinutes > 0 ? totalMinutes / distanceKm : 0;
+                return (
+                  <View key={`fitness-slot-${index}`} style={styles.fitnessGoalSlot}>
+                    <Text style={styles.inputLabel}>Goal {index + 1}</Text>
+                    <View style={styles.fitnessDeclarationPreview}>
+                      <Text style={styles.habitPreviewText}>
+                        I want my <Text style={styles.fitnessPreviewHighlight}>{slot.distanceKm || "xx"}k</Text> runs under{" "}
+                        <Text style={styles.fitnessPreviewHighlight}>
+                          {(slot.hours || "0")}h {slot.minutes || "0"}m
+                        </Text>{" "}
+                        <Text style={styles.fitnessPacePreview}>({pace > 0 ? `${formatPaceDecimal(pace)} min/km` : "zz"})</Text>
+                      </Text>
+                    </View>
+                    <View style={styles.fitnessGoalSlotInputs}>
+                      <View style={styles.fitnessGoalSlotInputGroup}>
+                        <Text style={styles.paceInputLabel}>km</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="10"
+                          value={slot.distanceKm}
+                          onChangeText={(value) => updateFitnessGoalSlot(index, "distanceKm", value)}
+                          keyboardType="decimal-pad"
+                          placeholderTextColor={colors.textLight}
+                        />
+                      </View>
+                      <View style={styles.fitnessGoalSlotInputGroup}>
+                        <Text style={styles.paceInputLabel}>hours</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="1"
+                          value={slot.hours}
+                          onChangeText={(value) => updateFitnessGoalSlot(index, "hours", value)}
+                          keyboardType="number-pad"
+                          placeholderTextColor={colors.textLight}
+                        />
+                      </View>
+                      <View style={styles.fitnessGoalSlotInputGroup}>
+                        <Text style={styles.paceInputLabel}>mins</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="0"
+                          value={slot.minutes}
+                          onChangeText={(value) => updateFitnessGoalSlot(index, "minutes", value)}
+                          keyboardType="number-pad"
+                          placeholderTextColor={colors.textLight}
+                        />
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
 
               <TouchableOpacity
                 style={[styles.saveButton, saveFitnessGoalMutation.isPending && styles.saveButtonDisabled]}
@@ -5065,6 +5100,45 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.text,
   },
+  dateInputRow: {
+    flexDirection: "row" as const,
+    gap: 10,
+    marginBottom: 12,
+  },
+  dateInputBlock: {
+    flex: 1,
+  },
+  fitnessGoalSlot: {
+    backgroundColor: "#FFF7ED",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#FED7AA",
+  },
+  fitnessDeclarationPreview: {
+    backgroundColor: colors.white,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.primary,
+  },
+  fitnessPreviewHighlight: {
+    fontWeight: "800" as const,
+    color: colors.primary,
+  },
+  fitnessPacePreview: {
+    color: colors.textSecondary,
+    fontWeight: "700" as const,
+  },
+  fitnessGoalSlotInputs: {
+    flexDirection: "row" as const,
+    gap: 8,
+  },
+  fitnessGoalSlotInputGroup: {
+    flex: 1,
+  },
   saveButton: {
     borderRadius: 14,
     overflow: "hidden" as const,
@@ -5682,6 +5756,14 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 1,
   },
+  fitnessScorecard: {
+    backgroundColor: "#FFF7ED",
+    borderColor: "#FED7AA",
+  },
+  plannedRunScorecard: {
+    backgroundColor: "#F0FDFA",
+    borderColor: "#99F6E4",
+  },
   dailyRunScoreRow: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
@@ -5721,6 +5803,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.divider,
   },
+  goalCalendarMetricCell: {
+    height: 38,
+  },
+  goalCalendarMetricText: {
+    fontSize: 11,
+    minHeight: 14,
+    lineHeight: 14,
+  },
+  goalCalendarCellGood: {
+    backgroundColor: "#ECFDF5",
+    borderColor: "#10B981",
+  },
+  goalCalendarCellBad: {
+    backgroundColor: "#FEF2F2",
+    borderColor: "#FCA5A5",
+  },
   dailyRunDayDone: {
     backgroundColor: "#ECFDF5",
     borderColor: "#10B981",
@@ -5739,6 +5837,14 @@ const styles = StyleSheet.create({
     fontWeight: "900" as const,
     minHeight: 20,
     color: colors.textLight,
+  },
+  goalBandSummaryText: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+    color: colors.textLight,
+    textAlign: "center" as const,
+    lineHeight: 15,
+    marginTop: 2,
   },
   dailyRunDayMarkDone: {
     color: "#10B981",

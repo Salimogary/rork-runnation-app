@@ -275,6 +275,16 @@ export default function EventsScreen() {
         current.includes(variables.eventId) ? current : [...current, variables.eventId]
       );
 
+      const externalRegistrationLink = String((result as any).externalRegistrationLink || "").trim();
+      if (externalRegistrationLink) {
+        try {
+          await Linking.openURL(externalRegistrationLink);
+        } catch {
+          Alert.alert("Registration Link Error", "You were added to the event, but the external registration link could not be opened.");
+        }
+        return;
+      }
+
       if (result.mode === "participant") {
         Alert.alert("Joined Event", result.message || "You have been added to the participant list.");
         return;
@@ -573,6 +583,12 @@ export default function EventsScreen() {
         eventId: eventItem.event_id,
         registrationId: effectiveRegistrationId,
       });
+
+    const externalRegistrationLink = String(eventItem.registration_link || eventItem.registrationLink || "").trim();
+    if (externalRegistrationLink) {
+      submit();
+      return;
+    }
 
     if (entryMode === "paid") {
       const feeLabel =

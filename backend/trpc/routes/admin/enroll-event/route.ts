@@ -229,7 +229,7 @@ export default publicProcedure
 
     const { data: event } = await ctx.supabase
       .from("events")
-      .select("event_id, country, country_code, is_virtual, entry, payment_details, organizer_payment_link, runnation_payment_link_enabled, registration_closes_at, participant_limit")
+      .select("event_id, country, country_code, is_virtual, entry, payment_details, organizer_payment_link, runnation_payment_link_enabled, registration_link, registration_closes_at, participant_limit")
       .eq("event_id", input.eventId)
       .maybeSingle();
 
@@ -292,9 +292,10 @@ export default publicProcedure
     }
 
     const entryMode = normalizeEventEntry(event.entry);
+    const externalRegistrationLink = String(event.registration_link || "").trim();
     await ensureEventCapacity(ctx, input.eventId, event.participant_limit);
 
-    if (entryMode === "free") {
+    const addParticipant = async () => {
       const { data, error } = await ctx.supabase
         .from("events_participants")
         .insert({
@@ -311,11 +312,29 @@ export default publicProcedure
         throw new Error(`Failed to join event: ${error.message}`);
       }
 
+      return data;
+    };
+
+    if (externalRegistrationLink) {
+      const participant = await addParticipant();
+
+      return {
+        success: true,
+        mode: "participant",
+        message: "You have been added to the participant list. Complete registration on the organizer site.",
+        externalRegistrationLink,
+        participant,
+      };
+    }
+
+    if (entryMode === "free") {
+      const participant = await addParticipant();
+
       return {
         success: true,
         mode: "participant",
         message: "You have been added to the participant list.",
-        participant: data,
+        participant,
       };
     }
 

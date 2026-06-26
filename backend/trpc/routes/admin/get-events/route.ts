@@ -139,7 +139,7 @@ export default publicProcedure.query(async ({ ctx }) => {
       const magazineSubmission = magazineMap.get(String(event.event_id || "")) ?? null;
       return {
         ...event,
-        organizer_name: organizer?.organizer_name ?? null,
+        organizer_name: event.external_organizer_name ?? organizer?.organizer_name ?? null,
         organizer_country: organizer?.country ?? null,
         magazine_submission_id: magazineSubmission?.submission_id ?? null,
         magazine_submission_status: magazineSubmission?.status ?? null,
