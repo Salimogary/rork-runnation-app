@@ -9,6 +9,7 @@ import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
 import { DistanceUnitProvider } from "@/contexts/DistanceUnitContext";
 import { WeightUnitProvider } from "@/contexts/WeightUnitContext";
 import { TRPCProvider } from "../lib/trpc";
+import OfflineSnapshotBanner from "@/components/OfflineSnapshotBanner";
 import * as SplashScreen from "expo-splash-screen";
 import * as Linking from "expo-linking";
 import { LogBox, Platform, View, Text } from "react-native";
@@ -288,6 +289,7 @@ export default function RootLayout() {
                     <WeightUnitProvider>
                     <NotificationProvider>
                         <RootLayoutNav />
+                        <OfflineSnapshotBanner />
                     </NotificationProvider>
                     </WeightUnitProvider>
                   </DistanceUnitProvider>

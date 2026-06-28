@@ -2,6 +2,7 @@ import { z } from "zod";
 import { publicProcedure } from "../../../create-context";
 import { requireAdminPermission } from "../../../rbac";
 import { sendActivityApprovalPush } from "../../../push-notifications";
+import { randomUUID } from "crypto";
 
 function getDateOnly(value?: string | null) {
   return String(value || "").slice(0, 10);
@@ -72,6 +73,90 @@ export default publicProcedure
       if (insertError) {
         console.error("[Approve External Submission] Insert error:", insertError);
         throw new Error(insertError.message || "Failed to create activity");
+      }
+
+      if (submission.source_type === "medal_claim") {
+        const externalEventName = String(submission.external_event_name || "").trim();
+        const externalEventLocation = String(submission.external_event_location || "").trim();
+        if (!externalEventName || !externalEventLocation) {
+          throw new Error("External medal claim is missing event details.");
+        }
+
+        const eventId = submission.external_event_id || randomUUID();
+        const activityDate = getDateOnly(submission.activity_date);
+        const eventPayload = {
+          event_id: eventId,
+          event_name: externalEventName,
+          starts_at: activityDate,
+          ends_at: activityDate,
+          registration_closes_at: activityDate,
+          event_type: "same_day",
+          country: externalEventLocation,
+          country_code: "EX",
+          is_virtual: true,
+          event_location: externalEventLocation,
+          entry: "free",
+          has_medal: true,
+          approval_status: "approved",
+          club: "External",
+          external_organizer_name: "External source",
+          medal_date_start: activityDate,
+          medal_date_end: activityDate,
+          available_distances_km: [Number(submission.distance_km) || 0].filter((value) => value > 0),
+        };
+
+        const { error: eventUpsertError } = await ctx.supabase
+          .from("events")
+          .upsert(eventPayload, { onConflict: "event_id" });
+
+        if (eventUpsertError) {
+          console.error("[Approve External Submission] Medal event error:", eventUpsertError);
+          throw new Error(eventUpsertError.message || "Failed to create external medal event.");
+        }
+
+        const participantPayload = {
+          event_id: eventId,
+          registration_id: submission.registration_id,
+          registration_date: activityDate,
+          distance_km: Number(Number(submission.distance_km || 0).toFixed(2)),
+          time_seconds: timeSeconds,
+        };
+
+        const { data: existingParticipant, error: existingParticipantError } = await ctx.supabase
+          .from("events_participants")
+          .select("event_participant_id")
+          .eq("event_id", eventId)
+          .eq("registration_id", submission.registration_id)
+          .maybeSingle();
+
+        if (existingParticipantError) {
+          throw new Error(existingParticipantError.message || "Could not check external medal participant row.");
+        }
+
+        const participantWrite = existingParticipant?.event_participant_id
+          ? await ctx.supabase
+              .from("events_participants")
+              .update(participantPayload)
+              .eq("event_participant_id", existingParticipant.event_participant_id)
+          : await ctx.supabase
+              .from("events_participants")
+              .insert({
+            event_participant_id: randomUUID(),
+            ...participantPayload,
+          });
+
+        if (participantWrite.error) {
+          console.error("[Approve External Submission] Medal participant error:", participantWrite.error);
+          throw new Error(participantWrite.error.message || "Failed to add external medal to participant list.");
+        }
+
+        await ctx.supabase
+          .from("external_activity_submissions")
+          .update({
+            external_event_id: eventId,
+            approved_activity_id: approvedActivity.activity_id,
+          })
+          .eq("submission_id", input.submissionId);
       }
 
       const { error: notificationError } = await ctx.supabase

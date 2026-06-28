@@ -20,8 +20,10 @@ export default publicProcedure
       startTime: z.string().regex(/^\d{2}:\d{2}:\d{2}$/, "Start time must be in HH:MM:SS format"),
       duration: z.string().regex(/^\d{2}:\d{2}:\d{2}$/, "Duration must be in HH:MM:SS format"),
       distanceKm: z.number().positive(),
-      sourceType: z.enum(["smart_watch", "other_sports_app"]).nullable().optional(),
+      sourceType: z.enum(["smart_watch", "other_sports_app", "medal_claim"]).nullable().optional(),
       sourceLabel: z.string().trim().max(80).nullable().optional(),
+      externalEventName: z.string().trim().max(160).nullable().optional(),
+      externalEventLocation: z.string().trim().max(160).nullable().optional(),
       evidenceImageBase64: z.string().nullable().optional(),
       evidenceMimeType: z.string().nullable().optional(),
     })
@@ -55,6 +57,15 @@ export default publicProcedure
         cooldownSeconds: 45,
         errorMessage: "Please wait a moment before submitting another manual activity.",
       });
+
+      if (input.sourceType === "medal_claim") {
+        if (!input.externalEventName || !input.externalEventLocation) {
+          throw new Error("External medal submissions need an event name and location.");
+        }
+        if (!input.evidenceImageBase64) {
+          throw new Error("Please upload a medal picture for approval.");
+        }
+      }
 
       let evidencePath: string | null = null;
       let evidenceMimeType: string | null = null;
@@ -93,7 +104,9 @@ export default publicProcedure
         duration: input.duration,
         distance_km: input.distanceKm,
         source_type: input.sourceType || null,
-        source_label: input.sourceLabel || null,
+        source_label: input.sourceType === "medal_claim" ? input.sourceLabel || "External Medal" : input.sourceLabel || null,
+        external_event_name: input.externalEventName || null,
+        external_event_location: input.externalEventLocation || null,
         evidence_path: evidencePath,
         evidence_mime_type: evidenceMimeType,
       };

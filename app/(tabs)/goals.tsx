@@ -3,9 +3,11 @@ import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { Target, TrendingDown, TrendingUp, Award, Calendar, Scale, Zap, X, Clock, ChevronRight, Plus, Heart, Moon, Droplets, Footprints, Users, Trophy, Flame } from "lucide-react-native";
-import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as ImagePicker from "expo-image-picker";
+import Svg, { Circle, Line, Polyline, Text as SvgText } from "react-native-svg";
 import { supabase } from "@/lib/supabase";
+import { getServerClient } from "@/lib/server-client";
 import { useAuth } from "@/contexts/AuthContext";
 import colors from "@/constants/colors";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -160,17 +162,53 @@ interface StoredRankSnapshot {
   timestamp: string;
 }
 
+interface CommunityRankHistoryPoint {
+  date: string;
+  familyRank?: number;
+  familyTotal?: number;
+  clubRank?: number;
+  clubTotal?: number;
+  communityRank?: number;
+  communityTotal?: number;
+}
+
+interface ExternalMedalForm {
+  activityDate: string;
+  distanceKm: string;
+  duration: string;
+  eventName: string;
+  location: string;
+}
+
+interface MedalTargetGoal {
+  medal_goal_id: number;
+  registration_id: string;
+  target_medals: number;
+  start_date: string;
+  end_date: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface MedalRaceSummary {
+  eventId: string;
+  eventName: string;
+  country: string;
+  dateLabel: string;
+  isVirtual: boolean;
+  isEnrolled: boolean;
+  isEarned: boolean;
+}
+
 interface MedalGoalData {
-  totalEvents: number;
-  enrolledEvents: number;
+  targetMedals: number;
+  availableRaces: number;
   medalsEarned: number;
-  enrollmentRatio: number;
   medalRatio: number;
-  events: {
-    eventName: string;
-    isEnrolled: boolean;
-    isOnMedalList: boolean;
-  }[];
+  internalMedalsEarned: number;
+  externalMedalsEarned: number;
+  countryRaces: MedalRaceSummary[];
+  virtualRaces: MedalRaceSummary[];
 }
 
 interface ActivitySummary {
@@ -313,6 +351,14 @@ const addDaysIso = (value: string, days: number): string => {
 
 const minIsoDate = (a: string, b: string): string => (a <= b ? a : b);
 
+const formatCompactDateRange = (start?: string | null, end?: string | null): string => {
+  const startKey = getDateOnly(start);
+  const endKey = getDateOnly(end);
+  if (!startKey && !endKey) return "Date TBA";
+  if (startKey && (!endKey || startKey === endKey)) return startKey;
+  return `${startKey || "TBA"} - ${endKey || "TBA"}`;
+};
+
 const getMedalBand = (distanceKm: number): (typeof MEDAL_BANDS)[number] | null =>
   MEDAL_BANDS.find((band) => distanceKm >= band.minKm) || null;
 
@@ -330,6 +376,141 @@ const getMedalBandForCompletedDistance = (
   const matchedDistance = distances.find((distance) => completedDistance + 0.01 >= distance);
   return getMedalBand(matchedDistance || completedDistance);
 };
+
+const RANK_HISTORY_COLORS = {
+  family: "#8B5CF6",
+  club: "#10B981",
+  community: "#0EA5E9",
+};
+
+function RankHistoryGraph({
+  points,
+  rankKey,
+  totalKey,
+  label,
+  color,
+  summary,
+  backgroundColor = "#F8FAFC",
+  borderColor,
+}: {
+  points: CommunityRankHistoryPoint[];
+  rankKey: "familyRank" | "clubRank" | "communityRank";
+  totalKey: "familyTotal" | "clubTotal" | "communityTotal";
+  label: string;
+  color: string;
+  summary?: RankSummary | null;
+  backgroundColor?: string;
+  borderColor?: string;
+}) {
+  const width = 320;
+  const height = 170;
+  const paddingLeft = 34;
+  const paddingRight = 14;
+  const paddingTop = 18;
+  const paddingBottom = 28;
+  const chartWidth = width - paddingLeft - paddingRight;
+  const chartHeight = height - paddingTop - paddingBottom;
+  const today = new Date();
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  const monthStartKey = getLocalDateKey(monthStart);
+  const monthEndKey = getLocalDateKey(monthEnd);
+  const monthSpanDays = Math.max(1, monthEnd.getDate() - 1);
+  const eligiblePoints = points.filter((point) =>
+    point.date >= monthStartKey &&
+    point.date <= monthEndKey &&
+    typeof point[rankKey] === "number" &&
+    Number.isFinite(point[rankKey]) &&
+    typeof point[totalKey] === "number" &&
+    Number(point[totalKey]) >= 3
+  );
+  const rankValues = eligiblePoints
+    .map((point) => point[rankKey])
+    .filter((rank): rank is number => typeof rank === "number" && Number.isFinite(rank));
+  if (eligiblePoints.length === 0 || rankValues.length === 0) return null;
+
+  const minRank = Math.max(1, Math.min(...rankValues));
+  const maxRank = Math.max(...rankValues, minRank + 1);
+  const midRank = Math.round((minRank + maxRank) / 2);
+  const xForDate = (dateString: string) => {
+    const date = new Date(`${dateString}T00:00:00`);
+    const dayIndex = Number.isNaN(date.getTime()) ? 0 : date.getDate() - 1;
+    return paddingLeft + (dayIndex / monthSpanDays) * chartWidth;
+  };
+  const yForRank = (rank: number) => paddingTop + ((rank - minRank) / Math.max(1, maxRank - minRank)) * chartHeight;
+  const middleDay = Math.ceil(monthEnd.getDate() / 2);
+  const xAxisLabels = [
+    { key: monthStartKey, label: "1" },
+    { key: getLocalDateKey(new Date(today.getFullYear(), today.getMonth(), middleDay)), label: String(middleDay) },
+    { key: monthEndKey, label: String(monthEnd.getDate()) },
+  ];
+
+  return (
+    <View style={[styles.rankGraphBlock, { backgroundColor, borderColor: borderColor || color }]}>
+      <View style={styles.rankGraphTitleRow}>
+        <View style={styles.rankGraphTitleInfo}>
+          <Text style={styles.rankGraphTitle}>{label}</Text>
+          <Text style={styles.rankGraphSubtitle}>
+            {summary ? `${summary.metricLabel}: ${summary.metricValue}` : "Activity rank"}
+          </Text>
+        </View>
+        {summary ? (
+          <View style={[styles.rankGraphPill, { borderColor: color }]}>
+            <Text style={[styles.rankGraphPillValue, { color }]}>#{summary.currentRank}</Text>
+            <Text style={styles.rankGraphPillOf}>of {summary.totalParticipants}</Text>
+          </View>
+        ) : (
+          <Text style={styles.rankGraphSubtitle}>Activity rank</Text>
+        )}
+      </View>
+      <View style={[styles.rankGraphFrame, { backgroundColor }]}>
+        <Svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`}>
+          <Line x1={paddingLeft} y1={paddingTop} x2={paddingLeft} y2={height - paddingBottom} stroke="#CBD5E1" strokeWidth="1.2" />
+          <Line x1={paddingLeft} y1={height - paddingBottom} x2={width - paddingRight} y2={height - paddingBottom} stroke="#CBD5E1" strokeWidth="1.2" />
+          <Line x1={paddingLeft} y1={paddingTop} x2={width - paddingRight} y2={paddingTop} stroke="#F1F5F9" strokeWidth="1" />
+          <Line x1={paddingLeft} y1={yForRank(midRank)} x2={width - paddingRight} y2={yForRank(midRank)} stroke="#F1F5F9" strokeWidth="1" />
+          <SvgText x={6} y={12} fill="#64748B" fontSize="9" fontWeight="700">Rank</SvgText>
+          <SvgText x={6} y={paddingTop + 4} fill="#64748B" fontSize="9" fontWeight="700">#{minRank}</SvgText>
+          <SvgText x={6} y={yForRank(midRank) + 4} fill="#94A3B8" fontSize="9" fontWeight="700">#{midRank}</SvgText>
+          <SvgText x={6} y={height - paddingBottom + 4} fill="#64748B" fontSize="9" fontWeight="700">#{maxRank}</SvgText>
+          <SvgText x={width - 34} y={height - 5} fill="#64748B" fontSize="9" fontWeight="700">Date</SvgText>
+          {xAxisLabels.map((item) => (
+            <SvgText key={item.key} x={xForDate(item.key) - 3} y={height - 12} fill="#64748B" fontSize="9" fontWeight="700">
+              {item.label}
+            </SvgText>
+          ))}
+          <Polyline
+            points={eligiblePoints
+              .map((point) => `${xForDate(point.date)},${yForRank(point[rankKey] as number)}`)
+              .join(" ")}
+            fill="none"
+            stroke={color}
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          {eligiblePoints.map((point) =>
+            (
+              <Circle
+                key={`${rankKey}-${point.date}`}
+                cx={xForDate(point.date)}
+                cy={yForRank(point[rankKey] as number)}
+                r="3.5"
+                fill={color}
+                stroke="#FFFFFF"
+                strokeWidth="1"
+              />
+            )
+          )}
+        </Svg>
+      </View>
+      <View style={styles.rankGraphDateRow}>
+        <Text style={styles.rankGraphDateText}>{today.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</Text>
+        <Text style={styles.rankGraphHintText}>lower rank is better</Text>
+      </View>
+    </View>
+  );
+}
 
 const getHealthRecommendations = (age: number | null) => {
   const stepTarget = age !== null && age >= 60 ? 2000 : 3000;
@@ -434,7 +615,6 @@ const scoreSmartFitHealth = (input: {
 };
 
 export default function GoalsScreen() {
-  const router = useRouter();
   const { user } = useAuth();
   const { colors: themeColors } = useTheme();
   const { isSubscribed } = useSubscription();
@@ -464,7 +644,24 @@ export default function GoalsScreen() {
   const [habitUnit, setHabitUnit] = useState<string>("kilometers");
   const [habitFrequency, setHabitFrequency] = useState<string>("daily");
   const [habitStartDate, setHabitStartDate] = useState<string>("");
+  const [showMedalGoalModal, setShowMedalGoalModal] = useState(false);
+  const [medalTargetInput, setMedalTargetInput] = useState("");
+  const [medalStartDateInput, setMedalStartDateInput] = useState("");
+  const [medalEndDateInput, setMedalEndDateInput] = useState("");
+  const [showExternalMedalModal, setShowExternalMedalModal] = useState(false);
+  const [externalMedalForm, setExternalMedalForm] = useState<ExternalMedalForm>({
+    activityDate: "",
+    distanceKm: "",
+    duration: "",
+    eventName: "",
+    location: "",
+  });
+  const [externalMedalImageBase64, setExternalMedalImageBase64] = useState<string | null>(null);
+  const [externalMedalMimeType, setExternalMedalMimeType] = useState<string | null>(null);
+  const [externalMedalImageName, setExternalMedalImageName] = useState<string>("");
+  const [isSubmittingExternalMedal, setIsSubmittingExternalMedal] = useState(false);
   const [previousRank, setPreviousRank] = useState<StoredRankSnapshot | null>(null);
+  const [communityRankHistory, setCommunityRankHistory] = useState<CommunityRankHistoryPoint[]>([]);
   const [activeGoalsPage, setActiveGoalsPage] = useState<GoalsSubPage>("overview");
 
   useEffect(() => {
@@ -794,23 +991,40 @@ export default function GoalsScreen() {
     const start = startDate ? new Date(startDate + "T00:00:00") : null;
     const end = endDate ? new Date(endDate + "T00:00:00") : null;
 
-    const days = recentActivities
+    const runsByDate = new Map<string, { totalDistance: number; weightedPaceSum: number; paceSum: number; count: number }>();
+    recentActivities
       .filter((activity) => Number(activity.pace_min_per_km) > 0)
-      .map((activity) => {
-        const distanceKm = Number(activity.distance_km) || bands[0].distance_km;
-        const band = getFitnessBandForDistance(distanceKm, bands);
-        const pace = Number(activity.pace_min_per_km) || 0;
+      .forEach((activity) => {
         const date = String(activity.activity_date || "").split("T")[0];
+        if (!date) return;
+        const pace = Number(activity.pace_min_per_km) || 0;
+        const distanceKm = Number(activity.distance_km) || 0;
+        const existing = runsByDate.get(date) || { totalDistance: 0, weightedPaceSum: 0, paceSum: 0, count: 0 };
+        existing.totalDistance += distanceKm;
+        existing.weightedPaceSum += pace * distanceKm;
+        existing.paceSum += pace;
+        existing.count += 1;
+        runsByDate.set(date, existing);
+      });
+
+    const days = Array.from(runsByDate.entries())
+      .map(([date, summary]) => {
+        const distanceKm = summary.totalDistance > 0 ? summary.totalDistance : bands[0].distance_km;
+        const band = getFitnessBandForDistance(distanceKm, bands);
+        const pace = summary.totalDistance > 0
+          ? summary.weightedPaceSum / summary.totalDistance
+          : summary.paceSum / Math.max(1, summary.count);
         return {
           date,
           day: new Date(date + "T00:00:00").getDate(),
           pace,
           distanceKm,
+          runCount: summary.count,
           targetPace: band?.target_pace_min_per_km || 0,
           isOnTarget: band ? pace <= band.target_pace_min_per_km : false,
         };
       })
-      .filter((day) => day.date && Number.isFinite(day.day))
+      .filter((day) => day.date && Number.isFinite(day.day) && Number.isFinite(day.pace))
       .filter((day) => {
         const date = new Date(day.date + "T00:00:00");
         if (start && !Number.isNaN(start.getTime()) && date < start) return false;
@@ -1701,25 +1915,74 @@ export default function GoalsScreen() {
     return resolved;
   }, []);
 
-  const { data: communityRankData, isLoading: communityRankLoading, refetch: refetchCommunityRank } = useQuery<CommunityRankData[]>({
-    queryKey: ["goalCommunityRank"],
+  const { data: userCanonicalRegistrationId } = useQuery<string | null>({
+    queryKey: ["goalCanonicalRegistrationId", user?.id],
     queryFn: async () => {
+      if (!user?.id) return null;
+      const resolved = await resolveCanonicalRegistrationIds([user.id]);
+      return resolved.get(user.id) || user.id;
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
+  const { data: medalTargetGoal, isLoading: medalTargetLoading, refetch: refetchMedalTargetGoal } = useQuery<MedalTargetGoal | null>({
+    queryKey: ["medalTargetGoal", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      const { data, error } = await supabase
+        .from("medal_goal")
+        .select("*")
+        .eq("registration_id", user.id)
+        .maybeSingle();
+      if (error) {
+        console.error("[Goals] Error fetching medal target goal:", JSON.stringify(error));
+        return null;
+      }
+      return data as MedalTargetGoal | null;
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
+  const { data: communityRankData, isLoading: communityRankLoading, refetch: refetchCommunityRank } = useQuery<CommunityRankData[]>({
+    queryKey: ["goalCommunityRank", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
       try {
-        const { data: activities, error: activityError } = await supabase
-          .from("activities")
-          .select("registration_id, activity_date, distance_km, start_time, end_time, pause_duration_seconds, pace_min_per_km");
-        if (activityError) {
-          console.error("[Goals] Community rank activity fetch error:", JSON.stringify(activityError));
-          throw activityError;
+        const activities: any[] = [];
+        const pageSize = 1000;
+
+        for (let offset = 0; ; offset += pageSize) {
+          const { data: activityPage, error: activityError } = await supabase
+            .from("activities")
+            .select("activity_id, registration_id, activity_date, distance_km, start_time, end_time, pause_duration_seconds, pace_min_per_km")
+            .order("activity_id", { ascending: true })
+            .range(offset, offset + pageSize - 1);
+          if (activityError) {
+            console.error("[Goals] Community rank activity fetch error:", JSON.stringify(activityError));
+            throw activityError;
+          }
+          activities.push(...(activityPage || []));
+          if (!activityPage || activityPage.length < pageSize) break;
         }
+
         const { data: registrations, error: regError } = await supabase
           .from("registrations")
-          .select('registration_id, first_name, other_names, has_disability, para_uses_equipment');
+          .select("registration_id, first_name, other_names, dob, has_disability, para_uses_equipment");
         if (regError) {
           console.error("[Goals] Community rank registration fetch error:", JSON.stringify(regError));
           throw regError;
         }
-        const regMap = new Map(registrations?.map((r: any) => [r.registration_id, r]));
+
+        const canonicalMap = await resolveCanonicalRegistrationIds([
+          user.id,
+          ...activities.map((activity: any) => activity.registration_id).filter(Boolean),
+        ]);
+        const eligibleRegistrations = (registrations || []).filter(
+          (registration: any) => !isJuniorAge(registration.dob) && !usesParaEquipment(registration)
+        );
+        const eligibleRegistrationIds = new Set(eligibleRegistrations.map((registration: any) => registration.registration_id));
         const userStats = new Map<string, {
           totalDistance: number;
           totalTime: number;
@@ -1727,9 +1990,10 @@ export default function GoalsScreen() {
           activityCount: number;
           activeDays: Set<string>;
         }>();
-        activities?.forEach((activity: any) => {
-          const regId = activity.registration_id;
+        activities.forEach((activity: any) => {
+          const regId = canonicalMap.get(activity.registration_id) || activity.registration_id;
           if (!regId) return;
+          if (!eligibleRegistrationIds.has(regId)) return;
           const existing = userStats.get(regId) || {
             totalDistance: 0, totalTime: 0, paceSum: 0, activityCount: 0, activeDays: new Set<string>(),
           };
@@ -1737,19 +2001,27 @@ export default function GoalsScreen() {
           existing.totalTime += getActivityDurationMinutes(activity) || 0;
           existing.paceSum += activity.pace_min_per_km || 0;
           existing.activityCount += 1;
-          existing.activeDays.add(activity.activity_date);
+          const activityDateKey = getDateOnly(activity.activity_date);
+          if (activityDateKey) existing.activeDays.add(activityDateKey);
           userStats.set(regId, existing);
         });
         const result: CommunityRankData[] = [];
-        userStats.forEach((stats, regId) => {
+        eligibleRegistrations.forEach((registration: any) => {
+          const regId = registration.registration_id;
+          if (!regId) return;
+          const stats = userStats.get(regId) || {
+            totalDistance: 0,
+            totalTime: 0,
+            paceSum: 0,
+            activityCount: 0,
+            activeDays: new Set<string>(),
+          };
           if (stats.totalDistance < 3 || stats.totalTime < 30) return;
-          const registration = regMap.get(regId) as any;
-          if (!registration) return;
-          if (registration.has_disability === true && registration.para_uses_equipment === true) return;
           const firstName = registration.first_name || "";
           const otherNames = registration.other_names || "";
           const fullName = [firstName, otherNames].filter((n: string) => n).join(" ") || "Unknown";
           const activeDays = stats.activeDays.size;
+          if (activeDays < 1) return;
           result.push({
             registrationId: regId,
             Name: fullName,
@@ -1828,8 +2100,105 @@ export default function GoalsScreen() {
     staleTime: 30000,
   });
 
+  const { data: clubRanking, isLoading: clubRankLoading, refetch: refetchClubRank } = useQuery<RankSummary | null>({
+    queryKey: ["goalClubRank", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      const canonicalMap = await resolveCanonicalRegistrationIds([user.id]);
+      const ownerRegistrationId = canonicalMap.get(user.id) || user.id;
+
+      const { data: memberships, error: membershipError } = await supabase
+        .from("club_membership_request")
+        .select("club_id, club")
+        .eq("registration_id", ownerRegistrationId)
+        .eq("request_type", "membership")
+        .in("status", ["pending", "approved"]);
+      if (membershipError) throw membershipError;
+
+      const userClubIds = Array.from(new Set((memberships || []).map((row: any) => row.club_id).filter(Boolean)));
+      if (userClubIds.length === 0) return null;
+
+      const { data: clubRows, error: clubError } = await supabase
+        .from("clubs")
+        .select("club_id, club_name, coordinator_id, is_special_club, special_club_code")
+        .in("club_id", userClubIds);
+      if (clubError) throw clubError;
+
+      const selectedClub = (clubRows || []).find((club: any) => !club.is_special_club && !club.special_club_code) || clubRows?.[0];
+      if (!selectedClub?.club_id) return null;
+
+      const [
+        { data: clubMemberships, error: clubMembershipsError },
+        legacyMembersResult,
+      ] = await Promise.all([
+        supabase
+          .from("club_membership_request")
+          .select("registration_id")
+          .eq("club_id", selectedClub.club_id)
+          .eq("request_type", "membership")
+          .in("status", ["pending", "approved"]),
+        selectedClub.coordinator_id
+          ? supabase
+              .from("club_members")
+              .select("registration_id")
+              .eq("coordinator_id", selectedClub.coordinator_id)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (clubMembershipsError) throw clubMembershipsError;
+      if (legacyMembersResult.error) throw legacyMembersResult.error;
+
+      const memberIds = Array.from(new Set([
+        ownerRegistrationId,
+        ...(clubMemberships || []).map((row: any) => row.registration_id).filter(Boolean),
+        ...(legacyMembersResult.data || []).map((row: any) => row.registration_id).filter(Boolean),
+      ]));
+      if (memberIds.length === 0) return null;
+
+      const { data: activities, error: activityError } = await supabase
+        .from("activities")
+        .select("registration_id, activity_date, distance_km, pace_min_per_km")
+        .in("registration_id", memberIds);
+      if (activityError) throw activityError;
+
+      const rowsById = new Map<string, { distance: number; activeDays: Set<string>; paceSum: number; activityCount: number }>();
+      memberIds.forEach((id) => rowsById.set(id, { distance: 0, activeDays: new Set<string>(), paceSum: 0, activityCount: 0 }));
+      (activities || []).forEach((activity: any) => {
+        const regId = activity.registration_id;
+        if (!regId) return;
+        const existing = rowsById.get(regId) || { distance: 0, activeDays: new Set<string>(), paceSum: 0, activityCount: 0 };
+        existing.distance += Number(activity.distance_km) || 0;
+        existing.activeDays.add(getDateOnly(activity.activity_date));
+        existing.paceSum += Number(activity.pace_min_per_km) || 0;
+        existing.activityCount += 1;
+        rowsById.set(regId, existing);
+      });
+
+      const rows: FamilyRankRow[] = Array.from(rowsById.entries()).map(([registrationId, row]) => ({
+        registrationId,
+        distance: row.distance,
+        activeDays: row.activeDays.size,
+        averagePace: row.activityCount > 0 ? row.paceSum / row.activityCount : 0,
+      }));
+
+      const sorted = rows.sort((a, b) => b.distance - a.distance || b.activeDays - a.activeDays || a.averagePace - b.averagePace);
+      const userIndex = sorted.findIndex((row) => row.registrationId === ownerRegistrationId);
+      if (userIndex === -1 || sorted[userIndex].distance <= 0) return null;
+
+      return {
+        label: "Club",
+        currentRank: userIndex + 1,
+        totalParticipants: sorted.length,
+        metricLabel: selectedClub.club_name || "Club",
+        metricValue: `${sorted[userIndex].distance.toFixed(1)} km`,
+      };
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
   const communityRanking = useMemo(() => {
     if (!communityRankData || !user?.id) return null;
+    const currentRegistrationId = userCanonicalRegistrationId || user.id;
     const sorted = [...communityRankData].sort((a, b) => {
       const distDiff = b.AvgDistance - a.AvgDistance;
       if (distDiff !== 0) return distDiff;
@@ -1837,7 +2206,7 @@ export default function GoalsScreen() {
       if (daysDiff !== 0) return daysDiff;
       return a.AveragePace - b.AveragePace;
     });
-    const userIndex = sorted.findIndex((item) => item.registrationId === user.id);
+    const userIndex = sorted.findIndex((item) => item.registrationId === currentRegistrationId || item.registrationId === user.id);
     if (userIndex === -1) return null;
     const currentRank = userIndex + 1;
     const totalParticipants = sorted.length;
@@ -1850,7 +2219,7 @@ export default function GoalsScreen() {
       activeDays: userData.ActiveDays,
       avgPace: userData.AveragePace,
     };
-  }, [communityRankData, user?.id]);
+  }, [communityRankData, user?.id, userCanonicalRegistrationId]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -1914,7 +2283,7 @@ export default function GoalsScreen() {
   const communityActivityRankSummary = useMemo<RankSummary | null>(() => {
     if (!communityRanking) return null;
     return {
-      label: "Activity",
+      label: "Community",
       currentRank: communityRanking.currentRank,
       totalParticipants: communityRanking.totalParticipants,
       metricLabel: "Avg km/day",
@@ -1922,79 +2291,182 @@ export default function GoalsScreen() {
     };
   }, [communityRanking]);
 
+  useEffect(() => {
+    if (!user?.id) {
+      setCommunityRankHistory([]);
+      return;
+    }
+
+    let active = true;
+    void AsyncStorage.getItem(`community_goal_rank_history_${user.id}`)
+      .then((stored) => {
+        if (!active || !stored) return;
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          setCommunityRankHistory(parsed.filter((point) => point?.date).slice(-30));
+        }
+      })
+      .catch((error) => {
+        console.warn("[Goals] Could not load community rank history:", error);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || (!familyRanking && !clubRanking && !communityActivityRankSummary)) return;
+
+    const today = getLocalDateKey(new Date());
+    const nextPoint: CommunityRankHistoryPoint = {
+      date: today,
+      familyRank: familyRanking?.currentRank,
+      familyTotal: familyRanking?.totalParticipants,
+      clubRank: clubRanking?.currentRank,
+      clubTotal: clubRanking?.totalParticipants,
+      communityRank: communityActivityRankSummary?.currentRank,
+      communityTotal: communityActivityRankSummary?.totalParticipants,
+    };
+
+    setCommunityRankHistory((current) => {
+      const merged = [...current.filter((point) => point.date !== today), nextPoint].slice(-30);
+      void AsyncStorage.setItem(`community_goal_rank_history_${user.id}`, JSON.stringify(merged)).catch((error) => {
+        console.warn("[Goals] Could not save community rank history:", error);
+      });
+      return merged;
+    });
+  }, [clubRanking, communityActivityRankSummary, familyRanking, user?.id]);
+
   const { data: medalGoalData, isLoading: medalGoalLoading, refetch: refetchMedalGoal } = useQuery<MedalGoalData | null>({
-    queryKey: ["medalGoalData", user?.id],
+    queryKey: ["medalGoalData", user?.id, medalTargetGoal?.start_date, medalTargetGoal?.end_date, medalTargetGoal?.target_medals],
     queryFn: async () => {
-      if (!user?.id) return null;
+      if (!user?.id || !medalTargetGoal) return null;
       try {
+        const goalStart = medalTargetGoal.start_date;
+        const goalEnd = medalTargetGoal.end_date;
+        const userRegistrationIds = Array.from(new Set([user.id, userCanonicalRegistrationId].filter(Boolean) as string[]));
+
         const { data: allEvents, error: eventsError } = await supabase
           .from("events")
-          .select("event_id, event_name, starts_at, ends_at, medal_min_cumulative_distance, medal_date_start, medal_date_end");
+          .select("event_id, event_name, starts_at, ends_at, country, country_code, is_virtual, has_medal, approval_status, available_distances_km, medal_min_daily_distance, medal_min_cumulative_distance, medal_date_start, medal_date_end, external_organizer_name")
+          .eq("has_medal", true)
+          .eq("approval_status", "approved")
+          .lte("starts_at", goalEnd)
+          .gte("ends_at", goalStart);
         if (eventsError) {
           console.error("[Goals] Medal goal - events fetch error:", JSON.stringify(eventsError));
           return null;
         }
-        if (!allEvents || allEvents.length === 0) return null;
+        const events = allEvents || [];
+        const eventIds = events.map((event: any) => event.event_id).filter(Boolean);
 
-        const { data: participantData, error: partError } = await supabase
-          .from("events_participants")
-          .select("event_id")
-          .eq("registration_id", user.id);
-        if (partError) {
-          console.error("[Goals] Medal goal - participants fetch error:", JSON.stringify(partError));
-          return null;
-        }
+        const [{ data: participantData, error: partError }, { data: activities, error: activityError }] = await Promise.all([
+          eventIds.length > 0
+            ? supabase
+              .from("events_participants")
+              .select("event_id, registration_id, distance_km")
+              .in("event_id", eventIds)
+              .in("registration_id", userRegistrationIds)
+            : Promise.resolve({ data: [], error: null } as any),
+          supabase
+            .from("activities")
+            .select("activity_date, distance_km")
+            .in("registration_id", userRegistrationIds)
+            .gte("activity_date", goalStart)
+            .lte("activity_date", goalEnd),
+        ]);
+        if (partError) throw partError;
+        if (activityError) throw activityError;
 
-        const enrolledEventIds = new Set((participantData || []).map((p: any) => p.event_id));
-        const totalEvents = allEvents.length;
-        const enrolledEvents = enrolledEventIds.size;
+        const participantByEvent = new Map<string, any>();
+        (participantData || []).forEach((participant: any) => {
+          if (participant?.event_id) participantByEvent.set(participant.event_id, participant);
+        });
+        const activityDistanceByDate = new Map<string, number>();
+        (activities || []).forEach((activity: any) => {
+          const date = getDateOnly(activity.activity_date);
+          if (!date) return;
+          activityDistanceByDate.set(date, (activityDistanceByDate.get(date) || 0) + (Number(activity.distance_km) || 0));
+        });
 
         let medalsEarned = 0;
-        const eventsDetail: MedalGoalData["events"] = [];
+        let externalMedalsEarned = 0;
+        const countryRaces: MedalRaceSummary[] = [];
+        const virtualRaces: MedalRaceSummary[] = [];
 
-        for (const event of allEvents) {
-          const isEnrolled = enrolledEventIds.has(event.event_id);
-          let isOnMedalList = false;
+        events.forEach((event: any) => {
+          const participant = participantByEvent.get(event.event_id);
+          const isEnrolled = !!participant;
+          const medalStart = getDateOnly(event.medal_date_start) || getDateOnly(event.starts_at);
+          const medalEnd = getDateOnly(event.medal_date_end) || getDateOnly(event.ends_at);
+          const participantDistance = Number(participant?.distance_km) || 0;
+          const minDailyDistance = Number(event.medal_min_daily_distance) || 0;
+          const minCumulativeDistance = Number(event.medal_min_cumulative_distance) || 0;
+          let isEarned = false;
 
           if (isEnrolled) {
-            const medalStart = event.medal_date_start || event.starts_at;
-            const medalEnd = event.medal_date_end || event.ends_at;
+            isEarned = participantDistance > 0 && (minDailyDistance <= 0 || participantDistance >= minDailyDistance);
 
-            if (medalStart && event.medal_min_cumulative_distance) {
-              const { data: acts } = await supabase
-                .from("activities")
-                .select("distance_km")
-                .eq("registration_id", user.id)
-                .gte("activity_date", medalStart)
-                .lte("activity_date", medalEnd);
-
-              const totalDist = (acts || []).reduce((sum: number, a: any) => sum + (a.distance_km || 0), 0);
-              isOnMedalList = totalDist >= event.medal_min_cumulative_distance;
-            } else if (isEnrolled && !event.medal_min_cumulative_distance) {
-              isOnMedalList = true;
+            if (medalStart && medalEnd && (minDailyDistance > 0 || minCumulativeDistance > 0)) {
+              let totalDistance = participantDistance;
+              let dailyQualified = true;
+              let cursor = medalStart;
+              while (cursor <= medalEnd) {
+                const dayDistance = activityDistanceByDate.get(cursor) || 0;
+                totalDistance += dayDistance;
+                if (minDailyDistance > 0 && dayDistance < minDailyDistance) dailyQualified = false;
+                cursor = addDaysIso(cursor, 1);
+              }
+              isEarned = dailyQualified && (minCumulativeDistance <= 0 || totalDistance >= minCumulativeDistance);
             }
 
-            if (isOnMedalList) medalsEarned++;
+            if (!minDailyDistance && !minCumulativeDistance && participantDistance > 0) {
+              isEarned = true;
+            }
           }
 
-          eventsDetail.push({
+          if (isEarned) {
+            medalsEarned += 1;
+            if (String(event.external_organizer_name || "").trim()) externalMedalsEarned += 1;
+          }
+
+          const raceSummary: MedalRaceSummary = {
+            eventId: event.event_id,
             eventName: event.event_name || "Unnamed Event",
+            country: event.is_virtual ? "Virtual" : (event.country || event.country_code || "Country"),
+            dateLabel: formatCompactDateRange(event.starts_at, event.ends_at),
+            isVirtual: event.is_virtual === true,
             isEnrolled,
-            isOnMedalList,
-          });
-        }
+            isEarned,
+          };
+          if (raceSummary.isVirtual) {
+            virtualRaces.push(raceSummary);
+          } else {
+            countryRaces.push(raceSummary);
+          }
+        });
 
-        const enrollmentRatio = totalEvents > 0 ? (enrolledEvents / totalEvents) * 100 : 0;
-        const medalRatio = enrolledEvents > 0 ? (medalsEarned / enrolledEvents) * 100 : 0;
+        const targetMedals = medalTargetGoal.target_medals;
+        const medalRatio = targetMedals > 0 ? (medalsEarned / targetMedals) * 100 : 0;
 
-        console.log("[Goals] Medal goal data:", { totalEvents, enrolledEvents, medalsEarned, enrollmentRatio, medalRatio });
-        return { totalEvents, enrolledEvents, medalsEarned, enrollmentRatio, medalRatio, events: eventsDetail };
+        console.log("[Goals] Medal goal data:", { availableRaces: events.length, medalsEarned, targetMedals, medalRatio });
+        return {
+          targetMedals,
+          availableRaces: events.length,
+          medalsEarned,
+          medalRatio,
+          internalMedalsEarned: medalsEarned - externalMedalsEarned,
+          externalMedalsEarned,
+          countryRaces,
+          virtualRaces,
+        };
       } catch (error) {
         console.error("[Goals] Medal goal query failed:", JSON.stringify(error));
         return null;
       }
     },
-    enabled: !!user?.id,
+    enabled: !!user?.id && !!medalTargetGoal,
     staleTime: 30000,
   });
 
@@ -2121,9 +2593,30 @@ export default function GoalsScreen() {
   });
 
   const communityGoalRanks = useMemo(
-    () => [familyRanking, communityActivityRankSummary, communityMedalRanking].filter(Boolean) as RankSummary[],
-    [communityActivityRankSummary, communityMedalRanking, familyRanking]
+    () => [familyRanking, clubRanking, communityActivityRankSummary].filter(Boolean) as RankSummary[],
+    [clubRanking, communityActivityRankSummary, familyRanking]
   );
+  const eligibleCommunityGoalRanks = useMemo(
+    () => communityGoalRanks.filter((rank) => rank.totalParticipants >= 3),
+    [communityGoalRanks]
+  );
+
+  const communityRankGraphPoints = useMemo(() => {
+    const today = getLocalDateKey(new Date());
+    const todayPoint: CommunityRankHistoryPoint = {
+      date: today,
+      familyRank: familyRanking?.currentRank,
+      familyTotal: familyRanking?.totalParticipants,
+      clubRank: clubRanking?.currentRank,
+      clubTotal: clubRanking?.totalParticipants,
+      communityRank: communityActivityRankSummary?.currentRank,
+      communityTotal: communityActivityRankSummary?.totalParticipants,
+    };
+    const hasTodayRank = [todayPoint.familyRank, todayPoint.clubRank, todayPoint.communityRank]
+      .some((rank) => typeof rank === "number");
+    const base = communityRankHistory.filter((point) => point.date !== today);
+    return (hasTodayRank ? [...base, todayPoint] : base).slice(-35);
+  }, [clubRanking, communityActivityRankSummary, communityRankHistory, familyRanking]);
 
   const { data: eventGoals = [], refetch: refetchEvents } = useQuery<RegisteredEvent[]>({
     queryKey: ["goalEvents", user?.id],
@@ -2218,8 +2711,191 @@ export default function GoalsScreen() {
     void refetchHabit();
     void refetchCommunityRank();
     void refetchFamilyRank();
+    void refetchClubRank();
+    void refetchMedalTargetGoal();
     void refetchMedalGoal();
     void refetchCommunityMedalRank();
+  };
+
+  const saveMedalGoalMutation = useMutation({
+    mutationFn: async ({ targetMedals, startDate, endDate }: { targetMedals: number; startDate: string; endDate: string }) => {
+      if (!user?.id) throw new Error("Not logged in");
+      const payload = {
+        registration_id: user.id,
+        target_medals: targetMedals,
+        start_date: startDate,
+        end_date: endDate,
+        updated_at: new Date().toISOString(),
+      };
+
+      const query = medalTargetGoal
+        ? supabase
+          .from("medal_goal")
+          .update(payload)
+          .eq("medal_goal_id", medalTargetGoal.medal_goal_id)
+        : supabase
+          .from("medal_goal")
+          .insert(payload);
+
+      const { data, error } = await query.select().single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["medalTargetGoal", user?.id] });
+      void queryClient.invalidateQueries({ queryKey: ["medalGoalData", user?.id] });
+      setShowMedalGoalModal(false);
+      Alert.alert("Success", "Earn Medals goal saved!");
+    },
+    onError: (error: any) => {
+      console.error("[Goals] Save medal goal error:", JSON.stringify(error));
+      Alert.alert("Error", error?.message || "Failed to save Earn Medals goal");
+    },
+  });
+
+  const openEditMedalGoal = useCallback(() => {
+    if (medalTargetGoal) {
+      setMedalTargetInput(String(medalTargetGoal.target_medals));
+      setMedalStartDateInput(medalTargetGoal.start_date);
+      setMedalEndDateInput(medalTargetGoal.end_date);
+    } else {
+      const today = getLocalDateKey(new Date());
+      const yearEnd = `${new Date().getFullYear()}-12-31`;
+      setMedalTargetInput("");
+      setMedalStartDateInput(today);
+      setMedalEndDateInput(yearEnd);
+    }
+    setShowMedalGoalModal(true);
+  }, [medalTargetGoal]);
+
+  const handleSaveMedalGoal = useCallback(() => {
+    const targetMedals = Number.parseInt(medalTargetInput.trim(), 10);
+    if (!Number.isFinite(targetMedals) || targetMedals <= 0) {
+      Alert.alert("Error", "Enter a target number of medals greater than 0.");
+      return;
+    }
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(medalStartDateInput) || !dateRegex.test(medalEndDateInput)) {
+      Alert.alert("Error", "Please enter start and end dates in YYYY-MM-DD format.");
+      return;
+    }
+
+    const start = new Date(`${medalStartDateInput}T00:00:00`);
+    const end = new Date(`${medalEndDateInput}T00:00:00`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
+      Alert.alert("Error", "End date must be on or after the start date.");
+      return;
+    }
+
+    saveMedalGoalMutation.mutate({
+      targetMedals,
+      startDate: medalStartDateInput,
+      endDate: medalEndDateInput,
+    });
+  }, [medalEndDateInput, medalStartDateInput, medalTargetInput, saveMedalGoalMutation]);
+
+  const updateExternalMedalForm = (field: keyof ExternalMedalForm, value: string) => {
+    setExternalMedalForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const resetExternalMedalForm = () => {
+    setExternalMedalForm({
+      activityDate: "",
+      distanceKm: "",
+      duration: "",
+      eventName: "",
+      location: "",
+    });
+    setExternalMedalImageBase64(null);
+    setExternalMedalMimeType(null);
+    setExternalMedalImageName("");
+  };
+
+  const pickExternalMedalImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Permission Required", "Please allow photo access to upload your medal picture.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+      base64: true,
+    });
+
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    if (!asset.base64) {
+      Alert.alert("Image Error", "Could not read the selected medal picture.");
+      return;
+    }
+    setExternalMedalImageBase64(asset.base64);
+    setExternalMedalMimeType(asset.mimeType || "image/jpeg");
+    setExternalMedalImageName(asset.fileName || "Medal picture selected");
+  };
+
+  const handleSubmitExternalMedal = async () => {
+    if (!user?.id) {
+      Alert.alert("Sign In Required", "Please sign in before submitting an external medal.");
+      return;
+    }
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(externalMedalForm.activityDate)) {
+      Alert.alert("Date Required", "Enter the medal date in YYYY-MM-DD format.");
+      return;
+    }
+
+    const distanceKm = Number.parseFloat(externalMedalForm.distanceKm.replace(/,/g, "").trim());
+    if (!Number.isFinite(distanceKm) || distanceKm <= 0) {
+      Alert.alert("Distance Required", "Enter a valid distance in kilometers.");
+      return;
+    }
+
+    if (!/^\d{2}:\d{2}:\d{2}$/.test(externalMedalForm.duration.trim())) {
+      Alert.alert("Time Required", "Enter time as HH:MM:SS, for example 01:02:30.");
+      return;
+    }
+
+    if (!externalMedalForm.eventName.trim() || !externalMedalForm.location.trim()) {
+      Alert.alert("Event Details Required", "Enter the external event name and location.");
+      return;
+    }
+
+    if (!externalMedalImageBase64) {
+      Alert.alert("Medal Picture Required", "Upload a medal picture for approval.");
+      return;
+    }
+
+    setIsSubmittingExternalMedal(true);
+    try {
+      await getServerClient().activities.submitExternalActivity.mutate({
+        registrationId: user.id,
+        activityDate: externalMedalForm.activityDate,
+        exerciseType: "Run",
+        startTime: "00:00:00",
+        duration: externalMedalForm.duration.trim(),
+        distanceKm,
+        sourceType: "medal_claim",
+        sourceLabel: "External Medal",
+        externalEventName: externalMedalForm.eventName.trim(),
+        externalEventLocation: externalMedalForm.location.trim(),
+        evidenceImageBase64: externalMedalImageBase64,
+        evidenceMimeType: externalMedalMimeType || "image/jpeg",
+      });
+
+      Alert.alert("Submitted", "Your external medal has been sent for approval.");
+      resetExternalMedalForm();
+      setShowExternalMedalModal(false);
+      void refetchMedalGoal();
+      void refetchCommunityMedalRank();
+    } catch (error: any) {
+      Alert.alert("Could Not Submit", error?.message || "Please try again.");
+    } finally {
+      setIsSubmittingExternalMedal(false);
+    }
   };
 
   const dailyRunProgress = useMemo(() => {
@@ -2450,7 +3126,7 @@ export default function GoalsScreen() {
     setShowGoalForm(true);
   }, [fitnessGoal]);
 
-  const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !dailyRunGoal && !fitnessGoalLoading && !dailyRunGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading && !habitDeclaration && !habitDeclarationLoading && communityGoalRanks.length === 0 && !communityRankLoading && !familyRankLoading && !communityMedalRankLoading && !medalGoalData && !medalGoalLoading;
+  const hasNoGoals = userGoals.length === 0 && !weightTargetGoal && ongoingEvents.length === 0 && !fitnessGoal && !dailyRunGoal && !fitnessGoalLoading && !dailyRunGoalLoading && !weightTargetLoading && healthEntries.length === 0 && !healthLoading && !habitDeclaration && !habitDeclarationLoading && eligibleCommunityGoalRanks.length === 0 && !communityRankLoading && !familyRankLoading && !clubRankLoading && !communityMedalRankLoading && !medalTargetGoal && !medalTargetLoading;
   const hasRunningGoal = !!dailyRunGoal;
   const selectedGoalKeys = useMemo(() => {
     const keys = new Set<string>();
@@ -2509,22 +3185,22 @@ export default function GoalsScreen() {
       medals: {
         key: "medals",
         label: "Earn Medals",
-        isTracked: (!!medalGoalData && medalGoalData.enrolledEvents > 0) || !!communityMedalRanking,
+        isTracked: !!medalTargetGoal,
         icon: "trophy",
-        overview: "Earn Medals follows your medal race participation and how many medals you actually earn.",
-        measuredBy: "Measured by medal races enrolled as a share of eligible local medal races, medals earned against yearly target, and future Community Medals ranking.",
+        overview: "Set a medal target for a date range, then track internal and approved external medals against it.",
+        measuredBy: "Measured by approved medal races earned against your target. Progress can exceed 100% when you beat the target.",
       },
       community: {
         key: "community",
         label: "Compete in Community",
-        isTracked: communityGoalRanks.length > 0,
+        isTracked: eligibleCommunityGoalRanks.length > 0,
         icon: "users",
-        overview: "Compete in Community brings together rankings from the clubs and community tables you belong to.",
-        measuredBy: "Measured by available community and club rankings from your memberships.",
+        overview: "Compete in Community tracks how your rank changes across Family, Club, and Community.",
+        measuredBy: "Measured by daily rank snapshots from Family, Club, and Community Activity tables when those groups are available.",
       },
     };
     return map;
-  }, [communityGoalRanks.length, communityMedalRanking, fitnessGoal, habitDeclaration, hasRunningGoal, healthEntries, medalGoalData, weightTargetGoal]);
+  }, [eligibleCommunityGoalRanks.length, fitnessGoal, habitDeclaration, hasRunningGoal, healthEntries, medalTargetGoal, weightTargetGoal]);
 
   const allGoalTypes = useMemo(() => {
     const goalKeys = orderedGoalKeys.filter(k => k !== "events");
@@ -2540,11 +3216,11 @@ export default function GoalsScreen() {
     if (goalKey === "habit") return !!habitDeclaration;
     if (goalKey === "weight") return !!weightTargetGoal;
     if (goalKey === "health") return healthEntries.length > 0;
-    if (goalKey === "medals") return !!medalGoalData || !!communityMedalRanking;
-    if (goalKey === "community") return communityGoalRanks.length > 0;
+    if (goalKey === "medals") return !!medalTargetGoal;
+    if (goalKey === "community") return eligibleCommunityGoalRanks.length > 0;
     if (goalKey === "events") return ongoingEvents.length > 0;
     return false;
-  }, [communityGoalRanks.length, communityMedalRanking, fitnessGoal, habitDeclaration, hasRunningGoal, healthEntries.length, medalGoalData, ongoingEvents.length, weightTargetGoal]);
+  }, [eligibleCommunityGoalRanks.length, fitnessGoal, habitDeclaration, hasRunningGoal, healthEntries.length, medalTargetGoal, ongoingEvents.length, weightTargetGoal]);
   const goalsSubPages: { key: GoalsSubPage; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "set", label: "Set Goals" },
@@ -2572,11 +3248,11 @@ export default function GoalsScreen() {
       return;
     }
     if (goalKey === "medals") {
-      router.push("/events" as any);
+      openEditMedalGoal();
       return;
     }
     setActiveGoalsPage("set");
-  }, [openDailyRunGoalForm, openEditGoalForm, openEditHabit, openEditWeightTarget, router]);
+  }, [openDailyRunGoalForm, openEditGoalForm, openEditHabit, openEditMedalGoal, openEditWeightTarget]);
   if (!isSubscribed) {
     return (
       <SubscriptionGate featureName="Goals">
@@ -2745,13 +3421,16 @@ export default function GoalsScreen() {
               )}
 
               {hasSelectedGoal("medals") && (
-                <View style={[styles.setGoalActionCard, styles.setGoalActionCardDisabled]}>
-                  <Trophy size={22} color={colors.textLight} />
+                <TouchableOpacity style={styles.setGoalActionCard} onPress={openEditMedalGoal} activeOpacity={0.85}>
+                  <Trophy size={22} color="#D97706" />
                   <View style={styles.setGoalActionInfo}>
-                    <Text style={[styles.setGoalActionTitle, styles.setGoalActionTitleDisabled]}>Earn Medals</Text>
-                    <Text style={styles.setGoalActionText}>No target setup required. Medal progress is measured from eligible event participation.</Text>
+                    <Text style={styles.setGoalActionTitle}>Earn Medals</Text>
+                    <Text style={styles.setGoalActionText}>
+                      {medalTargetGoal ? "Update medal target and dates." : "Set target medals and date range."}
+                    </Text>
                   </View>
-                </View>
+                  <ChevronRight size={16} color={colors.textLight} />
+                </TouchableOpacity>
               )}
 
               {hasSelectedGoal("community") && (
@@ -3425,59 +4104,76 @@ export default function GoalsScreen() {
           }
 
           if (goalKey === "medals") {
-            return medalGoalData ? (
+            return medalTargetGoal ? (
               <View key="medals" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Trophy size={18} color="#D97706" />
                   <Text style={styles.sectionTitle}>Earn Medals</Text>
+                  <TouchableOpacity onPress={openEditMedalGoal} style={styles.editButton} activeOpacity={0.7}>
+                    <Text style={styles.editButtonText}>Edit</Text>
+                    <ChevronRight size={14} color={colors.primary} />
+                  </TouchableOpacity>
                 </View>
                 <View style={styles.medalGoalCard}>
-                  <View style={styles.medalRatiosRow}>
-                    <View style={styles.medalRatioBlock}>
-                      <View style={styles.medalRatioCircle}>
-                        <Text style={styles.medalRatioNumber}>{medalGoalData.enrolledEvents}</Text>
-                        <Text style={styles.medalRatioOf}>/ {medalGoalData.totalEvents}</Text>
-                      </View>
-                      <Text style={styles.medalRatioLabel}>Eligible Races Enrolled</Text>
-                      <View style={styles.medalRatioBarTrack}>
-                        <View style={[styles.medalRatioBarFill, { width: `${medalGoalData.enrollmentRatio}%`, backgroundColor: "#D97706" }]} />
-                      </View>
-                      <Text style={styles.medalRatioPercent}>{Math.round(medalGoalData.enrollmentRatio)}%</Text>
+                  <View style={styles.medalGoalHeaderRow}>
+                    <View>
+                      <Text style={styles.medalGoalScore}>{Math.round(medalGoalData?.medalRatio || 0)}%</Text>
+                      <Text style={styles.dailyRunScoreLabel}>Medals earned</Text>
                     </View>
-
-                    <View style={styles.medalRatioDivider} />
-
-                    <View style={styles.medalRatioBlock}>
-                      <View style={styles.medalRatioCircle}>
-                        <Text style={[styles.medalRatioNumber, { color: "#059669" }]}>{medalGoalData.medalsEarned}</Text>
-                        <Text style={styles.medalRatioOf}>/ {medalGoalData.enrolledEvents}</Text>
-                      </View>
-                      <Text style={styles.medalRatioLabel}>Medals Earned / Target</Text>
-                      <View style={styles.medalRatioBarTrack}>
-                        <View style={[styles.medalRatioBarFill, { width: `${medalGoalData.medalRatio}%`, backgroundColor: "#059669" }]} />
-                      </View>
-                      <Text style={styles.medalRatioPercent}>{Math.round(medalGoalData.medalRatio)}%</Text>
+                    <View style={styles.medalTargetPill}>
+                      <Text style={styles.medalTargetPillText}>
+                        {medalGoalData?.medalsEarned || 0} / {medalTargetGoal.target_medals} medals
+                      </Text>
                     </View>
                   </View>
 
-                  {medalGoalData.events.filter(e => e.isEnrolled).length > 0 && (
+                  <View style={styles.medalRatioBarTrackFull}>
+                    <View
+                      style={[
+                        styles.medalRatioBarFill,
+                        {
+                          width: `${Math.min(100, Math.round(medalGoalData?.medalRatio || 0))}%`,
+                          backgroundColor: (medalGoalData?.medalRatio || 0) >= 100 ? "#059669" : "#D97706",
+                        },
+                      ]}
+                    />
+                  </View>
+
+                  <View style={styles.medalGoalMetaRow}>
+                    <Text style={styles.medalGoalMetaText}>
+                      {formatGoalDate(medalTargetGoal.start_date)} to {formatGoalDate(medalTargetGoal.end_date)}
+                    </Text>
+                    <TouchableOpacity onPress={() => setShowExternalMedalModal(true)} style={styles.medalAddButton} activeOpacity={0.8}>
+                      <Plus size={13} color="#92400E" />
+                      <Text style={styles.medalAddButtonText}>External medal</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.medalBreakdownRow}>
+                    <Text style={styles.medalBreakdownText}>Internal {medalGoalData?.internalMedalsEarned || 0}</Text>
+                    <Text style={styles.medalBreakdownText}>External {medalGoalData?.externalMedalsEarned || 0}</Text>
+                    <Text style={styles.medalBreakdownText}>Available {medalGoalData?.availableRaces || 0}</Text>
+                  </View>
+
+                  {medalGoalData && medalGoalData.countryRaces.length > 0 && (
                     <View style={styles.medalEventsList}>
-                      <Text style={styles.weightHistoryTitle}>Enrolled Events</Text>
-                      {medalGoalData.events.filter(e => e.isEnrolled).map((event, index) => (
-                        <View key={index} style={styles.medalEventRow}>
+                      <Text style={styles.weightHistoryTitle}>Country</Text>
+                      {medalGoalData.countryRaces.map((event) => (
+                        <View key={event.eventId} style={styles.medalEventRow}>
                           <View style={styles.medalEventInfo}>
                             <Text style={styles.medalEventName} numberOfLines={1}>{event.eventName}</Text>
+                            <Text style={styles.medalEventMeta} numberOfLines={1}>{event.country} • {event.dateLabel}</Text>
                           </View>
                           <View style={[
                             styles.medalEventBadge,
-                            event.isOnMedalList ? styles.medalEventBadgeEarned : styles.medalEventBadgePending,
+                            event.isEarned ? styles.medalEventBadgeEarned : styles.medalEventBadgePending,
                           ]}>
-                            <Award size={12} color={event.isOnMedalList ? "#D97706" : colors.textLight} />
+                            <Award size={12} color={event.isEarned ? "#D97706" : colors.textLight} />
                             <Text style={[
                               styles.medalEventBadgeText,
-                              event.isOnMedalList ? styles.medalEventBadgeTextEarned : styles.medalEventBadgeTextPending,
+                              event.isEarned ? styles.medalEventBadgeTextEarned : styles.medalEventBadgeTextPending,
                             ]}>
-                              {event.isOnMedalList ? "Earned" : "Pending"}
+                              {event.isEarned ? "Earned" : event.isEnrolled ? "Pending" : "Open"}
                             </Text>
                           </View>
                         </View>
@@ -3485,17 +4181,41 @@ export default function GoalsScreen() {
                     </View>
                   )}
 
-                  {medalGoalData.enrolledEvents === 0 && (
+                  {medalGoalData && medalGoalData.virtualRaces.length > 0 && (
+                    <View style={styles.medalEventsList}>
+                      <Text style={styles.weightHistoryTitle}>Virtual</Text>
+                      {medalGoalData.virtualRaces.map((event) => (
+                        <View key={event.eventId} style={styles.medalEventRow}>
+                          <View style={styles.medalEventInfo}>
+                            <Text style={styles.medalEventName} numberOfLines={1}>{event.eventName}</Text>
+                            <Text style={styles.medalEventMeta} numberOfLines={1}>{event.dateLabel}</Text>
+                          </View>
+                          <View style={[
+                            styles.medalEventBadge,
+                            event.isEarned ? styles.medalEventBadgeEarned : styles.medalEventBadgePending,
+                          ]}>
+                            <Award size={12} color={event.isEarned ? "#D97706" : colors.textLight} />
+                            <Text style={[
+                              styles.medalEventBadgeText,
+                              event.isEarned ? styles.medalEventBadgeTextEarned : styles.medalEventBadgeTextPending,
+                            ]}>
+                              {event.isEarned ? "Earned" : event.isEnrolled ? "Pending" : "Open"}
+                            </Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {!medalGoalLoading && (!medalGoalData || medalGoalData.availableRaces === 0) && (
                     <View style={styles.noActivitiesInfo}>
                       <Trophy size={24} color={colors.textLight} />
-                      <Text style={styles.noActivitiesText}>
-                        Enroll in races from the Events tab to start earning medals
-                      </Text>
+                      <Text style={styles.noActivitiesText}>No available medal races in this goal date range yet.</Text>
                     </View>
                   )}
 
                   <Text style={styles.fitnessFootnote}>
-                    Enrollment is measured against eligible medal races. Individual medal rank follows the Community Medals table.
+                    Approved internal and external medals count against your target. Progress can go above 100%.
                   </Text>
                   {communityMedalRanking ? (
                     <View style={styles.goalRankList}>
@@ -3518,68 +4238,65 @@ export default function GoalsScreen() {
                   ) : null}
                 </View>
               </View>
-            ) : !medalGoalLoading ? (
+            ) : !medalTargetLoading ? (
               <View key="medals" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Trophy size={18} color="#D97706" />
                   <Text style={styles.sectionTitle}>Earn Medals</Text>
                 </View>
-                <View style={styles.medalGoalCard}>
-                  <View style={styles.noActivitiesInfo}>
-                    <Trophy size={28} color={colors.textLight} />
-                    <Text style={styles.noActivitiesTitle}>No Races Available</Text>
-                    <Text style={styles.noActivitiesText}>
-                      When races are added, you can track your enrollment and medal progress here
-                    </Text>
-                  </View>
-                </View>
+                <TouchableOpacity style={styles.setupGoalCard} onPress={openEditMedalGoal} activeOpacity={0.8}>
+                  <LinearGradient colors={["#D97706", "#F59E0B"]} style={styles.setupGoalGradient}>
+                    <Trophy size={32} color={colors.white} />
+                    <Text style={styles.setupGoalTitle}>Set Earn Medals Goal</Text>
+                    <Text style={styles.setupGoalSubtext}>Choose a medal target and date range to track internal and approved external medals.</Text>
+                    <View style={styles.setupGoalButton}>
+                      <Text style={[styles.setupGoalButtonText, { color: "#D97706" }]}>Set Goal</Text>
+                      <ChevronRight size={16} color="#D97706" />
+                    </View>
+                  </LinearGradient>
+                </TouchableOpacity>
               </View>
             ) : null;
           }
 
           if (goalKey === "community") {
-            return communityGoalRanks.length > 0 ? (
+            return eligibleCommunityGoalRanks.length > 0 ? (
               <View key="community" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Users size={18} color="#0EA5E9" />
                   <Text style={styles.sectionTitle}>Compete in Community</Text>
                 </View>
                 <View style={styles.communityCard}>
-                  <View style={styles.goalRankList}>
-                    {communityGoalRanks.map((rank) => (
-                      <View key={rank.label} style={styles.goalRankRow}>
-                        <View style={styles.goalRankInfo}>
-                          <Text style={styles.goalRankLabel}>{rank.label}</Text>
-                          <Text style={styles.goalRankSubtext}>{rank.metricLabel}: {rank.metricValue}</Text>
-                        </View>
-                        <View style={styles.goalRankPill}>
-                          <Text style={styles.goalRankValue}>#{rank.currentRank}</Text>
-                          <Text style={styles.goalRankOf}>of {rank.totalParticipants}</Text>
-                        </View>
-                      </View>
-                    ))}
-                  </View>
-
-                  {communityRanking ? (
-                    <View style={styles.communityStatsRow}>
-                      <View style={styles.communityStatItem}>
-                        <Text style={styles.communityStatValue}>{communityRanking.avgDistance.toFixed(1)}</Text>
-                        <Text style={styles.communityStatLabel}>Avg km/day</Text>
-                      </View>
-                      <View style={styles.communityStatDivider} />
-                      <View style={styles.communityStatItem}>
-                        <Text style={styles.communityStatValue}>{communityRanking.activeDays}</Text>
-                        <Text style={styles.communityStatLabel}>Active Days</Text>
-                      </View>
-                      <View style={styles.communityStatDivider} />
-                      <View style={styles.communityStatItem}>
-                        <Text style={styles.communityStatValue}>
-                          {communityRanking.avgPace > 0 ? formatPaceMinPerKm(communityRanking.avgPace) : "--"}
-                        </Text>
-                        <Text style={styles.communityStatLabel}>Avg Pace</Text>
-                      </View>
-                    </View>
-                  ) : null}
+                  <RankHistoryGraph
+                    points={communityRankGraphPoints}
+                    rankKey="familyRank"
+                    totalKey="familyTotal"
+                    label="Family"
+                    color={RANK_HISTORY_COLORS.family}
+                    summary={familyRanking}
+                    backgroundColor="#F5F3FF"
+                    borderColor="#DDD6FE"
+                  />
+                  <RankHistoryGraph
+                    points={communityRankGraphPoints}
+                    rankKey="clubRank"
+                    totalKey="clubTotal"
+                    label="Club"
+                    color={RANK_HISTORY_COLORS.club}
+                    summary={clubRanking}
+                    backgroundColor="#F0FDF4"
+                    borderColor="#BBF7D0"
+                  />
+                  <RankHistoryGraph
+                    points={communityRankGraphPoints}
+                    rankKey="communityRank"
+                    totalKey="communityTotal"
+                    label="Community"
+                    color={RANK_HISTORY_COLORS.community}
+                    summary={communityActivityRankSummary}
+                    backgroundColor="#F0F9FF"
+                    borderColor="#BAE6FD"
+                  />
 
                   {rankChange && rankChange.previousRank > 0 && (
                     <View style={styles.communityHistoryRow}>
@@ -3589,11 +4306,11 @@ export default function GoalsScreen() {
                   )}
 
                   <Text style={styles.fitnessFootnote}>
-                    Pulls individual ranks from Family, Community Activity, and Community Medals.
+                    Rank history is saved locally each day. Graphs appear only for activity groups with at least 3 competitors.
                   </Text>
                 </View>
               </View>
-            ) : !communityRankLoading && !familyRankLoading && !communityMedalRankLoading ? (
+            ) : !communityRankLoading && !familyRankLoading && !clubRankLoading && !communityMedalRankLoading ? (
               <View key="community" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Users size={18} color="#0EA5E9" />
@@ -4124,6 +4841,178 @@ export default function GoalsScreen() {
                 <LinearGradient colors={["#0D9488", "#14B8A6"]} style={styles.saveButtonGradient}>
                   <Text style={styles.saveButtonText}>
                     {saveHabitMutation.isPending ? "Saving..." : "Save Declaration"}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showMedalGoalModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowMedalGoalModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <LinearGradient colors={["#D97706", "#F59E0B"]} style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Earn Medals Goal</Text>
+              <TouchableOpacity onPress={() => setShowMedalGoalModal(false)}>
+                <X size={24} color={colors.white} />
+              </TouchableOpacity>
+            </LinearGradient>
+
+            <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Target Medals *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 12"
+                  value={medalTargetInput}
+                  onChangeText={setMedalTargetInput}
+                  keyboardType="number-pad"
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Start Date *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="YYYY-MM-DD"
+                  value={medalStartDateInput}
+                  onChangeText={setMedalStartDateInput}
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>End Date *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="YYYY-MM-DD"
+                  value={medalEndDateInput}
+                  onChangeText={setMedalEndDateInput}
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.saveButton, saveMedalGoalMutation.isPending && styles.saveButtonDisabled]}
+                onPress={handleSaveMedalGoal}
+                disabled={saveMedalGoalMutation.isPending}
+                activeOpacity={0.8}
+              >
+                <LinearGradient colors={["#D97706", "#F59E0B"]} style={styles.saveButtonGradient}>
+                  <Text style={styles.saveButtonText}>
+                    {saveMedalGoalMutation.isPending ? "Saving..." : medalTargetGoal ? "Update Goal" : "Save Goal"}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showExternalMedalModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowExternalMedalModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <LinearGradient colors={["#D97706", "#F59E0B"]} style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add External Medal</Text>
+              <TouchableOpacity onPress={() => setShowExternalMedalModal(false)}>
+                <X size={24} color={colors.white} />
+              </TouchableOpacity>
+            </LinearGradient>
+
+            <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalSubtitle}>
+                Submit an external medal for admin approval. Approved medals feed Earn Medals and the Community Medals leaderboard.
+              </Text>
+
+              <View style={styles.externalMedalTable}>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Date *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="YYYY-MM-DD"
+                    value={externalMedalForm.activityDate}
+                    onChangeText={(value) => updateExternalMedalForm("activityDate", value)}
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Distance (km) *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. 21.1"
+                    value={externalMedalForm.distanceKm}
+                    onChangeText={(value) => updateExternalMedalForm("distanceKm", value)}
+                    keyboardType="decimal-pad"
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Time *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="HH:MM:SS"
+                    value={externalMedalForm.duration}
+                    onChangeText={(value) => updateExternalMedalForm("duration", value)}
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Event Name *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. Kampala Half Marathon"
+                    value={externalMedalForm.eventName}
+                    onChangeText={(value) => updateExternalMedalForm("eventName", value)}
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Location *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="City, country or venue"
+                    value={externalMedalForm.location}
+                    onChangeText={(value) => updateExternalMedalForm("location", value)}
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Medal Picture *</Text>
+                  <TouchableOpacity style={styles.medalPictureButton} onPress={pickExternalMedalImage} activeOpacity={0.8}>
+                    <Award size={16} color="#D97706" />
+                    <Text style={styles.medalPictureButtonText}>
+                      {externalMedalImageName || "Choose picture"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.saveButton, isSubmittingExternalMedal && styles.saveButtonDisabled]}
+                onPress={handleSubmitExternalMedal}
+                disabled={isSubmittingExternalMedal}
+                activeOpacity={0.8}
+              >
+                <LinearGradient colors={["#D97706", "#F59E0B"]} style={styles.saveButtonGradient}>
+                  <Text style={styles.saveButtonText}>
+                    {isSubmittingExternalMedal ? "Submitting..." : "Submit for Approval"}
                   </Text>
                 </LinearGradient>
               </TouchableOpacity>
@@ -5864,6 +6753,191 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 1,
   },
+  medalGoalHeaderRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    marginBottom: 8,
+  },
+  medalGoalScore: {
+    fontSize: 28,
+    fontWeight: "900" as const,
+    color: "#D97706",
+    lineHeight: 31,
+  },
+  medalTargetPill: {
+    backgroundColor: "#FFFBEB",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  medalTargetPillText: {
+    fontSize: 11,
+    fontWeight: "800" as const,
+    color: "#92400E",
+  },
+  medalRatioBarTrackFull: {
+    width: "100%" as const,
+    height: 7,
+    backgroundColor: colors.extraLightGray,
+    borderRadius: 4,
+    overflow: "hidden" as const,
+    marginBottom: 8,
+  },
+  medalGoalMetaRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    gap: 8,
+    marginBottom: 8,
+  },
+  medalGoalMetaText: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: "700" as const,
+    color: colors.textSecondary,
+  },
+  medalAddButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 4,
+    borderRadius: 14,
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  medalAddButtonText: {
+    fontSize: 10,
+    fontWeight: "800" as const,
+    color: "#92400E",
+  },
+  medalBreakdownRow: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 6,
+    marginBottom: 8,
+  },
+  medalBreakdownText: {
+    fontSize: 10,
+    fontWeight: "800" as const,
+    color: "#92400E",
+    backgroundColor: "#FFFBEB",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  externalMedalTable: {
+    gap: 10,
+  },
+  medalPictureButton: {
+    minHeight: 46,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#F59E0B",
+    backgroundColor: "#FFFBEB",
+    paddingHorizontal: 12,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+  },
+  medalPictureButtonText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "700" as const,
+    color: "#92400E",
+  },
+  rankGraphBlock: {
+    borderRadius: 9,
+    borderWidth: 1,
+    padding: 10,
+    marginBottom: 12,
+  },
+  rankGraphTitleRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    marginBottom: 6,
+  },
+  rankGraphTitleInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  rankGraphTitle: {
+    fontSize: 13,
+    fontWeight: "800" as const,
+    color: colors.text,
+  },
+  rankGraphSubtitle: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+    color: colors.textLight,
+  },
+  rankGraphPill: {
+    minWidth: 54,
+    alignItems: "center" as const,
+    backgroundColor: colors.white,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+  },
+  rankGraphPillValue: {
+    fontSize: 14,
+    fontWeight: "900" as const,
+    lineHeight: 16,
+  },
+  rankGraphPillOf: {
+    fontSize: 9,
+    fontWeight: "700" as const,
+    color: colors.textSecondary,
+  },
+  rankGraphFrame: {
+    width: "100%" as const,
+    borderRadius: 8,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: "hidden" as const,
+  },
+  rankGraphLegend: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 10,
+    marginTop: 8,
+  },
+  rankGraphLegendItem: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 5,
+  },
+  rankGraphLegendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  rankGraphLegendText: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+    color: colors.textSecondary,
+  },
+  rankGraphDateRow: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    marginTop: 6,
+  },
+  rankGraphDateText: {
+    fontSize: 10,
+    fontWeight: "700" as const,
+    color: colors.textLight,
+  },
+  rankGraphHintText: {
+    fontSize: 10,
+    fontStyle: "italic" as const,
+    color: colors.textLight,
+  },
   medalRatiosRow: {
     flexDirection: "row" as const,
     alignItems: "flex-start" as const,
@@ -5936,6 +7010,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600" as const,
     color: colors.text,
+  },
+  medalEventMeta: {
+    marginTop: 2,
+    fontSize: 10,
+    fontWeight: "700" as const,
+    color: colors.textSecondary,
   },
   medalEventBadge: {
     flexDirection: "row" as const,

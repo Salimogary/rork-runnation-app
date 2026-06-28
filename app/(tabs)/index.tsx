@@ -122,9 +122,11 @@ const ABNORMAL_SPEED_MIN_DISTANCE_KM = 1;
 const ABNORMAL_SPEED_KM_PER_MINUTE = 2.3;
 const KM_VOICE_ANNOUNCEMENT_INTERVAL = 1;
 const AUTO_PAUSE_STATIONARY_SECONDS = 60;
+const AUTO_PAUSE_ACCURACY_THRESHOLD = 50;
 const AUTO_PAUSE_MAX_SPEED_KMH = 1.2;
 const AUTO_RESUME_MIN_SPEED_KMH = 1.5;
 const AUTO_RESUME_MIN_DISTANCE_KM = 0.004;
+const FINISH_LONG_PRESS_MS = 900;
 const BACKGROUND_LOCATION_TASK = "runnation-background-location";
 const ACTIVE_WORKOUT_SESSION_KEY = "runnation_active_workout_session";
 const REGISTERED_EVENTS_CACHE_PREFIX = "runnation_registered_events";
@@ -293,6 +295,12 @@ async function processPersistedBackgroundLocation(location: Location.LocationObj
     return;
   }
 
+  if (point.accuracy !== null && point.accuracy > AUTO_PAUSE_ACCURACY_THRESHOLD) {
+    session.lastProcessedLocationTimestamp = location.timestamp;
+    await setPersistedWorkoutSession(session);
+    return;
+  }
+
   const movementAnchor = session.autoPauseAnchorPoint ?? session.lastValidPoint;
   const movementDistanceKm = movementAnchor
     ? calculateDistance(
@@ -336,7 +344,33 @@ async function processPersistedBackgroundLocation(location: Location.LocationObj
     await setPersistedWorkoutSession(session);
     return;
   } else {
-    session.stationaryStartTimestamp = null;
+    if (session.stationaryStartTimestamp === null || session.stationaryStartTimestamp === undefined) {
+      session.stationaryStartTimestamp = point.timestamp;
+      session.lastProcessedLocationTimestamp = location.timestamp;
+      await setPersistedWorkoutSession(session);
+      return;
+    }
+
+    const stationarySeconds = (point.timestamp - session.stationaryStartTimestamp) / 1000;
+    if (stationarySeconds >= AUTO_PAUSE_STATIONARY_SECONDS && session.runningStartTimestamp !== null) {
+      const pauseStartedAt = Math.min(point.timestamp, session.stationaryStartTimestamp);
+      session.elapsedBeforePause += Math.max(
+        0,
+        Math.floor((pauseStartedAt - session.runningStartTimestamp) / 1000)
+      );
+      session.pauseDurationSeconds = Math.floor(session.totalPauseDuration / 1000);
+      session.runningStartTimestamp = null;
+      session.pauseStartTimestamp = pauseStartedAt;
+      session.autoPaused = true;
+      session.status = "paused";
+      session.lastProcessedLocationTimestamp = location.timestamp;
+      await setPersistedWorkoutSession(session);
+      return;
+    }
+
+    session.lastProcessedLocationTimestamp = location.timestamp;
+    await setPersistedWorkoutSession(session);
+    return;
   }
 
   if (session.autoPaused) {
@@ -1202,8 +1236,11 @@ export default function ExerciseScreen() {
 
     setCurrentLocation(newCoord);
 
-    if (lastValidPoint.current && (newPoint.accuracy === null || newPoint.accuracy <= GPS_ACCURACY_THRESHOLD)) {
-      const movementAnchor = autoPauseAnchorPoint.current ?? lastValidPoint.current;
+    const previousValidPoint = lastValidPoint.current;
+    const canEvaluateAutoPause =
+      previousValidPoint !== null && (newPoint.accuracy === null || newPoint.accuracy <= AUTO_PAUSE_ACCURACY_THRESHOLD);
+    if (canEvaluateAutoPause) {
+      const movementAnchor = autoPauseAnchorPoint.current ?? previousValidPoint;
       const movementDistanceKm = calculateDistance(
         { latitude: movementAnchor.latitude, longitude: movementAnchor.longitude },
         newCoord
@@ -1216,6 +1253,13 @@ export default function ExerciseScreen() {
           : null;
       const speedKmh = nativeSpeedKmh ?? calculatedSpeedKmh;
       evaluateAutoPause(newPoint, movementDistanceKm, speedKmh, nativeSpeedKmh !== null);
+      if (autoPaused.current || runStateRef.current !== "running" || stationaryStartTimestamp.current !== null) {
+        await persistActiveWorkoutSession(autoPaused.current || runStateRef.current === "paused" ? "paused" : "running");
+        return;
+      }
+    } else if (autoPaused.current || runStateRef.current !== "running") {
+      await persistActiveWorkoutSession(autoPaused.current || runStateRef.current === "paused" ? "paused" : "running");
+      return;
     }
 
     if (isResuming.current) {
@@ -1230,7 +1274,7 @@ export default function ExerciseScreen() {
     }
 
     if (!isValidGpsPoint(newPoint, exerciseT)) {
-      await persistActiveWorkoutSession(runStateRef.current === "paused" ? "paused" : "running");
+      await persistActiveWorkoutSession("running");
       return;
     }
 
@@ -1675,6 +1719,10 @@ export default function ExerciseScreen() {
     runStateRef.current = "paused";
     setRunState("paused");
     await resumeTracking();
+  };
+
+  const showFinishLongPressHint = () => {
+    Alert.alert("Hold to Finish", "Press and hold the Finish button to stop this workout.");
   };
 
   const stopTracking = async () => {
@@ -2895,7 +2943,9 @@ export default function ExerciseScreen() {
               
               <TouchableOpacity
                 style={[styles.actionButton, hasAbnormalWorkoutSpeed && styles.actionButtonDisabled]}
-                onPress={stopTracking}
+                onPress={showFinishLongPressHint}
+                onLongPress={stopTracking}
+                delayLongPress={FINISH_LONG_PRESS_MS}
                 disabled={isSaving || hasAbnormalWorkoutSpeed}
                 activeOpacity={0.8}
               >
@@ -2904,7 +2954,7 @@ export default function ExerciseScreen() {
                   style={styles.actionButtonGradient}
                 >
                   <Square size={28} color={colors.white} />
-                  <Text style={styles.actionButtonText}>{isSaving ? "Saving..." : "Finish"}</Text>
+                  <Text style={styles.actionButtonText}>{isSaving ? "Saving..." : "Hold to Finish"}</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -2938,7 +2988,9 @@ export default function ExerciseScreen() {
 
                 <TouchableOpacity
                   style={[styles.actionButton, hasAbnormalWorkoutSpeed && styles.actionButtonDisabled]}
-                  onPress={stopTracking}
+                  onPress={showFinishLongPressHint}
+                  onLongPress={stopTracking}
+                  delayLongPress={FINISH_LONG_PRESS_MS}
                   disabled={isSaving || hasAbnormalWorkoutSpeed}
                   activeOpacity={0.8}
                 >
@@ -2947,7 +2999,7 @@ export default function ExerciseScreen() {
                     style={styles.actionButtonGradient}
                   >
                     <Square size={28} color={colors.white} />
-                    <Text style={styles.actionButtonText}>{isSaving ? "Saving..." : "Finish"}</Text>
+                    <Text style={styles.actionButtonText}>{isSaving ? "Saving..." : "Hold to Finish"}</Text>
                   </LinearGradient>
                 </TouchableOpacity>
               </View>

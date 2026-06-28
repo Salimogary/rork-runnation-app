@@ -8425,6 +8425,12 @@ const getStatusLabel = (status: string) => {
                   <View style={[styles.adminDataCell, { width: 140 }]}>
                     <Text style={styles.adminDataHeaderText}>Source</Text>
                   </View>
+                  <View style={[styles.adminDataCell, { width: 180 }]}>
+                    <Text style={styles.adminDataHeaderText}>Event</Text>
+                  </View>
+                  <View style={[styles.adminDataCell, { width: 160 }]}>
+                    <Text style={styles.adminDataHeaderText}>Location</Text>
+                  </View>
                   <View style={[styles.adminDataCell, { width: 120 }]}>
                     <Text style={styles.adminDataHeaderText}>Exercise</Text>
                   </View>
@@ -8454,7 +8460,17 @@ const getStatusLabel = (status: string) => {
                         </View>
                         <View style={[styles.adminDataCell, { width: 140 }]}>
                           <Text style={styles.adminDataCellText} numberOfLines={2}>
-                            {submission.sourceLabel || (submission.sourceType === "smart_watch" ? "Smart Watch" : "Sports App")}
+                            {submission.sourceLabel || (submission.sourceType === "smart_watch" ? "Smart Watch" : submission.sourceType === "medal_claim" ? "External Medal" : "Sports App")}
+                          </Text>
+                        </View>
+                        <View style={[styles.adminDataCell, { width: 180 }]}>
+                          <Text style={styles.adminDataCellText} numberOfLines={2}>
+                            {submission.externalEventName || "-"}
+                          </Text>
+                        </View>
+                        <View style={[styles.adminDataCell, { width: 160 }]}>
+                          <Text style={styles.adminDataCellText} numberOfLines={2}>
+                            {submission.externalEventLocation || "-"}
                           </Text>
                         </View>
                         <View style={[styles.adminDataCell, { width: 120 }]}>

@@ -23,6 +23,9 @@ export default publicProcedure.query(async ({ ctx }) => {
         distance_km,
         source_type,
         source_label,
+        external_event_name,
+        external_event_location,
+        external_event_id,
         evidence_path,
         evidence_mime_type
       `)
@@ -65,6 +68,9 @@ export default publicProcedure.query(async ({ ctx }) => {
         distanceKm: sub.distance_km,
         sourceType: sub.source_type,
         sourceLabel: sub.source_label,
+        externalEventName: sub.external_event_name,
+        externalEventLocation: sub.external_event_location,
+        externalEventId: sub.external_event_id,
         evidencePath: sub.evidence_path,
         evidenceMimeType: sub.evidence_mime_type,
         evidenceUrl: sub.evidence_path
