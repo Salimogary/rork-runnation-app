@@ -63,6 +63,17 @@ interface DailyRunGoal {
   updated_at: string;
 }
 
+type GoalPauseType = "injury" | "sick";
+
+interface GoalPausePeriod {
+  pause_id: number;
+  registration_id: string;
+  pause_type: GoalPauseType;
+  start_date: string;
+  end_date: string | null;
+  is_active: boolean;
+}
+
 interface HealthGoalEntry {
   health_id: number;
   registration_id: string;
@@ -357,6 +368,19 @@ const formatCompactDateRange = (start?: string | null, end?: string | null): str
   if (!startKey && !endKey) return "Date TBA";
   if (startKey && (!endKey || startKey === endKey)) return startKey;
   return `${startKey || "TBA"} - ${endKey || "TBA"}`;
+};
+
+const getGoalPauseForDate = (periods: GoalPausePeriod[], date: string): GoalPausePeriod | null => {
+  return periods.find((period) =>
+    date >= period.start_date &&
+    (!period.end_date || date <= period.end_date)
+  ) || null;
+};
+
+const getGoalPauseSymbol = (pauseType?: GoalPauseType | null): string => {
+  if (pauseType === "injury") return "I";
+  if (pauseType === "sick") return "S";
+  return "";
 };
 
 const getMedalBand = (distanceKm: number): (typeof MEDAL_BANDS)[number] | null =>
@@ -791,6 +815,25 @@ export default function GoalsScreen() {
       return (data || []) as { activity_date: string; distance_km?: number | null }[];
     },
     enabled: !!user?.id && !!dailyRunGoal,
+    staleTime: 30000,
+  });
+
+  const { data: goalPausePeriods = [], refetch: refetchGoalPausePeriods } = useQuery<GoalPausePeriod[]>({
+    queryKey: ["goalPausePeriods", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      const { data, error } = await supabase
+        .from("user_goal_pause_periods")
+        .select("pause_id, registration_id, pause_type, start_date, end_date, is_active")
+        .eq("registration_id", user.id)
+        .order("start_date", { ascending: true });
+      if (error) {
+        console.warn("[Goals] Could not load injury/sick periods:", error);
+        return [];
+      }
+      return (data || []) as GoalPausePeriod[];
+    },
+    enabled: !!user?.id,
     staleTime: 30000,
   });
 
@@ -1778,16 +1821,20 @@ export default function GoalsScreen() {
     while (iter <= today) {
       const date = getLocalDateKey(iter);
       const distanceKm = distanceByDate.get(date) || 0;
+      const pause = getGoalPauseForDate(goalPausePeriods, date);
+      const isOnTarget = distanceKm >= targetDistance;
       days.push({
         date,
         day: iter.getDate(),
         distanceKm,
-        isOnTarget: distanceKm >= targetDistance,
+        isOnTarget,
+        pauseType: pause?.pause_type || null,
+        isExcused: !!pause && !isOnTarget,
       });
       iter.setDate(iter.getDate() + 1);
     }
 
-    const plannedDays = days.length;
+    const plannedDays = days.filter((day) => !day.isExcused).length;
     const daysMet = days.filter((day) => day.isOnTarget).length;
     const scorePercent = plannedDays > 0 ? Math.round((daysMet / plannedDays) * 100) : 0;
     const totalDistance = days.reduce((sum, day) => sum + day.distanceKm, 0);
@@ -1802,7 +1849,7 @@ export default function GoalsScreen() {
       totalDistance,
       isOnTrack: daysMet >= plannedDays,
     };
-  }, [habitActivities, habitDeclaration]);
+  }, [goalPausePeriods, habitActivities, habitDeclaration]);
 
   const openEditHabit = useCallback(() => {
     if (habitDeclaration) {
@@ -2704,6 +2751,7 @@ export default function GoalsScreen() {
     void refetchFitnessGoal();
     void refetchDailyRunGoal();
     void refetchDailyRunActivities();
+    void refetchGoalPausePeriods();
     void refetchRecent();
     void refetchHealthDurationActivities();
     void refetchHealth();
@@ -2926,15 +2974,27 @@ export default function GoalsScreen() {
       const isFuture = iter > today;
       const hasRun = runDateSet.has(date);
       const distanceKm = distanceByDate.get(date) || 0;
-      days.push({ date, day: iter.getDate(), isFuture, hasRun, distanceKm });
+      const pause = getGoalPauseForDate(goalPausePeriods, date);
+      const isExcused = !isFuture && !!pause && !hasRun;
+      const isAccountable = !isFuture && (!pause || hasRun);
+      days.push({
+        date,
+        day: iter.getDate(),
+        isFuture,
+        hasRun,
+        distanceKm,
+        pauseType: pause?.pause_type || null,
+        isExcused,
+        isAccountable,
+      });
       iter.setDate(iter.getDate() + 1);
     }
 
     const runDays = days.filter((day) => day.hasRun).length;
-    const elapsedDays = days.filter((day) => !day.isFuture).length;
+    const elapsedDays = days.filter((day) => day.isAccountable).length;
     const totalDays = days.length;
     const scorePercent = elapsedDays > 0 ? Math.round((runDays / elapsedDays) * 100) : 0;
-    const missedDays = days.filter((day) => !day.isFuture && !day.hasRun).length;
+    const missedDays = days.filter((day) => !day.isFuture && !day.hasRun && !day.isExcused).length;
     const targetRunsToDate = elapsedDays > 0 ? Math.ceil((elapsedDays * dailyRunGoal.target_percent) / 100) : 0;
 
     return {
@@ -2948,7 +3008,7 @@ export default function GoalsScreen() {
       isOnTrack: runDays >= targetRunsToDate,
       days,
     };
-  }, [dailyRunActivities, dailyRunGoal]);
+  }, [dailyRunActivities, dailyRunGoal, goalPausePeriods]);
 
   const openDailyRunGoalForm = useCallback(() => {
     if (dailyRunGoal) {
@@ -3609,23 +3669,28 @@ export default function GoalsScreen() {
                         style={[
                           styles.dailyRunDayCell,
                           day.hasRun && styles.dailyRunDayDone,
-                          !day.isFuture && !day.hasRun && styles.dailyRunDayMissed,
+                          !day.isFuture && !day.hasRun && !day.isExcused && styles.dailyRunDayMissed,
+                          day.isExcused && styles.goalCalendarCellExcused,
                         ]}
                       >
                         <Text style={styles.dailyRunDayNumber}>{day.day}</Text>
                         <Text style={[
                           styles.dailyRunDayMark,
                           day.hasRun && styles.dailyRunDayMarkDone,
-                          !day.isFuture && !day.hasRun && styles.dailyRunDayMarkMissed,
+                          !day.isFuture && !day.hasRun && !day.isExcused && styles.dailyRunDayMarkMissed,
+                          day.isExcused && styles.goalCalendarExcusedText,
                         ]}>
-                          {day.isFuture ? "" : day.hasRun ? "✓" : "×"}
+                          {day.isFuture ? "" : day.hasRun ? "✓" : day.isExcused ? getGoalPauseSymbol(day.pauseType) : "×"}
                         </Text>
+                        {day.hasRun && day.pauseType ? (
+                          <Text style={styles.goalCalendarPauseBadge}>{getGoalPauseSymbol(day.pauseType)}</Text>
+                        ) : null}
                       </View>
                     ))}
                   </View>
 
                   <Text style={styles.fitnessFootnote}>
-                    Commitment is measured up to today: actual run days compared with the target runs expected by now.
+                    Injury/Sick days are marked I/S and are excused when missed. If you still run, the day counts as completed.
                   </Text>
                 </View>
               </View>
@@ -4057,19 +4122,26 @@ export default function GoalsScreen() {
                             style={[
                               styles.dailyRunDayCell,
                               styles.goalCalendarMetricCell,
-                              day.isOnTarget ? styles.goalCalendarCellGood : styles.goalCalendarCellBad,
+                              day.isOnTarget ? styles.goalCalendarCellGood : day.isExcused ? styles.goalCalendarCellExcused : styles.goalCalendarCellBad,
                             ]}
                           >
                             <Text style={styles.dailyRunDayNumber}>{day.day}</Text>
-                            <Text style={[styles.dailyRunDayMark, styles.goalCalendarMetricText, day.isOnTarget ? styles.dailyRunDayMarkDone : styles.dailyRunDayMarkMissed]}>
-                              {formatDistanceDecimal(day.distanceKm)}
+                            <Text style={[
+                              styles.dailyRunDayMark,
+                              styles.goalCalendarMetricText,
+                              day.isOnTarget ? styles.dailyRunDayMarkDone : day.isExcused ? styles.goalCalendarExcusedText : styles.dailyRunDayMarkMissed,
+                            ]}>
+                              {day.isExcused ? getGoalPauseSymbol(day.pauseType) : formatDistanceDecimal(day.distanceKm)}
                             </Text>
+                            {day.isOnTarget && day.pauseType ? (
+                              <Text style={styles.goalCalendarPauseBadge}>{getGoalPauseSymbol(day.pauseType)}</Text>
+                            ) : null}
                           </View>
                         ))}
                       </View>
 
                       <Text style={styles.fitnessFootnote}>
-                        Daily planned runs show every committed day up to today. Days without a run are recorded as 0 km.
+                        Injury/Sick days are marked I/S and are excused when missed. Completed days still count toward the target.
                       </Text>
                     </>
                   ) : (
@@ -6683,6 +6755,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   dailyRunDayCell: {
+    position: "relative" as const,
     width: 32,
     height: 36,
     borderRadius: 7,
@@ -6707,6 +6780,28 @@ const styles = StyleSheet.create({
   goalCalendarCellBad: {
     backgroundColor: "#FEF2F2",
     borderColor: "#FCA5A5",
+  },
+  goalCalendarCellExcused: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#93C5FD",
+  },
+  goalCalendarExcusedText: {
+    color: "#2563EB",
+  },
+  goalCalendarPauseBadge: {
+    position: "absolute" as const,
+    top: 1,
+    right: 2,
+    minWidth: 11,
+    height: 11,
+    borderRadius: 6,
+    backgroundColor: "#DBEAFE",
+    color: "#1D4ED8",
+    fontSize: 7,
+    fontWeight: "900" as const,
+    lineHeight: 11,
+    textAlign: "center" as const,
+    overflow: "hidden" as const,
   },
   dailyRunDayDone: {
     backgroundColor: "#ECFDF5",

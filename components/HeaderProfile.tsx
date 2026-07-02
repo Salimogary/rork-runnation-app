@@ -144,6 +144,7 @@ export default function HeaderProfile() {
           hasTargets: false,
           hasEventEnrollment: false,
           hasAtLeastOneBadge: false,
+          hasEarnedMedal: false,
           hasRatedApp: false,
         };
       }

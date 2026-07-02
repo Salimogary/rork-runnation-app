@@ -89,6 +89,14 @@ function getInstalledAndroidBuildNumber(): number {
 type DonationPaymentMethod = "card" | "mobile_money";
 type ServiceRoleAvailabilityGrouping = "grouped" | "flat";
 type ChatReportTab = "complaint" | "feedback";
+type GoalPauseType = "injury" | "sick";
+type ActiveGoalPause = {
+  pause_id: number;
+  pause_type: GoalPauseType;
+  start_date: string;
+  end_date: string | null;
+  is_active: boolean;
+};
 type WearableProvider = {
   provider: "health_connect" | "garmin";
   displayName: string;
@@ -128,6 +136,19 @@ function formatSettingsDate(value?: string | null): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleDateString();
+}
+
+function getLocalSettingsDateKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addSettingsDaysIso(value: string, days: number): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 function getServiceRoleButtonLabel(roleName: string, countryName: string): string {
@@ -172,6 +193,7 @@ export default function SettingsScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [activityVoiceAssistantEnabled, setActivityVoiceAssistantEnabled] = useState(true);
   const [workoutAutoPauseEnabled, setWorkoutAutoPauseEnabled] = useState(true);
+  const [showGoalPauseModal, setShowGoalPauseModal] = useState(false);
 
   useEffect(() => {
     void getNotificationsEnabled().then(setNotificationsEnabled);
@@ -479,6 +501,98 @@ export default function SettingsScreen() {
     },
     enabled: !!user,
   });
+
+  const { data: activeGoalPause, isLoading: activeGoalPauseLoading } = useQuery<ActiveGoalPause | null>({
+    queryKey: ["activeGoalPause", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      const { data, error } = await supabase
+        .from("user_goal_pause_periods")
+        .select("pause_id, pause_type, start_date, end_date, is_active")
+        .eq("registration_id", user.id)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (error) {
+        console.warn("[Settings] Could not load active goal pause:", error);
+        return null;
+      }
+      return data as ActiveGoalPause | null;
+    },
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
+  const startGoalPauseMutation = useMutation({
+    mutationFn: async (pauseType: GoalPauseType) => {
+      if (!user?.id) throw new Error("Not signed in");
+      const today = getLocalSettingsDateKey();
+      const { error: closeError } = await supabase
+        .from("user_goal_pause_periods")
+        .update({
+          is_active: false,
+          end_date: addSettingsDaysIso(today, -1),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("registration_id", user.id)
+        .eq("is_active", true);
+      if (closeError) throw closeError;
+
+      const { data, error } = await supabase
+        .from("user_goal_pause_periods")
+        .insert({
+          registration_id: user.id,
+          pause_type: pauseType,
+          start_date: today,
+          is_active: true,
+          updated_at: new Date().toISOString(),
+        })
+        .select("pause_id, pause_type, start_date, end_date, is_active")
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      setShowGoalPauseModal(false);
+      void queryClient.invalidateQueries({ queryKey: ["activeGoalPause", user?.id] });
+      void queryClient.invalidateQueries({ queryKey: ["goalPausePeriods", user?.id] });
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (error: any) => {
+      Alert.alert("Could Not Save", error?.message || "Please try again.");
+    },
+  });
+
+  const stopGoalPauseMutation = useMutation({
+    mutationFn: async () => {
+      if (!user?.id || !activeGoalPause) throw new Error("No active status");
+      const today = getLocalSettingsDateKey();
+      const { error } = await supabase
+        .from("user_goal_pause_periods")
+        .update({
+          is_active: false,
+          end_date: activeGoalPause.start_date === today ? today : addSettingsDaysIso(today, -1),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("pause_id", activeGoalPause.pause_id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["activeGoalPause", user?.id] });
+      void queryClient.invalidateQueries({ queryKey: ["goalPausePeriods", user?.id] });
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (error: any) => {
+      Alert.alert("Could Not Save", error?.message || "Please try again.");
+    },
+  });
+
+  const handleGoalPausePress = () => {
+    if (activeGoalPause) {
+      stopGoalPauseMutation.mutate();
+      return;
+    }
+    setShowGoalPauseModal(true);
+  };
 
   const suggestionMutation = useMutation({
     mutationFn: async (suggestion: string) => {
@@ -999,6 +1113,29 @@ export default function SettingsScreen() {
           </View>
         </TouchableOpacity>
 
+        <TouchableOpacity
+          style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]}
+          onPress={handleGoalPausePress}
+          disabled={activeGoalPauseLoading || startGoalPauseMutation.isPending || stopGoalPauseMutation.isPending}
+        >
+          <View style={styles.settingLeft}>
+            <View style={[styles.iconContainer, { backgroundColor: activeGoalPause ? "#FEF2F2" : "#F3F4F6" }]}>
+              <HeartPulse size={22} color={activeGoalPause ? "#DC2626" : "#6B7280"} />
+            </View>
+            <View style={styles.settingTextContainer}>
+              <Text style={[styles.settingTitle, { color: themeColors.text }]}>Injury / Sick Status</Text>
+              <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>
+                {activeGoalPause
+                  ? `${activeGoalPause.pause_type === "injury" ? "Injury" : "Sick"} since ${formatSettingsDate(activeGoalPause.start_date)}`
+                  : "Mark days that should be excused in Goals"}
+              </Text>
+            </View>
+          </View>
+          <View style={[styles.radioButton, activeGoalPause && styles.radioButtonActive]}>
+            {activeGoalPause && <View style={styles.radioButtonInner} />}
+          </View>
+        </TouchableOpacity>
+
         <TouchableOpacity 
           style={[styles.settingItem, { backgroundColor: themeColors.cardBackground }]} 
           onPress={() => setLocationEnabled(!locationEnabled)}
@@ -1414,6 +1551,55 @@ export default function SettingsScreen() {
           <Text style={[styles.footerSubtext, { color: themeColors.textLight }]}>Signed in as: {user.username}</Text>
         )}
       </View>
+
+      <Modal
+        visible={showGoalPauseModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowGoalPauseModal(false)}
+      >
+        <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.detailModalContent, { backgroundColor: themeColors.modalBackground }]}>
+            <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.detailTitle, { color: themeColors.text }]}>Injury / Sick Status</Text>
+              <TouchableOpacity onPress={() => setShowGoalPauseModal(false)}>
+                <XIcon size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.goalPauseBody}>
+              <Text style={[styles.goalPauseHelpText, { color: themeColors.textSecondary }]}>
+                These days will be marked on goal calendars and excused when a run or planned distance is missed.
+              </Text>
+              <TouchableOpacity
+                style={[styles.goalPauseOption, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}
+                onPress={() => startGoalPauseMutation.mutate("injury")}
+                disabled={startGoalPauseMutation.isPending}
+              >
+                <View style={[styles.iconContainer, { backgroundColor: "#FEF2F2" }]}>
+                  <AlertTriangle size={22} color="#DC2626" />
+                </View>
+                <View style={styles.settingTextContainer}>
+                  <Text style={[styles.settingTitle, { color: themeColors.text }]}>Injury</Text>
+                  <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Use when an injury affects training.</Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.goalPauseOption, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}
+                onPress={() => startGoalPauseMutation.mutate("sick")}
+                disabled={startGoalPauseMutation.isPending}
+              >
+                <View style={[styles.iconContainer, { backgroundColor: "#EFF6FF" }]}>
+                  <HeartPulse size={22} color="#2563EB" />
+                </View>
+                <View style={styles.settingTextContainer}>
+                  <Text style={[styles.settingTitle, { color: themeColors.text }]}>Sick</Text>
+                  <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>Use when illness affects training.</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={showFeedbackModal}
@@ -2817,6 +3003,23 @@ const styles = StyleSheet.create({
   },
   detailBody: {
     padding: 20,
+  },
+  goalPauseBody: {
+    padding: 20,
+    gap: 12,
+  },
+  goalPauseHelpText: {
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  goalPauseOption: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
   },
   detailSection: {
     marginBottom: 20,

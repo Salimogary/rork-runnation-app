@@ -46,6 +46,103 @@ function getEarnedBadgeCount(totalDistanceKm: number, totalActivities: number): 
   return distanceEarned + activityEarned;
 }
 
+function getDateOnly(value?: string | null): string {
+  return String(value || "").slice(0, 10);
+}
+
+function addDaysIso(value: string, days: number): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function getMedalEarnedDate(event: any): string {
+  return getDateOnly(event?.medal_date_end) || getDateOnly(event?.ends_at) || getDateOnly(event?.medal_date_start) || getDateOnly(event?.starts_at);
+}
+
+async function hasEarnedMedalAfterRegistration(ctx: { supabase: any }, registrationId: string, registrationDate?: string | null): Promise<boolean> {
+  const registeredOn = getDateOnly(registrationDate);
+  const { data: participants, error: participantsError } = await ctx.supabase
+    .from("events_participants")
+    .select(`
+      event_id,
+      distance_km,
+      events!events_participants_event_id_fkey(
+        event_id,
+        starts_at,
+        ends_at,
+        has_medal,
+        medal_min_daily_distance,
+        medal_min_cumulative_distance,
+        medal_date_start,
+        medal_date_end
+      )
+    `)
+    .eq("registration_id", registrationId);
+
+  if (participantsError) return false;
+
+  const medalRows = (participants || []).filter((row: any) => {
+    const event = Array.isArray(row.events) ? row.events[0] : row.events;
+    if (event?.has_medal !== true) return false;
+    const earnedDate = getMedalEarnedDate(event);
+    return !registeredOn || !earnedDate || earnedDate >= registeredOn;
+  });
+  if (medalRows.length === 0) return false;
+
+  const earliest = medalRows
+    .map((row: any) => {
+      const event = Array.isArray(row.events) ? row.events[0] : row.events;
+      return getDateOnly(event?.medal_date_start) || getDateOnly(event?.starts_at);
+    })
+    .filter(Boolean)
+    .sort()[0];
+  const latest = medalRows
+    .map((row: any) => getMedalEarnedDate(Array.isArray(row.events) ? row.events[0] : row.events))
+    .filter(Boolean)
+    .sort()
+    .pop();
+
+  const { data: activities } = earliest && latest
+    ? await ctx.supabase
+      .from("activities")
+      .select("activity_date, distance_km")
+      .eq("registration_id", registrationId)
+      .gte("activity_date", earliest)
+      .lte("activity_date", latest)
+    : { data: [] };
+
+  const distanceByDate = new Map<string, number>();
+  (activities || []).forEach((activity: any) => {
+    const date = getDateOnly(activity.activity_date);
+    if (!date) return;
+    distanceByDate.set(date, (distanceByDate.get(date) || 0) + (Number(activity.distance_km) || 0));
+  });
+
+  return medalRows.some((row: any) => {
+    const event = Array.isArray(row.events) ? row.events[0] : row.events;
+    const medalStart = getDateOnly(event?.medal_date_start) || getDateOnly(event?.starts_at);
+    const medalEnd = getMedalEarnedDate(event);
+    const participantDistance = Number(row.distance_km) || 0;
+    const minDailyDistance = Number(event?.medal_min_daily_distance) || 0;
+    const minCumulativeDistance = Number(event?.medal_min_cumulative_distance) || 0;
+
+    if (!minDailyDistance && !minCumulativeDistance) return participantDistance > 0;
+    if (!medalStart || !medalEnd) return participantDistance > 0 && (!minDailyDistance || participantDistance >= minDailyDistance);
+
+    let totalDistance = participantDistance;
+    let dailyQualified = true;
+    let cursor = medalStart;
+    while (cursor <= medalEnd) {
+      const dayDistance = distanceByDate.get(cursor) || 0;
+      totalDistance += dayDistance;
+      if (minDailyDistance > 0 && dayDistance < minDailyDistance) dailyQualified = false;
+      cursor = addDaysIso(cursor, 1);
+    }
+    return dailyQualified && (minCumulativeDistance <= 0 || totalDistance >= minCumulativeDistance);
+  });
+}
+
 async function resolveRegistrationId(ctx: { supabase: any; authUserId: string | null }, registrationId: string): Promise<string> {
   if (!ctx.authUserId || registrationId !== ctx.authUserId) {
     return registrationId;
@@ -98,6 +195,7 @@ export default publicProcedure
       habitDeclarationRes,
       healthGoalRes,
       enrollmentRes,
+      appRatingRes,
       profileRes,
     ] = await Promise.all([
       ctx.supabase.from("registrations").select("*").eq("registration_id", registrationId).maybeSingle(),
@@ -119,6 +217,7 @@ export default publicProcedure
       ctx.supabase.from("habit_declarations").select("declaration_id").eq("registration_id", registrationId).eq("is_active", true).limit(1),
       ctx.supabase.from("health_goal").select("health_id").eq("registration_id", registrationId).limit(1),
       ctx.supabase.from("event_enrollments").select("event_enrollment_id").eq("registration_id", registrationId).limit(1),
+      ctx.supabase.from("app_ratings").select("rating_id").eq("registration_id", registrationId).limit(1),
       ctx.supabase.from("profiles").select("profile_id").eq("registration_id", registrationId).maybeSingle(),
     ]);
 
@@ -218,6 +317,8 @@ export default publicProcedure
       (habitDeclarationRes.data?.length ?? 0) > 0 ||
       (healthGoalRes.data?.length ?? 0) > 0;
     const hasEventEnrollment = (enrollmentRes.data?.length ?? 0) > 0;
+    const hasEarnedMedal = await hasEarnedMedalAfterRegistration(ctx, registrationId, regRes.data.created_at);
+    const hasRatedApp = (appRatingRes.data?.length ?? 0) > 0;
     let requiresAdminTerms = false;
     let hasAcceptedAdminTerms = false;
     let hasFreeAdminSubscription = false;
@@ -272,6 +373,8 @@ export default publicProcedure
         hasTargets,
         hasEventEnrollment,
         hasAtLeastOneBadge,
+        hasEarnedMedal,
+        hasRatedApp,
         requiresAdminTerms,
         hasAcceptedAdminTerms,
       },
