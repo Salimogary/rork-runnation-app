@@ -1,7 +1,7 @@
-import { useMemo } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { useMemo, useState } from "react";
+import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
@@ -73,6 +73,8 @@ function formatPaceMinPerKm(paceMinPerKm: number): string {
 export default function MyWorkouts() {
   const { user } = useAuth();
   const { colors: themeColors } = useTheme();
+  const queryClient = useQueryClient();
+  const [deletingActivityId, setDeletingActivityId] = useState<string | null>(null);
 
   const { data: activities = [], isLoading, error } = useQuery<ActivityData[]>({
     queryKey: ["my-workouts", user?.id],
@@ -95,6 +97,53 @@ export default function MyWorkouts() {
     () => [...activities].sort((a, b) => new Date(b.activity_date).getTime() - new Date(a.activity_date).getTime()),
     [activities]
   );
+
+  const deleteWorkout = async (activity: ActivityData) => {
+    if (!user?.id || deletingActivityId) return;
+
+    setDeletingActivityId(activity.activity_id);
+    try {
+      const { error } = await supabase
+        .from("activities")
+        .delete()
+        .eq("activity_id", activity.activity_id)
+        .eq("registration_id", user.id);
+
+      if (error) throw error;
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["my-workouts", user.id] }),
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["dailyRunActivities", user.id] }),
+        queryClient.invalidateQueries({ queryKey: ["recentPaceActivities", user.id] }),
+        queryClient.invalidateQueries({ queryKey: ["healthDurationActivities", user.id] }),
+      ]);
+    } catch (error) {
+      console.error("[MyWorkouts] Could not delete workout:", error);
+      Alert.alert("Delete Failed", error instanceof Error ? error.message : "This workout could not be deleted.");
+    } finally {
+      setDeletingActivityId(null);
+    }
+  };
+
+  const confirmDeleteWorkout = (activity: ActivityData) => {
+    if (deletingActivityId) return;
+
+    Alert.alert(
+      "Delete Workout",
+      `Delete this ${activity.exercise_type} from ${formatDate(activity.activity_date)}? This removes it from your workout totals, goals, and rankings.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void deleteWorkout(activity);
+          },
+        },
+      ]
+    );
+  };
 
   const groupedActivities = useMemo<ActivityYearGroup[]>(() => {
     const years = new Map<string, {
@@ -233,19 +282,42 @@ export default function MyWorkouts() {
                   <Text style={[styles.runsTableHeaderText, styles.runsTimeColumn]}>Time</Text>
                   <Text style={[styles.runsTableHeaderText, styles.runsPaceColumn]}>Pace</Text>
                 </View>
-                {monthGroup.activities.map((activity, index) => (
-                  <View key={activity.activity_id} style={[styles.runsTableRow, index % 2 === 1 && styles.runsTableRowAlt]}>
+                {monthGroup.activities.map((activity, index) => {
+                  const isDeleting = deletingActivityId === activity.activity_id;
+                  return (
+                  <TouchableOpacity
+                    key={activity.activity_id}
+                    style={[
+                      styles.runsTableRow,
+                      index % 2 === 1 && styles.runsTableRowAlt,
+                      isDeleting && styles.runsTableRowDeleting,
+                    ]}
+                    onLongPress={() => confirmDeleteWorkout(activity)}
+                    delayLongPress={650}
+                    activeOpacity={0.72}
+                    disabled={!!deletingActivityId}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Workout ${activity.exercise_type} on ${formatDate(activity.activity_date)}`}
+                    accessibilityHint="Long press to delete this workout"
+                  >
                     <Text style={[styles.runsTableCellText, styles.runsDateColumn]} numberOfLines={1}>{formatDate(activity.activity_date)}</Text>
                     <Text style={[styles.runsTableCellText, styles.runsTypeColumn]} numberOfLines={1}>{activity.exercise_type}</Text>
                     <Text style={[styles.runsTableCellText, styles.runsDistanceColumn]}>{activity.distance_km.toFixed(1)}</Text>
                     <Text style={[styles.runsTableCellText, styles.runsTimeColumn]} numberOfLines={1}>
                       {calculateDuration(activity.start_time, activity.end_time, activity.pause_duration_seconds || 0)}
                     </Text>
-                    <Text style={[styles.runsTableCellText, styles.runsPaceColumn]} numberOfLines={1}>
-                      {formatPaceMinPerKm(activity.pace_min_per_km)}
-                    </Text>
-                  </View>
-                ))}
+                    {isDeleting ? (
+                      <View style={[styles.runsPaceColumn, styles.runsDeletingCell]}>
+                        <ActivityIndicator size="small" color={colors.primary} />
+                      </View>
+                    ) : (
+                      <Text style={[styles.runsTableCellText, styles.runsPaceColumn]} numberOfLines={1}>
+                        {formatPaceMinPerKm(activity.pace_min_per_km)}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                  );
+                })}
               </View>
             ))}
           </View>
@@ -366,6 +438,9 @@ const styles = StyleSheet.create({
   runsTableRowAlt: {
     backgroundColor: "rgba(0,0,0,0.025)",
   },
+  runsTableRowDeleting: {
+    opacity: 0.55,
+  },
   runsTableCellText: {
     fontSize: 12,
     color: colors.text,
@@ -388,5 +463,8 @@ const styles = StyleSheet.create({
   runsPaceColumn: {
     flex: 0.85,
     textAlign: "right",
+  },
+  runsDeletingCell: {
+    alignItems: "flex-end",
   },
 });

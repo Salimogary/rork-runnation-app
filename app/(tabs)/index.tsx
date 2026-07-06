@@ -1,4 +1,4 @@
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Platform, Modal, TextInput, Alert, Image, AppState, AppStateStatus, AccessibilityInfo, Share } from "react-native";
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Platform, Modal, TextInput, Alert, Image, AppState, AppStateStatus, AccessibilityInfo, Share, Animated, Easing } from "react-native";
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
@@ -592,6 +592,7 @@ export default function ExerciseScreen() {
   const autoPaused = useRef<boolean>(false);
   const autoPauseAnchorPoint = useRef<LocationPoint | null>(null);
   const autoPauseEnabled = useRef<boolean>(true);
+  const finishHoldProgress = useRef(new Animated.Value(0)).current;
   const runStateRef = useRef<RunState>("idle");
   const distanceRef = useRef(0);
   const durationRef = useRef(0);
@@ -604,6 +605,14 @@ export default function ExerciseScreen() {
   const workoutBottomPadding = runState === "finished" ? androidBottomInset + 48 : androidBottomInset + 24;
   const runDetailsActionsBottomPadding = Math.max(insets.bottom, Platform.OS === "android" ? 8 : 12) + 8;
   const hasAbnormalWorkoutSpeed = isAbnormallyFastWalkOrRun(exerciseType, distance, duration);
+  const finishHoldWidth = finishHoldProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0%", "100%"],
+  });
+  const finishHoldShineOpacity = finishHoldProgress.interpolate({
+    inputRange: [0, 0.25, 1],
+    outputRange: [0, 0.45, 0.18],
+  });
 
   useEffect(() => {
     runStateRef.current = runState;
@@ -1721,8 +1730,36 @@ export default function ExerciseScreen() {
     await resumeTracking();
   };
 
-  const showFinishLongPressHint = () => {
-    Alert.alert("Hold to Finish", "Press and hold the Finish button to stop this workout.");
+  const startFinishHoldFeedback = () => {
+    finishHoldProgress.stopAnimation();
+    finishHoldProgress.setValue(0);
+    Animated.timing(finishHoldProgress, {
+      toValue: 1,
+      duration: FINISH_LONG_PRESS_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  };
+
+  const resetFinishHoldFeedback = () => {
+    finishHoldProgress.stopAnimation();
+    Animated.timing(finishHoldProgress, {
+      toValue: 0,
+      duration: 160,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: false,
+    }).start();
+  };
+
+  const finishWorkoutAfterHold = () => {
+    finishHoldProgress.stopAnimation();
+    Animated.timing(finishHoldProgress, {
+      toValue: 1,
+      duration: 90,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: false,
+    }).start();
+    void stopTracking();
   };
 
   const stopTracking = async () => {
@@ -2943,18 +2980,25 @@ export default function ExerciseScreen() {
               
               <TouchableOpacity
                 style={[styles.actionButton, hasAbnormalWorkoutSpeed && styles.actionButtonDisabled]}
-                onPress={showFinishLongPressHint}
-                onLongPress={stopTracking}
+                onPressIn={startFinishHoldFeedback}
+                onPressOut={resetFinishHoldFeedback}
+                onLongPress={finishWorkoutAfterHold}
                 delayLongPress={FINISH_LONG_PRESS_MS}
                 disabled={isSaving || hasAbnormalWorkoutSpeed}
                 activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Hold to finish workout"
               >
                 <LinearGradient
                   colors={hasAbnormalWorkoutSpeed ? ['#6B7280', '#9CA3AF'] : ['#EF4444', '#F87171']}
                   style={styles.actionButtonGradient}
                 >
+                  <Animated.View pointerEvents="none" style={[styles.finishButtonShine, { opacity: finishHoldShineOpacity }]} />
                   <Square size={28} color={colors.white} />
                   <Text style={styles.actionButtonText}>{isSaving ? "Saving..." : "Hold to Finish"}</Text>
+                  <View style={styles.finishHoldTrack}>
+                    <Animated.View style={[styles.finishHoldProgress, { width: finishHoldWidth }]} />
+                  </View>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -2988,18 +3032,25 @@ export default function ExerciseScreen() {
 
                 <TouchableOpacity
                   style={[styles.actionButton, hasAbnormalWorkoutSpeed && styles.actionButtonDisabled]}
-                  onPress={showFinishLongPressHint}
-                  onLongPress={stopTracking}
+                  onPressIn={startFinishHoldFeedback}
+                  onPressOut={resetFinishHoldFeedback}
+                  onLongPress={finishWorkoutAfterHold}
                   delayLongPress={FINISH_LONG_PRESS_MS}
                   disabled={isSaving || hasAbnormalWorkoutSpeed}
                   activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Hold to finish workout"
                 >
                   <LinearGradient
                     colors={hasAbnormalWorkoutSpeed ? ['#6B7280', '#9CA3AF'] : ['#EF4444', '#F87171']}
                     style={styles.actionButtonGradient}
                   >
+                    <Animated.View pointerEvents="none" style={[styles.finishButtonShine, { opacity: finishHoldShineOpacity }]} />
                     <Square size={28} color={colors.white} />
                     <Text style={styles.actionButtonText}>{isSaving ? "Saving..." : "Hold to Finish"}</Text>
+                    <View style={styles.finishHoldTrack}>
+                      <Animated.View style={[styles.finishHoldProgress, { width: finishHoldWidth }]} />
+                    </View>
                   </LinearGradient>
                 </TouchableOpacity>
               </View>
@@ -4112,6 +4163,29 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
+    overflow: "hidden",
+  },
+  finishButtonShine: {
+    position: "absolute",
+    top: -28,
+    bottom: -28,
+    width: 46,
+    left: "50%",
+    backgroundColor: "rgba(255,255,255,0.88)",
+    transform: [{ rotate: "18deg" }],
+  },
+  finishHoldTrack: {
+    width: "78%",
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.28)",
+    overflow: "hidden",
+    marginTop: 2,
+  },
+  finishHoldProgress: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: colors.white,
   },
   actionButtonText: {
     color: colors.white,
