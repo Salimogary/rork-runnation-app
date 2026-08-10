@@ -11,10 +11,11 @@ import {
   Modal,
   Share,
   Linking,
+  TextInput,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import { Award, Calendar, ChevronDown, Clock3, Globe2, List, MapPin, CheckCircle2 } from "lucide-react-native";
+import { Award, Calendar, Car, ChevronDown, Clock3, Globe2, List, MapPin, CheckCircle2, Plus, Users } from "lucide-react-native";
 import { Image } from "expo-image";
 import * as FileSystem from "expo-file-system/legacy";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
@@ -30,7 +31,137 @@ type EventEntryMode = "free" | "club_approved" | "paid";
 type EventTypeFilter = "all" | "same_day" | "recurring" | "multiday";
 type EventViewMode = "cards" | "table";
 type EventTimeTab = "active" | "closed";
+type EventsMainTab = "events" | "rideShare" | "accommodation";
 type SelectorMode = "filters" | null;
+type RideContactPreference = "any" | "calls_only" | "whatsapp_only";
+type RideDriverSex = "Male" | "Female";
+type RideBootSpace = "none" | "some";
+type RideVehicleType = "passenger_car_light" | "van" | "bus";
+type AccommodationType = "single" | "shared" | "mixed";
+type LodgingType =
+  | "private_home"
+  | "airbnb"
+  | "guest_house"
+  | "motel"
+  | "hotel"
+  | "campsite"
+  | "other";
+type AccommodationFeature =
+  | "breakfast"
+  | "security_guard"
+  | "access_24_7"
+  | "restaurant"
+  | "parking"
+  | "cctv"
+  | "reception_24_7";
+type ContactFilter = "all" | RideContactPreference;
+type PriceFilter = "all" | "free" | "paid";
+
+const RIDE_CONTACT_PREFERENCE_OPTIONS: { value: RideContactPreference; label: string }[] = [
+  { value: "calls_only", label: "Calls only" },
+  { value: "whatsapp_only", label: "WhatsApp only" },
+  { value: "any", label: "Any" },
+];
+
+const RIDE_DRIVER_SEX_OPTIONS: { value: RideDriverSex; label: string }[] = [
+  { value: "Male", label: "Male driver" },
+  { value: "Female", label: "Female driver" },
+];
+
+const RIDE_BOOT_SPACE_OPTIONS: { value: RideBootSpace; label: string }[] = [
+  { value: "none", label: "No space" },
+  { value: "some", label: "Have some space" },
+];
+
+const RIDE_VEHICLE_TYPE_OPTIONS: { value: RideVehicleType; label: string; maxSeats: number }[] = [
+  { value: "passenger_car_light", label: "Passenger car (light)", maxSeats: 7 },
+  { value: "van", label: "Van", maxSeats: 14 },
+  { value: "bus", label: "Bus", maxSeats: 49 },
+];
+
+const ACCOMMODATION_FEATURE_OPTIONS: { value: AccommodationFeature; label: string }[] = [
+  { value: "breakfast", label: "Breakfast" },
+  { value: "security_guard", label: "Security guard" },
+  { value: "access_24_7", label: "24/7 access" },
+  { value: "restaurant", label: "Restaurant" },
+  { value: "parking", label: "Parking" },
+  { value: "cctv", label: "CCTV" },
+  { value: "reception_24_7", label: "24/7 reception" },
+];
+
+const LODGING_TYPE_OPTIONS: { value: LodgingType; label: string }[] = [
+  { value: "private_home", label: "Private home" },
+  { value: "airbnb", label: "AirBnB" },
+  { value: "guest_house", label: "Guest House" },
+  { value: "motel", label: "Motel" },
+  { value: "hotel", label: "Hotel" },
+  { value: "campsite", label: "Campsite" },
+  { value: "other", label: "Other" },
+];
+
+function formatRideContactPreference(value?: string | null) {
+  return RIDE_CONTACT_PREFERENCE_OPTIONS.find((option) => option.value === value)?.label || "Any";
+}
+
+function formatRideDriverSex(value?: string | null) {
+  return RIDE_DRIVER_SEX_OPTIONS.find((option) => option.value === value)?.label || "Driver sex";
+}
+
+function formatRideBootSpace(value?: string | null) {
+  return RIDE_BOOT_SPACE_OPTIONS.find((option) => option.value === value)?.label || "Boot space";
+}
+
+function getRideVehicleTypeOption(value?: string | null) {
+  return RIDE_VEHICLE_TYPE_OPTIONS.find((option) => option.value === value) || RIDE_VEHICLE_TYPE_OPTIONS[0];
+}
+
+function formatRideVehicleType(value?: string | null) {
+  return getRideVehicleTypeOption(value).label;
+}
+
+function formatAccommodationType(value?: string | null) {
+  if (value === "shared") return "Shared accommodation";
+  if (value === "mixed") return "Mixed accommodation";
+  return "Single accommodation";
+}
+
+function formatAccommodationFeature(value?: string | null) {
+  return ACCOMMODATION_FEATURE_OPTIONS.find((option) => option.value === value)?.label || String(value || "");
+}
+
+function formatLodgingType(value?: string | null) {
+  return LODGING_TYPE_OPTIONS.find((option) => option.value === value)?.label || String(value || "");
+}
+
+function cleanPhoneNumber(value?: string | null) {
+  return String(value || "").replace(/[^\d+]/g, "");
+}
+
+function buildWhatsAppUrl(contact?: string | null, message = "") {
+  const phone = cleanPhoneNumber(contact).replace(/^\+/, "");
+  return phone ? `https://wa.me/${phone}${message ? `?text=${encodeURIComponent(message)}` : ""}` : "";
+}
+
+function encodeBase64(input: string) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+  let output = "";
+  let index = 0;
+  while (index < input.length) {
+    const chr1 = input.charCodeAt(index++);
+    const chr2 = input.charCodeAt(index++);
+    const chr3 = input.charCodeAt(index++);
+    const enc1 = chr1 >> 2;
+    const enc2 = ((chr1 & 3) << 4) | (chr2 >> 4);
+    const enc3 = Number.isNaN(chr2) ? 64 : ((chr2 & 15) << 2) | (chr3 >> 6);
+    const enc4 = Number.isNaN(chr3) ? 64 : chr3 & 63;
+    output += chars.charAt(enc1) + chars.charAt(enc2) + chars.charAt(enc3) + chars.charAt(enc4);
+  }
+  return output;
+}
+
+function escapePdfText(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
 
 function normalizeCountryCode(country?: string | null) {
   const value = String(country || "").trim().toLowerCase();
@@ -75,6 +206,45 @@ function formatTableEventDate(dateString?: string | null) {
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return formatShortEventDate(dateString);
   return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }).replace(" ", "-");
+}
+
+function padDatePart(value: number) {
+  return value.toString().padStart(2, "0");
+}
+
+function formatLocalDateTimeInput(date: Date) {
+  return [
+    `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`,
+    `${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}`,
+  ].join("T");
+}
+
+function formatRideDateTimeField(value?: string | null) {
+  const date = new Date(String(value || ""));
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function buildCalendarDays(monthDate: Date) {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const first = new Date(year, month, 1);
+  const firstOffset = (first.getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: (Date | null)[] = Array(firstOffset).fill(null);
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push(new Date(year, month, day));
+  }
+  while (cells.length % 7 !== 0) {
+    cells.push(null);
+  }
+  return cells;
 }
 
 function formatEventMetaDate(startsAt?: string | null, endsAt?: string | null) {
@@ -210,6 +380,14 @@ function getEventLocationLabel(item: any) {
   return location || "TBA";
 }
 
+function getEventLocationPin(item: any) {
+  return String(item?.event_location_pin || item?.eventLocationPin || "").trim();
+}
+
+function isLocationPinLink(value: string) {
+  return /^https?:\/\/\S+$/i.test(value);
+}
+
 function getTableEventStatus(item: any, registeredEvent: any): "" | "registered" | "pending" | "completed" | "closed" {
   const explicitStatus = String(registeredEvent?.registrationStatus || "").toLowerCase();
   if (explicitStatus === "pending" || explicitStatus === "awaiting_payment") return "pending";
@@ -249,6 +427,88 @@ export default function EventsScreen() {
   } | null>(null);
   const [isSharingResult, setIsSharingResult] = useState(false);
   const [isPostingResult, setIsPostingResult] = useState(false);
+  const [mainTab, setMainTab] = useState<EventsMainTab>("events");
+  const [showRideOfferForm, setShowRideOfferForm] = useState(false);
+  const [showRideEventPicker, setShowRideEventPicker] = useState(false);
+  const [showSeatPicker, setShowSeatPicker] = useState(false);
+  const [showVehicleTypePicker, setShowVehicleTypePicker] = useState(false);
+  const [showDeparturePicker, setShowDeparturePicker] = useState(false);
+  const [showContactPreferencePicker, setShowContactPreferencePicker] = useState(false);
+  const [showDriverSexPicker, setShowDriverSexPicker] = useState(false);
+  const [showBootSpacePicker, setShowBootSpacePicker] = useState(false);
+  const [showRideFilters, setShowRideFilters] = useState(false);
+  const [showAccommodationForm, setShowAccommodationForm] = useState(false);
+  const [showAccommodationFilters, setShowAccommodationFilters] = useState(false);
+  const [showAccommodationEventPicker, setShowAccommodationEventPicker] = useState(false);
+  const [showAccommodationTypePicker, setShowAccommodationTypePicker] = useState(false);
+  const [showAccommodationContactPreferencePicker, setShowAccommodationContactPreferencePicker] = useState(false);
+  const [showAccommodationHostSexPicker, setShowAccommodationHostSexPicker] = useState(false);
+  const [showAccommodationRoomsPicker, setShowAccommodationRoomsPicker] = useState(false);
+  const [departureCalendarMonth, setDepartureCalendarMonth] = useState(() => new Date());
+  const [editingRideOfferId, setEditingRideOfferId] = useState<string | null>(null);
+  const [editingAccommodationOfferId, setEditingAccommodationOfferId] = useState<string | null>(null);
+  const [expandedBookingsOfferId, setExpandedBookingsOfferId] = useState<string | null>(null);
+  const [expandedAccommodationBookingsOfferId, setExpandedAccommodationBookingsOfferId] = useState<string | null>(null);
+  const [rideModerationDraft, setRideModerationDraft] = useState<{
+    offerId: string;
+    action: "hide" | "delete";
+    title: string;
+  } | null>(null);
+  const [rideModerationReason, setRideModerationReason] = useState("");
+  const [rideOfferForm, setRideOfferForm] = useState({
+    eventId: "",
+    availableSeats: "3",
+    vehicleType: "passenger_car_light" as RideVehicleType,
+    departureTown: "",
+    departureAt: "",
+    departureMeetingPoint: "",
+    contact: "",
+    preferredContactMethod: "any" as RideContactPreference,
+    driverSex: "Male" as RideDriverSex,
+    bootSpace: "some" as RideBootSpace,
+    requiresCommitmentFee: false,
+    commitmentFee: "",
+    farePerSeat: "",
+    carType: "",
+    numberPlate: "",
+    preferredSex: "Any" as "Any" | "Male" | "Female",
+  });
+  const [rideFilters, setRideFilters] = useState({
+    vehicleType: "all" as "all" | RideVehicleType,
+    minSeats: "all" as "all" | "1" | "2" | "3",
+    driverSex: "all" as "all" | RideDriverSex,
+    bootSpace: "all" as "all" | RideBootSpace,
+    contact: "all" as ContactFilter,
+    price: "all" as PriceFilter,
+  });
+  const [accommodationForm, setAccommodationForm] = useState({
+    eventId: "",
+    accommodationName: "",
+    locationName: "",
+    accommodationType: "single" as AccommodationType,
+    lodgingTypes: [] as LodgingType[],
+    roomsAvailable: "1",
+    locationPin: "",
+    pricePerRoom: "",
+    roomDescription: "",
+    notPermitted: "",
+    features: [] as AccommodationFeature[],
+    contact: "",
+    preferredContactMethod: "any" as RideContactPreference,
+    preferredGuestSex: "Any" as "Any" | "Male" | "Female",
+    requiresCommitmentFee: false,
+    commitmentFee: "",
+  });
+  const [accommodationBookingDrafts, setAccommodationBookingDrafts] = useState<Record<string, {
+    occupants: { name: string; sex: RideDriverSex }[];
+  }>>({});
+  const [accommodationFilters, setAccommodationFilters] = useState({
+    accommodationType: "all" as "all" | AccommodationType,
+    minRooms: "all" as "all" | "1" | "2" | "3",
+    contact: "all" as ContactFilter,
+    guestSex: "all" as "all" | "Male" | "Female",
+    price: "all" as PriceFilter,
+  });
   const { data: profileBundle, isLoading: profileLoading } = trpc.profile.getBundle.useQuery(
     { registrationId: effectiveRegistrationId },
     { enabled: !!effectiveRegistrationId }
@@ -365,6 +625,196 @@ export default function EventsScreen() {
       return aDate.localeCompare(bDate);
     });
   }, [registeredEventMap, visibleEvents]);
+
+  const rideShareEventOptions = useMemo(() => {
+    return [...(events ?? [])]
+      .filter((item: any) => {
+        const isVirtual = item.is_virtual === true || item.isVirtual === true;
+        const endDate = getEventEndDate(item);
+        const isClosed = Boolean(endDate && endDate < todayDate);
+        return !isVirtual && !isClosed && item.approval_status === "approved";
+      })
+      .sort((a: any, b: any) => String(a.starts_at || "").localeCompare(String(b.starts_at || "")));
+  }, [events, todayDate]);
+
+  const selectedRideShareEventId = rideOfferForm.eventId || rideShareEventOptions[0]?.event_id || "";
+  const selectedRideShareEvent =
+    rideShareEventOptions.find((item: any) => item.event_id === selectedRideShareEventId) || rideShareEventOptions[0] || null;
+  const selectedAccommodationEventId = accommodationForm.eventId || rideShareEventOptions[0]?.event_id || "";
+  const selectedAccommodationEvent =
+    rideShareEventOptions.find((item: any) => item.event_id === selectedAccommodationEventId) || rideShareEventOptions[0] || null;
+  const selectedDepartureDate = useMemo(() => {
+    const parsed = new Date(rideOfferForm.departureAt || "");
+    return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  }, [rideOfferForm.departureAt]);
+  const departureCalendarDays = useMemo(() => buildCalendarDays(departureCalendarMonth), [departureCalendarMonth]);
+  const departureHourOptions = useMemo(() => Array.from({ length: 24 }, (_, index) => index), []);
+  const departureMinuteOptions = useMemo(() => [0, 15, 30, 45], []);
+  const selectedVehicleType = getRideVehicleTypeOption(rideOfferForm.vehicleType);
+  const seatOptions = useMemo(
+    () => Array.from({ length: selectedVehicleType.maxSeats }, (_, index) => index + 1),
+    [selectedVehicleType.maxSeats]
+  );
+
+  const rideSharesQuery = trpc.events.listRideShares.useQuery(
+    { registrationId: effectiveRegistrationId, eventId: selectedRideShareEventId || undefined },
+    { enabled: !!effectiveRegistrationId && mainTab === "rideShare" && !!selectedRideShareEventId }
+  );
+  const rideShareOffers = ((rideSharesQuery.data as any)?.offers ?? []) as any[];
+  const filteredRideShareOffers = useMemo(() => {
+    return rideShareOffers.filter((offer: any) => {
+      if (rideFilters.vehicleType !== "all" && offer.vehicleType !== rideFilters.vehicleType) return false;
+      if (rideFilters.minSeats !== "all" && Number(offer.seatsRemaining || 0) < Number(rideFilters.minSeats)) return false;
+      if (rideFilters.driverSex !== "all" && offer.driverSex !== rideFilters.driverSex) return false;
+      if (rideFilters.bootSpace !== "all" && offer.bootSpace !== rideFilters.bootSpace) return false;
+      if (rideFilters.contact !== "all" && offer.preferredContactMethod !== rideFilters.contact) return false;
+      if (rideFilters.price === "free" && Number(offer.farePerSeat || 0) > 0) return false;
+      if (rideFilters.price === "paid" && Number(offer.farePerSeat || 0) <= 0) return false;
+      return true;
+    });
+  }, [rideFilters, rideShareOffers]);
+  const invalidateRideShares = () => trpcUtils.events.listRideShares.invalidate();
+  const accommodationsQuery = trpc.events.listAccommodations.useQuery(
+    { registrationId: effectiveRegistrationId, eventId: selectedAccommodationEventId || undefined },
+    { enabled: !!effectiveRegistrationId && mainTab === "accommodation" && !!selectedAccommodationEventId }
+  );
+  const accommodationOffers = ((accommodationsQuery.data as any)?.offers ?? []) as any[];
+  const filteredAccommodationOffers = useMemo(() => {
+    return accommodationOffers.filter((offer: any) => {
+      if (accommodationFilters.accommodationType !== "all" && offer.accommodationType !== accommodationFilters.accommodationType) return false;
+      if (accommodationFilters.minRooms !== "all" && Number(offer.roomsRemaining || 0) < Number(accommodationFilters.minRooms)) return false;
+      if (accommodationFilters.contact !== "all" && offer.preferredContactMethod !== accommodationFilters.contact) return false;
+      if (accommodationFilters.guestSex !== "all" && offer.preferredGuestSex !== accommodationFilters.guestSex) return false;
+      if (accommodationFilters.price === "free" && Number(offer.pricePerRoom || 0) > 0) return false;
+      if (accommodationFilters.price === "paid" && Number(offer.pricePerRoom || 0) <= 0) return false;
+      return true;
+    });
+  }, [accommodationFilters, accommodationOffers]);
+  const invalidateAccommodations = () => trpcUtils.events.listAccommodations.invalidate();
+
+  const createRideOfferMutation = trpc.events.createRideOffer.useMutation({
+    onSuccess: () => {
+      setRideOfferForm((current) => ({
+        ...current,
+        availableSeats: "3",
+        vehicleType: "passenger_car_light",
+        departureTown: "",
+        departureAt: "",
+        departureMeetingPoint: "",
+        contact: "",
+        preferredContactMethod: "any",
+        driverSex: "Male",
+        bootSpace: "some",
+        requiresCommitmentFee: false,
+        commitmentFee: "",
+        farePerSeat: "",
+        carType: "",
+        numberPlate: "",
+        preferredSex: "Any",
+      }));
+      setEditingRideOfferId(null);
+      setShowRideOfferForm(false);
+      void invalidateRideShares();
+      Alert.alert("Car Listed", "Your car is now visible to runners looking for a ride.");
+    },
+    onError: (mutationError: any) => Alert.alert("Could Not List Car", mutationError.message || "Please try again."),
+  });
+  const updateRideOfferMutation = trpc.events.updateRideOffer.useMutation({
+    onSuccess: () => {
+      setEditingRideOfferId(null);
+      setShowRideOfferForm(false);
+      void invalidateRideShares();
+      Alert.alert("Car Updated", "Your ride-share car details have been updated.");
+    },
+    onError: (mutationError: any) => Alert.alert("Could Not Update Car", mutationError.message || "Please try again."),
+  });
+  const requestRideBookingMutation = trpc.events.requestRideBooking.useMutation({
+    onSuccess: () => {
+      void invalidateRideShares();
+      Alert.alert("Request Sent", "Your booking is pending until the driver confirms it.");
+    },
+    onError: (mutationError: any) => Alert.alert("Could Not Request Ride", mutationError.message || "Please try again."),
+  });
+  const withdrawRideBookingMutation = trpc.events.withdrawRideBooking.useMutation({
+    onSuccess: () => void invalidateRideShares(),
+    onError: (mutationError: any) => Alert.alert("Could Not Withdraw", mutationError.message || "Please try again."),
+  });
+  const updateRideBookingMutation = trpc.events.updateRideBooking.useMutation({
+    onSuccess: () => void invalidateRideShares(),
+    onError: (mutationError: any) => Alert.alert("Could Not Update Booking", mutationError.message || "Please try again."),
+  });
+  const updateRideOfferStatusMutation = trpc.events.updateRideOfferStatus.useMutation({
+    onSuccess: () => {
+      setRideModerationDraft(null);
+      setRideModerationReason("");
+      void invalidateRideShares();
+    },
+    onError: (mutationError: any) => Alert.alert("Could Not Update Car", mutationError.message || "Please try again."),
+  });
+  const cancelRideOfferMutation = trpc.events.cancelRideOffer.useMutation({
+    onSuccess: () => void invalidateRideShares(),
+    onError: (mutationError: any) => Alert.alert("Could Not Cancel Car", mutationError.message || "Please try again."),
+  });
+  const createAccommodationOfferMutation = trpc.events.createAccommodationOffer.useMutation({
+    onSuccess: () => {
+      setAccommodationForm((current) => ({
+        ...current,
+        accommodationName: "",
+        locationName: "",
+        accommodationType: "single",
+        lodgingTypes: [],
+        roomsAvailable: "1",
+        locationPin: "",
+        pricePerRoom: "",
+        roomDescription: "",
+        notPermitted: "",
+        features: [],
+        contact: "",
+        preferredContactMethod: "any",
+        preferredGuestSex: "Any",
+        requiresCommitmentFee: false,
+        commitmentFee: "",
+      }));
+      setEditingAccommodationOfferId(null);
+      setShowAccommodationForm(false);
+      void invalidateAccommodations();
+      Alert.alert("Accommodation Listed", "Your accommodation is now visible to runners.");
+    },
+    onError: (mutationError: any) => Alert.alert("Could Not List Accommodation", mutationError.message || "Please try again."),
+  });
+  const updateAccommodationOfferMutation = trpc.events.updateAccommodationOffer.useMutation({
+    onSuccess: () => {
+      setEditingAccommodationOfferId(null);
+      setShowAccommodationForm(false);
+      void invalidateAccommodations();
+      Alert.alert("Accommodation Updated", "Your accommodation details have been updated.");
+    },
+    onError: (mutationError: any) => Alert.alert("Could Not Update Accommodation", mutationError.message || "Please try again."),
+  });
+  const requestAccommodationBookingMutation = trpc.events.requestAccommodationBooking.useMutation({
+    onSuccess: (_result, variables) => {
+      setAccommodationBookingDrafts((current) => {
+        const next = { ...current };
+        delete next[variables.offerId];
+        return next;
+      });
+      void invalidateAccommodations();
+      Alert.alert("Booking Sent", "Your accommodation booking is pending until the owner confirms it.");
+    },
+    onError: (mutationError: any) => Alert.alert("Could Not Book Accommodation", mutationError.message || "Please try again."),
+  });
+  const withdrawAccommodationBookingMutation = trpc.events.withdrawAccommodationBooking.useMutation({
+    onSuccess: () => void invalidateAccommodations(),
+    onError: (mutationError: any) => Alert.alert("Could Not Withdraw", mutationError.message || "Please try again."),
+  });
+  const updateAccommodationBookingMutation = trpc.events.updateAccommodationBooking.useMutation({
+    onSuccess: () => void invalidateAccommodations(),
+    onError: (mutationError: any) => Alert.alert("Could Not Update Booking", mutationError.message || "Please try again."),
+  });
+  const cancelAccommodationOfferMutation = trpc.events.cancelAccommodationOffer.useMutation({
+    onSuccess: () => void invalidateAccommodations(),
+    onError: (mutationError: any) => Alert.alert("Could Not Cancel Accommodation", mutationError.message || "Please try again."),
+  });
 
   const eventTypeFilterLabel = {
     all: "All Types",
@@ -644,12 +1094,1926 @@ export default function EventsScreen() {
     submit();
   };
 
-  const openEventParticipants = (eventItem: any) => {
-    router.push({
-      pathname: "/participants" as any,
-      params: { eventId: eventItem.event_id, eventMode: getEventModeParam(eventItem) },
+
+  const formatRideDateTime = (value?: string | null) => {
+    const date = new Date(String(value || ""));
+    if (Number.isNaN(date.getTime())) return String(value || "TBA");
+    return date.toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
+
+  const formatRideContact = (person: any) => {
+    return [person?.phone, person?.email].filter(Boolean).join(" | ") || "Contact hidden until confirmed";
+  };
+
+  const updateDepartureDatePart = (datePart: Date) => {
+    const current = selectedDepartureDate;
+    const next = new Date(
+      datePart.getFullYear(),
+      datePart.getMonth(),
+      datePart.getDate(),
+      current.getHours(),
+      current.getMinutes()
+    );
+    setRideOfferForm((currentForm) => ({ ...currentForm, departureAt: formatLocalDateTimeInput(next) }));
+  };
+
+  const updateDepartureTimePart = (hour: number, minute: number) => {
+    const current = selectedDepartureDate;
+    const next = new Date(current.getFullYear(), current.getMonth(), current.getDate(), hour, minute);
+    setRideOfferForm((currentForm) => ({ ...currentForm, departureAt: formatLocalDateTimeInput(next) }));
+  };
+
+  const startEditRideOffer = (offer: any) => {
+    setEditingRideOfferId(offer.offerId);
+    setRideOfferForm({
+      eventId: offer.eventId || selectedRideShareEventId,
+      availableSeats: String(offer.availableSeats || 1),
+      vehicleType: (offer.vehicleType || "passenger_car_light") as RideVehicleType,
+      departureTown: offer.departureTown || "",
+      departureAt: offer.departureAt ? formatLocalDateTimeInput(new Date(offer.departureAt)) : "",
+      departureMeetingPoint: offer.departureMeetingPoint || "",
+      contact: offer.contact || "",
+      preferredContactMethod: (offer.preferredContactMethod || "any") as RideContactPreference,
+      driverSex: (offer.driverSex || "Male") as RideDriverSex,
+      bootSpace: (offer.bootSpace || "some") as RideBootSpace,
+      requiresCommitmentFee: offer.requiresCommitmentFee === true,
+      commitmentFee: offer.commitmentFee ? String(offer.commitmentFee) : "",
+      farePerSeat: offer.farePerSeat ? String(offer.farePerSeat) : "",
+      carType: offer.carType || "",
+      numberPlate: offer.numberPlate || "",
+      preferredSex: (offer.preferredSex || "Any") as "Any" | "Male" | "Female",
+    });
+    setDepartureCalendarMonth(offer.departureAt ? new Date(new Date(offer.departureAt).getFullYear(), new Date(offer.departureAt).getMonth(), 1) : new Date());
+    setShowRideOfferForm(true);
+  };
+
+  const handleCreateRideOffer = () => {
+    if (!effectiveRegistrationId) {
+      Alert.alert("Login Required", "Please log in before listing a car.");
+      return;
+    }
+    if (!selectedRideShareEventId) {
+      Alert.alert("Choose Event", "Select a race before listing your car.");
+      return;
+    }
+
+    const availableSeats = Number.parseInt(rideOfferForm.availableSeats, 10);
+    const farePerSeat = Number.parseFloat(rideOfferForm.farePerSeat || "0");
+    const commitmentFee = Number.parseFloat(rideOfferForm.commitmentFee || "0");
+    const departureAt = rideOfferForm.departureAt.trim();
+    const numberPlate = rideOfferForm.numberPlate.trim().toUpperCase();
+
+    const maxSeats = getRideVehicleTypeOption(rideOfferForm.vehicleType).maxSeats;
+    if (!Number.isFinite(availableSeats) || availableSeats < 1 || availableSeats > maxSeats) {
+      Alert.alert("Seats Required", `Choose available seats from 1 to ${maxSeats}.`);
+      return;
+    }
+    if (!rideOfferForm.departureTown.trim() || !departureAt || !rideOfferForm.carType.trim() || !numberPlate) {
+      Alert.alert("Missing Details", "Departure town, departure date/time, car model, and number plate are required.");
+      return;
+    }
+    if (!rideOfferForm.departureMeetingPoint.trim() || !rideOfferForm.contact.trim()) {
+      Alert.alert("Missing Details", "Departure meeting point and contact are required.");
+      return;
+    }
+    if (Number.isNaN(new Date(departureAt).getTime())) {
+      Alert.alert("Invalid Date", "Choose the departure date and time from the calendar picker.");
+      return;
+    }
+    if (!Number.isFinite(farePerSeat) || farePerSeat < 0) {
+      Alert.alert("Invalid Fare", "Enter a valid fare per seat, or 0 for free.");
+      return;
+    }
+    if (rideOfferForm.requiresCommitmentFee && (!Number.isFinite(commitmentFee) || commitmentFee <= 0)) {
+      Alert.alert("Invalid Commitment Fee", "Enter a commitment fee greater than 0, or turn the fee off.");
+      return;
+    }
+
+    const payload = {
+      registrationId: effectiveRegistrationId,
+      eventId: selectedRideShareEventId,
+      availableSeats,
+      vehicleType: rideOfferForm.vehicleType,
+      departureTown: rideOfferForm.departureTown.trim(),
+      departureAt,
+      departureMeetingPoint: rideOfferForm.departureMeetingPoint.trim(),
+      contact: rideOfferForm.contact.trim(),
+      preferredContactMethod: rideOfferForm.preferredContactMethod,
+      driverSex: rideOfferForm.driverSex,
+      bootSpace: rideOfferForm.bootSpace,
+      requiresCommitmentFee: rideOfferForm.requiresCommitmentFee,
+      commitmentFee: rideOfferForm.requiresCommitmentFee ? commitmentFee : 0,
+      farePerSeat,
+      carType: rideOfferForm.carType.trim(),
+      numberPlate,
+      preferredSex: rideOfferForm.preferredSex,
+    };
+
+    if (editingRideOfferId) {
+      updateRideOfferMutation.mutate({ ...payload, offerId: editingRideOfferId });
+      return;
+    }
+
+    createRideOfferMutation.mutate(payload);
+  };
+
+  const handleCancelRideOffer = (offerId: string) => {
+    Alert.alert("Cancel Car Listing", "Cancel this car and any active ride requests?", [
+      { text: "Keep", style: "cancel" },
+      {
+        text: "Cancel Listing",
+        style: "destructive",
+        onPress: () => cancelRideOfferMutation.mutate({ registrationId: effectiveRegistrationId, offerId }),
+      },
+    ]);
+  };
+
+  const runRideOfferStatusAction = (
+    offerId: string,
+    action: "approve" | "hide" | "unhide" | "delete",
+    reason?: string | null
+  ) => {
+    updateRideOfferStatusMutation.mutate({
+      registrationId: effectiveRegistrationId,
+      offerId,
+      action,
+      reason,
+    });
+  };
+
+  const handleRideOfferStatusAction = (
+    offer: any,
+    action: "approve" | "hide" | "unhide" | "delete"
+  ) => {
+    if (offer.canModerate && !offer.isDriver && (action === "hide" || action === "delete")) {
+      setRideModerationDraft({
+        offerId: offer.offerId,
+        action,
+        title: action === "hide" ? "Hide car listing" : "Delete car listing",
+      });
+      setRideModerationReason("");
+      return;
+    }
+
+    if (action === "delete") {
+      Alert.alert("Delete Car Listing", "Delete this car and cancel active ride requests?", [
+        { text: "Keep", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => runRideOfferStatusAction(offer.offerId, action) },
+      ]);
+      return;
+    }
+
+    runRideOfferStatusAction(offer.offerId, action);
+  };
+
+  const openListingContact = (listing: any, message: string) => {
+    const contact = listing?.contact || listing?.host?.phone || listing?.driver?.phone;
+    const method = listing?.preferredContactMethod || "any";
+    const phone = cleanPhoneNumber(contact);
+    if (!phone) {
+      Alert.alert("No Contact", "The owner has not added a callable or WhatsApp contact.");
+      return;
+    }
+    const url = method === "calls_only" ? `tel:${phone}` : buildWhatsAppUrl(phone, message);
+    Linking.openURL(url).catch(() => {
+      if (method !== "calls_only") {
+        Linking.openURL(`tel:${phone}`).catch(() =>
+          Alert.alert("Contact Error", "Could not open WhatsApp or the phone dialer.")
+        );
+        return;
+      }
+      Alert.alert("Contact Error", "Could not open the phone dialer.");
+    });
+  };
+
+  const handleRideContact = (offer: any) => {
+    openListingContact(
+      offer,
+      `Hello, I saw your RunNation ride-share listing for ${offer.eventName}. Is a seat still available?`
+    );
+  };
+
+  const handleRideBook = (offer: any) => {
+    requestRideBookingMutation.mutate({
+      registrationId: effectiveRegistrationId,
+      offerId: offer.offerId,
+    });
+    openListingContact(
+      offer,
+      `Hello, I requested a seat in your RunNation ride-share listing for ${offer.eventName}.`
+    );
+  };
+
+  const shareBookingReceipt = async (kind: "ride" | "accommodation", listing: any) => {
+    const booking = listing.userBooking;
+    const lines = [
+      "RunNation Booking Receipt",
+      `Receipt type: ${kind === "ride" ? "Ride Share" : "Accommodation"}`,
+      `Status: ${booking?.status || "confirmed"}`,
+      `Event: ${listing.eventName || "RunNation event"}`,
+      kind === "ride"
+        ? `Route: ${listing.departureTown || "Departure"} to ${listing.eventLocation || "event venue"}`
+        : `Stay: ${listing.accommodationName || "Accommodation"}`,
+      kind === "ride"
+        ? `Departure: ${formatRideDateTime(listing.departureAt)}`
+        : `Location: ${listing.locationName || listing.eventLocation || "event venue"}`,
+      kind === "ride"
+        ? `Driver: ${listing.driver?.name || "RunNation user"}`
+        : `Host: ${listing.host?.name || "RunNation user"}`,
+      kind === "ride"
+        ? `Vehicle: ${formatRideVehicleType(listing.vehicleType)} ${listing.carType || ""}`.trim()
+        : `Accommodation type: ${formatAccommodationType(listing.accommodationType)}`,
+      kind === "ride"
+        ? `Fare: ${listing.farePerSeat ? formatMoneyAmount(listing.farePerSeat) : "Free"}`
+        : `Price: ${listing.pricePerRoom ? formatMoneyAmount(listing.pricePerRoom) : "Free"}`,
+      kind === "accommodation" && booking?.occupants?.length
+        ? `Occupants: ${booking.occupants.map((occupant: any) => `${occupant.name} (${occupant.sex})`).join(", ")}`
+        : "",
+      `Booking ID: ${booking?.bookingId || "N/A"}`,
+      `Generated: ${new Date().toLocaleString("en-GB")}`,
+      "",
+      "Use this receipt to identify a confirmed RunNation event booking for safety and coordination.",
+    ].filter(Boolean);
+    const contentLines = lines.map((line, index) => `BT /F1 ${index === 0 ? 18 : 11} Tf 50 ${780 - index * 24} Td (${escapePdfText(line)}) Tj ET`).join("\n");
+    const stream = `${contentLines}\n`;
+    const objects = [
+      "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj",
+      "4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj",
+      `5 0 obj << /Length ${stream.length} >> stream\n${stream}endstream endobj`,
+    ];
+    let pdf = "%PDF-1.4\n";
+    const offsets = [0];
+    for (const object of objects) {
+      offsets.push(pdf.length);
+      pdf += `${object}\n`;
+    }
+    const xrefOffset = pdf.length;
+    pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+    offsets.slice(1).forEach((offset) => {
+      pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+    });
+    pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+    const path = `${FileSystem.cacheDirectory}runnation-${kind}-receipt-${Date.now()}.pdf`;
+    await FileSystem.writeAsStringAsync(path, encodeBase64(pdf), { encoding: FileSystem.EncodingType.Base64 });
+    await Share.share({
+      title: "RunNation booking receipt",
+      message: `RunNation ${kind === "ride" ? "ride-share" : "accommodation"} receipt for ${listing.eventName || "event booking"}`,
+      url: path,
+    });
+  };
+
+  const startEditAccommodationOffer = (offer: any) => {
+    setEditingAccommodationOfferId(offer.offerId);
+    setAccommodationForm({
+      eventId: offer.eventId || selectedAccommodationEventId,
+      accommodationName: offer.accommodationName || "",
+      locationName: offer.locationName || "",
+      accommodationType: (offer.accommodationType === "lone" ? "single" : offer.accommodationType || "single") as AccommodationType,
+      lodgingTypes: Array.isArray(offer.lodgingTypes) ? offer.lodgingTypes : [],
+      roomsAvailable: String(offer.roomsAvailable || 1),
+      locationPin: offer.locationPin || "",
+      pricePerRoom: offer.pricePerRoom ? String(offer.pricePerRoom) : "",
+      roomDescription: offer.roomDescription || "",
+      notPermitted: offer.notPermitted || "",
+      features: Array.isArray(offer.features) ? offer.features : [],
+      contact: offer.contact || "",
+      preferredContactMethod: (offer.preferredContactMethod || "any") as RideContactPreference,
+      preferredGuestSex: (offer.preferredGuestSex || "Any") as "Any" | "Male" | "Female",
+      requiresCommitmentFee: offer.requiresCommitmentFee === true,
+      commitmentFee: offer.commitmentFee ? String(offer.commitmentFee) : "",
+    });
+    setShowAccommodationForm(true);
+  };
+
+  const handleCreateAccommodationOffer = () => {
+    if (!effectiveRegistrationId) {
+      Alert.alert("Login Required", "Please log in before listing accommodation.");
+      return;
+    }
+    if (!selectedAccommodationEventId) {
+      Alert.alert("Choose Event", "Select a race before listing accommodation.");
+      return;
+    }
+    const roomsAvailable = Number.parseInt(accommodationForm.roomsAvailable, 10);
+    const pricePerRoom = Number.parseInt(accommodationForm.pricePerRoom || "0", 10);
+    const commitmentFee = Number.parseInt(accommodationForm.commitmentFee || "0", 10);
+    if (!Number.isFinite(roomsAvailable) || roomsAvailable < 1) {
+      Alert.alert("Rooms Required", "Choose at least 1 available room.");
+      return;
+    }
+    if (!Number.isInteger(pricePerRoom) || pricePerRoom < 0) {
+      Alert.alert("Invalid Price", "Enter pricing as a whole number, or 0 for free.");
+      return;
+    }
+    if (accommodationForm.requiresCommitmentFee && (!Number.isInteger(commitmentFee) || commitmentFee <= 0)) {
+      Alert.alert("Invalid Commitment Fee", "Enter a whole number greater than 0, or turn the fee off.");
+      return;
+    }
+    if (!accommodationForm.accommodationName.trim() || !accommodationForm.locationName.trim()) {
+      Alert.alert("Missing Details", "Accommodation name and location are required.");
+      return;
+    }
+    if (!accommodationForm.roomDescription.trim() || !accommodationForm.contact.trim()) {
+      Alert.alert("Missing Details", "Room description and contact are required.");
+      return;
+    }
+
+    const payload = {
+      registrationId: effectiveRegistrationId,
+      eventId: selectedAccommodationEventId,
+      accommodationName: accommodationForm.accommodationName.trim(),
+      locationName: accommodationForm.locationName.trim(),
+      accommodationType: accommodationForm.accommodationType,
+      lodgingTypes: accommodationForm.lodgingTypes,
+      roomsAvailable,
+      locationPin: accommodationForm.locationPin.trim() || undefined,
+      pricePerRoom,
+      roomDescription: accommodationForm.roomDescription.trim(),
+      notPermitted: accommodationForm.notPermitted.trim() || undefined,
+      features: accommodationForm.features,
+      contact: accommodationForm.contact.trim(),
+      preferredContactMethod: accommodationForm.preferredContactMethod,
+      preferredGuestSex: accommodationForm.preferredGuestSex,
+      requiresCommitmentFee: accommodationForm.requiresCommitmentFee,
+      commitmentFee: accommodationForm.requiresCommitmentFee ? commitmentFee : 0,
+    };
+
+    if (editingAccommodationOfferId) {
+      updateAccommodationOfferMutation.mutate({ ...payload, offerId: editingAccommodationOfferId });
+      return;
+    }
+
+    createAccommodationOfferMutation.mutate(payload);
+  };
+
+  const handleAccommodationContact = (offer: any) => {
+    openListingContact(
+      offer,
+      `Hello, I saw your RunNation accommodation listing for ${offer.eventName}. Is it still available?`
+    );
+  };
+
+  const getAccommodationBookingDraft = (offerId: string) => {
+    return accommodationBookingDrafts[offerId] ?? { occupants: [{ name: "", sex: "Male" as RideDriverSex }] };
+  };
+
+  const setAccommodationOccupantCount = (offerId: string, count: number) => {
+    setAccommodationBookingDrafts((current) => {
+      const draft = current[offerId] ?? { occupants: [{ name: "", sex: "Male" as RideDriverSex }] };
+      const occupants = [...draft.occupants];
+      while (occupants.length < count) occupants.push({ name: "", sex: "Male" as RideDriverSex });
+      return { ...current, [offerId]: { occupants: occupants.slice(0, count) } };
+    });
+  };
+
+  const updateAccommodationOccupant = (
+    offerId: string,
+    index: number,
+    patch: Partial<{ name: string; sex: RideDriverSex }>
+  ) => {
+    setAccommodationBookingDrafts((current) => {
+      const draft = current[offerId] ?? { occupants: [{ name: "", sex: "Male" as RideDriverSex }] };
+      const occupants = draft.occupants.map((occupant, occupantIndex) =>
+        occupantIndex === index ? { ...occupant, ...patch } : occupant
+      );
+      return { ...current, [offerId]: { occupants } };
+    });
+  };
+
+  const toggleAccommodationFeature = (feature: AccommodationFeature) => {
+    setAccommodationForm((current) => ({
+      ...current,
+      features: current.features.includes(feature)
+        ? current.features.filter((value) => value !== feature)
+        : [...current.features, feature],
+    }));
+  };
+
+  const toggleLodgingType = (lodgingType: LodgingType) => {
+    setAccommodationForm((current) => ({
+      ...current,
+      lodgingTypes: current.lodgingTypes.includes(lodgingType)
+        ? current.lodgingTypes.filter((value) => value !== lodgingType)
+        : [...current.lodgingTypes, lodgingType],
+    }));
+  };
+
+  const handleAccommodationBook = (offer: any) => {
+    const draft = getAccommodationBookingDraft(offer.offerId);
+    const occupants = draft.occupants
+      .map((occupant) => ({ name: occupant.name.trim(), sex: occupant.sex }))
+      .filter((occupant) => occupant.name);
+    if (occupants.length !== draft.occupants.length) {
+      Alert.alert("Occupant Names Required", "Please enter the name and sex for every occupant.");
+      return;
+    }
+    if (occupants.length > Number(offer.roomsRemaining || 0)) {
+      Alert.alert("Not Enough Space", "This accommodation does not have enough available spaces.");
+      return;
+    }
+    requestAccommodationBookingMutation.mutate({
+      registrationId: effectiveRegistrationId,
+      offerId: offer.offerId,
+      occupants,
+    });
+    openListingContact(
+      offer,
+      `Hello, I requested your RunNation accommodation listing for ${offer.eventName} for ${occupants.length} occupant(s).`
+    );
+  };
+
+  const handleCancelAccommodationOffer = (offerId: string) => {
+    Alert.alert("Cancel Accommodation", "Cancel this accommodation listing and active booking requests?", [
+      { text: "Keep", style: "cancel" },
+      {
+        text: "Cancel Listing",
+        style: "destructive",
+        onPress: () => cancelAccommodationOfferMutation.mutate({ registrationId: effectiveRegistrationId, offerId }),
+      },
+    ]);
+  };
+
+  const renderFilterChips = (
+    value: string,
+    options: Array<{ value: string; label: string }>,
+    onSelect: (value: string) => void
+  ) => (
+    <View style={styles.filterChipRow}>
+      {options.map((option) => {
+        const selected = value === option.value;
+        return (
+          <Pressable
+            key={option.value}
+            style={[styles.filterChip, selected && styles.filterChipActive]}
+            onPress={() => onSelect(option.value)}
+          >
+            <Text style={[styles.filterChipText, selected && styles.filterChipTextActive]} numberOfLines={1}>
+              {option.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+
+  const renderRideSharePanel = () => (
+    <View style={styles.rideSharePanel}>
+      <View style={styles.rideShareHero}>
+        <View style={styles.rideShareHeroIcon}>
+          <Car size={22} color={appColors.primary} />
+        </View>
+        <View style={styles.rideShareHeroTextBlock}>
+          <Text style={styles.rideShareHeroTitle}>Event Ride Share</Text>
+          <Text style={styles.rideShareHeroText}>
+            Find a car to the race, or list seats for runners leaving from your town.
+          </Text>
+        </View>
+      </View>
+
+      <>
+        <View style={styles.rideShareRegisterHeader}>
+          <Text style={styles.rideShareSectionTitle}>Register my car</Text>
+          <Pressable
+            style={[styles.rideShareAddButton, rideShareEventOptions.length === 0 && styles.rideShareAddButtonDisabled]}
+            onPress={() => setShowRideOfferForm((current) => !current)}
+            disabled={rideShareEventOptions.length === 0}
+          >
+            <Plus size={18} color={rideShareEventOptions.length === 0 ? appColors.textSecondary : appColors.white} />
+          </Pressable>
+        </View>
+        {rideShareEventOptions.length === 0 ? (
+          <Text style={styles.rideShareNoRunsNote}>No Registered Runs</Text>
+        ) : null}
+
+        {showRideOfferForm ? (
+          <View style={styles.rideShareFormCard}>
+            <Pressable
+              style={[
+                styles.rideShareSelectButton,
+                rideShareEventOptions.length === 0 && styles.rideShareSelectButtonDisabled,
+              ]}
+              onPress={() => rideShareEventOptions.length > 0 && setShowRideEventPicker(true)}
+              disabled={rideShareEventOptions.length === 0}
+            >
+              <View style={styles.rideShareSelectTextBlock}>
+                <Text style={styles.rideShareFieldLabel}>Run</Text>
+                <Text style={[styles.rideShareSelectText, !selectedRideShareEvent && styles.rideShareSelectTextMuted]} numberOfLines={1}>
+                  {selectedRideShareEvent?.event_name || "No Registered Runs"}
+                </Text>
+              </View>
+              <ChevronDown size={18} color={appColors.textSecondary} />
+            </Pressable>
+            <Pressable
+              style={styles.rideShareSelectButton}
+              onPress={() => setShowVehicleTypePicker(true)}
+            >
+              <View style={styles.rideShareSelectTextBlock}>
+                <Text style={styles.rideShareFieldLabel}>Car type</Text>
+                <Text style={styles.rideShareSelectText} numberOfLines={1}>
+                  {formatRideVehicleType(rideOfferForm.vehicleType)}
+                </Text>
+              </View>
+              <ChevronDown size={18} color={appColors.textSecondary} />
+            </Pressable>
+            <View style={styles.rideShareInputRow}>
+              <Pressable
+                style={[styles.rideShareSelectButton, styles.rideShareSmallInput]}
+                onPress={() => setShowSeatPicker(true)}
+              >
+                <View style={styles.rideShareSelectTextBlock}>
+                  <Text style={styles.rideShareFieldLabel}>Available seats</Text>
+                  <Text style={styles.rideShareSelectText}>{rideOfferForm.availableSeats}</Text>
+                </View>
+                <ChevronDown size={18} color={appColors.textSecondary} />
+              </Pressable>
+              <TextInput
+                value={rideOfferForm.farePerSeat}
+                onChangeText={(text) => setRideOfferForm((current) => ({ ...current, farePerSeat: text }))}
+                placeholder="Fare / seat"
+                placeholderTextColor={appColors.textSecondary}
+                keyboardType="decimal-pad"
+                style={styles.rideShareInput}
+              />
+            </View>
+            <TextInput
+              value={rideOfferForm.departureTown}
+              onChangeText={(text) => setRideOfferForm((current) => ({ ...current, departureTown: text }))}
+              placeholder="Departure town e.g Kampala-Kyanja"
+              placeholderTextColor={appColors.textSecondary}
+              style={styles.rideShareInput}
+            />
+            <Pressable
+              style={styles.rideShareDateButton}
+              onPress={() => {
+                setDepartureCalendarMonth(new Date(selectedDepartureDate.getFullYear(), selectedDepartureDate.getMonth(), 1));
+                if (!rideOfferForm.departureAt) {
+                  const next = new Date();
+                  next.setMinutes(next.getMinutes() < 30 ? 30 : 0);
+                  if (next.getMinutes() === 0) next.setHours(next.getHours() + 1);
+                  setRideOfferForm((current) => ({ ...current, departureAt: formatLocalDateTimeInput(next) }));
+                }
+                setShowDeparturePicker(true);
+              }}
+            >
+              <Calendar size={16} color={appColors.primary} />
+              <View style={styles.rideShareSelectTextBlock}>
+                <Text style={styles.rideShareFieldLabel}>Departure date and time</Text>
+                <Text style={[styles.rideShareSelectText, !rideOfferForm.departureAt && styles.rideShareSelectTextMuted]} numberOfLines={1}>
+                  {formatRideDateTimeField(rideOfferForm.departureAt) || "Choose from calendar"}
+                </Text>
+              </View>
+            </Pressable>
+            <TextInput
+              value={rideOfferForm.departureMeetingPoint}
+              onChangeText={(text) => setRideOfferForm((current) => ({ ...current, departureMeetingPoint: text }))}
+              placeholder="Departure Meeting point e.g The Local Restaurant-Kyanja"
+              placeholderTextColor={appColors.textSecondary}
+              style={styles.rideShareInput}
+            />
+            <TextInput
+              value={rideOfferForm.contact}
+              onChangeText={(text) => setRideOfferForm((current) => ({ ...current, contact: text }))}
+              placeholder="Contact: e.g 256701111111"
+              placeholderTextColor={appColors.textSecondary}
+              keyboardType="phone-pad"
+              style={styles.rideShareInput}
+            />
+            <Pressable
+              style={styles.rideShareSelectButton}
+              onPress={() => setShowContactPreferencePicker(true)}
+            >
+              <View style={styles.rideShareSelectTextBlock}>
+                <Text style={styles.rideShareFieldLabel}>Preferred means of contact</Text>
+                <Text style={styles.rideShareSelectText} numberOfLines={1}>
+                  {formatRideContactPreference(rideOfferForm.preferredContactMethod)}
+                </Text>
+              </View>
+              <ChevronDown size={18} color={appColors.textSecondary} />
+            </Pressable>
+            <Pressable
+              style={styles.rideShareSelectButton}
+              onPress={() => setShowDriverSexPicker(true)}
+            >
+              <View style={styles.rideShareSelectTextBlock}>
+                <Text style={styles.rideShareFieldLabel}>Driver sex</Text>
+                <Text style={styles.rideShareSelectText} numberOfLines={1}>
+                  {formatRideDriverSex(rideOfferForm.driverSex)}
+                </Text>
+              </View>
+              <ChevronDown size={18} color={appColors.textSecondary} />
+            </Pressable>
+            <Pressable
+              style={styles.rideShareSelectButton}
+              onPress={() => setShowBootSpacePicker(true)}
+            >
+              <View style={styles.rideShareSelectTextBlock}>
+                <Text style={styles.rideShareFieldLabel}>Boot space</Text>
+                <Text style={styles.rideShareSelectText} numberOfLines={1}>
+                  {formatRideBootSpace(rideOfferForm.bootSpace)}
+                </Text>
+              </View>
+              <ChevronDown size={18} color={appColors.textSecondary} />
+            </Pressable>
+            <View style={styles.rideShareCommitmentBox}>
+              <Pressable
+                style={styles.rideShareCommitmentToggle}
+                onPress={() =>
+                  setRideOfferForm((current) => ({
+                    ...current,
+                    requiresCommitmentFee: !current.requiresCommitmentFee,
+                    commitmentFee: current.requiresCommitmentFee ? "" : current.commitmentFee,
+                  }))
+                }
+              >
+                <View style={[styles.rideShareCheckbox, rideOfferForm.requiresCommitmentFee && styles.rideShareCheckboxActive]}>
+                  {rideOfferForm.requiresCommitmentFee ? <CheckCircle2 size={14} color={appColors.white} /> : null}
+                </View>
+                <View style={styles.rideShareSelectTextBlock}>
+                  <Text style={styles.rideShareFieldLabel}>Commitment fee</Text>
+                  <Text style={styles.rideShareSelectText}>Require fee before confirming booking</Text>
+                </View>
+              </Pressable>
+              {rideOfferForm.requiresCommitmentFee ? (
+                <TextInput
+                  value={rideOfferForm.commitmentFee}
+                  onChangeText={(text) => setRideOfferForm((current) => ({ ...current, commitmentFee: text }))}
+                  placeholder="Commitment fee amount"
+                  placeholderTextColor={appColors.textSecondary}
+                  keyboardType="decimal-pad"
+                  style={styles.rideShareInput}
+                />
+              ) : null}
+            </View>
+            <TextInput
+              value={rideOfferForm.carType}
+              onChangeText={(text) => setRideOfferForm((current) => ({ ...current, carType: text }))}
+              placeholder="Car model, e.g. Toyota Noah"
+              placeholderTextColor={appColors.textSecondary}
+              style={styles.rideShareInput}
+            />
+            <TextInput
+              value={rideOfferForm.numberPlate}
+              onChangeText={(text) => setRideOfferForm((current) => ({ ...current, numberPlate: text }))}
+              placeholder="Number plate, stored privately for safety"
+              placeholderTextColor={appColors.textSecondary}
+              autoCapitalize="characters"
+              style={styles.rideShareInput}
+            />
+            <View style={styles.rideShareSexRow}>
+              <Text style={styles.preferenceTitle}>Sex</Text>
+              {(["Any", "Male", "Female"] as const).map((value) => (
+                <Pressable
+                  key={value}
+                  style={[styles.rideShareSexButton, rideOfferForm.preferredSex === value && styles.rideShareSexButtonActive]}
+                  onPress={() => setRideOfferForm((current) => ({ ...current, preferredSex: value }))}
+                >
+                  <Text style={[styles.rideShareSexText, rideOfferForm.preferredSex === value && styles.rideShareSexTextActive]}>
+                    {value === "Any" ? "Any sex" : value}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <Pressable
+              style={[
+                styles.rideSharePrimaryButton,
+                (createRideOfferMutation.isPending || updateRideOfferMutation.isPending) && styles.rideShareButtonDisabled,
+              ]}
+              onPress={handleCreateRideOffer}
+              disabled={createRideOfferMutation.isPending || updateRideOfferMutation.isPending}
+            >
+              <Text style={styles.rideSharePrimaryButtonText}>
+                {createRideOfferMutation.isPending || updateRideOfferMutation.isPending
+                  ? editingRideOfferId ? "Saving..." : "Registering..."
+                  : editingRideOfferId ? "Save my car" : "Register my car"}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+          <View style={styles.rideShareListHeader}>
+            <Text style={styles.rideShareSectionTitle}>Available Cars</Text>
+            <View style={styles.filterHeaderActions}>
+              <Text style={styles.rideShareCountText}>{filteredRideShareOffers.length}/{rideShareOffers.length} listed</Text>
+              <Pressable
+                style={[styles.filterButton, showRideFilters && styles.filterButtonActive]}
+                onPress={() => setShowRideFilters((current) => !current)}
+              >
+                <List size={13} color={showRideFilters ? appColors.white : appColors.primary} />
+                <Text style={[styles.filterButtonText, showRideFilters && styles.filterButtonTextActive]}>Filter</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          {showRideFilters ? (
+            <View style={styles.filterPanel}>
+              <Text style={styles.filterGroupLabel}>Car type</Text>
+              {renderFilterChips(
+                rideFilters.vehicleType,
+                [{ value: "all", label: "All" }, ...RIDE_VEHICLE_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))],
+                (value) => setRideFilters((current) => ({ ...current, vehicleType: value as "all" | RideVehicleType }))
+              )}
+              <Text style={styles.filterGroupLabel}>Available seats</Text>
+              {renderFilterChips(
+                rideFilters.minSeats,
+                [
+                  { value: "all", label: "Any" },
+                  { value: "1", label: "1+" },
+                  { value: "2", label: "2+" },
+                  { value: "3", label: "3+" },
+                ],
+                (value) => setRideFilters((current) => ({ ...current, minSeats: value as "all" | "1" | "2" | "3" }))
+              )}
+              <Text style={styles.filterGroupLabel}>Driver sex</Text>
+              {renderFilterChips(
+                rideFilters.driverSex,
+                [{ value: "all", label: "Any" }, ...RIDE_DRIVER_SEX_OPTIONS.map((option) => ({ value: option.value, label: option.value }))],
+                (value) => setRideFilters((current) => ({ ...current, driverSex: value as "all" | RideDriverSex }))
+              )}
+              <Text style={styles.filterGroupLabel}>Boot space</Text>
+              {renderFilterChips(
+                rideFilters.bootSpace,
+                [{ value: "all", label: "Any" }, ...RIDE_BOOT_SPACE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))],
+                (value) => setRideFilters((current) => ({ ...current, bootSpace: value as "all" | RideBootSpace }))
+              )}
+              <Text style={styles.filterGroupLabel}>Contact</Text>
+              {renderFilterChips(
+                rideFilters.contact,
+                [{ value: "all", label: "Any" }, ...RIDE_CONTACT_PREFERENCE_OPTIONS],
+                (value) => setRideFilters((current) => ({ ...current, contact: value as ContactFilter }))
+              )}
+              <Text style={styles.filterGroupLabel}>Price</Text>
+              {renderFilterChips(
+                rideFilters.price,
+                [
+                  { value: "all", label: "Any" },
+                  { value: "free", label: "Free" },
+                  { value: "paid", label: "Paid" },
+                ],
+                (value) => setRideFilters((current) => ({ ...current, price: value as PriceFilter }))
+              )}
+            </View>
+          ) : null}
+
+          {!selectedRideShareEventId ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>No Registered Runs</Text>
+              <Text style={styles.emptySubtext}>Ride share opens when an approved active run is available.</Text>
+            </View>
+          ) : rideSharesQuery.isLoading ? (
+            <View style={styles.rideShareLoadingCard}>
+              <ActivityIndicator color={appColors.primary} />
+              <Text style={styles.rideShareMutedText}>Loading cars...</Text>
+            </View>
+          ) : rideShareOffers.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>No cars listed yet</Text>
+              <Text style={styles.emptySubtext}>Be the first driver to list available seats for this race.</Text>
+            </View>
+          ) : filteredRideShareOffers.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>No matching cars</Text>
+              <Text style={styles.emptySubtext}>Adjust the filters to see more ride-share options.</Text>
+            </View>
+          ) : (
+            filteredRideShareOffers.map((offer: any) => {
+              const booking = offer.userBooking;
+              const isPending = booking?.status === "pending";
+              const isConfirmed = booking?.status === "confirmed";
+              const canRequest = !offer.isDriver && !offer.canModerate && !booking && offer.seatsRemaining > 0 && offer.status === "active";
+              return (
+                <View key={offer.offerId} style={styles.rideShareOfferCard}>
+                  <View style={styles.rideShareOfferHeader}>
+                    <View style={styles.rideShareOfferTitleBlock}>
+                      <Text style={styles.rideShareOfferEvent} numberOfLines={1}>{offer.eventName}</Text>
+                      <Text style={styles.rideShareOfferRoute} numberOfLines={2}>
+                        {offer.departureTown} to {offer.eventLocation || "event venue"}
+                      </Text>
+                    </View>
+                    <View style={[styles.rideShareSeatBadge, offer.seatsRemaining <= 0 && styles.rideShareSeatBadgeFull]}>
+                      <Users size={13} color={offer.seatsRemaining <= 0 ? "#991B1B" : appColors.primary} />
+                      <Text style={[styles.rideShareSeatBadgeText, offer.seatsRemaining <= 0 && styles.rideShareSeatBadgeTextFull]}>
+                        {offer.seatsRemaining} available
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.rideShareMetaGrid}>
+                    <Text style={styles.rideShareMetaText}>Depart: {formatRideDateTime(offer.departureAt)}</Text>
+                    {offer.departureMeetingPoint ? (
+                      <Text style={styles.rideShareMetaText}>Meeting point: {offer.departureMeetingPoint}</Text>
+                    ) : null}
+                    {offer.contact ? (
+                      <Text style={styles.rideShareMetaText}>Contact: {offer.contact}</Text>
+                    ) : null}
+                    <Text style={styles.rideShareMetaText}>Contact by: {formatRideContactPreference(offer.preferredContactMethod)}</Text>
+                    <Text style={styles.rideShareMetaText}>Fare: {offer.farePerSeat ? formatMoneyAmount(offer.farePerSeat) : "Free"}</Text>
+                    <Text style={styles.rideShareMetaText}>Car type: {formatRideVehicleType(offer.vehicleType)}</Text>
+                    <Text style={styles.rideShareMetaText}>Car model: {offer.carType}</Text>
+                    <Text style={styles.rideShareMetaText}>Driver sex: {formatRideDriverSex(offer.driverSex)}</Text>
+                    <Text style={styles.rideShareMetaText}>Boot space: {formatRideBootSpace(offer.bootSpace)}</Text>
+                    <Text style={styles.rideShareMetaText}>
+                      Commitment fee: {offer.requiresCommitmentFee ? formatMoneyAmount(offer.commitmentFee) : "Not required"}
+                    </Text>
+                    {offer.status === "pending_approval" ? (
+                      <Text style={styles.rideShareStatusText}>Status: Pending organizer/admin approval</Text>
+                    ) : offer.status === "hidden" ? (
+                      <Text style={styles.rideShareStatusText}>Status: Hidden</Text>
+                    ) : null}
+                    {offer.moderationReason ? (
+                      <Text style={styles.rideShareStatusText}>Reason: {offer.moderationReason}</Text>
+                    ) : null}
+                    {offer.isDriver ? (
+                      <Text style={styles.rideShareMetaText}>Plate: {offer.numberPlate || "Stored privately"}</Text>
+                    ) : null}
+                    <Text style={styles.rideShareMetaText}>Preferred: {offer.preferredSex || "Any sex"}</Text>
+                  </View>
+                  <View style={styles.rideShareDriverBox}>
+                    <Text style={styles.rideShareDriverName}>Driver: {offer.driver?.name || "RunNation user"}</Text>
+                    <Text style={styles.rideShareMutedText}>{formatRideContact(offer.driver)}</Text>
+                  </View>
+
+                  {offer.isDriver ? (
+                    <View style={styles.rideShareDriverRequests}>
+                      <View style={styles.rideShareActionRow}>
+                        <Pressable
+                          style={styles.rideShareSecondaryButton}
+                          onPress={() => startEditRideOffer(offer)}
+                        >
+                          <Text style={styles.rideShareSecondaryButtonText}>My car</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.rideShareSecondaryButton}
+                          onPress={() =>
+                            setExpandedBookingsOfferId((current) => current === offer.offerId ? null : offer.offerId)
+                          }
+                        >
+                          <Text style={styles.rideShareSecondaryButtonText}>My bookings</Text>
+                        </Pressable>
+                      </View>
+                      <View style={styles.rideShareActionRow}>
+                        <Pressable
+                          style={styles.rideShareSecondaryButton}
+                          onPress={() => handleRideOfferStatusAction(offer, offer.status === "hidden" ? "unhide" : "hide")}
+                        >
+                          <Text style={styles.rideShareSecondaryButtonText}>{offer.status === "hidden" ? "Unhide" : "Hide"}</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.rideShareSecondaryButton}
+                          onPress={() => handleRideOfferStatusAction(offer, "delete")}
+                        >
+                          <Text style={styles.rideShareSecondaryButtonText}>Delete</Text>
+                        </Pressable>
+                      </View>
+                      {expandedBookingsOfferId === offer.offerId ? (
+                        <>
+                          <Text style={styles.rideShareRequestsTitle}>Requests</Text>
+                          {offer.bookings?.length ? offer.bookings.map((request: any) => (
+                            <View key={request.bookingId} style={styles.rideShareRequestRow}>
+                              <View style={styles.rideShareRequestInfo}>
+                                <Text style={styles.rideShareRequestName}>{request.rider?.name || "Runner"}</Text>
+                                <Text style={styles.rideShareMutedText}>{formatRideContact(request.rider)}</Text>
+                                <Text style={styles.rideShareStatusText}>Status: {request.status}</Text>
+                              </View>
+                              {request.status === "pending" ? (
+                                <View style={styles.rideShareRequestActions}>
+                                  <Pressable
+                                    style={styles.rideShareConfirmButton}
+                                    onPress={() => updateRideBookingMutation.mutate({
+                                      registrationId: effectiveRegistrationId,
+                                      bookingId: request.bookingId,
+                                      decision: "confirmed",
+                                    })}
+                                  >
+                                    <Text style={styles.rideShareConfirmText}>Accept</Text>
+                                  </Pressable>
+                                  <Pressable
+                                    style={styles.rideShareRejectButton}
+                                    onPress={() => updateRideBookingMutation.mutate({
+                                      registrationId: effectiveRegistrationId,
+                                      bookingId: request.bookingId,
+                                      decision: "rejected",
+                                    })}
+                                  >
+                                    <Text style={styles.rideShareRejectText}>Decline</Text>
+                                  </Pressable>
+                                </View>
+                              ) : null}
+                            </View>
+                          )) : (
+                            <Text style={styles.rideShareMutedText}>No requests yet.</Text>
+                          )}
+                          <Pressable
+                            style={styles.rideShareSecondaryButton}
+                            onPress={() => handleCancelRideOffer(offer.offerId)}
+                          >
+                            <Text style={styles.rideShareSecondaryButtonText}>Cancel Listing</Text>
+                          </Pressable>
+                        </>
+                      ) : null}
+                    </View>
+                  ) : (
+                    <View style={styles.rideShareActionRow}>
+                      {isPending || isConfirmed ? (
+                        <>
+                          <View style={[styles.rideShareStatusPill, isConfirmed && styles.rideShareStatusPillConfirmed]}>
+                            <Text style={[styles.rideShareStatusPillText, isConfirmed && styles.rideShareStatusPillTextConfirmed]}>
+                              {isConfirmed ? "Confirmed" : "Pending"}
+                            </Text>
+                          </View>
+                          <Pressable
+                            style={styles.rideShareSecondaryButton}
+                            onPress={() => withdrawRideBookingMutation.mutate({
+                              registrationId: effectiveRegistrationId,
+                              bookingId: booking.bookingId,
+                            })}
+                          >
+                            <Text style={styles.rideShareSecondaryButtonText}>Withdraw</Text>
+                          </Pressable>
+                          {isConfirmed ? (
+                            <Pressable
+                              style={styles.rideShareSecondaryButton}
+                              onPress={() => void shareBookingReceipt("ride", offer)}
+                            >
+                              <Text style={styles.rideShareSecondaryButtonText}>Receipt</Text>
+                            </Pressable>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          <Pressable
+                            style={styles.rideShareSecondaryButton}
+                            onPress={() => handleRideContact(offer)}
+                          >
+                            <Text style={styles.rideShareSecondaryButtonText}>Contact</Text>
+                          </Pressable>
+                          <Pressable
+                            style={[styles.rideSharePrimaryButton, !canRequest && styles.rideShareButtonDisabled]}
+                            disabled={!canRequest || requestRideBookingMutation.isPending}
+                            onPress={() => handleRideBook(offer)}
+                          >
+                            <Text style={styles.rideSharePrimaryButtonText}>
+                              {offer.seatsRemaining <= 0 ? "Full" : "Book"}
+                            </Text>
+                          </Pressable>
+                        </>
+                      )}
+                    </View>
+                  )}
+                  {offer.canModerate && !offer.isDriver ? (
+                    <View style={styles.rideShareDriverRequests}>
+                      {offer.status === "pending_approval" ? (
+                        <Pressable
+                          style={styles.rideShareConfirmButton}
+                          onPress={() => handleRideOfferStatusAction(offer, "approve")}
+                        >
+                          <Text style={styles.rideShareConfirmText}>Approve listing</Text>
+                        </Pressable>
+                      ) : null}
+                      <View style={styles.rideShareActionRow}>
+                        <Pressable
+                          style={styles.rideShareSecondaryButton}
+                          onPress={() => handleRideOfferStatusAction(offer, offer.status === "hidden" ? "unhide" : "hide")}
+                        >
+                          <Text style={styles.rideShareSecondaryButtonText}>{offer.status === "hidden" ? "Unhide" : "Hide"}</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.rideShareSecondaryButton}
+                          onPress={() => handleRideOfferStatusAction(offer, "delete")}
+                        >
+                          <Text style={styles.rideShareSecondaryButtonText}>Delete</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })
+          )}
+        <Modal visible={showRideEventPicker} transparent animationType="fade" onRequestClose={() => setShowRideEventPicker(false)}>
+          <View style={styles.rideShareModalBackdrop}>
+            <View style={styles.rideSharePickerModal}>
+              <Text style={styles.rideSharePickerTitle}>Choose run</Text>
+              <ScrollView style={styles.rideSharePickerList}>
+                {rideShareEventOptions.map((item: any) => {
+                  const isSelected = item.event_id === selectedRideShareEventId;
+                  return (
+                    <Pressable
+                      key={item.event_id}
+                      style={[styles.rideShareEventOption, isSelected && styles.rideShareEventOptionActive]}
+                      onPress={() => {
+                        setRideOfferForm((current) => ({ ...current, eventId: item.event_id }));
+                        setShowRideEventPicker(false);
+                      }}
+                    >
+                      <Text style={[styles.rideShareEventOptionText, isSelected && styles.rideShareEventOptionTextActive]} numberOfLines={2}>
+                        {item.event_name || "Unnamed run"}
+                      </Text>
+                      <Text style={styles.rideShareEventOptionMeta} numberOfLines={1}>
+                        {formatShortEventDate(item.starts_at || item.startsAt) || "TBA"}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              <Pressable style={styles.rideShareSecondaryButton} onPress={() => setShowRideEventPicker(false)}>
+                <Text style={styles.rideShareSecondaryButtonText}>Close</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={!!rideModerationDraft}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            setRideModerationDraft(null);
+            setRideModerationReason("");
+          }}
+        >
+          <View style={styles.rideShareModalBackdrop}>
+            <View style={styles.rideSharePickerModal}>
+              <Text style={styles.rideSharePickerTitle}>{rideModerationDraft?.title || "Moderate car"}</Text>
+              <TextInput
+                value={rideModerationReason}
+                onChangeText={setRideModerationReason}
+                placeholder="Reason required"
+                placeholderTextColor={appColors.textSecondary}
+                multiline
+                style={[styles.rideShareInput, styles.rideShareReasonInput]}
+              />
+              <View style={styles.rideShareActionRow}>
+                <Pressable
+                  style={styles.rideShareSecondaryButton}
+                  onPress={() => {
+                    setRideModerationDraft(null);
+                    setRideModerationReason("");
+                  }}
+                >
+                  <Text style={styles.rideShareSecondaryButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.rideSharePrimaryButton, !rideModerationReason.trim() && styles.rideShareButtonDisabled]}
+                  disabled={!rideModerationReason.trim() || updateRideOfferStatusMutation.isPending}
+                  onPress={() => {
+                    if (!rideModerationDraft) return;
+                    runRideOfferStatusAction(rideModerationDraft.offerId, rideModerationDraft.action, rideModerationReason.trim());
+                  }}
+                >
+                  <Text style={styles.rideSharePrimaryButtonText}>Submit</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={showContactPreferencePicker}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowContactPreferencePicker(false)}
+        >
+          <View style={styles.rideShareModalBackdrop}>
+            <View style={styles.rideSharePickerModal}>
+              <Text style={styles.rideSharePickerTitle}>Preferred means of contact</Text>
+              {RIDE_CONTACT_PREFERENCE_OPTIONS.map((option) => {
+                const isSelected = rideOfferForm.preferredContactMethod === option.value;
+                return (
+                  <Pressable
+                    key={option.value}
+                    style={[styles.rideShareEventOption, isSelected && styles.rideShareEventOptionActive]}
+                    onPress={() => {
+                      setRideOfferForm((current) => ({ ...current, preferredContactMethod: option.value }));
+                      setShowContactPreferencePicker(false);
+                    }}
+                  >
+                    <Text style={[styles.rideShareEventOptionText, isSelected && styles.rideShareEventOptionTextActive]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              <Pressable style={styles.rideShareSecondaryButton} onPress={() => setShowContactPreferencePicker(false)}>
+                <Text style={styles.rideShareSecondaryButtonText}>Close</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={showSeatPicker} transparent animationType="fade" onRequestClose={() => setShowSeatPicker(false)}>
+          <View style={styles.rideShareModalBackdrop}>
+            <View style={styles.rideSharePickerModal}>
+              <Text style={styles.rideSharePickerTitle}>Available seats ({selectedVehicleType.label})</Text>
+              <View style={styles.rideShareSeatPickerGrid}>
+                {seatOptions.map((seat) => {
+                  const isSelected = rideOfferForm.availableSeats === String(seat);
+                  return (
+                    <Pressable
+                      key={seat}
+                      style={[styles.rideShareSeatPickerOption, isSelected && styles.rideShareTimeOptionActive]}
+                      onPress={() => {
+                        setRideOfferForm((current) => ({ ...current, availableSeats: String(seat) }));
+                        setShowSeatPicker(false);
+                      }}
+                    >
+                      <Text style={[styles.rideShareTimeOptionText, isSelected && styles.rideShareTimeOptionTextActive]}>
+                        {seat}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Pressable style={styles.rideShareSecondaryButton} onPress={() => setShowSeatPicker(false)}>
+                <Text style={styles.rideShareSecondaryButtonText}>Close</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={showVehicleTypePicker} transparent animationType="fade" onRequestClose={() => setShowVehicleTypePicker(false)}>
+          <View style={styles.rideShareModalBackdrop}>
+            <View style={styles.rideSharePickerModal}>
+              <Text style={styles.rideSharePickerTitle}>Car type</Text>
+              {RIDE_VEHICLE_TYPE_OPTIONS.map((option) => {
+                const isSelected = rideOfferForm.vehicleType === option.value;
+                return (
+                  <Pressable
+                    key={option.value}
+                    style={[styles.rideShareEventOption, isSelected && styles.rideShareEventOptionActive]}
+                    onPress={() => {
+                      setRideOfferForm((current) => ({
+                        ...current,
+                        vehicleType: option.value,
+                        availableSeats: String(Math.min(Number(current.availableSeats || 1), option.maxSeats)),
+                      }));
+                      setShowVehicleTypePicker(false);
+                    }}
+                  >
+                    <Text style={[styles.rideShareEventOptionText, isSelected && styles.rideShareEventOptionTextActive]}>
+                      {option.label}
+                    </Text>
+                    <Text style={styles.rideShareEventOptionMeta}>Up to {option.maxSeats} passengers</Text>
+                  </Pressable>
+                );
+              })}
+              <Pressable style={styles.rideShareSecondaryButton} onPress={() => setShowVehicleTypePicker(false)}>
+                <Text style={styles.rideShareSecondaryButtonText}>Close</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={showDriverSexPicker} transparent animationType="fade" onRequestClose={() => setShowDriverSexPicker(false)}>
+          <View style={styles.rideShareModalBackdrop}>
+            <View style={styles.rideSharePickerModal}>
+              <Text style={styles.rideSharePickerTitle}>Driver sex</Text>
+              {RIDE_DRIVER_SEX_OPTIONS.map((option) => {
+                const isSelected = rideOfferForm.driverSex === option.value;
+                return (
+                  <Pressable
+                    key={option.value}
+                    style={[styles.rideShareEventOption, isSelected && styles.rideShareEventOptionActive]}
+                    onPress={() => {
+                      setRideOfferForm((current) => ({ ...current, driverSex: option.value }));
+                      setShowDriverSexPicker(false);
+                    }}
+                  >
+                    <Text style={[styles.rideShareEventOptionText, isSelected && styles.rideShareEventOptionTextActive]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              <Pressable style={styles.rideShareSecondaryButton} onPress={() => setShowDriverSexPicker(false)}>
+                <Text style={styles.rideShareSecondaryButtonText}>Close</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={showBootSpacePicker} transparent animationType="fade" onRequestClose={() => setShowBootSpacePicker(false)}>
+          <View style={styles.rideShareModalBackdrop}>
+            <View style={styles.rideSharePickerModal}>
+              <Text style={styles.rideSharePickerTitle}>Boot space</Text>
+              {RIDE_BOOT_SPACE_OPTIONS.map((option) => {
+                const isSelected = rideOfferForm.bootSpace === option.value;
+                return (
+                  <Pressable
+                    key={option.value}
+                    style={[styles.rideShareEventOption, isSelected && styles.rideShareEventOptionActive]}
+                    onPress={() => {
+                      setRideOfferForm((current) => ({ ...current, bootSpace: option.value }));
+                      setShowBootSpacePicker(false);
+                    }}
+                  >
+                    <Text style={[styles.rideShareEventOptionText, isSelected && styles.rideShareEventOptionTextActive]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              <Pressable style={styles.rideShareSecondaryButton} onPress={() => setShowBootSpacePicker(false)}>
+                <Text style={styles.rideShareSecondaryButtonText}>Close</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={showDeparturePicker} transparent animationType="fade" onRequestClose={() => setShowDeparturePicker(false)}>
+          <View style={styles.rideShareModalBackdrop}>
+            <View style={styles.rideSharePickerModal}>
+              <View style={styles.rideShareCalendarHeader}>
+                <Pressable
+                  style={styles.rideShareCalendarNav}
+                  onPress={() => setDepartureCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))}
+                >
+                  <Text style={styles.rideShareCalendarNavText}>{"<"}</Text>
+                </Pressable>
+                <Text style={styles.rideSharePickerTitle}>
+                  {departureCalendarMonth.toLocaleDateString("en-GB", { month: "long", year: "numeric" })}
+                </Text>
+                <Pressable
+                  style={styles.rideShareCalendarNav}
+                  onPress={() => setDepartureCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))}
+                >
+                  <Text style={styles.rideShareCalendarNavText}>{">"}</Text>
+                </Pressable>
+              </View>
+              <View style={styles.rideShareWeekRow}>
+                {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => (
+                  <Text key={day} style={styles.rideShareWeekText}>{day}</Text>
+                ))}
+              </View>
+              <View style={styles.rideShareCalendarGrid}>
+                {departureCalendarDays.map((date, index) => {
+                  const isSelected =
+                    !!date &&
+                    date.getFullYear() === selectedDepartureDate.getFullYear() &&
+                    date.getMonth() === selectedDepartureDate.getMonth() &&
+                    date.getDate() === selectedDepartureDate.getDate();
+                  return (
+                    <Pressable
+                      key={date ? date.toISOString() : `blank-${index}`}
+                      style={[styles.rideShareCalendarDay, isSelected && styles.rideShareCalendarDayActive]}
+                      disabled={!date}
+                      onPress={() => date && updateDepartureDatePart(date)}
+                    >
+                      <Text style={[styles.rideShareCalendarDayText, isSelected && styles.rideShareCalendarDayTextActive]}>
+                        {date ? date.getDate() : ""}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={styles.rideShareFieldLabel}>Hour</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rideShareTimeOptions}>
+                {departureHourOptions.map((hour) => {
+                  const isSelected = selectedDepartureDate.getHours() === hour;
+                  return (
+                    <Pressable
+                      key={hour}
+                      style={[styles.rideShareTimeOption, isSelected && styles.rideShareTimeOptionActive]}
+                      onPress={() => updateDepartureTimePart(hour, selectedDepartureDate.getMinutes())}
+                    >
+                      <Text style={[styles.rideShareTimeOptionText, isSelected && styles.rideShareTimeOptionTextActive]}>
+                        {padDatePart(hour)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              <Text style={styles.rideShareFieldLabel}>Minutes</Text>
+              <View style={styles.rideShareMinuteOptions}>
+                {departureMinuteOptions.map((minute) => {
+                  const isSelected = selectedDepartureDate.getMinutes() === minute;
+                  return (
+                    <Pressable
+                      key={minute}
+                      style={[styles.rideShareTimeOption, isSelected && styles.rideShareTimeOptionActive]}
+                      onPress={() => updateDepartureTimePart(selectedDepartureDate.getHours(), minute)}
+                    >
+                      <Text style={[styles.rideShareTimeOptionText, isSelected && styles.rideShareTimeOptionTextActive]}>
+                        {padDatePart(minute)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Pressable style={styles.rideSharePrimaryButton} onPress={() => setShowDeparturePicker(false)}>
+                <Text style={styles.rideSharePrimaryButtonText}>Done</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+      </>
+    </View>
+  );
+
+  const renderAccommodationPanel = () => (
+    <View style={styles.rideSharePanel}>
+      <View style={styles.rideShareHero}>
+        <View style={styles.rideShareHeroIcon}>
+          <MapPin size={22} color={appColors.primary} />
+        </View>
+        <View style={styles.rideShareHeroTextBlock}>
+          <Text style={styles.rideShareHeroTitle}>Event Accommodation</Text>
+          <Text style={styles.rideShareHeroText}>
+            Find a place near the race, or list rooms available for runners.
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.rideShareRegisterHeader}>
+        <Text style={styles.rideShareSectionTitle}>Add accommodation</Text>
+        <Pressable
+          style={[styles.rideShareAddButton, rideShareEventOptions.length === 0 && styles.rideShareAddButtonDisabled]}
+          onPress={() => setShowAccommodationForm((current) => !current)}
+          disabled={rideShareEventOptions.length === 0}
+        >
+          <Plus size={18} color={rideShareEventOptions.length === 0 ? appColors.textSecondary : appColors.white} />
+        </Pressable>
+      </View>
+      {rideShareEventOptions.length === 0 ? <Text style={styles.rideShareNoRunsNote}>No Registered Runs</Text> : null}
+
+      {showAccommodationForm ? (
+        <View style={styles.rideShareFormCard}>
+          <Pressable
+            style={[styles.rideShareSelectButton, rideShareEventOptions.length === 0 && styles.rideShareSelectButtonDisabled]}
+            onPress={() => rideShareEventOptions.length > 0 && setShowAccommodationEventPicker(true)}
+            disabled={rideShareEventOptions.length === 0}
+          >
+            <View style={styles.rideShareSelectTextBlock}>
+              <Text style={styles.rideShareFieldLabel}>Run</Text>
+              <Text style={[styles.rideShareSelectText, !selectedAccommodationEvent && styles.rideShareSelectTextMuted]} numberOfLines={1}>
+                {selectedAccommodationEvent?.event_name || "No Registered Runs"}
+              </Text>
+            </View>
+            <ChevronDown size={18} color={appColors.textSecondary} />
+          </Pressable>
+          <View style={styles.rideShareSexRow}>
+            {(["single", "shared", "mixed"] as AccommodationType[]).map((value) => (
+              <Pressable
+                key={value}
+                style={[styles.rideShareSexButton, accommodationForm.accommodationType === value && styles.rideShareSexButtonActive]}
+                onPress={() => setAccommodationForm((current) => ({ ...current, accommodationType: value }))}
+              >
+                <Text style={[styles.rideShareSexText, accommodationForm.accommodationType === value && styles.rideShareSexTextActive]}>
+                  {value === "single" ? "Single" : value === "shared" ? "Shared" : "Mixed"}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.rideShareCommitmentBox}>
+            <Text style={styles.rideShareFieldLabel}>Accommodation category</Text>
+            <View style={styles.filterChipRow}>
+              {LODGING_TYPE_OPTIONS.map((option) => {
+                const selected = accommodationForm.lodgingTypes.includes(option.value);
+                return (
+                  <Pressable
+                    key={option.value}
+                    style={[styles.amenityChip, selected && styles.amenityChipActive]}
+                    onPress={() => toggleLodgingType(option.value)}
+                  >
+                    {selected ? <CheckCircle2 size={13} color={appColors.primary} /> : null}
+                    <Text style={[styles.amenityChipText, selected && styles.amenityChipTextActive]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+          <TextInput
+            value={accommodationForm.accommodationName}
+            onChangeText={(text) => setAccommodationForm((current) => ({ ...current, accommodationName: text }))}
+            placeholder="Name e.g Kilembe Highway Motel"
+            placeholderTextColor={appColors.textSecondary}
+            style={styles.rideShareInput}
+          />
+          <TextInput
+            value={accommodationForm.locationName}
+            onChangeText={(text) => setAccommodationForm((current) => ({ ...current, locationName: text }))}
+            placeholder="Location e.g Kilembe trading Center"
+            placeholderTextColor={appColors.textSecondary}
+            style={styles.rideShareInput}
+          />
+          <View style={styles.rideShareInputRow}>
+            <Pressable
+              style={[styles.rideShareSelectButton, styles.rideShareSmallInput]}
+              onPress={() => setShowAccommodationRoomsPicker(true)}
+            >
+              <View style={styles.rideShareSelectTextBlock}>
+                <Text style={styles.rideShareFieldLabel}>Guest capacity</Text>
+                <Text style={styles.rideShareSelectText}>{accommodationForm.roomsAvailable}</Text>
+              </View>
+              <ChevronDown size={18} color={appColors.textSecondary} />
+            </Pressable>
+            <TextInput
+              value={accommodationForm.pricePerRoom}
+              onChangeText={(text) => setAccommodationForm((current) => ({ ...current, pricePerRoom: text.replace(/[^0-9]/g, "") }))}
+              placeholder={accommodationForm.accommodationType === "single" ? "Price / room" : "Price / guest"}
+              placeholderTextColor={appColors.textSecondary}
+              keyboardType="number-pad"
+              style={styles.rideShareInput}
+            />
+          </View>
+          <TextInput
+            value={accommodationForm.locationPin}
+            onChangeText={(text) => setAccommodationForm((current) => ({ ...current, locationPin: text }))}
+            placeholder="Location pin e.g Google Maps link"
+            placeholderTextColor={appColors.textSecondary}
+            keyboardType="url"
+            autoCapitalize="none"
+            style={styles.rideShareInput}
+          />
+          <TextInput
+            value={accommodationForm.roomDescription}
+            onChangeText={(text) => setAccommodationForm((current) => ({ ...current, roomDescription: text }))}
+            placeholder="Room description"
+            placeholderTextColor={appColors.textSecondary}
+            multiline
+            style={[styles.rideShareInput, styles.rideShareReasonInput]}
+          />
+          <View style={styles.rideShareCommitmentBox}>
+            <Text style={styles.rideShareFieldLabel}>Features</Text>
+            <View style={styles.filterChipRow}>
+              {ACCOMMODATION_FEATURE_OPTIONS.map((option) => {
+                const selected = accommodationForm.features.includes(option.value);
+                return (
+                  <Pressable
+                    key={option.value}
+                    style={[styles.amenityChip, selected && styles.amenityChipActive]}
+                    onPress={() => toggleAccommodationFeature(option.value)}
+                  >
+                    {selected ? <CheckCircle2 size={13} color={appColors.primary} /> : null}
+                    <Text style={[styles.amenityChipText, selected && styles.amenityChipTextActive]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+          <TextInput
+            value={accommodationForm.notPermitted}
+            onChangeText={(text) => setAccommodationForm((current) => ({ ...current, notPermitted: text }))}
+            placeholder="Not permitted e.g pets, alcohol (optional)"
+            placeholderTextColor={appColors.textSecondary}
+            multiline
+            style={[styles.rideShareInput, styles.rideShareReasonInput]}
+          />
+          <TextInput
+            value={accommodationForm.contact}
+            onChangeText={(text) => setAccommodationForm((current) => ({ ...current, contact: text }))}
+            placeholder="Contact: e.g 256701111111"
+            placeholderTextColor={appColors.textSecondary}
+            keyboardType="phone-pad"
+            style={styles.rideShareInput}
+          />
+          <View style={styles.rideShareSexRow}>
+            <Text style={styles.preferenceTitle}>Contact</Text>
+            {RIDE_CONTACT_PREFERENCE_OPTIONS.map((option) => (
+              <Pressable
+                key={option.value}
+                style={[styles.rideShareSexButton, accommodationForm.preferredContactMethod === option.value && styles.rideShareSexButtonActive]}
+                onPress={() => setAccommodationForm((current) => ({ ...current, preferredContactMethod: option.value }))}
+              >
+                <Text style={[styles.rideShareSexText, accommodationForm.preferredContactMethod === option.value && styles.rideShareSexTextActive]}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.rideShareSexRow}>
+            <Text style={styles.preferenceTitle}>Sex</Text>
+            {(["Any", "Male", "Female"] as const).map((value) => (
+              <Pressable
+                key={value}
+                style={[styles.rideShareSexButton, accommodationForm.preferredGuestSex === value && styles.rideShareSexButtonActive]}
+                onPress={() => setAccommodationForm((current) => ({ ...current, preferredGuestSex: value }))}
+              >
+                <Text style={[styles.rideShareSexText, accommodationForm.preferredGuestSex === value && styles.rideShareSexTextActive]}>
+                  {value === "Any" ? "Any guest" : `${value} guest`}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.rideShareCommitmentBox}>
+            <Pressable
+              style={styles.rideShareCommitmentToggle}
+              onPress={() =>
+                setAccommodationForm((current) => ({
+                  ...current,
+                  requiresCommitmentFee: !current.requiresCommitmentFee,
+                  commitmentFee: current.requiresCommitmentFee ? "" : current.commitmentFee,
+                }))
+              }
+            >
+              <View style={[styles.rideShareCheckbox, accommodationForm.requiresCommitmentFee && styles.rideShareCheckboxActive]}>
+                {accommodationForm.requiresCommitmentFee ? <CheckCircle2 size={14} color={appColors.white} /> : null}
+              </View>
+              <View style={styles.rideShareSelectTextBlock}>
+                <Text style={styles.rideShareFieldLabel}>Commitment fee</Text>
+                <Text style={styles.rideShareSelectText}>Require fee before confirming booking</Text>
+              </View>
+            </Pressable>
+            {accommodationForm.requiresCommitmentFee ? (
+              <TextInput
+                value={accommodationForm.commitmentFee}
+                onChangeText={(text) => setAccommodationForm((current) => ({ ...current, commitmentFee: text.replace(/[^0-9]/g, "") }))}
+                placeholder="Commitment fee amount"
+                placeholderTextColor={appColors.textSecondary}
+                keyboardType="number-pad"
+                style={styles.rideShareInput}
+              />
+            ) : null}
+          </View>
+          <Pressable
+            style={[
+              styles.rideSharePrimaryButton,
+              (createAccommodationOfferMutation.isPending || updateAccommodationOfferMutation.isPending) && styles.rideShareButtonDisabled,
+            ]}
+            onPress={handleCreateAccommodationOffer}
+            disabled={createAccommodationOfferMutation.isPending || updateAccommodationOfferMutation.isPending}
+          >
+            <Text style={styles.rideSharePrimaryButtonText}>
+              {editingAccommodationOfferId ? "Save accommodation" : "Add accommodation"}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <View style={styles.rideShareListHeader}>
+        <Text style={styles.rideShareSectionTitle}>Available Accommodation</Text>
+        <View style={styles.filterHeaderActions}>
+          <Text style={styles.rideShareCountText}>{filteredAccommodationOffers.length}/{accommodationOffers.length} listed</Text>
+          <Pressable
+            style={[styles.filterButton, showAccommodationFilters && styles.filterButtonActive]}
+            onPress={() => setShowAccommodationFilters((current) => !current)}
+          >
+            <List size={13} color={showAccommodationFilters ? appColors.white : appColors.primary} />
+            <Text style={[styles.filterButtonText, showAccommodationFilters && styles.filterButtonTextActive]}>Filter</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {showAccommodationFilters ? (
+        <View style={styles.filterPanel}>
+          <Text style={styles.filterGroupLabel}>Accommodation type</Text>
+          {renderFilterChips(
+            accommodationFilters.accommodationType,
+            [
+              { value: "all", label: "All" },
+              { value: "single", label: "Single" },
+              { value: "shared", label: "Shared" },
+              { value: "mixed", label: "Mixed" },
+            ],
+            (value) => setAccommodationFilters((current) => ({ ...current, accommodationType: value as "all" | AccommodationType }))
+          )}
+          <Text style={styles.filterGroupLabel}>Rooms</Text>
+          {renderFilterChips(
+            accommodationFilters.minRooms,
+            [
+              { value: "all", label: "Any" },
+              { value: "1", label: "1+" },
+              { value: "2", label: "2+" },
+              { value: "3", label: "3+" },
+            ],
+            (value) => setAccommodationFilters((current) => ({ ...current, minRooms: value as "all" | "1" | "2" | "3" }))
+          )}
+          <Text style={styles.filterGroupLabel}>Guest preference</Text>
+          {renderFilterChips(
+            accommodationFilters.guestSex,
+            [
+              { value: "all", label: "Any" },
+              { value: "Male", label: "Male" },
+              { value: "Female", label: "Female" },
+            ],
+            (value) => setAccommodationFilters((current) => ({ ...current, guestSex: value as "all" | "Male" | "Female" }))
+          )}
+          <Text style={styles.filterGroupLabel}>Contact</Text>
+          {renderFilterChips(
+            accommodationFilters.contact,
+            [{ value: "all", label: "Any" }, ...RIDE_CONTACT_PREFERENCE_OPTIONS],
+            (value) => setAccommodationFilters((current) => ({ ...current, contact: value as ContactFilter }))
+          )}
+          <Text style={styles.filterGroupLabel}>Price</Text>
+          {renderFilterChips(
+            accommodationFilters.price,
+            [
+              { value: "all", label: "Any" },
+              { value: "free", label: "Free" },
+              { value: "paid", label: "Paid" },
+            ],
+            (value) => setAccommodationFilters((current) => ({ ...current, price: value as PriceFilter }))
+          )}
+        </View>
+      ) : null}
+
+      {!selectedAccommodationEventId ? (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyTitle}>No Registered Runs</Text>
+          <Text style={styles.emptySubtext}>Accommodation opens when an approved active run is available.</Text>
+        </View>
+      ) : accommodationsQuery.isLoading ? (
+        <View style={styles.rideShareLoadingCard}>
+          <ActivityIndicator color={appColors.primary} />
+          <Text style={styles.rideShareMutedText}>Loading accommodation...</Text>
+        </View>
+      ) : accommodationOffers.length === 0 ? (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyTitle}>No accommodation listed yet</Text>
+          <Text style={styles.emptySubtext}>Be the first to list a room or shared stay for this race.</Text>
+        </View>
+      ) : filteredAccommodationOffers.length === 0 ? (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyTitle}>No matching accommodation</Text>
+          <Text style={styles.emptySubtext}>Adjust the filters to see more stay options.</Text>
+        </View>
+      ) : (
+        filteredAccommodationOffers.map((offer: any) => {
+          const booking = offer.userBooking;
+          const isPending = booking?.status === "pending";
+          const isConfirmed = booking?.status === "confirmed";
+          const canRequest = !offer.isHost && !booking && offer.roomsRemaining > 0 && offer.status === "active";
+          const bookingDraft = getAccommodationBookingDraft(offer.offerId);
+          return (
+            <View key={offer.offerId} style={styles.rideShareOfferCard}>
+              <View style={styles.rideShareOfferHeader}>
+                <View style={styles.rideShareOfferTitleBlock}>
+                  <Text style={styles.rideShareOfferEvent} numberOfLines={1}>{offer.accommodationName || offer.eventName}</Text>
+                  <Text style={styles.rideShareOfferRoute} numberOfLines={2}>
+                    {formatAccommodationType(offer.accommodationType)} | {offer.locationName || offer.eventLocation || "event venue"}
+                  </Text>
+                </View>
+                <View style={[styles.rideShareSeatBadge, offer.roomsRemaining <= 0 && styles.rideShareSeatBadgeFull]}>
+                  <Users size={13} color={offer.roomsRemaining <= 0 ? "#991B1B" : appColors.primary} />
+                  <Text style={[styles.rideShareSeatBadgeText, offer.roomsRemaining <= 0 && styles.rideShareSeatBadgeTextFull]}>
+                    {offer.roomsRemaining} {offer.accommodationType === "shared" ? "spaces" : "rooms"}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.rideShareMetaGrid}>
+                <Text style={styles.rideShareMetaText}>Event: {offer.eventName}</Text>
+                <Text style={styles.rideShareMetaText}>
+                  Price: {offer.pricePerRoom ? formatMoneyAmount(offer.pricePerRoom) : "Free"} / {offer.accommodationType === "single" ? "room" : "guest"}
+                </Text>
+                {Array.isArray(offer.lodgingTypes) && offer.lodgingTypes.length ? (
+                  <Text style={styles.rideShareMetaText}>
+                    Category: {offer.lodgingTypes.map((type: string) => formatLodgingType(type)).filter(Boolean).join(", ")}
+                  </Text>
+                ) : null}
+                <Text style={styles.rideShareMetaText}>Contact by: {formatRideContactPreference(offer.preferredContactMethod)}</Text>
+                <Text style={styles.rideShareMetaText}>Preferred guest: {offer.preferredGuestSex || "Any sex"}</Text>
+                <Text style={styles.rideShareMetaText}>
+                  Commitment fee: {offer.requiresCommitmentFee ? formatMoneyAmount(offer.commitmentFee) : "Not required"}
+                </Text>
+                {offer.locationPin ? (
+                  <Pressable
+                    onPress={() => {
+                      if (isLocationPinLink(offer.locationPin)) {
+                        Linking.openURL(offer.locationPin).catch(() =>
+                          Alert.alert("Location Pin", "Could not open this location pin.")
+                        );
+                      }
+                    }}
+                    disabled={!isLocationPinLink(offer.locationPin)}
+                  >
+                    <Text style={styles.rideShareMetaText}>
+                      Pin: {isLocationPinLink(offer.locationPin) ? "Open location pin" : offer.locationPin}
+                    </Text>
+                  </Pressable>
+                ) : null}
+                <Text style={styles.rideShareMetaText}>{offer.roomDescription}</Text>
+                {Array.isArray(offer.features) && offer.features.length ? (
+                  <Text style={styles.rideShareMetaText}>
+                    Features: {offer.features.map((feature: string) => formatAccommodationFeature(feature)).filter(Boolean).join(", ")}
+                  </Text>
+                ) : null}
+                {offer.notPermitted ? (
+                  <Text style={styles.rideShareStatusText}>Not permitted: {offer.notPermitted}</Text>
+                ) : null}
+              </View>
+              <View style={styles.rideShareDriverBox}>
+                <Text style={styles.rideShareDriverName}>Host: {offer.host?.name || "RunNation user"}</Text>
+                <Text style={styles.rideShareMutedText}>{formatRideContact(offer.host)}</Text>
+              </View>
+              {offer.isHost ? (
+                <View style={styles.rideShareDriverRequests}>
+                  <View style={styles.rideShareActionRow}>
+                    <Pressable style={styles.rideShareSecondaryButton} onPress={() => startEditAccommodationOffer(offer)}>
+                      <Text style={styles.rideShareSecondaryButtonText}>My stay</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.rideShareSecondaryButton}
+                      onPress={() => setExpandedAccommodationBookingsOfferId((current) => current === offer.offerId ? null : offer.offerId)}
+                    >
+                      <Text style={styles.rideShareSecondaryButtonText}>My bookings</Text>
+                    </Pressable>
+                  </View>
+                  {expandedAccommodationBookingsOfferId === offer.offerId ? (
+                    <>
+                      <Text style={styles.rideShareRequestsTitle}>Requests</Text>
+                      {offer.bookings?.length ? offer.bookings.map((request: any) => (
+                        <View key={request.bookingId} style={styles.rideShareRequestRow}>
+                          <View style={styles.rideShareRequestInfo}>
+                            <Text style={styles.rideShareRequestName}>{request.guest?.name || "Runner"}</Text>
+                            <Text style={styles.rideShareMutedText}>{formatRideContact(request.guest)}</Text>
+                            <Text style={styles.rideShareMutedText}>
+                              Occupants: {(request.occupants || []).map((occupant: any) => `${occupant.name} (${occupant.sex})`).join(", ") || request.occupantCount}
+                            </Text>
+                            <Text style={styles.rideShareStatusText}>Status: {request.status}</Text>
+                          </View>
+                          {request.status === "pending" ? (
+                            <View style={styles.rideShareRequestActions}>
+                              <Pressable
+                                style={styles.rideShareConfirmButton}
+                                onPress={() => updateAccommodationBookingMutation.mutate({
+                                  registrationId: effectiveRegistrationId,
+                                  bookingId: request.bookingId,
+                                  decision: "confirmed",
+                                })}
+                              >
+                                <Text style={styles.rideShareConfirmText}>Accept</Text>
+                              </Pressable>
+                              <Pressable
+                                style={styles.rideShareRejectButton}
+                                onPress={() => updateAccommodationBookingMutation.mutate({
+                                  registrationId: effectiveRegistrationId,
+                                  bookingId: request.bookingId,
+                                  decision: "rejected",
+                                })}
+                              >
+                                <Text style={styles.rideShareRejectText}>Decline</Text>
+                              </Pressable>
+                            </View>
+                          ) : null}
+                        </View>
+                      )) : (
+                        <Text style={styles.rideShareMutedText}>No requests yet.</Text>
+                      )}
+                      <Pressable style={styles.rideShareSecondaryButton} onPress={() => handleCancelAccommodationOffer(offer.offerId)}>
+                        <Text style={styles.rideShareSecondaryButtonText}>Cancel Listing</Text>
+                      </Pressable>
+                    </>
+                  ) : null}
+                </View>
+              ) : (
+                <View style={styles.rideShareDriverRequests}>
+                  {isPending || isConfirmed ? (
+                    <>
+                      <View style={[styles.rideShareStatusPill, isConfirmed && styles.rideShareStatusPillConfirmed]}>
+                        <Text style={[styles.rideShareStatusPillText, isConfirmed && styles.rideShareStatusPillTextConfirmed]}>
+                          {isConfirmed ? "Confirmed" : "Pending"}
+                        </Text>
+                      </View>
+                      <Pressable
+                        style={styles.rideShareSecondaryButton}
+                        onPress={() => withdrawAccommodationBookingMutation.mutate({
+                          registrationId: effectiveRegistrationId,
+                          bookingId: booking.bookingId,
+                        })}
+                      >
+                        <Text style={styles.rideShareSecondaryButtonText}>Withdraw</Text>
+                      </Pressable>
+                      {isConfirmed ? (
+                        <Pressable
+                          style={styles.rideShareSecondaryButton}
+                          onPress={() => void shareBookingReceipt("accommodation", offer)}
+                        >
+                          <Text style={styles.rideShareSecondaryButtonText}>Receipt</Text>
+                        </Pressable>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <View style={styles.bookingDraftBox}>
+                        <Text style={styles.rideShareFieldLabel}>Occupants</Text>
+                        <View style={styles.rideShareSeatPickerGrid}>
+                          {Array.from({ length: Math.min(Number(offer.roomsRemaining || 1), 6) }, (_, index) => index + 1).map((count) => {
+                            const isSelected = bookingDraft.occupants.length === count;
+                            return (
+                              <Pressable
+                                key={count}
+                                style={[styles.rideShareSeatPickerOption, isSelected && styles.rideShareTimeOptionActive]}
+                                onPress={() => setAccommodationOccupantCount(offer.offerId, count)}
+                              >
+                                <Text style={[styles.rideShareTimeOptionText, isSelected && styles.rideShareTimeOptionTextActive]}>{count}</Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                        {bookingDraft.occupants.map((occupant, index) => (
+                          <View key={`${offer.offerId}-occupant-${index}`} style={styles.occupantInputRow}>
+                            <TextInput
+                              value={occupant.name}
+                              onChangeText={(text) => updateAccommodationOccupant(offer.offerId, index, { name: text })}
+                              placeholder={`Occupant ${index + 1} name`}
+                              placeholderTextColor={appColors.textSecondary}
+                              style={[styles.rideShareInput, styles.occupantNameInput]}
+                            />
+                            {(["Male", "Female"] as RideDriverSex[]).map((sex) => (
+                              <Pressable
+                                key={sex}
+                                style={[styles.occupantSexButton, occupant.sex === sex && styles.rideShareSexButtonActive]}
+                                onPress={() => updateAccommodationOccupant(offer.offerId, index, { sex })}
+                              >
+                                <Text style={[styles.rideShareSexText, occupant.sex === sex && styles.rideShareSexTextActive]}>
+                                  {sex}
+                                </Text>
+                              </Pressable>
+                            ))}
+                          </View>
+                        ))}
+                      </View>
+                      <Pressable style={styles.rideShareSecondaryButton} onPress={() => handleAccommodationContact(offer)}>
+                        <Text style={styles.rideShareSecondaryButtonText}>Contact</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.rideSharePrimaryButton, !canRequest && styles.rideShareButtonDisabled]}
+                        disabled={!canRequest || requestAccommodationBookingMutation.isPending}
+                        onPress={() => handleAccommodationBook(offer)}
+                      >
+                        <Text style={styles.rideSharePrimaryButtonText}>
+                          {offer.roomsRemaining <= 0 ? "Full" : "Book"}
+                        </Text>
+                      </Pressable>
+                    </>
+                  )}
+                </View>
+              )}
+            </View>
+          );
+        })
+      )}
+
+      <Modal visible={showAccommodationEventPicker} transparent animationType="fade" onRequestClose={() => setShowAccommodationEventPicker(false)}>
+        <View style={styles.rideShareModalBackdrop}>
+          <View style={styles.rideSharePickerModal}>
+            <Text style={styles.rideSharePickerTitle}>Choose run</Text>
+            <ScrollView style={styles.rideSharePickerList}>
+              {rideShareEventOptions.map((item: any) => {
+                const isSelected = item.event_id === selectedAccommodationEventId;
+                return (
+                  <Pressable
+                    key={`stay-event-${item.event_id}`}
+                    style={[styles.rideShareEventOption, isSelected && styles.rideShareEventOptionActive]}
+                    onPress={() => {
+                      setAccommodationForm((current) => ({ ...current, eventId: item.event_id }));
+                      setShowAccommodationEventPicker(false);
+                    }}
+                  >
+                    <Text style={[styles.rideShareEventOptionText, isSelected && styles.rideShareEventOptionTextActive]} numberOfLines={2}>
+                      {item.event_name}
+                    </Text>
+                    <Text style={styles.rideShareEventOptionMeta} numberOfLines={1}>
+                      {formatEventCardDate(item)} | {getEventLocationLabel(item)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <Pressable style={styles.rideShareSecondaryButton} onPress={() => setShowAccommodationEventPicker(false)}>
+              <Text style={styles.rideShareSecondaryButtonText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+      <Modal visible={showAccommodationRoomsPicker} transparent animationType="fade" onRequestClose={() => setShowAccommodationRoomsPicker(false)}>
+        <View style={styles.rideShareModalBackdrop}>
+          <View style={styles.rideSharePickerModal}>
+            <Text style={styles.rideSharePickerTitle}>Guest capacity</Text>
+            <View style={styles.rideShareSeatPickerGrid}>
+              {Array.from({ length: 30 }, (_, index) => index + 1).map((value) => {
+                const isSelected = accommodationForm.roomsAvailable === String(value);
+                return (
+                  <Pressable
+                    key={value}
+                    style={[styles.rideShareSeatPickerOption, isSelected && styles.rideShareTimeOptionActive]}
+                    onPress={() => {
+                      setAccommodationForm((current) => ({ ...current, roomsAvailable: String(value) }));
+                      setShowAccommodationRoomsPicker(false);
+                    }}
+                  >
+                    <Text style={[styles.rideShareTimeOptionText, isSelected && styles.rideShareTimeOptionTextActive]}>{value}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Pressable style={styles.rideShareSecondaryButton} onPress={() => setShowAccommodationRoomsPicker(false)}>
+              <Text style={styles.rideShareSecondaryButtonText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
 
   const handleUnavailableSignupPress = (status: string) => {
     const alreadySignedUp = status === "registered" || status === "pending" || status === "completed";
@@ -703,7 +3067,21 @@ export default function EventsScreen() {
 
   return (
     <View style={styles.container}>
+      <View style={styles.eventsMainTabRow}>
+        {(["events", "rideShare", "accommodation"] as const).map((value) => (
+          <Pressable
+            key={value}
+            style={[styles.eventsMainTabButton, mainTab === value && styles.eventsMainTabButtonActive]}
+            onPress={() => setMainTab(value)}
+          >
+            <Text style={[styles.eventsMainTabText, mainTab === value && styles.eventsMainTabTextActive]}>
+              {value === "events" ? "Events" : value === "rideShare" ? "Ride Share" : "Accommodation"}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
       <View style={styles.topActions}>
+        {mainTab === "events" ? (
         <Pressable style={styles.singleFilterButton} onPress={() => setSelectorMode("filters")}>
           <List size={15} color={appColors.primary} />
           <Text style={styles.singleFilterText} numberOfLines={1}>
@@ -711,6 +3089,21 @@ export default function EventsScreen() {
           </Text>
           <ChevronDown size={14} color={appColors.textSecondary} />
         </Pressable>
+        ) : mainTab === "rideShare" ? (
+          <View style={styles.singleFilterButton}>
+            <Car size={15} color={appColors.primary} />
+            <Text style={styles.singleFilterText} numberOfLines={1}>
+              Ride Share: {selectedRideShareEvent?.event_name || "Choose a race"}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.singleFilterButton}>
+            <MapPin size={15} color={appColors.primary} />
+            <Text style={styles.singleFilterText} numberOfLines={1}>
+              Accommodation: {selectedAccommodationEvent?.event_name || "Choose a race"}
+            </Text>
+          </View>
+        )}
       </View>
 
       <ScrollView
@@ -718,13 +3111,29 @@ export default function EventsScreen() {
         contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={() => void refetch()}
+            refreshing={mainTab === "rideShare" ? rideSharesQuery.isRefetching : mainTab === "accommodation" ? accommodationsQuery.isRefetching : isRefetching}
+            onRefresh={() => {
+              if (mainTab === "rideShare") {
+                void rideSharesQuery.refetch();
+                return;
+              }
+              if (mainTab === "accommodation") {
+                void accommodationsQuery.refetch();
+                return;
+              }
+              void refetch();
+            }}
             tintColor={appColors.primary}
             colors={[appColors.primary]}
           />
         }
       >
+        {mainTab === "rideShare" ? (
+          renderRideSharePanel()
+        ) : mainTab === "accommodation" ? (
+          renderAccommodationPanel()
+        ) : (
+          <>
         <View style={styles.eventsTimeTabRow}>
           {(["active", "closed"] as const).map((value) => (
             <Pressable
@@ -772,6 +3181,7 @@ export default function EventsScreen() {
                 const endLabel = formatShortEventDate(item.ends_at || item.endsAt);
                 const closeLabel = formatFullEventDate(item.registration_closes_at || item.registrationClosesAt);
                 const distanceLabel = formatEventDistances(item);
+                const locationPin = getEventLocationPin(item);
                 const displayStatus =
                   status === "closed"
                     ? closeLabel
@@ -820,6 +3230,11 @@ export default function EventsScreen() {
                         <Text style={styles.eventTileSubMeta} numberOfLines={2}>
                           Venue: {locationLabel} | Distances: {distanceLabel}
                         </Text>
+                        {locationPin ? (
+                          <Text style={styles.eventTileSubMeta} numberOfLines={1}>
+                            Pin: {locationPin}
+                          </Text>
+                        ) : null}
                       </View>
                       <View style={styles.eventTileActions}>
                         <Pressable
@@ -852,7 +3267,12 @@ export default function EventsScreen() {
                         </Pressable>
                         <Pressable
                           style={[styles.eventTileActionButton, styles.eventTileParticipantsButton]}
-                          onPress={() => openEventParticipants(item)}
+                          onPress={() => {
+                            router.push({
+                              pathname: "/participants" as any,
+                              params: { eventId: item.event_id, eventMode: getEventModeParam(item) },
+                            });
+                          }}
                         >
                           <Text style={styles.eventTileActionText}>{hasEntrants ? "entrants" : "no entrants"}</Text>
                         </Pressable>
@@ -886,6 +3306,7 @@ export default function EventsScreen() {
             const eventStatus = getTableEventStatus(item, registeredEvent);
             const isConfirmedRegistration = eventStatus === "registered" || eventStatus === "completed";
             const confirmedEventResult = isConfirmedRegistration ? registeredEvent : null;
+            const locationPin = getEventLocationPin(item);
             const hasRecordedResult =
               typeof confirmedEventResult?.distanceKm === "number" &&
               !!confirmedEventResult?.timeSeconds;
@@ -1013,6 +3434,25 @@ export default function EventsScreen() {
                 </Text>
               ) : null}
 
+              {locationPin ? (
+                <Pressable
+                  style={styles.locationPinRow}
+                  onPress={() => {
+                    if (isLocationPinLink(locationPin)) {
+                      Linking.openURL(locationPin).catch(() =>
+                        Alert.alert("Location Pin", "Could not open this location pin.")
+                      );
+                    }
+                  }}
+                  disabled={!isLocationPinLink(locationPin)}
+                >
+                  <MapPin size={14} color={appColors.primary} />
+                  <Text style={styles.locationPinText} numberOfLines={1}>
+                    {isLocationPinLink(locationPin) ? "Open location pin" : `Pin: ${locationPin}`}
+                  </Text>
+                </Pressable>
+              ) : null}
+
               {isConfirmedRegistration ? (
                 <Pressable
                   style={styles.resultPanel}
@@ -1084,6 +3524,8 @@ export default function EventsScreen() {
               )}
             </View>
           );})
+        )}
+          </>
         )}
       </ScrollView>
 
@@ -1415,6 +3857,30 @@ const styles = StyleSheet.create({
   },
   filterChipTextActive: {
     color: appColors.white,
+  },
+  amenityChip: {
+    minHeight: 36,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: appColors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#FFFFFF",
+  },
+  amenityChipActive: {
+    backgroundColor: "#E0F2FE",
+    borderColor: appColors.primary,
+  },
+  amenityChipText: {
+    color: appColors.text,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  amenityChipTextActive: {
+    color: appColors.primary,
   },
   quickActionsRow: {
     flexDirection: "row",
@@ -2027,6 +4493,18 @@ const styles = StyleSheet.create({
   registrationCloseTextClosed: {
     color: "#991B1B",
   },
+  locationPinRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  locationPinText: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: "800",
+    color: appColors.primary,
+  },
   registeredBadge: {
     minWidth: 116,
     alignItems: "center",
@@ -2347,6 +4825,688 @@ const styles = StyleSheet.create({
   },
   resultModalActionDisabled: {
     opacity: 0.7,
+  },
+
+  eventsMainTabRow: {
+    flexDirection: "row",
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    gap: 8,
+  },
+  eventsMainTabButton: {
+    flex: 1,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: appColors.border,
+    backgroundColor: appColors.cardBackground,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  eventsMainTabButtonActive: {
+    backgroundColor: appColors.primary,
+    borderColor: appColors.primary,
+  },
+  eventsMainTabText: {
+    color: appColors.textSecondary,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  eventsMainTabTextActive: {
+    color: appColors.white,
+  },
+  rideSharePanel: {
+    gap: 14,
+  },
+  rideShareHero: {
+    flexDirection: "row",
+    gap: 12,
+    borderRadius: 14,
+    padding: 14,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: appColors.border,
+  },
+  rideShareHeroIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#E0F2FE",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rideShareHeroTextBlock: {
+    flex: 1,
+  },
+  rideShareHeroTitle: {
+    color: appColors.text,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  rideShareHeroText: {
+    marginTop: 3,
+    color: appColors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  rideShareEventPicker: {
+    gap: 8,
+    paddingRight: 12,
+  },
+  rideShareEventChip: {
+    width: 180,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: appColors.cardBackground,
+    borderWidth: 1,
+    borderColor: appColors.border,
+  },
+  rideShareEventChipActive: {
+    borderColor: appColors.primary,
+    backgroundColor: "#EFF6FF",
+  },
+  rideShareEventChipText: {
+    color: appColors.text,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  rideShareEventChipTextActive: {
+    color: appColors.primary,
+  },
+  rideShareEventChipMeta: {
+    marginTop: 3,
+    color: appColors.textSecondary,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  rideShareEventChipMetaActive: {
+    color: "#1D4ED8",
+  },
+  rideShareFormCard: {
+    borderRadius: 14,
+    padding: 14,
+    gap: 10,
+    backgroundColor: appColors.cardBackground,
+    borderWidth: 1,
+    borderColor: appColors.border,
+  },
+  rideShareSectionTitle: {
+    color: appColors.text,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  rideShareRegisterHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  rideShareAddButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: appColors.primary,
+  },
+  rideShareAddButtonDisabled: {
+    backgroundColor: "#E5E7EB",
+  },
+  rideShareNoRunsNote: {
+    color: appColors.textSecondary,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  rideShareSelectedEvent: {
+    color: appColors.textSecondary,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  rideShareFieldLabel: {
+    color: appColors.textSecondary,
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  rideShareSelectButton: {
+    minHeight: 50,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: appColors.border,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  rideShareSelectButtonDisabled: {
+    backgroundColor: "#F3F4F6",
+  },
+  rideShareSelectTextBlock: {
+    flex: 1,
+    gap: 2,
+  },
+  rideShareSelectText: {
+    color: appColors.text,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  rideShareSelectTextMuted: {
+    color: appColors.textSecondary,
+  },
+  rideShareDateButton: {
+    minHeight: 52,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: appColors.border,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  rideShareCommitmentBox: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: appColors.border,
+    backgroundColor: "#FFFFFF",
+    padding: 10,
+    gap: 10,
+  },
+  rideShareCommitmentToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  rideShareCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: appColors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  rideShareCheckboxActive: {
+    borderColor: appColors.primary,
+    backgroundColor: appColors.primary,
+  },
+  rideShareInputRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  rideShareInput: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: appColors.border,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    color: appColors.text,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  rideShareReasonInput: {
+    minHeight: 96,
+    paddingTop: 10,
+    textAlignVertical: "top",
+  },
+  rideShareSmallInput: {
+    flex: 0.55,
+  },
+  rideShareSexRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  preferenceTitle: {
+    width: "100%",
+    color: appColors.textSecondary,
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  rideShareSexButton: {
+    flex: 1,
+    borderRadius: 999,
+    paddingVertical: 9,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: appColors.border,
+    backgroundColor: "#FFFFFF",
+  },
+  rideShareSexButtonActive: {
+    backgroundColor: "#111827",
+    borderColor: "#111827",
+  },
+  rideShareSexText: {
+    color: appColors.textSecondary,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  rideShareSexTextActive: {
+    color: appColors.white,
+  },
+  rideSharePrimaryButton: {
+    minHeight: 44,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    backgroundColor: appColors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rideSharePrimaryButtonText: {
+    color: appColors.white,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  rideShareButtonDisabled: {
+    opacity: 0.55,
+  },
+  rideShareModalBackdrop: {
+    flex: 1,
+    padding: 20,
+    backgroundColor: "rgba(15, 23, 42, 0.45)",
+    justifyContent: "center",
+  },
+  rideSharePickerModal: {
+    maxHeight: "88%",
+    borderRadius: 14,
+    padding: 14,
+    gap: 12,
+    backgroundColor: appColors.cardBackground,
+  },
+  rideSharePickerTitle: {
+    flex: 1,
+    color: appColors.text,
+    fontSize: 16,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  rideSharePickerList: {
+    maxHeight: 320,
+  },
+  rideShareEventOption: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: appColors.border,
+    backgroundColor: "#FFFFFF",
+    padding: 12,
+    marginBottom: 8,
+  },
+  rideShareEventOptionActive: {
+    borderColor: appColors.primary,
+    backgroundColor: "#EFF6FF",
+  },
+  rideShareEventOptionText: {
+    color: appColors.text,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  rideShareEventOptionTextActive: {
+    color: appColors.primary,
+  },
+  rideShareEventOptionMeta: {
+    marginTop: 3,
+    color: appColors.textSecondary,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  rideShareCalendarHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  rideShareCalendarNav: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F3F4F6",
+  },
+  rideShareCalendarNavText: {
+    color: appColors.text,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  rideShareWeekRow: {
+    flexDirection: "row",
+  },
+  rideShareWeekText: {
+    flex: 1,
+    color: appColors.textSecondary,
+    fontSize: 10,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  rideShareCalendarGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  rideShareCalendarDay: {
+    width: `${100 / 7}%`,
+    aspectRatio: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+  },
+  rideShareCalendarDayActive: {
+    backgroundColor: appColors.primary,
+  },
+  rideShareCalendarDayText: {
+    color: appColors.text,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  rideShareCalendarDayTextActive: {
+    color: appColors.white,
+  },
+  rideShareTimeOptions: {
+    gap: 6,
+    paddingRight: 8,
+  },
+  rideShareMinuteOptions: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  rideShareSeatPickerGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  rideShareSeatPickerOption: {
+    width: 48,
+    borderRadius: 999,
+    paddingVertical: 10,
+    alignItems: "center",
+    backgroundColor: "#F3F4F6",
+  },
+  rideShareTimeOption: {
+    minWidth: 42,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    alignItems: "center",
+    backgroundColor: "#F3F4F6",
+  },
+  rideShareTimeOptionActive: {
+    backgroundColor: appColors.primary,
+  },
+  rideShareTimeOptionText: {
+    color: appColors.text,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  rideShareTimeOptionTextActive: {
+    color: appColors.white,
+  },
+  rideShareListHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  filterHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  filterButton: {
+    minHeight: 34,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: appColors.border,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    backgroundColor: "#FFFFFF",
+  },
+  filterButtonActive: {
+    backgroundColor: appColors.primary,
+    borderColor: appColors.primary,
+  },
+  filterButtonText: {
+    color: appColors.primary,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  filterButtonTextActive: {
+    color: appColors.white,
+  },
+  filterPanel: {
+    borderRadius: 14,
+    padding: 12,
+    gap: 8,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: appColors.border,
+  },
+  filterGroupLabel: {
+    color: appColors.textSecondary,
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  filterChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  rideShareCountText: {
+    color: appColors.textSecondary,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  rideShareLoadingCard: {
+    borderRadius: 14,
+    padding: 18,
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: appColors.cardBackground,
+    borderWidth: 1,
+    borderColor: appColors.border,
+  },
+  rideShareOfferCard: {
+    borderRadius: 14,
+    padding: 14,
+    gap: 12,
+    backgroundColor: appColors.cardBackground,
+    borderWidth: 1,
+    borderColor: appColors.border,
+  },
+  rideShareOfferHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  rideShareOfferTitleBlock: {
+    flex: 1,
+  },
+  rideShareOfferEvent: {
+    color: appColors.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  rideShareOfferRoute: {
+    marginTop: 3,
+    color: appColors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "700",
+  },
+  rideShareSeatBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    backgroundColor: "#E0F2FE",
+  },
+  rideShareSeatBadgeFull: {
+    backgroundColor: "#FEE2E2",
+  },
+  rideShareSeatBadgeText: {
+    color: appColors.primary,
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  rideShareSeatBadgeTextFull: {
+    color: "#991B1B",
+  },
+  rideShareMetaGrid: {
+    gap: 5,
+  },
+  rideShareMetaText: {
+    color: appColors.text,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  rideShareDriverBox: {
+    borderRadius: 10,
+    padding: 10,
+    backgroundColor: "#F8FAFC",
+  },
+  rideShareDriverName: {
+    color: appColors.text,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  rideShareMutedText: {
+    marginTop: 2,
+    color: appColors.textSecondary,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  rideShareDriverRequests: {
+    gap: 9,
+  },
+  bookingDraftBox: {
+    flex: 1,
+    gap: 8,
+    borderRadius: 10,
+    padding: 10,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: appColors.border,
+  },
+  occupantInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  occupantNameInput: {
+    flex: 1,
+    minHeight: 40,
+  },
+  occupantSexButton: {
+    minHeight: 40,
+    minWidth: 62,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: appColors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  rideShareRequestsTitle: {
+    color: appColors.text,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  rideShareRequestRow: {
+    gap: 8,
+    borderRadius: 10,
+    padding: 10,
+    backgroundColor: "#F8FAFC",
+  },
+  rideShareRequestInfo: {
+    gap: 1,
+  },
+  rideShareRequestName: {
+    color: appColors.text,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  rideShareStatusText: {
+    color: appColors.textSecondary,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  rideShareRequestActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  rideShareConfirmButton: {
+    flex: 1,
+    borderRadius: 999,
+    paddingVertical: 9,
+    alignItems: "center",
+    backgroundColor: "#DCFCE7",
+  },
+  rideShareConfirmText: {
+    color: "#166534",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  rideShareRejectButton: {
+    flex: 1,
+    borderRadius: 999,
+    paddingVertical: 9,
+    alignItems: "center",
+    backgroundColor: "#FEE2E2",
+  },
+  rideShareRejectText: {
+    color: "#991B1B",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  rideShareActionRow: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+  },
+  rideShareSecondaryButton: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: appColors.border,
+    backgroundColor: "#FFFFFF",
+  },
+  rideShareSecondaryButtonText: {
+    color: appColors.text,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  rideShareStatusPill: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FEF3C7",
+  },
+  rideShareStatusPillConfirmed: {
+    backgroundColor: "#DCFCE7",
+  },
+  rideShareStatusPillText: {
+    color: "#92400E",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  rideShareStatusPillTextConfirmed: {
+    color: "#166534",
   },
   paymentHintText: {
     marginTop: 8,

@@ -18,17 +18,21 @@ import {
   Award,
   CalendarDays,
   ChevronRight,
+  BookOpen,
   Dumbbell,
   Footprints,
   MessageCircle,
+  ShoppingBag,
+  Smartphone,
   Target,
   Trophy,
   Users,
+  Watch,
 } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-type SlideId = 'welcome' | 'inclusive' | 'goals' | 'clubs' | 'leaderboards' | 'social' | 'events';
+type SlideId = 'welcome' | 'inclusive' | 'goals' | 'clubs' | 'leaderboards' | 'social' | 'gear' | 'magazine' | 'events';
 
 type Slide = {
   id: SlideId;
@@ -55,7 +59,7 @@ const slides: Slide[] = [
     pillar: 'Inclusivity',
     title: 'A running home for every kind of runner.',
     description:
-      'Beyond the usual road runners, RunNation makes space for juniors, golden age runners, para runners, indoor runners, beginners, and comeback stories.',
+      'Beyond the usual road runners, RunNation makes space for juniors, golden age runners, para runners, indoor runners, staircase climbers, beginners, comeback stories, and activity capture from both smart phones and smart watches.',
     gradient: ['#020617', '#0A1E52', '#31216F', '#B51D35'] as const,
     accent: '#F43F5E',
   },
@@ -96,6 +100,24 @@ const slides: Slide[] = [
     accent: '#EC4899',
   },
   {
+    id: 'gear',
+    pillar: 'Gear Shopping',
+    title: 'Find running gear inside the app.',
+    description:
+      'The Shop tab helps runners discover gear, apparel, and useful running items without leaving the RunNation experience.',
+    gradient: ['#020617', '#0F1B44', '#154E4A', '#F97316'] as const,
+    accent: '#14B8A6',
+  },
+  {
+    id: 'magazine',
+    pillar: 'Magazine',
+    title: 'Read the running story as it grows.',
+    description:
+      'The Magazine tab brings runners stories, practical guidance, pictorials, club news, and community inspiration from the RunNation world.',
+    gradient: ['#020617', '#111B55', '#3B1D68', '#DB2777'] as const,
+    accent: '#EC4899',
+  },
+  {
     id: 'events',
     pillar: 'Events',
     title: 'Show up for runs that matter.',
@@ -117,7 +139,9 @@ const inclusivityChips = [
   { label: 'Juniors', detail: '8-15' },
   { label: 'Golden Age', detail: '60+' },
   { label: 'Para Runners', detail: 'Access' },
-  { label: 'Indoor', detail: 'Treadmill' },
+  { label: 'Stairs', detail: 'Buildings' },
+  { label: 'Phone Capture', detail: 'Smart phone' },
+  { label: 'Watch Capture', detail: 'Smart watch' },
 ];
 
 const goalCards = [
@@ -173,7 +197,15 @@ function InclusivityVisual() {
   return (
     <View style={styles.visualStage}>
       <View style={styles.peopleCircle}>
-        <Users size={56} color="#0F766E" />
+        <View style={styles.inclusiveIconCluster}>
+          <Users size={44} color="#0F766E" />
+          <View style={styles.captureIconBadgeLeft}>
+            <Smartphone size={16} color="#0F766E" />
+          </View>
+          <View style={styles.captureIconBadgeRight}>
+            <Watch size={16} color="#0F766E" />
+          </View>
+        </View>
       </View>
       <View style={styles.inclusiveGrid}>
         {inclusivityChips.map((chip) => (
@@ -266,6 +298,42 @@ function SocialVisual() {
   );
 }
 
+function FeatureTabVisual({ kind }: { kind: 'gear' | 'magazine' }) {
+  const isGear = kind === 'gear';
+  return (
+    <View style={styles.visualStage}>
+      <View style={styles.extraFeatureStack}>
+        <View style={styles.extraFeatureCard}>
+          <View style={styles.extraFeatureIcon}>
+            {isGear ? (
+              <ShoppingBag size={34} color="#0F766E" />
+            ) : (
+              <BookOpen size={34} color="#0F766E" />
+            )}
+          </View>
+          <View style={styles.extraFeatureTextWrap}>
+            <Text style={styles.extraFeatureLabel}>{isGear ? 'Gear Shopping' : 'RunNation Magazine'}</Text>
+            <Text style={styles.extraFeatureDetail}>{isGear ? 'Shop tab' : 'Magazine tab'}</Text>
+          </View>
+        </View>
+        <View style={[styles.extraFeatureCard, styles.extraFeatureCardOffset]}>
+          <View style={styles.extraFeatureIconSmall}>
+            {isGear ? (
+              <Footprints size={24} color="#0F766E" />
+            ) : (
+              <MessageCircle size={24} color="#0F766E" />
+            )}
+          </View>
+          <View style={styles.extraFeatureTextWrap}>
+            <Text style={styles.extraFeatureLabel}>{isGear ? 'Running essentials' : 'Stories and guidance'}</Text>
+            <Text style={styles.extraFeatureDetail}>{isGear ? 'Gear for the journey' : 'Community inspiration'}</Text>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 function EventsVisual() {
   return (
     <View style={styles.visualStage}>
@@ -305,6 +373,10 @@ function SlideVisual({ id }: { id: SlideId }) {
       return <LeaderboardsVisual />;
     case 'social':
       return <SocialVisual />;
+    case 'gear':
+      return <FeatureTabVisual kind="gear" />;
+    case 'magazine':
+      return <FeatureTabVisual kind="magazine" />;
     case 'events':
       return <EventsVisual />;
     default:
@@ -715,6 +787,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 18,
   },
+  inclusiveIconCluster: {
+    width: 74,
+    height: 74,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  captureIconBadgeLeft: {
+    position: 'absolute',
+    left: -2,
+    bottom: 2,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#D1FAE5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  captureIconBadgeRight: {
+    position: 'absolute',
+    right: -2,
+    bottom: 2,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#D1FAE5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   inclusiveGrid: {
     width: '100%',
     maxWidth: 330,
@@ -736,6 +836,57 @@ const styles = StyleSheet.create({
     color: '#111827',
   },
   inclusiveDetail: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0F766E',
+  },
+  extraFeatureStack: {
+    width: '100%',
+    maxWidth: 330,
+    gap: 14,
+  },
+  extraFeatureCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    padding: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    shadowColor: '#111827',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    elevation: 6,
+  },
+  extraFeatureCardOffset: {
+    marginLeft: 28,
+  },
+  extraFeatureIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#CCFBF1',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  extraFeatureIconSmall: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#CCFBF1',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  extraFeatureTextWrap: {
+    flex: 1,
+  },
+  extraFeatureLabel: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#111827',
+  },
+  extraFeatureDetail: {
     marginTop: 4,
     fontSize: 13,
     fontWeight: '800',

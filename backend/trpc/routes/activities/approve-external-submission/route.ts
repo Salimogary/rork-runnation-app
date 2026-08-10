@@ -44,6 +44,7 @@ export default publicProcedure
       const durationMins = parseInt(durationParts[1] || "0");
       const durationSecs = parseInt(durationParts[2] || "0");
       const totalDurationMinutes = durationHours * 60 + durationMins + durationSecs / 60;
+      const isStairs = submission.exercise_type === "Stairs";
 
       const startTimeParts = submission.start_time.split(":");
       const startHours = parseInt(startTimeParts[0]);
@@ -53,26 +54,49 @@ export default publicProcedure
       const endMinutes = totalMinutes % 60;
       const endTime = `${endHours.toString().padStart(2, "0")}:${endMinutes.toString().padStart(2, "0")}:00`;
 
-      const paceMinPerKm = totalDurationMinutes > 0 && submission.distance_km > 0 ? totalDurationMinutes / submission.distance_km : 0;
+      const paceMinPerKm = !isStairs && totalDurationMinutes > 0 && submission.distance_km > 0 ? totalDurationMinutes / submission.distance_km : 0;
       const timeSeconds = Math.round(totalDurationMinutes * 60);
+      const activityPayload: Record<string, any> = {
+        registration_id: submission.registration_id,
+        activity_date: submission.activity_date,
+        exercise_type: submission.exercise_type,
+        distance_km: isStairs ? 0 : submission.distance_km,
+        start_time: submission.start_time,
+        end_time: endTime,
+        pace_min_per_km: paceMinPerKm,
+      };
+      if (isStairs) {
+        activityPayload.steps_count = Number(submission.steps_count || 0);
+      }
 
       const { data: approvedActivity, error: insertError } = await ctx.supabase
         .from("activities")
-        .insert({
-          registration_id: submission.registration_id,
-          activity_date: submission.activity_date,
-          exercise_type: submission.exercise_type,
-          distance_km: submission.distance_km,
-          start_time: submission.start_time,
-          end_time: endTime,
-          pace_min_per_km: paceMinPerKm,
-        })
+        .insert(activityPayload)
         .select("activity_id")
         .single();
 
       if (insertError) {
         console.error("[Approve External Submission] Insert error:", insertError);
         throw new Error(insertError.message || "Failed to create activity");
+      }
+
+      let activitySourceLabel = submission.source_label || (
+        submission.source_type === "smart_watch" ? "Smart Watch" : "Sports App"
+      );
+      if (submission.source_type === "smart_watch") {
+        const { data: watchProfile, error: watchProfileError } = await ctx.supabase
+          .from("registrations")
+          .select("smart_watch_brand, smart_watch_model")
+          .eq("registration_id", submission.registration_id)
+          .maybeSingle();
+        if (watchProfileError) {
+          console.warn("[Approve External Submission] Could not load smart watch profile:", watchProfileError);
+        }
+        const watchDetails = [watchProfile?.smart_watch_brand, watchProfile?.smart_watch_model]
+          .map((value: unknown) => String(value || "").trim())
+          .filter(Boolean)
+          .join(" ");
+        activitySourceLabel = watchDetails ? `Smartwatch-${watchDetails}` : "Smart Watch";
       }
 
       if (submission.source_type === "medal_claim") {
@@ -164,9 +188,8 @@ export default publicProcedure
         .insert({
           registration_id: submission.registration_id,
           activity_id: approvedActivity.activity_id,
-          source_label: submission.source_label || (
-            submission.source_type === "smart_watch" ? "Smart Watch" : "Sports App"
-          ),
+          source_label: activitySourceLabel,
+          source_type: submission.source_type || null,
         });
 
       if (notificationError) {
@@ -175,9 +198,7 @@ export default publicProcedure
         const pushSent = await sendActivityApprovalPush(ctx, {
           registrationId: submission.registration_id,
           activityId: approvedActivity.activity_id,
-          sourceLabel: submission.source_label || (
-            submission.source_type === "smart_watch" ? "Smart Watch" : "Sports App"
-          ),
+          sourceLabel: activitySourceLabel,
         });
         if (pushSent) {
           await ctx.supabase

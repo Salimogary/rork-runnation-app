@@ -23,6 +23,7 @@ type ApprovedActivity = {
   activity_date: string;
   exercise_type: string;
   distance_km: number;
+  steps_count?: number | null;
   start_time: string;
   end_time: string;
   pace_min_per_km: number;
@@ -73,7 +74,7 @@ export default function ActivityCompleteScreen() {
       if (!activityId || !effectiveRegistrationId) throw new Error("Activity details are unavailable.");
       const { data: activityRow, error: activityError } = await supabase
         .from("activities")
-        .select("activity_id, registration_id, activity_date, exercise_type, distance_km, start_time, end_time, pace_min_per_km")
+        .select("activity_id, registration_id, activity_date, exercise_type, distance_km, steps_count, start_time, end_time, pace_min_per_km")
         .eq("activity_id", activityId)
         .eq("registration_id", effectiveRegistrationId)
         .maybeSingle();
@@ -98,7 +99,7 @@ export default function ActivityCompleteScreen() {
           .maybeSingle(),
         supabase
           .from("activity_approval_notifications")
-          .select("source_label")
+          .select("source_label, source_type")
           .eq("activity_id", activityId)
           .eq("registration_id", effectiveRegistrationId)
           .maybeSingle(),
@@ -108,6 +109,7 @@ export default function ActivityCompleteScreen() {
       return {
         ...activityRow,
         distance_km: Number(activityRow.distance_km || 0),
+        steps_count: Number((activityRow as any).steps_count || 0),
         pace_min_per_km: Number(activityRow.pace_min_per_km || 0),
         runnerName:
           [profile?.first_name, profile?.other_names].filter(Boolean).join(" ").trim() ||
@@ -132,9 +134,11 @@ export default function ActivityCompleteScreen() {
     await Share.share({
       message: [
         `${activity.runnerName} completed a ${activity.exercise_type || "workout"} on RunNation.`,
-        `${activity.distance_km.toFixed(2)} km in ${formatDuration(durationSeconds)}.`,
-        `Average pace: ${formatPace(activity.pace_min_per_km)} /km.`,
-      ].join("\n"),
+        activity.exercise_type === "Stairs"
+          ? `${Number(activity.steps_count || 0).toLocaleString()} steps in ${formatDuration(durationSeconds)}.`
+          : `${activity.distance_km.toFixed(2)} km in ${formatDuration(durationSeconds)}.`,
+        activity.exercise_type === "Stairs" ? null : `Average pace: ${formatPace(activity.pace_min_per_km)} /km.`,
+      ].filter(Boolean).join("\n"),
     });
   };
 
@@ -195,8 +199,12 @@ export default function ActivityCompleteScreen() {
             </View>
 
             <View style={styles.distanceBlock}>
-              <Text style={styles.distance}>{activity.distance_km.toFixed(2)}</Text>
-              <Text style={styles.distanceUnit}>KILOMETRES</Text>
+              <Text style={styles.distance}>
+                {activity.exercise_type === "Stairs"
+                  ? Number(activity.steps_count || 0).toLocaleString()
+                  : activity.distance_km.toFixed(2)}
+              </Text>
+              <Text style={styles.distanceUnit}>{activity.exercise_type === "Stairs" ? "STAIR STEPS" : "KILOMETRES"}</Text>
             </View>
 
             <View style={styles.runnerRow}>
@@ -220,15 +228,28 @@ export default function ActivityCompleteScreen() {
 
             <View style={styles.metrics}>
               <View style={styles.metric}>
+                <Activity size={19} color="#10B981" />
+                <Text style={styles.metricValue} numberOfLines={2}>{activity.sourceLabel}</Text>
+                <Text style={styles.metricLabel}>Activity source</Text>
+              </View>
+              <View style={styles.metric}>
                 <Timer size={19} color="#F97316" />
                 <Text style={styles.metricValue}>{formatDuration(durationSeconds)}</Text>
                 <Text style={styles.metricLabel}>Moving time</Text>
               </View>
-              <View style={styles.metric}>
-                <Gauge size={19} color="#3B82F6" />
-                <Text style={styles.metricValue}>{formatPace(activity.pace_min_per_km)}</Text>
-                <Text style={styles.metricLabel}>Average pace /km</Text>
-              </View>
+              {activity.exercise_type === "Stairs" ? (
+                <View style={styles.metric}>
+                  <Gauge size={19} color="#3B82F6" />
+                  <Text style={styles.metricValue}>{Number(activity.steps_count || 0).toLocaleString()}</Text>
+                  <Text style={styles.metricLabel}>Steps climbed</Text>
+                </View>
+              ) : (
+                <View style={styles.metric}>
+                  <Gauge size={19} color="#3B82F6" />
+                  <Text style={styles.metricValue}>{formatPace(activity.pace_min_per_km)}</Text>
+                  <Text style={styles.metricLabel}>Average pace /km</Text>
+                </View>
+              )}
             </View>
           </View>
         </View>

@@ -12,8 +12,9 @@ import { TRPCProvider } from "../lib/trpc";
 import OfflineSnapshotBanner from "@/components/OfflineSnapshotBanner";
 import * as SplashScreen from "expo-splash-screen";
 import * as Linking from "expo-linking";
-import { LogBox, Platform, View, Text } from "react-native";
+import { LogBox, Platform, View, Text, TouchableOpacity } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { useIsWatchDisplay } from "@/utils/useWatchDisplay";
 import { initializeCrashReporter, recordCrash } from "@/utils/crashReporter";
 
 LogBox.ignoreLogs([
@@ -130,11 +131,13 @@ function NavigationGuard() {
   const { user, isLoading: authLoading, isRoleSessionLoading } = useAuth();
   const { hasSeenOnboarding, isReady } = useOnboardingCheck();
   const { trialExpired, isSubscribed, isLoading: subLoading } = useSubscription();
+  const isWatchDisplay = useIsWatchDisplay();
 
   useEffect(() => {
     if (!isReady || authLoading || hasSeenOnboarding === null) return;
 
     const currentSegment = segments[0] as string;
+    const inWatch = currentSegment === "watch";
     const inOnboarding = currentSegment === "onboarding";
     const inRegister = currentSegment === "register" || currentSegment === "profleSetup";
     const inTabs = currentSegment === "(tabs)";
@@ -143,10 +146,21 @@ function NavigationGuard() {
     const inSubscription = currentSegment === "subscription";
     const inAuthCallback = currentSegment === "auth-callback";
     const inPolicy = currentSegment === "policy";
+    const tabSegment = inTabs ? (segments[1] as string | undefined) : undefined;
+    const inWorkoutTab = inTabs && (!tabSegment || tabSegment === "index");
 
     if (inAdminLogin || inAdmin || inAuthCallback) return;
 
+    if (isWatchDisplay) {
+      if (!inWatch) {
+        router.replace("/watch" as never);
+      }
+      return;
+    }
+
     const inAllowedRoute =
+      inTabs ||
+      inWatch ||
       currentSegment === "settings" ||
       currentSegment === "profile" ||
       currentSegment === "cart" ||
@@ -159,9 +173,19 @@ function NavigationGuard() {
       currentSegment === "about-us" ||
       currentSegment === "subscription";
 
+    const inExpiredAllowedRoute =
+      inWorkoutTab ||
+      inWatch ||
+      currentSegment === "settings" ||
+      currentSegment === "profile" ||
+      currentSegment === "activity-complete" ||
+      currentSegment === "policy" ||
+      currentSegment === "about-us" ||
+      currentSegment === "subscription";
+
     if (user) {
-      if (!isRoleSessionLoading && !subLoading && trialExpired && !isSubscribed && !inSubscription && !inAllowedRoute) {
-        router.replace("/subscription" as never);
+      if (!isRoleSessionLoading && !subLoading && trialExpired && !isSubscribed && !inExpiredAllowedRoute) {
+        router.replace("/(tabs)" as never);
         return;
       }
       if (!inTabs && !inAllowedRoute && !inRegister) {
@@ -178,13 +202,14 @@ function NavigationGuard() {
         }
       }
     }
-  }, [user, isReady, authLoading, hasSeenOnboarding, segments, router, trialExpired, isSubscribed, subLoading, isRoleSessionLoading]);
+  }, [user, isReady, authLoading, hasSeenOnboarding, segments, router, trialExpired, isSubscribed, subLoading, isRoleSessionLoading, isWatchDisplay]);
 
   return null;
 }
 
 function RootLayoutNav() {
   const { colors } = useTheme();
+  const router = useRouter();
 
   return (
     <>
@@ -197,12 +222,28 @@ function RootLayoutNav() {
       }}>
         <Stack.Screen name="onboarding" options={{ headerShown: false }} />
         <Stack.Screen name="register" options={{ headerShown: false }} />
+        <Stack.Screen name="watch" options={{ headerShown: false }} />
         <Stack.Screen name="auth-callback" options={{ headerShown: false }} />
         <Stack.Screen name="profleSetup" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: "modal", title: "Modal" }} />
         <Stack.Screen name="profile" options={{ presentation: "modal", title: "Profile" }} />
-        <Stack.Screen name="settings" options={{ presentation: "modal", title: "Settings" }} />
+        <Stack.Screen
+          name="settings"
+          options={{
+            presentation: "modal",
+            title: "Settings",
+            headerLeft: undefined,
+            headerRight: () => (
+              <TouchableOpacity
+                onPress={() => router.replace("/(tabs)" as never)}
+                style={{ paddingHorizontal: 10, paddingVertical: 6 }}
+              >
+                <Text style={{ color: colors.headerText, fontWeight: "700" }}>Home</Text>
+              </TouchableOpacity>
+            ),
+          }}
+        />
         <Stack.Screen name="admin-login" options={{ presentation: "modal", title: "Admin Login" }} />
         <Stack.Screen name="admin" options={{ title: "Admin" }} />
         <Stack.Screen name="cart" options={{ title: "Cart" }} />

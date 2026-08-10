@@ -16,10 +16,11 @@ export default publicProcedure
     z.object({
       registrationId: z.string(),
       activityDate: z.string(),
-      exerciseType: z.enum(["Run", "Walk", "Cycle", "Treadmill"]),
+      exerciseType: z.enum(["Run", "Walk", "Cycle", "Treadmill", "Stairs"]),
       startTime: z.string().regex(/^\d{2}:\d{2}:\d{2}$/, "Start time must be in HH:MM:SS format"),
       duration: z.string().regex(/^\d{2}:\d{2}:\d{2}$/, "Duration must be in HH:MM:SS format"),
-      distanceKm: z.number().positive(),
+      distanceKm: z.number().positive().nullable().optional(),
+      stepsCount: z.number().int().positive().nullable().optional(),
       sourceType: z.enum(["smart_watch", "other_sports_app", "medal_claim"]).nullable().optional(),
       sourceLabel: z.string().trim().max(80).nullable().optional(),
       externalEventName: z.string().trim().max(160).nullable().optional(),
@@ -31,6 +32,15 @@ export default publicProcedure
   .mutation(async ({ ctx, input }) => {
     try {
       await requireRegistrationOwner(ctx, input.registrationId);
+      const isStairs = input.exerciseType === "Stairs";
+      if (isStairs) {
+        if (!input.stepsCount || input.stepsCount <= 0) {
+          throw new Error("Please enter the number of stairs climbed.");
+        }
+      } else if (!input.distanceKm || input.distanceKm <= 0) {
+        throw new Error("Please enter a valid distance.");
+      }
+
       if (["Cycle", "Run", "Walk"].includes(input.exerciseType)) {
         const { data: registration, error: registrationError } = await ctx.supabase
           .from("registrations")
@@ -51,12 +61,21 @@ export default publicProcedure
           throw new Error("Your Para equipment profile qualifies for Cycle workouts only.");
         }
       }
-      await ensureActionCooldown(ctx, {
-        table: "external_activity_submissions",
-        filters: [{ column: "registration_id", value: input.registrationId }],
-        cooldownSeconds: 45,
-        errorMessage: "Please wait a moment before submitting another manual activity.",
-      });
+      try {
+        await ensureActionCooldown(ctx, {
+          table: "external_activity_submissions",
+          filters: [{ column: "registration_id", value: input.registrationId }],
+          cooldownSeconds: 45,
+          errorMessage: "Please wait a moment before submitting another manual activity.",
+        });
+      } catch (cooldownError: any) {
+        const message = String(cooldownError?.message || "");
+        if (message.includes("external_activity_submissions.created_at")) {
+          console.warn("[Submit External Activity] Cooldown skipped because created_at is missing on external_activity_submissions.");
+        } else {
+          throw cooldownError;
+        }
+      }
 
       if (input.sourceType === "medal_claim") {
         if (!input.externalEventName || !input.externalEventLocation) {
@@ -102,7 +121,7 @@ export default publicProcedure
         exercise_type: input.exerciseType,
         start_time: input.startTime,
         duration: input.duration,
-        distance_km: input.distanceKm,
+        distance_km: isStairs ? 0 : input.distanceKm,
         source_type: input.sourceType || null,
         source_label: input.sourceType === "medal_claim" ? input.sourceLabel || "External Medal" : input.sourceLabel || null,
         external_event_name: input.externalEventName || null,
@@ -110,6 +129,9 @@ export default publicProcedure
         evidence_path: evidencePath,
         evidence_mime_type: evidenceMimeType,
       };
+      if (isStairs) {
+        insertPayload.steps_count = input.stepsCount;
+      }
 
       const { data, error } = await ctx.supabase
         .from("external_activity_submissions")

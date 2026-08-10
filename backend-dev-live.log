@@ -1,0 +1,82 @@
+
+> runnation-backend@1.0.0 dev
+> ts-node-dev server.ts
+
+[INFO] 12:56:08 ts-node-dev ver. 2.0.0 (using ts-node ver. 10.9.2, typescript ver. 5.9.3)
+◇ injected env (14) from .env // tip: ⌘ override existing { override: true }
+[ERROR] 12:56:32 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/register-stair-route/route.ts(2,20): error TS7016: Could not find a declaration file for module 'qrcode'. 'C:/Users/salim/rork-runnation-app/node_modules/qrcode/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/qrcode` if it exists or add a new declaration (.d.ts) file containing `declare module 'qrcode';`
+
+[INFO] 13:58:09 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\app-router.ts has been modified
+◇ injected env (14) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+[ERROR] 13:58:35 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/register-stair-route/route.ts(2,20): error TS7016: Could not find a declaration file for module 'qrcode'. 'C:/Users/salim/rork-runnation-app/node_modules/qrcode/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/qrcode` if it exists or add a new declaration (.d.ts) file containing `declare module 'qrcode';`
+
+[INFO] 17:42:24 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\app-router.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ override existing { override: true }
+[ERROR] 17:42:56 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/register-stair-route/route.ts(2,20): error TS7016: Could not find a declaration file for module 'qrcode'. 'C:/Users/salim/rork-runnation-app/node_modules/qrcode/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/qrcode` if it exists or add a new declaration (.d.ts) file containing `declare module 'qrcode';`
+
+[INFO] 17:52:58 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\admin\add-event\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+[ERROR] 17:53:07 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/register-stair-route/route.ts(2,20): error TS7016: Could not find a declaration file for module 'qrcode'. 'C:/Users/salim/rork-runnation-app/node_modules/qrcode/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/qrcode` if it exists or add a new declaration (.d.ts) file containing `declare module 'qrcode';`
+
+[INFO] 18:09:45 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\app-router.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+[ERROR] 18:10:08 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/register-stair-route/route.ts(2,20): error TS7016: Could not find a declaration file for module 'qrcode'. 'C:/Users/salim/rork-runnation-app/node_modules/qrcode/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/qrcode` if it exists or add a new declaration (.d.ts) file containing `declare module 'qrcode';`
+
+[INFO] 20:08:29 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\submit-external-activity\route.ts has been modified
+◇ injected env (14) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+[ERROR] 20:08:34 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/register-stair-route/route.ts(2,20): error TS7016: Could not find a declaration file for module 'qrcode'. 'C:/Users/salim/rork-runnation-app/node_modules/qrcode/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/qrcode` if it exists or add a new declaration (.d.ts) file containing `declare module 'qrcode';`
+
+[INFO] 20:18:22 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\submit-external-activity\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ override existing { override: true }
+[ERROR] 20:18:24 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/register-stair-route/route.ts(2,20): error TS7016: Could not find a declaration file for module 'qrcode'. 'C:/Users/salim/rork-runnation-app/node_modules/qrcode/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/qrcode` if it exists or add a new declaration (.d.ts) file containing `declare module 'qrcode';`
+
+[INFO] 20:40:38 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\approve-external-submission\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ suppress logs { quiet: true }
+[ERROR] 20:40:41 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/register-stair-route/route.ts(2,20): error TS7016: Could not find a declaration file for module 'qrcode'. 'C:/Users/salim/rork-runnation-app/node_modules/qrcode/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/qrcode` if it exists or add a new declaration (.d.ts) file containing `declare module 'qrcode';`
+
+[INFO] 20:40:51 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts has been modified
+◇ injected env (14) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+[ERROR] 20:40:54 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/get-external-submissions/route.ts(55,7): error TS2322: Type 'PostgrestSingleResponse<{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evidence_mime_type: an...' is not assignable to type 'PostgrestSingleResponse<{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; steps_count: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evid...'.
+  Type 'PostgrestResponseSuccess<{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evidence_mime_type: a...' is not assignable to type 'PostgrestSingleResponse<{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; steps_count: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evid...'.
+    Type 'PostgrestResponseSuccess<{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evidence_mime_type: a...' is not assignable to type 'PostgrestResponseSuccess<{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; steps_count: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evi...'.
+      Type '{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evidence_mime_type: any; }[]' is not assignable to type '{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; steps_count: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evidence_mime_type: any; }[]'.
+        Property 'steps_count' is missing in type '{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evidence_mime_type: any; }' but required in type '{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; steps_count: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evidence_mime_type: any; }'.
+
+[INFO] 20:42:09 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts has been modified
+◇ injected env (14) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+[ERROR] 20:42:16 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/register-stair-route/route.ts(2,20): error TS7016: Could not find a declaration file for module 'qrcode'. 'C:/Users/salim/rork-runnation-app/node_modules/qrcode/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/qrcode` if it exists or add a new declaration (.d.ts) file containing `declare module 'qrcode';`
+
+[INFO] 20:47:50 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+[ERROR] 20:47:52 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/get-external-submissions/route.ts(87,27): error TS7006: Parameter 'r' implicitly has an 'any' type.
+trpc/routes/activities/get-external-submissions/route.ts(143,23): error TS2339: Property 'firstName' does not exist on type '{}'.
+trpc/routes/activities/get-external-submissions/route.ts(143,41): error TS2339: Property 'otherNames' does not exist on type '{}'.
+trpc/routes/activities/get-external-submissions/route.ts(143,69): error TS2339: Property 'username' does not exist on type '{}'.
+trpc/routes/activities/get-external-submissions/route.ts(145,24): error TS2339: Property 'email' does not exist on type '{}'.
+
+[INFO] 20:49:22 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+[ERROR] 20:49:29 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/register-stair-route/route.ts(2,20): error TS7016: Could not find a declaration file for module 'qrcode'. 'C:/Users/salim/rork-runnation-app/node_modules/qrcode/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/qrcode` if it exists or add a new declaration (.d.ts) file containing `declare module 'qrcode';`
+

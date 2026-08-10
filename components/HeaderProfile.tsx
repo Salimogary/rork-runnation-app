@@ -118,7 +118,7 @@ export default function HeaderProfile() {
         console.error("[HeaderBadges] Error:", error);
         return { totalDistance: 0, totalActivities: 0 };
       }
-      const validTypes = ["Run", "Walk", "Treadmill", "Tredmill"];
+      const validTypes = ["Run", "Walk", "Treadmill", "Tredmill", "Stairs"];
       const filtered = (data || []).filter((a) => validTypes.includes(a.exercise_type || ""));
       const totalDistance = filtered.reduce((sum, a) => sum + (a.distance_km || 0), 0);
       const totalActivities = filtered.length;

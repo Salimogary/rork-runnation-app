@@ -1,0 +1,365 @@
+Compilation error in C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\update-accommodation-offer.ts
+TypeError: fetch failed
+    at node:internal/deps/undici/undici:14976:13
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at _handleRequest (C:\Users\salim\rork-runnation-app\backend\node_modules\@supabase\auth-js\src\lib\fetch.ts:221:14)
+    at _request (C:\Users\salim\rork-runnation-app\backend\node_modules\@supabase\auth-js\src\lib\fetch.ts:194:16)
+    at SupabaseAuthClient._getUser (C:\Users\salim\rork-runnation-app\backend\node_modules\@supabase\auth-js\src\GoTrueClient.ts:2993:16)
+    at SupabaseAuthClient.getUser (C:\Users\salim\rork-runnation-app\backend\node_modules\@supabase\auth-js\src\GoTrueClient.ts:2974:14)
+    at getAuthUserIdWithRetry (C:\Users\salim\rork-runnation-app\backend\trpc\create-context.ts:36:31)
+    at Object.createContext (C:\Users\salim\rork-runnation-app\backend\trpc\create-context.ts:69:18)
+    at Object.createContext (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\node-http-DWoBQ413.cjs:199:13)
+    at Object.create (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:1902:18) {
+  [cause]: ConnectTimeoutError: Connect Timeout Error (attempted addresses: 104.18.38.10:443, 172.64.149.246:443, timeout: 10000ms)
+      at onConnectTimeout (node:internal/deps/undici/undici:2746:28)
+      at Immediate._onImmediate (node:internal/deps/undici/undici:2712:35)
+      at processImmediate (node:internal/timers:483:21) {
+    code: 'UND_ERR_CONNECT_TIMEOUT',
+    [Symbol(undici.error.UND_ERR)]: true,
+    [Symbol(undici.error.UND_ERR_CONNECT_TIMEOUT)]: true
+  }
+}
+[Auth] Could not verify bearer token: fetch failed
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Auth] Could not verify bearer token: Auth session missing!
+[Submit External Activity] Error: Error: column external_activity_submissions.created_at does not exist
+    at ensureActionCooldown (C:\Users\salim\rork-runnation-app\backend\trpc\abuse.ts:54:11)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\submit-external-activity\route.ts:64:7
+    at resolveMiddleware (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:221:17)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at procedure (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:281:18)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:1948:18
+    at async Promise.all (index 0)
+    at Object.resolveResponse (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:2138:20)
+[Submit External Activity] Error: Error: column external_activity_submissions.created_at does not exist
+    at ensureActionCooldown (C:\Users\salim\rork-runnation-app\backend\trpc\abuse.ts:54:11)
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\submit-external-activity\route.ts:64:7
+    at resolveMiddleware (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:221:17)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at procedure (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:281:18)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:1948:18
+    at async Promise.all (index 0)
+    at Object.resolveResponse (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:2138:20)
+[Submit External Activity] Error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'steps_count' column of 'external_activity_submissions' in the schema cache"
+}
+[Submit External Activity] Error: Error: Could not find the 'steps_count' column of 'external_activity_submissions' in the schema cache
+    at C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\submit-external-activity\route.ts:142:15
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at resolveMiddleware (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:221:17)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at procedure (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:281:18)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:1948:18
+    at async Promise.all (index 0)
+    at Object.resolveResponse (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:2138:20)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\node-http-DWoBQ413.cjs:201:22
+[Get External Submissions] Error: {
+  code: '42703',
+  details: null,
+  hint: null,
+  message: 'column external_activity_submissions.steps_count does not exist'
+}
+[Get External Submissions] Error: Error: column external_activity_submissions.steps_count does not exist
+    at C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts:37:13
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at resolveMiddleware (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:221:17)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at procedure (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:281:18)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:1948:18
+    at async Promise.all (index 0)
+    at Object.resolveResponse (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:2138:20)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\node-http-DWoBQ413.cjs:201:22
+[Get External Submissions] Error: {
+  code: '42703',
+  details: null,
+  hint: null,
+  message: 'column external_activity_submissions.steps_count does not exist'
+}
+[Get External Submissions] Error: Error: column external_activity_submissions.steps_count does not exist
+    at C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts:37:13
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at resolveMiddleware (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:221:17)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at procedure (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:281:18)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:1948:18
+    at async Promise.all (index 0)
+    at Object.resolveResponse (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:2138:20)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\node-http-DWoBQ413.cjs:201:22
+Compilation error in C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts
+[Get External Submissions] steps_count missing; loading external submissions without stair step data.
+[Get External Submissions] Registration error: {
+  code: '42703',
+  details: null,
+  hint: null,
+  message: 'column registrations.email does not exist'
+}
+[Get External Submissions] Error: Error: column registrations.email does not exist
+    at C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts:74:13
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at resolveMiddleware (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:221:17)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at procedure (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:281:18)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:1948:18
+    at async Promise.all (index 0)
+    at Object.resolveResponse (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:2138:20)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\node-http-DWoBQ413.cjs:201:22
+[Get External Submissions] steps_count missing; loading external submissions without stair step data.
+[Get External Submissions] Registration error: {
+  code: '42703',
+  details: null,
+  hint: null,
+  message: 'column registrations.email does not exist'
+}
+[Get External Submissions] Error: Error: column registrations.email does not exist
+    at C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts:74:13
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at resolveMiddleware (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:221:17)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at procedure (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:281:18)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:1948:18
+    at async Promise.all (index 0)
+    at Object.resolveResponse (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:2138:20)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\node-http-DWoBQ413.cjs:201:22
+[Get External Submissions] steps_count missing; loading external submissions without stair step data.
+[Get External Submissions] Registration error: {
+  code: '42703',
+  details: null,
+  hint: null,
+  message: 'column registrations.email does not exist'
+}
+[Get External Submissions] Error: Error: column registrations.email does not exist
+    at C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts:74:13
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at resolveMiddleware (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:221:17)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at procedure (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:281:18)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:1948:18
+    at async Promise.all (index 2)
+    at Object.resolveResponse (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:2138:20)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\node-http-DWoBQ413.cjs:201:22
+[Get External Submissions] steps_count missing; loading external submissions without stair step data.
+[Get External Submissions] Registration error: {
+  code: '42703',
+  details: null,
+  hint: null,
+  message: 'column registrations.email does not exist'
+}
+[Get External Submissions] Error: Error: column registrations.email does not exist
+    at C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts:74:13
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at resolveMiddleware (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:221:17)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at procedure (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:281:18)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:1948:18
+    at async Promise.all (index 2)
+    at Object.resolveResponse (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:2138:20)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\node-http-DWoBQ413.cjs:201:22
+[Get External Submissions] steps_count missing; loading external submissions without stair step data.
+[Get External Submissions] Registration error: {
+  code: '42703',
+  details: null,
+  hint: null,
+  message: 'column registrations.email does not exist'
+}
+[Get External Submissions] Error: Error: column registrations.email does not exist
+    at C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts:74:13
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at resolveMiddleware (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:221:17)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at procedure (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:281:18)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:1948:18
+    at async Promise.all (index 2)
+    at Object.resolveResponse (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:2138:20)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\node-http-DWoBQ413.cjs:201:22
+[Get External Submissions] steps_count missing; loading external submissions without stair step data.
+[Get External Submissions] Registration error: {
+  code: '42703',
+  details: null,
+  hint: null,
+  message: 'column registrations.email does not exist'
+}
+[Get External Submissions] Error: Error: column registrations.email does not exist
+    at C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts:74:13
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at resolveMiddleware (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:221:17)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at procedure (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:281:18)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:1948:18
+    at async Promise.all (index 2)
+    at Object.resolveResponse (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:2138:20)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\node-http-DWoBQ413.cjs:201:22
+[Get External Submissions] steps_count missing; loading external submissions without stair step data.
+[Get External Submissions] Registration error: {
+  code: '42703',
+  details: null,
+  hint: null,
+  message: 'column registrations.email does not exist'
+}
+[Get External Submissions] Error: Error: column registrations.email does not exist
+    at C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts:74:13
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at resolveMiddleware (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:221:17)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at procedure (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:281:18)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:1948:18
+    at async Promise.all (index 2)
+    at Object.resolveResponse (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:2138:20)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\node-http-DWoBQ413.cjs:201:22
+[Get External Submissions] steps_count missing; loading external submissions without stair step data.
+[Get External Submissions] Registration error: {
+  code: '42703',
+  details: null,
+  hint: null,
+  message: 'column registrations.email does not exist'
+}
+[Get External Submissions] Error: Error: column registrations.email does not exist
+    at C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts:74:13
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at resolveMiddleware (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:221:17)
+    at callRecursive (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:256:18)
+    at procedure (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\initTRPC-Bq6NzC7R.cjs:281:18)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:1948:18
+    at async Promise.all (index 2)
+    at Object.resolveResponse (C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\resolveResponse-BGrZsJDx.cjs:2138:20)
+    at C:\Users\salim\rork-runnation-app\backend\node_modules\@trpc\server\dist\node-http-DWoBQ413.cjs:201:22
+Compilation error in C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts
+[Get External Submissions] steps_count missing; loading external submissions without stair step data.
+[Get External Submissions] registrations.email missing; loading registrations without email.
+[Get External Submissions] steps_count missing; loading external submissions without stair step data.
+[Get External Submissions] registrations.email missing; loading registrations without email.
+[Get External Submissions] steps_count missing; loading external submissions without stair step data.
+[Get External Submissions] registrations.email missing; loading registrations without email.
+[Get External Submissions] steps_count missing; loading external submissions without stair step data.
+[Get External Submissions] registrations.email missing; loading registrations without email.
+[Get External Submissions] steps_count missing; loading external submissions without stair step data.
+[Get External Submissions] registrations.email missing; loading registrations without email.

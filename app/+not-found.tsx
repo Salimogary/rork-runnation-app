@@ -1,8 +1,20 @@
 // template
-import { Link, Stack } from "expo-router";
+import WatchRunExperience from "@/components/WatchRunExperience";
+import { Link, Stack, usePathname } from "expo-router";
 import { StyleSheet, Text, View } from "react-native";
 
 export default function NotFoundScreen() {
+  const pathname = usePathname();
+
+  if (pathname === "/watch") {
+    return (
+      <>
+        <Stack.Screen options={{ headerShown: false }} />
+        <WatchRunExperience />
+      </>
+    );
+  }
+
   return (
     <>
       <Stack.Screen options={{ title: "Oops!" }} />

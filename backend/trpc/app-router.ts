@@ -36,6 +36,11 @@ import getExternalSubmissionsRoute from "./routes/activities/get-external-submis
 import approveExternalSubmissionRoute from "./routes/activities/approve-external-submission/route";
 import rejectExternalSubmissionRoute from "./routes/activities/reject-external-submission/route";
 import completeEventRunRoute from "./routes/activities/complete-event-run/route";
+import getStairRoutesRoute from "./routes/activities/get-stair-routes/route";
+import registerStairRouteRoute from "./routes/activities/register-stair-route/route";
+import scanStairCheckpointRoute from "./routes/activities/scan-stair-checkpoint/route";
+import endStairSessionRoute from "./routes/activities/end-stair-session/route";
+import getStairLeaderboardRoute from "./routes/activities/get-stair-leaderboard/route";
 import getDeliveryOrdersRoute from "./routes/admin/get-delivery-orders/route";
 import updateDeliveryOrderStatusRoute from "./routes/admin/update-delivery-order-status/route";
 import getMagazineSubmissionsRoute from "./routes/admin/get-magazine-submissions/route";
@@ -138,6 +143,21 @@ import leaveClubMembershipRoute from "./routes/profile/leave-club-membership/rou
 import getRoleSessionRoute from "./routes/session/get-role-session/route";
 import getPublicEventsRoute from "./routes/events/get-events/route";
 import getRegisteredEventsRoute from "./routes/events/get-registered-events/route";
+import listRideSharesRoute from "./routes/events/list-ride-shares";
+import createRideOfferRoute from "./routes/events/create-ride-offer";
+import updateRideOfferRoute from "./routes/events/update-ride-offer";
+import updateRideOfferStatusRoute from "./routes/events/update-ride-offer-status";
+import requestRideBookingRoute from "./routes/events/request-ride-booking";
+import withdrawRideBookingRoute from "./routes/events/withdraw-ride-booking";
+import updateRideBookingRoute from "./routes/events/update-ride-booking";
+import cancelRideOfferRoute from "./routes/events/cancel-ride-offer";
+import listAccommodationsRoute from "./routes/events/list-accommodations";
+import createAccommodationOfferRoute from "./routes/events/create-accommodation-offer";
+import updateAccommodationOfferRoute from "./routes/events/update-accommodation-offer";
+import requestAccommodationBookingRoute from "./routes/events/request-accommodation-booking";
+import withdrawAccommodationBookingRoute from "./routes/events/withdraw-accommodation-booking";
+import updateAccommodationBookingRoute from "./routes/events/update-accommodation-booking";
+import cancelAccommodationOfferRoute from "./routes/events/cancel-accommodation-offer";
 import submitMagazineArticleRoute from "./routes/magazine/submit-article/route";
 import submitMagazinePictorialRoute from "./routes/magazine/submit-pictorial/route";
 import getMagazinePictorialsPublicRoute from "./routes/magazine/get-pictorials/route";
@@ -266,6 +286,11 @@ export const appRouter = createTRPCRouter({
     approveExternalSubmission: approveExternalSubmissionRoute,
     rejectExternalSubmission: rejectExternalSubmissionRoute,
     completeEventRun: completeEventRunRoute,
+    getStairRoutes: getStairRoutesRoute,
+    registerStairRoute: registerStairRouteRoute,
+    scanStairCheckpoint: scanStairCheckpointRoute,
+    endStairSession: endStairSessionRoute,
+    getStairLeaderboard: getStairLeaderboardRoute,
   }),
   auth: createTRPCRouter({
     register: registerRoute,
@@ -318,6 +343,21 @@ export const appRouter = createTRPCRouter({
   events: createTRPCRouter({
     getEvents: getPublicEventsRoute,
     getRegisteredEvents: getRegisteredEventsRoute,
+    listRideShares: listRideSharesRoute,
+    createRideOffer: createRideOfferRoute,
+    updateRideOffer: updateRideOfferRoute,
+    updateRideOfferStatus: updateRideOfferStatusRoute,
+    requestRideBooking: requestRideBookingRoute,
+    withdrawRideBooking: withdrawRideBookingRoute,
+    updateRideBooking: updateRideBookingRoute,
+    cancelRideOffer: cancelRideOfferRoute,
+    listAccommodations: listAccommodationsRoute,
+    createAccommodationOffer: createAccommodationOfferRoute,
+    updateAccommodationOffer: updateAccommodationOfferRoute,
+    requestAccommodationBooking: requestAccommodationBookingRoute,
+    withdrawAccommodationBooking: withdrawAccommodationBookingRoute,
+    updateAccommodationBooking: updateAccommodationBookingRoute,
+    cancelAccommodationOffer: cancelAccommodationOfferRoute,
   }),
   magazine: createTRPCRouter({
     getArticles: getMagazineArticlesRoute,

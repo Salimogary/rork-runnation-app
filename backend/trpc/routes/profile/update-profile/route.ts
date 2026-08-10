@@ -33,6 +33,8 @@ export default publicProcedure
         para_equipment_other: z.string().trim().max(120).nullable().optional(),
         does_indoor_workouts: z.boolean().nullable().optional(),
         has_smart_watch: z.boolean().nullable().optional(),
+        smart_watch_brand: z.string().trim().max(80).nullable().optional(),
+        smart_watch_model: z.string().trim().max(120).nullable().optional(),
         travel_country: z.string().nullable().optional(),
         travel_country_code: z.string().nullable().optional(),
         travel_start_date: z.string().nullable().optional(),
@@ -98,6 +100,11 @@ export default publicProcedure
       throw new Error("Please choose the para equipment you use.");
     } else if (registration.para_equipment_type !== "other") {
       registration.para_equipment_other = null;
+    }
+
+    if (registration.has_smart_watch === false || registration.has_smart_watch === null) {
+      registration.smart_watch_brand = null;
+      registration.smart_watch_model = null;
     }
 
     if (registration.travel_start_date || registration.travel_end_date) {

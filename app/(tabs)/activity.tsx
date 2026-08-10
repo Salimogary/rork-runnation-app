@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
-import { X, Calendar, Award, Download, Filter, Search } from "lucide-react-native";
+import { X, Calendar, Award, Download, Filter, Search, ChevronDown } from "lucide-react-native";
 
 import { Platform } from 'react-native';
 import colors from "@/constants/colors";
@@ -21,6 +21,7 @@ interface ActivityData {
   activity_date: string;
   exercise_type: string;
   distance_km: number;
+  steps_count?: number | null;
   start_time: string;
   end_time: string;
   pace_min_per_km: number;
@@ -116,6 +117,18 @@ interface RegisteredEvent {
   status: 'ongoing' | 'upcoming' | 'completed';
 }
 
+interface EventParticipantRow {
+  eventId: string;
+  registrationId: string;
+  name: string;
+  sex: string;
+  country: string;
+  distanceKm: number | null;
+  timeSeconds: number | null;
+  paceSecondsPerKm: number | null;
+  status: string;
+}
+
 interface CommunityData {
   registrationId: string;
   Name: string;
@@ -185,7 +198,18 @@ interface SmartFitClubRow {
   remarks: string;
 }
 
-type ActiveTab = "runs" | "family" | "club" | "community";
+interface StairLeaderboardRow {
+  rank: number;
+  registrationId: string;
+  name: string;
+  sex: string;
+  building: string;
+  steps: number;
+  ascents: number;
+  durationSeconds: number;
+}
+
+type ActiveTab = "events" | "stairs" | "family" | "club" | "community";
 type CommunityLeaderboardView = "activity_indv" | "activity_club" | "medals_indv" | "medals_club";
 type CommunityBoardMode = "activity" | "medals";
 type CommunityBoardScope = "individual" | "clubs";
@@ -468,6 +492,8 @@ export default function ActivityScreen() {
   const [showLeaderboardFilters, setShowLeaderboardFilters] = useState(false);
   const [showLeaderboardSearch, setShowLeaderboardSearch] = useState(false);
   const [leaderboardSearchQuery, setLeaderboardSearchQuery] = useState("");
+  const [selectedLeaderboardEventId, setSelectedLeaderboardEventId] = useState("");
+  const [showEventPicker, setShowEventPicker] = useState(false);
   const [leaderboardFilters, setLeaderboardFilters] = useState<Record<LeaderboardTab, LeaderboardFilters>>({
     club: EMPTY_LEADERBOARD_FILTERS,
     community: EMPTY_LEADERBOARD_FILTERS,
@@ -482,10 +508,11 @@ export default function ActivityScreen() {
   const [showExternalForm, setShowExternalForm] = useState(false);
   const [formData, setFormData] = useState({
     activityDate: "",
-    exerciseType: "Run" as "Run" | "Walk" | "Treadmill",
+    exerciseType: "Run" as "Run" | "Walk" | "Cycle" | "Treadmill" | "Stairs",
     startTime: "",
     duration: "",
     distanceKm: "",
+    stepsCount: "",
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -921,7 +948,77 @@ export default function ActivityScreen() {
         return [];
       }
     },
-    enabled: activeTab === "runs" && !!user?.id,
+    enabled: activeTab === "events" && !!user?.id,
+    staleTime: 30000,
+    retry: 1,
+  });
+
+  const selectedLeaderboardEvent = useMemo(
+    () => (registeredEvents || []).find((event) => event.eventId === selectedLeaderboardEventId) || null,
+    [registeredEvents, selectedLeaderboardEventId]
+  );
+
+  const { data: eventParticipants = [], isLoading: eventParticipantsLoading, refetch: refetchEventParticipants } = useQuery<EventParticipantRow[]>({
+    queryKey: ["leaderboard-event-participants", selectedLeaderboardEventId],
+    queryFn: async () => {
+      if (!selectedLeaderboardEventId) return [];
+
+      const { data, error } = await supabase
+        .from("events_participants")
+        .select(`
+          registration_id,
+          distance_km,
+          time_seconds,
+          event_id,
+          registrations!events_participants_registration_id_fkey(first_name, other_names, sex, country)
+        `)
+        .eq("event_id", selectedLeaderboardEventId);
+
+      if (error) {
+        console.error("[LeaderboardEventParticipants] Fetch error:", JSON.stringify(error));
+        throw error;
+      }
+
+      return (data || [])
+        .map((row: any) => {
+          const registration = Array.isArray(row.registrations) ? row.registrations[0] : row.registrations;
+          const firstName = String(registration?.first_name || "").trim();
+          const otherNames = String(registration?.other_names || "").trim();
+          const name = [firstName, otherNames].filter(Boolean).join(" ") || "Runner";
+          const distanceKm = row.distance_km == null ? null : Number(row.distance_km);
+          const timeSeconds = row.time_seconds == null ? null : Number(row.time_seconds);
+          const paceSecondsPerKm = distanceKm && distanceKm > 0 && timeSeconds && timeSeconds > 0
+            ? timeSeconds / distanceKm
+            : null;
+
+          return {
+            eventId: String(row.event_id || selectedLeaderboardEventId),
+            registrationId: String(row.registration_id || ""),
+            name,
+            sex: String(registration?.sex || "-"),
+            country: String(registration?.country || "-"),
+            distanceKm: Number.isFinite(distanceKm) ? distanceKm : null,
+            timeSeconds: Number.isFinite(timeSeconds) ? timeSeconds : null,
+            paceSecondsPerKm,
+            status: distanceKm && distanceKm > 0 && timeSeconds && timeSeconds > 0 ? "Finisher" : "Participant",
+          };
+        })
+        .filter((row) => (row.distanceKm || 0) > 0 && (row.timeSeconds || 0) > 0)
+        .sort((a, b) => {
+          const distanceDiff = (b.distanceKm || 0) - (a.distanceKm || 0);
+          if (distanceDiff !== 0) return distanceDiff;
+          return (a.timeSeconds || Number.MAX_SAFE_INTEGER) - (b.timeSeconds || Number.MAX_SAFE_INTEGER);
+        });
+    },
+    enabled: activeTab === "events" && !!selectedLeaderboardEventId,
+    staleTime: 30000,
+    retry: 1,
+  });
+
+  const { data: stairLeaderboard = [], isLoading: stairLeaderboardLoading, refetch: refetchStairLeaderboard, error: stairLeaderboardError } = useQuery<StairLeaderboardRow[]>({
+    queryKey: ["stair-leaderboard"],
+    queryFn: async () => getServerClient().activities.getStairLeaderboard.query(),
+    enabled: activeTab === "stairs",
     staleTime: 30000,
     retry: 1,
   });
@@ -952,7 +1049,7 @@ export default function ActivityScreen() {
         throw error;
       }
     },
-    enabled: activeTab === "runs",
+    enabled: false,
     staleTime: 30000,
     retry: 1,
   });
@@ -2331,9 +2428,17 @@ export default function ActivityScreen() {
   const getExerciseEmoji = (type: string): string => {
     if (type === "Cycle") return "🚲";
     if (type === "Treadmill" || type === "Tredmill") return "🏃‍♂️";
+    if (type === "Stairs") return "🪜";
     if (type === "Walk") return "🚶";
     if (type === "Run") return "🏃";
     return "🏃";
+  };
+
+  const getActivityMeasureLabel = (activity: ActivityData): string => {
+    if (activity.exercise_type === "Stairs") {
+      return `${Number(activity.steps_count || 0).toLocaleString()} steps`;
+    }
+    return `${Number(activity.distance_km || 0).toFixed(1)} km`;
   };
 
   const formatPauseDuration = (pauseSeconds: number): string => {
@@ -2406,11 +2511,12 @@ export default function ActivityScreen() {
   };
 
   const buildWorkoutCsv = (workouts: ActivityData[]): string => {
-    const headers = ['Date', 'Type', 'Distance (km)', 'Start Time', 'End Time', 'Duration', 'Pause Time', 'Pace (min/km)'];
+    const headers = ['Date', 'Type', 'Distance (km)', 'Steps', 'Start Time', 'End Time', 'Duration', 'Pause Time', 'Pace (min/km)'];
     const rows = workouts.map((activity) => [
       activity.activity_date,
       activity.exercise_type,
       activity.distance_km.toFixed(2),
+      activity.exercise_type === "Stairs" ? Number(activity.steps_count || 0) : "",
       activity.start_time,
       activity.end_time,
       calculateDuration(activity.start_time, activity.end_time, activity.pause_duration_seconds || 0),
@@ -2865,6 +2971,181 @@ export default function ActivityScreen() {
     );
   };
 
+  const formatParticipantTime = (seconds?: number | null): string => {
+    if (!seconds || seconds <= 0) return "--:--";
+    const safeSeconds = Math.round(seconds);
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const remainingSeconds = safeSeconds % 60;
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
+    }
+    return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
+  };
+
+  const formatParticipantPace = (secondsPerKm?: number | null): string => {
+    if (!secondsPerKm || secondsPerKm <= 0) return "--:--";
+    return formatPaceMinPerKm(secondsPerKm / 60);
+  };
+
+  const renderEventParticipantsTable = () => (
+    <View style={styles.eventsSection}>
+      <Text style={[styles.eventsSectionTitle, { color: themeColors.text }]}>Event Results</Text>
+      <TouchableOpacity
+        style={[styles.eventDropdownButton, { backgroundColor: themeColors.cardBackground }]}
+        onPress={() => setShowEventPicker(true)}
+        activeOpacity={0.75}
+      >
+        <Calendar size={18} color={colors.primary} />
+        <View style={styles.eventDropdownTextBlock}>
+          <Text style={styles.eventDropdownLabel}>Event</Text>
+          <Text style={[styles.eventDropdownText, { color: themeColors.text }]} numberOfLines={1}>
+            {selectedLeaderboardEvent?.eventName || "Select an event"}
+          </Text>
+        </View>
+        <ChevronDown size={18} color={colors.textSecondary} />
+      </TouchableOpacity>
+
+      {!selectedLeaderboardEventId ? (
+        <View style={[styles.noEventsCard, { backgroundColor: themeColors.cardBackground }]}>
+          <Calendar size={20} color={colors.textLight} />
+          <Text style={styles.noEventsText}>Select an event to view results</Text>
+        </View>
+      ) : eventParticipantsLoading ? (
+        <View style={[styles.noEventsCard, { backgroundColor: themeColors.cardBackground }]}>
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={styles.noEventsText}>Loading results...</Text>
+        </View>
+      ) : eventParticipants.length === 0 ? (
+        <View style={[styles.noEventsCard, { backgroundColor: themeColors.cardBackground }]}>
+          <Award size={20} color={colors.textLight} />
+          <Text style={styles.noEventsText}>No results recorded yet</Text>
+        </View>
+      ) : (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={styles.eventParticipantsTable}>
+            <View style={styles.leaderboardTableHeader}>
+              <View style={styles.eventRankColumn}><Text style={styles.leaderTableHeaderText}>#</Text></View>
+              <View style={styles.eventParticipantNameColumn}><Text style={styles.leaderTableHeaderText}>Name</Text></View>
+              <View style={styles.eventParticipantSmallColumn}><Text style={styles.leaderTableHeaderText}>Sex</Text></View>
+              <View style={styles.eventParticipantCountryColumn}><Text style={styles.leaderTableHeaderText}>Country</Text></View>
+              <View style={styles.eventParticipantMetricColumn}><Text style={styles.leaderTableHeaderText}>km</Text></View>
+              <View style={styles.eventParticipantMetricColumn}><Text style={styles.leaderTableHeaderText}>Time</Text></View>
+              <View style={styles.eventParticipantMetricColumn}><Text style={styles.leaderTableHeaderText}>Pace</Text></View>
+              <View style={styles.eventParticipantStatusColumn}><Text style={styles.leaderTableHeaderText}>Status</Text></View>
+            </View>
+            {eventParticipants.map((participant, index) => (
+              <View
+                key={`${participant.eventId}-${participant.registrationId || index}`}
+                style={[
+                  styles.leaderboardTableRow,
+                  index % 2 === 1 && styles.leaderboardTableRowAlt,
+                  participant.registrationId === currentRegistrationId && styles.currentUserLeaderboardRow,
+                ]}
+              >
+                <View style={styles.eventRankColumn}>
+                  <Text style={styles.leaderTableCellText}>{index + 1}</Text>
+                </View>
+                <View style={styles.eventParticipantNameColumn}>
+                  <Text
+                    style={[styles.leaderTableCellText, participant.registrationId === currentRegistrationId && styles.currentUserLeaderboardText]}
+                    numberOfLines={1}
+                  >
+                    {participant.name}
+                  </Text>
+                </View>
+                <View style={styles.eventParticipantSmallColumn}>
+                  <Text style={styles.leaderTableCellText}>
+                    {participant.sex === "Male" ? "M" : participant.sex === "Female" ? "F" : participant.sex || "-"}
+                  </Text>
+                </View>
+                <View style={styles.eventParticipantCountryColumn}>
+                  <Text style={styles.leaderTableCellText} numberOfLines={1}>{participant.country || "-"}</Text>
+                </View>
+                <View style={styles.eventParticipantMetricColumn}>
+                  <Text style={styles.leaderTableCellText}>{participant.distanceKm ? participant.distanceKm.toFixed(1) : "-"}</Text>
+                </View>
+                <View style={styles.eventParticipantMetricColumn}>
+                  <Text style={styles.leaderTableCellText}>{formatParticipantTime(participant.timeSeconds)}</Text>
+                </View>
+                <View style={styles.eventParticipantMetricColumn}>
+                  <Text style={styles.leaderTableCellText}>{formatParticipantPace(participant.paceSecondsPerKm)}</Text>
+                </View>
+                <View style={styles.eventParticipantStatusColumn}>
+                  <Text style={styles.leaderTableCellText} numberOfLines={1}>{participant.status}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </ScrollView>
+      )}
+    </View>
+  );
+
+  const renderStairLeaderboardTable = (rows: StairLeaderboardRow[]) => (
+    <View style={styles.leaderboardTableContainer}>
+      <View style={styles.leaderboardTableHeader}>
+        <View style={styles.leaderRankColumn}>
+          <Text style={styles.leaderTableHeaderText}>#</Text>
+        </View>
+        <View style={styles.leaderNameColumn}>
+          <Text style={styles.leaderTableHeaderText}>Name</Text>
+        </View>
+        <View style={styles.leaderClubColumn}>
+          <Text style={styles.leaderTableHeaderText}>Building</Text>
+        </View>
+        <View style={styles.leaderSexColumn}>
+          <Text style={styles.leaderTableHeaderText}>Sex</Text>
+        </View>
+        <View style={styles.leaderDistanceColumn}>
+          <Text style={styles.leaderTableHeaderText}>Steps</Text>
+        </View>
+        <View style={styles.leaderDaysColumn}>
+          <Text style={styles.leaderTableHeaderText}>Asc</Text>
+        </View>
+        <View style={styles.leaderTimeColumn}>
+          <Text style={styles.leaderTableHeaderText}>Time</Text>
+        </View>
+      </View>
+      {rows.map((item, index) => (
+        <View
+          key={item.registrationId}
+          style={[
+            styles.leaderboardTableRow,
+            index % 2 === 1 && styles.leaderboardTableRowAlt,
+            item.registrationId === currentRegistrationId && styles.currentUserLeaderboardRow,
+          ]}
+        >
+          <View style={styles.leaderRankColumn}>
+            <Text style={styles.leaderTableCellText}>{item.rank || index + 1}</Text>
+          </View>
+          <View style={styles.leaderNameColumn}>
+            <Text style={[styles.leaderTableCellText, item.registrationId === currentRegistrationId && styles.currentUserLeaderboardText]} numberOfLines={1}>
+              {item.name}
+            </Text>
+          </View>
+          <View style={styles.leaderClubColumn}>
+            <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.building || "-"}</Text>
+          </View>
+          <View style={styles.leaderSexColumn}>
+            <Text style={styles.leaderTableCellText}>
+              {item.sex === "Male" ? "M" : item.sex === "Female" ? "F" : item.sex || "-"}
+            </Text>
+          </View>
+          <View style={styles.leaderDistanceColumn}>
+            <Text style={styles.leaderTableCellText}>{Number(item.steps || 0).toLocaleString()}</Text>
+          </View>
+          <View style={styles.leaderDaysColumn}>
+            <Text style={styles.leaderTableCellText}>{Number(item.ascents || 0).toLocaleString()}</Text>
+          </View>
+          <View style={styles.leaderTimeColumn}>
+            <Text style={styles.leaderTableCellText}>{formatParticipantTime(Number(item.durationSeconds || 0))}</Text>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+
   const renderParaClubLeaderboardTable = (rows: CommunityData[]) => {
     const groupOrder = ["Wheelchair", "Handcycle", "Prosthetic blades", "Other", "No gear"];
     const groups = Array.from(new Set(rows.map((row) => row.ParaEquipmentGroup || "No gear"))).sort((a, b) => {
@@ -3128,7 +3409,10 @@ export default function ActivityScreen() {
       return;
     }
 
-    if (!formData.activityDate || !formData.startTime || !formData.duration || !formData.distanceKm) {
+    const isStairs = formData.exerciseType === "Stairs";
+    const requiredMeasure = isStairs ? formData.stepsCount : formData.distanceKm;
+
+    if (!formData.activityDate || !formData.startTime || !formData.duration || !requiredMeasure) {
       Alert.alert("Error", "Please fill in all fields");
       return;
     }
@@ -3139,10 +3423,16 @@ export default function ActivityScreen() {
       return;
     }
 
-    const distanceNum = parseFloat(formData.distanceKm);
+    const distanceNum = isStairs ? 0 : parseFloat(formData.distanceKm);
+    const stepsNum = isStairs ? parseInt(formData.stepsCount.replace(/,/g, ""), 10) : null;
 
-    if (isNaN(distanceNum) || distanceNum <= 0) {
+    if (!isStairs && (isNaN(distanceNum) || distanceNum <= 0)) {
       Alert.alert("Error", "Please enter a valid distance");
+      return;
+    }
+
+    if (isStairs && (!stepsNum || isNaN(stepsNum) || stepsNum <= 0)) {
+      Alert.alert("Error", "Please enter a valid stair step count");
       return;
     }
 
@@ -3178,7 +3468,8 @@ export default function ActivityScreen() {
         exerciseType: formData.exerciseType,
         startTime: `${formData.startTime}:00`,
         duration: formData.duration,
-        distanceKm: distanceNum,
+        distanceKm: isStairs ? null : distanceNum,
+        stepsCount: isStairs ? stepsNum : null,
       });
       
       Alert.alert(
@@ -3193,10 +3484,11 @@ export default function ActivityScreen() {
         startTime: "",
         duration: "",
         distanceKm: "",
+        stepsCount: "",
       });
     } catch (error: any) {
       console.error("[Submit External Activity] Error:", error);
-      Alert.alert("Error", "Something went wrong. Please try again.");
+      Alert.alert("Error", error?.message || "Something went wrong. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -3221,15 +3513,6 @@ export default function ActivityScreen() {
         <View style={styles.reportTabsRow}>
           <View style={styles.toggleContainer}>
             <TouchableOpacity
-              style={[styles.toggleButton, activeTab === "runs" && styles.toggleButtonActive]}
-              onPress={() => setActiveTab("runs")}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.toggleText, activeTab === "runs" && styles.toggleTextActive]}>
-                Runs
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
               style={[styles.toggleButton, activeTab === "community" && styles.toggleButtonActive, !isSubscribed && styles.toggleButtonLocked]}
               onPress={() => {
                 if (!isSubscribed) {
@@ -3246,6 +3529,15 @@ export default function ActivityScreen() {
                 </Text>
                 {!isSubscribed && <Lock size={12} color="#9CA3AF" />}
               </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.toggleButton, activeTab === "events" && styles.toggleButtonActive]}
+              onPress={() => setActiveTab("events")}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.toggleText, activeTab === "events" && styles.toggleTextActive]}>
+                Events
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.toggleButton, activeTab === "club" && styles.toggleButtonActive, !isSubscribed && styles.toggleButtonLocked]}
@@ -3266,6 +3558,15 @@ export default function ActivityScreen() {
               </View>
             </TouchableOpacity>
             <TouchableOpacity
+              style={[styles.toggleButton, activeTab === "stairs" && styles.toggleButtonActive]}
+              onPress={() => setActiveTab("stairs")}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.toggleText, activeTab === "stairs" && styles.toggleTextActive]}>
+                Stairs
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               style={[styles.toggleButton, activeTab === "family" && styles.toggleButtonActive]}
               onPress={() => setActiveTab("family")}
               activeOpacity={0.7}
@@ -3275,22 +3576,6 @@ export default function ActivityScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-
-          {activeTab === "runs" && (
-            <TouchableOpacity
-              style={[styles.saveIconButton, (!isSubscribed || isSaving || sortedActivities.length === 0) && styles.saveIconButtonDisabled]}
-              onPress={handleSaveCSV}
-              activeOpacity={0.8}
-              disabled={isSaving}
-              accessibilityLabel="Download all workouts as CSV"
-            >
-              {isSaving ? (
-                <ActivityIndicator size="small" color={colors.primary} />
-              ) : (
-                <Download size={18} color={isSubscribed && sortedActivities.length > 0 ? colors.primary : "#9CA3AF"} />
-              )}
-            </TouchableOpacity>
-          )}
 
           {activeTab === "club" && (
             <TouchableOpacity
@@ -3531,7 +3816,11 @@ export default function ActivityScreen() {
                   ? familyMembersLoading || familyLeaderboardLoading
                   : activeTab === "club"
                     ? clubLeaderboardLoading
-                    : isLoading
+                  : activeTab === "events"
+                      ? eventsLoading || (!!selectedLeaderboardEventId && eventParticipantsLoading)
+                      : activeTab === "stairs"
+                        ? stairLeaderboardLoading
+                        : false
             }
             onRefresh={() => {
               if (activeTab === "community") {
@@ -3547,77 +3836,45 @@ export default function ActivityScreen() {
               if (activeTab === "club") {
                 return refetchClubLeaderboard();
               }
-              return refetch();
+              if (activeTab === "events") {
+                if (selectedLeaderboardEventId) return Promise.all([refetchEvents(), refetchEventParticipants()]);
+                return refetchEvents();
+              }
+              if (activeTab === "stairs") {
+                return refetchStairLeaderboard();
+              }
+              return Promise.resolve();
             }}
             tintColor={colors.primary}
             colors={[colors.primary]}
           />
         }
       >
-        {activeTab === "runs" && sortedActivities.length > 0 && (
-          <View style={styles.statsSection}>
-            <LinearGradient colors={colors.gradient.orange} style={styles.statCard}>
-              <Text style={styles.statValue}>{uniqueDaysCount}</Text>
-              <Text style={styles.statLabel}>Active Days</Text>
-            </LinearGradient>
-            
-            <LinearGradient colors={colors.gradient.teal} style={styles.statCard}>
-              <Text style={styles.statValue}>{totalDistance.toFixed(1)}</Text>
-              <Text style={styles.statLabel}>Total km</Text>
-            </LinearGradient>
-            
-            <LinearGradient colors={colors.gradient.blue} style={styles.statCard}>
-              <Text style={styles.statValue}>{formatTime(totalTimeMinutes)}</Text>
-              <Text style={styles.statLabel}>Total Time</Text>
-            </LinearGradient>
-          </View>
-        )}
-
-        {activeTab === "runs" && (
-          <View style={styles.eventsSection}>
-            <Text style={[styles.eventsSectionTitle, { color: themeColors.text }]}>Registered Events</Text>
-            {registeredEvents && registeredEvents.length > 0 ? (
-              registeredEvents.map((event) => (
-                <View key={event.eventId} style={[styles.eventCard, { backgroundColor: themeColors.cardBackground }]}>
-                  <View style={styles.eventCardRow}>
-                    <Calendar size={14} color={colors.primary} />
-                    <Text style={styles.eventName} numberOfLines={1}>{event.eventName}</Text>
-                    <View style={styles.eventBadges}>
-                      <View style={styles.medalIndicator}>
-                        <Award size={12} color={event.isOnMedalList ? '#FFD700' : colors.lightGray} />
-                        <Text style={[styles.medalText, event.isOnMedalList ? styles.medalTextQualified : styles.medalTextNot]}>
-                          {event.isOnMedalList ? 'Yes' : 'No'}
-                        </Text>
-                      </View>
-                      <View style={[
-                        styles.statusBadge,
-                        event.status === 'ongoing' && styles.statusOngoing,
-                        event.status === 'upcoming' && styles.statusUpcoming,
-                        event.status === 'completed' && styles.statusCompleted,
-                      ]}>
-                        <Text style={[
-                          styles.statusText,
-                          event.status === 'ongoing' && styles.statusTextOngoing,
-                          event.status === 'upcoming' && styles.statusTextUpcoming,
-                          event.status === 'completed' && styles.statusTextCompleted,
-                        ]}>
-                          {event.status === 'ongoing' ? 'Ongoing' : event.status === 'upcoming' ? 'Not Started' : 'Closed'}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                </View>
-              ))
-            ) : (
-              <View style={[styles.noEventsCard, { backgroundColor: themeColors.cardBackground }]}>
-                <Calendar size={20} color={colors.textLight} />
-                <Text style={styles.noEventsText}>No registered events</Text>
-              </View>
-            )}
-          </View>
-        )}
-
-        {activeTab === "family" ? (
+        {activeTab === "events" ? (
+          renderEventParticipantsTable()
+        ) : activeTab === "stairs" ? (
+          stairLeaderboardError ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyEmoji}>!</Text>
+              <Text style={styles.emptyText}>Connection Error</Text>
+              <Text style={styles.emptySubtext}>Could not load the stairs leaderboard.</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={() => refetchStairLeaderboard()}>
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : stairLeaderboardLoading && stairLeaderboard.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Loading stairs leaderboard...</Text>
+            </View>
+          ) : stairLeaderboard.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No stair sessions yet</Text>
+              <Text style={styles.emptySubtext}>Verified stair climbs will appear here by building and steps.</Text>
+            </View>
+          ) : (
+            renderStairLeaderboardTable(stairLeaderboard)
+          )
+        ) : activeTab === "family" ? (
           <>
             {renderFamilyManager()}
             {familyMembersLoading ? (
@@ -3786,91 +4043,61 @@ export default function ActivityScreen() {
               {renderLeaderboardTable(sortedCommunityData)}
             </>
           )
-        ) : activeTab === "runs" ? (
-          activitiesError ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyEmoji}>⚠️</Text>
-              <Text style={styles.emptyText}>Connection Error</Text>
-              <Text style={styles.emptySubtext}>Check your internet connection</Text>
-              <TouchableOpacity 
-                style={styles.retryButton} 
-                onPress={() => refetch()}
-              >
-                <Text style={styles.retryButtonText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          ) : isLoading && sortedActivities.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>Loading activities...</Text>
-            </View>
-          ) : sortedActivities.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyEmoji}>👟</Text>
-              <Text style={styles.emptyText}>No activities yet</Text>
-              <Text style={styles.emptySubtext}>Start your first run to see it here</Text>
-            </View>
-          ) : (
-            <View style={styles.runsTableContainer}>
-              {groupedActivities.map((yearGroup) => (
-                <View key={yearGroup.year} style={styles.runsYearGroup}>
-                  <View style={styles.runsYearHeader}>
-                    <Text style={styles.runsYearTitle}>{yearGroup.year}</Text>
-                    <Text style={styles.runsYearSummary}>
-                      {yearGroup.activityCount} runs | {yearGroup.totalDistance.toFixed(1)} km
-                    </Text>
-                  </View>
-                  {yearGroup.months.map((monthGroup) => (
-                    <View key={monthGroup.key} style={[styles.runsMonthTable, { backgroundColor: themeColors.cardBackground }]}>
-                      <View style={styles.runsMonthHeader}>
-                        <Text style={styles.runsMonthTitle}>{monthGroup.label}</Text>
-                        <Text style={styles.runsMonthSummary}>
-                          {monthGroup.activities.length} | {monthGroup.totalDistance.toFixed(1)} km
-                        </Text>
-                      </View>
-                      <View style={styles.runsTableHeader}>
-                        <Text style={[styles.runsTableHeaderText, styles.runsDateColumn]}>Date</Text>
-                        <Text style={[styles.runsTableHeaderText, styles.runsTypeColumn]}>Type</Text>
-                        <Text style={[styles.runsTableHeaderText, styles.runsDistanceColumn]}>km</Text>
-                        <Text style={[styles.runsTableHeaderText, styles.runsTimeColumn]}>Time</Text>
-                        <Text style={[styles.runsTableHeaderText, styles.runsPaceColumn]}>Pace</Text>
-                        <Text style={[styles.runsTableHeaderText, styles.runsPauseColumn]}>Pause</Text>
-                        <Text style={[styles.runsTableHeaderText, styles.runsDownloadHeader]}>CSV</Text>
-                      </View>
-                      {monthGroup.activities.map((activity, index) => (
-                        <View key={activity.activity_id} style={[styles.runsTableRow, index % 2 === 1 && styles.runsTableRowAlt]}>
-                          <Text style={[styles.runsTableCellText, styles.runsDateColumn]} numberOfLines={1}>{formatDate(activity.activity_date)}</Text>
-                          <Text style={[styles.runsTableCellText, styles.runsTypeColumn]} numberOfLines={1}>{activity.exercise_type}</Text>
-                          <Text style={[styles.runsTableCellText, styles.runsDistanceColumn]}>{activity.distance_km.toFixed(1)}</Text>
-                          <Text style={[styles.runsTableCellText, styles.runsTimeColumn]} numberOfLines={1}>
-                            {calculateDuration(activity.start_time, activity.end_time, activity.pause_duration_seconds || 0)}
-                          </Text>
-                          <Text style={[styles.runsTableCellText, styles.runsPaceColumn]} numberOfLines={1}>
-                            {formatPaceMinPerKm(activity.pace_min_per_km)}
-                          </Text>
-                          <Text style={[styles.runsTableCellText, styles.runsPauseColumn]} numberOfLines={1}>
-                            {(activity.pause_duration_seconds || 0) > 0 ? formatPauseDuration(activity.pause_duration_seconds || 0) : "-"}
-                          </Text>
-                          <View style={styles.runsDownloadColumn}>
-                            <TouchableOpacity
-                              style={[styles.workoutCsvButton, (!isSubscribed || isSaving) && styles.workoutCsvButtonDisabled]}
-                              onPress={() => handleSaveWorkoutCSV(activity)}
-                              activeOpacity={0.75}
-                              disabled={isSaving}
-                              accessibilityLabel={`Download ${activity.exercise_type} from ${formatDate(activity.activity_date)} as CSV`}
-                            >
-                              <Download size={12} color={isSubscribed ? colors.primary : "#9CA3AF"} />
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      ))}
-                    </View>
-                  ))}
-                </View>
-              ))}
-            </View>
-          )
         ) : null}
       </ScrollView>
+
+      <Modal
+        visible={showEventPicker}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowEventPicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.eventPickerModal, { backgroundColor: themeColors.surface }]}>
+            <View style={styles.eventPickerHeader}>
+              <Text style={[styles.eventPickerTitle, { color: themeColors.text }]}>Choose Event</Text>
+              <TouchableOpacity onPress={() => setShowEventPicker(false)} hitSlop={8}>
+                <X size={22} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.eventPickerList} contentContainerStyle={styles.eventPickerListContent}>
+              {eventsLoading ? (
+                <View style={styles.eventPickerEmpty}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={styles.noEventsText}>Loading events...</Text>
+                </View>
+              ) : registeredEvents && registeredEvents.length > 0 ? (
+                registeredEvents.map((event) => {
+                  const isSelected = event.eventId === selectedLeaderboardEventId;
+                  return (
+                    <TouchableOpacity
+                      key={event.eventId}
+                      style={[styles.eventPickerOption, isSelected && styles.eventPickerOptionActive]}
+                      onPress={() => {
+                        setSelectedLeaderboardEventId(event.eventId);
+                        setShowEventPicker(false);
+                      }}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={[styles.eventPickerOptionText, isSelected && styles.eventPickerOptionTextActive]} numberOfLines={2}>
+                        {event.eventName}
+                      </Text>
+                      <Text style={styles.eventPickerOptionMeta} numberOfLines={1}>
+                        {formatDate(event.startsAt)} - {formatDate(event.endsAt)} | {event.status === "ongoing" ? "Ongoing" : event.status === "upcoming" ? "Not Started" : "Closed"}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })
+              ) : (
+                <View style={styles.eventPickerEmpty}>
+                  <Calendar size={22} color={colors.textLight} />
+                  <Text style={styles.noEventsText}>No registered events</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={showExternalForm}
@@ -3906,7 +4133,7 @@ export default function ActivityScreen() {
               <View style={styles.inputGroup}>
                 <Text style={[styles.inputLabel, { color: themeColors.text }]}>Activity Type *</Text>
                 <View style={styles.typeChipsContainer}>
-                  {["Run", "Walk", "Cycle"].map((type) => (
+                  {["Run", "Walk", "Cycle", "Stairs"].map((type) => (
                     <TouchableOpacity
                       key={type}
                       style={[
@@ -3952,13 +4179,21 @@ export default function ActivityScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Distance (km) *</Text>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>
+                  {formData.exerciseType === "Stairs" ? "Stair Steps *" : "Distance (km) *"}
+                </Text>
                 <TextInput
                   style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
-                  placeholder="e.g., 5.5"
+                  placeholder={formData.exerciseType === "Stairs" ? "e.g., 720" : "e.g., 5.5"}
                   keyboardType="numeric"
-                  value={formData.distanceKm}
-                  onChangeText={(text) => setFormData({ ...formData, distanceKm: text })}
+                  value={formData.exerciseType === "Stairs" ? formData.stepsCount : formData.distanceKm}
+                  onChangeText={(text) =>
+                    setFormData(
+                      formData.exerciseType === "Stairs"
+                        ? { ...formData, stepsCount: text }
+                        : { ...formData, distanceKm: text }
+                    )
+                  }
                   placeholderTextColor={themeColors.textLight}
                 />
               </View>
@@ -5115,6 +5350,117 @@ const styles = StyleSheet.create({
     backgroundColor: colors.lightGray,
     marginHorizontal: 2,
   },
+  eventDropdownButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    shadowColor: colors.black,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  eventDropdownTextBlock: {
+    flex: 1,
+    gap: 2,
+  },
+  eventDropdownLabel: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    fontWeight: "700" as const,
+  },
+  eventDropdownText: {
+    fontSize: 14,
+    fontWeight: "800" as const,
+  },
+  eventParticipantsTable: {
+    minWidth: 680,
+    marginBottom: 10,
+    borderRadius: 8,
+    overflow: "hidden" as const,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.divider,
+  },
+  eventRankColumn: {
+    width: 34,
+  },
+  eventParticipantNameColumn: {
+    width: 150,
+  },
+  eventParticipantSmallColumn: {
+    width: 42,
+  },
+  eventParticipantCountryColumn: {
+    width: 92,
+  },
+  eventParticipantMetricColumn: {
+    width: 72,
+  },
+  eventParticipantStatusColumn: {
+    width: 92,
+  },
+  eventPickerModal: {
+    width: "100%",
+    maxWidth: 420,
+    maxHeight: "72%",
+    borderRadius: 18,
+    padding: 16,
+  },
+  eventPickerHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    marginBottom: 12,
+  },
+  eventPickerTitle: {
+    fontSize: 18,
+    fontWeight: "800" as const,
+  },
+  eventPickerList: {
+    maxHeight: 420,
+  },
+  eventPickerListContent: {
+    gap: 8,
+    paddingBottom: 4,
+  },
+  eventPickerOption: {
+    borderWidth: 1,
+    borderColor: colors.divider,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: colors.white,
+  },
+  eventPickerOptionActive: {
+    borderColor: colors.primary,
+    backgroundColor: "rgba(255, 107, 53, 0.08)",
+  },
+  eventPickerOptionText: {
+    fontSize: 14,
+    fontWeight: "800" as const,
+    color: colors.text,
+  },
+  eventPickerOptionTextActive: {
+    color: colors.primary,
+  },
+  eventPickerOptionMeta: {
+    marginTop: 3,
+    fontSize: 11,
+    color: colors.textSecondary,
+    fontWeight: "600" as const,
+  },
+  eventPickerEmpty: {
+    minHeight: 110,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 8,
+  },
   eventsSection: {
     paddingHorizontal: 16,
     paddingBottom: 8,
@@ -5278,10 +5624,12 @@ const styles = StyleSheet.create({
   },
   typeChipsContainer: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
   },
   typeChip: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: "47%",
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderRadius: 12,

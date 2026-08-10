@@ -238,7 +238,7 @@ export default publicProcedure
       email_verified: regRes.data.email_verified === true || socialAuthVerified,
     };
 
-    const validTypes = ["Run", "Walk", "Cycle", "Treadmill", "Tredmill"];
+    const validTypes = ["Run", "Walk", "Cycle", "Treadmill", "Tredmill", "Stairs"];
     const filteredActivities = (activitiesRes.data || []).filter((a: any) =>
       validTypes.includes(a.exercise_type || "")
     );

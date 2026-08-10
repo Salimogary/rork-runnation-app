@@ -924,6 +924,7 @@ export default function AdminScreen() {
   const [eventOrganizerId, setEventOrganizerId] = useState<string>("");
   const [eventExternalOrganizerName, setEventExternalOrganizerName] = useState<string>("");
   const [eventLocation, setEventLocation] = useState<string>("");
+  const [eventLocationPin, setEventLocationPin] = useState<string>("");
   const [eventTypeMode, setEventTypeMode] = useState<EventTypeMode>("same_day");
   const [eventRecurrenceWeekday, setEventRecurrenceWeekday] = useState<number>(3);
   const [eventRecurrenceFrequency, setEventRecurrenceFrequency] = useState<EventRecurrenceFrequency>("weekly");
@@ -1480,7 +1481,7 @@ export default function AdminScreen() {
       : 0,
   }));
 
-  const { data: externalSubmissions, isLoading: externalSubmissionsLoading, refetch: refetchExternalSubmissions } = trpc.activities.getExternalSubmissions.useQuery(
+  const { data: externalSubmissions, isLoading: externalSubmissionsLoading, error: externalSubmissionsError, refetch: refetchExternalSubmissions } = trpc.activities.getExternalSubmissions.useQuery(
     undefined,
     { 
       enabled: canUseProtectedAdminRoutes && activeTab === "externalActivities",
@@ -3047,6 +3048,7 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     setEventOrganizerId(isEventOrganizer ? roleSession.eventOrganizerScopes[0] ?? "" : "");
     setEventExternalOrganizerName("");
     setEventLocation("");
+    setEventLocationPin("");
     setEventTypeMode("same_day");
     setEventRecurrenceWeekday(3);
     setEventRecurrenceFrequency("weekly");
@@ -3180,6 +3182,10 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     }
     if (!eventIsVirtual && !eventLocation.trim()) {
       Alert.alert("Missing Location", "Please enter the race start/finish location.");
+      return;
+    }
+    if (eventLocationPin.trim().length > 500) {
+      Alert.alert("Location Pin Too Long", "Please keep the location pin under 500 characters.");
       return;
     }
     if (eventEntry === "paid" && !eventPaymentDetails.trim()) {
@@ -3368,6 +3374,7 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
       club: eventOrganizerMode === "self" ? selfEventOwner.club || undefined : undefined,
       externalOrganizerName: eventOrganizerMode === "other" ? eventExternalOrganizerName.trim() : undefined,
       eventLocation: eventIsVirtual ? null : eventLocation.trim(),
+      eventLocationPin: eventLocationPin.trim() || undefined,
       isVirtual: eventIsVirtual,
       entry: eventEntry,
       entryFee: eventEntry === "paid" ? numericEntryFee : undefined,
@@ -3430,6 +3437,7 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     setEventOrganizerId(event.organizer || "");
     setEventExternalOrganizerName(existingExternalOrganizerName);
     setEventLocation(event.event_location || event.eventLocation || "");
+    setEventLocationPin(event.event_location_pin || event.eventLocationPin || "");
     setEventTypeMode(existingEventType);
     setEventRecurrenceWeekday(Number(event.recurrence_weekday ?? event.recurrenceWeekday ?? 3));
     setEventRecurrenceFrequency((event.recurrence_frequency || event.recurrenceFrequency || "weekly") as EventRecurrenceFrequency);
@@ -8402,7 +8410,15 @@ const getStatusLabel = (status: string) => {
         </View>
       ) : activeTab === "externalActivities" ? (
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-          {externalSubmissionsLoading ? (
+          {externalSubmissionsError ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.errorText}>Error loading external activity submissions</Text>
+              <Text style={styles.errorSubtext}>{externalSubmissionsError.message || "Could not load external submissions."}</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={() => refetchExternalSubmissions()}>
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : externalSubmissionsLoading ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>Loading submissions...</Text>
             </View>
@@ -8435,7 +8451,7 @@ const getStatusLabel = (status: string) => {
                     <Text style={styles.adminDataHeaderText}>Exercise</Text>
                   </View>
                   <View style={[styles.adminDataCell, { width: 110 }]}>
-                    <Text style={styles.adminDataHeaderText}>Distance</Text>
+                    <Text style={styles.adminDataHeaderText}>Result</Text>
                   </View>
                   <View style={[styles.adminDataCell, { width: 110 }]}>
                     <Text style={styles.adminDataHeaderText}>Duration</Text>
@@ -8477,7 +8493,11 @@ const getStatusLabel = (status: string) => {
                           <Text style={styles.adminDataCellText}>{submission.exerciseType}</Text>
                         </View>
                         <View style={[styles.adminDataCell, { width: 110 }]}>
-                          <Text style={styles.adminDataCellText}>{Number(submission.distanceKm || 0).toFixed(2)} km</Text>
+                          <Text style={styles.adminDataCellText}>
+                            {submission.exerciseType === "Stairs"
+                              ? `${Number(submission.stepsCount || 0).toLocaleString()} steps`
+                              : `${Number(submission.distanceKm || 0).toFixed(2)} km`}
+                          </Text>
                         </View>
                         <View style={[styles.adminDataCell, { width: 110 }]}>
                           <Text style={styles.adminDataCellText}>{submission.duration}</Text>
@@ -9549,6 +9569,22 @@ const getStatusLabel = (status: string) => {
                   </Text>
                 </View>
               )}
+
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Location Pin (optional)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={eventLocationPin}
+                  onChangeText={setEventLocationPin}
+                  placeholder="e.g., Google Maps pin or lat,long"
+                  placeholderTextColor="#9ca3af"
+                  keyboardType="url"
+                  autoCapitalize="none"
+                />
+                <Text style={styles.eventPosterHint}>
+                  Optional. Add a map pin, plus code, or coordinates to help runners find the venue.
+                </Text>
+              </View>
 
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Entry Type</Text>

@@ -95,6 +95,7 @@ interface OrganizerRequestData {
 interface GoalItem {
   goal_id: number;
   goal: string;
+  description?: string | null;
 }
 
 interface ClubItem {
@@ -212,13 +213,15 @@ const PARA_EQUIPMENT_OPTIONS = [
 ];
 
 const FALLBACK_GOALS: GoalItem[] = [
-  { goal_id: 1, goal: 'Improve fitness' },
-  { goal_id: 2, goal: 'Lose weight' },
-  { goal_id: 3, goal: 'Build endurance' },
-  { goal_id: 4, goal: 'Train for an event' },
-  { goal_id: 5, goal: 'Stay consistent' },
-  { goal_id: 6, goal: 'General Health' },
-  { goal_id: 7, goal: 'Other' },
+  { goal_id: 1, goal: 'Keep active', description: 'Build consistency by choosing how often you want to run during a date range.' },
+  { goal_id: 2, goal: 'Weight Loss', description: 'Track your target weight and log progress as your running supports healthy weight change.' },
+  { goal_id: 3, goal: 'Improve Fitness', description: 'Set pace targets for different distances and compare each run against your target.' },
+  { goal_id: 4, goal: 'Earn Medals', description: 'Set a medal target for a date range and track approved internal and external race medals.' },
+  { goal_id: 5, goal: 'Compete in Community', description: 'Follow your ranking across family, club, and community leaderboards as your activities grow.' },
+  { goal_id: 6, goal: 'General Health', description: 'Use smartwatch-style health readings such as steps, sleep, heart rate, and SpO2 to monitor wellness.' },
+  { goal_id: 7, goal: 'Have planned runs', description: 'Declare planned running commitments and check whether completed runs match your plan.' },
+  { goal_id: 8, goal: 'Run Window', description: 'Set preferred run time windows and see whether completed runs happened within those hours.' },
+  { goal_id: 9, goal: 'Running Budget', description: 'Set a running expense budget and track race, travel, gear, and nutrition spending against it.' },
 ];
 
 function isGeneralHealthGoal(value: string | null | undefined): boolean {
@@ -1817,9 +1820,16 @@ export default function RegisterScreen() {
                 <View style={[styles.goalCheckbox, isSelected && styles.goalCheckboxSelected]}>
                   {isSelected && <Check size={14} color="#fff" />}
                 </View>
-                <Text style={[styles.goalCardText, isSelected && styles.goalCardTextSelected]}>
-                  {goal.goal}
-                </Text>
+                <View style={styles.goalCardCopy}>
+                  <Text style={[styles.goalCardText, isSelected && styles.goalCardTextSelected]}>
+                    {goal.goal}
+                  </Text>
+                  {goal.description ? (
+                    <Text style={[styles.goalCardDescription, isSelected && styles.goalCardDescriptionSelected]}>
+                      {goal.description}
+                    </Text>
+                  ) : null}
+                </View>
               </TouchableOpacity>
             );
           })}
@@ -3158,14 +3168,25 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a1a',
     borderColor: '#1a1a1a',
   },
+  goalCardCopy: {
+    flex: 1,
+    gap: 4,
+  },
   goalCardText: {
     fontSize: 15,
     color: '#fff',
     fontWeight: '500' as const,
-    flex: 1,
   },
   goalCardTextSelected: {
     fontWeight: '700' as const,
+  },
+  goalCardDescription: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: 'rgba(255,255,255,0.78)',
+  },
+  goalCardDescriptionSelected: {
+    color: 'rgba(255,255,255,0.92)',
   },
   selectedCount: {
     fontSize: 13,

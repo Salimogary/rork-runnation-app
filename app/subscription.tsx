@@ -169,7 +169,7 @@ export default function SubscriptionScreen() {
     }) => {
       if (!user) throw new Error('Not signed in');
       if (plan.paymentMethod === 'credit_card') {
-        throw new Error('Card payments are not available in Flutterwave sandbox yet. Please use mobile money for testing.');
+        throw new Error('Card payments are not available yet. Please use mobile money.');
       }
       const paymentMethod: MobilePaymentMethod =
         userRegion === 'uganda'
@@ -196,7 +196,7 @@ export default function SubscriptionScreen() {
       }
       const msg = payment?.paymentInstruction
         ? payment.paymentInstruction
-        : 'Your Flutterwave payment has been started. Approve the prompt on your phone. Once Flutterwave confirms it, your subscription will be activated automatically.';
+        : 'Your payment has been started. Approve the prompt on your phone. Once payment is confirmed, your subscription will be activated automatically.';
       if (Platform.OS !== 'web') {
         Alert.alert('Payment Started', msg);
       } else {
@@ -479,7 +479,7 @@ export default function SubscriptionScreen() {
               </Text>
             </View>
             <Text style={styles.paymentProviderText}>
-              Processed by Flutterwave. Available payment methods depend on your country and Flutterwave account settings.
+              Pay securely by mobile money or card. Available payment methods depend on your country and account settings.
             </Text>
 
             {isMobilePayment ? (
@@ -502,8 +502,7 @@ export default function SubscriptionScreen() {
               <View style={styles.stripeNotice}>
                 <CreditCard size={24} color="#1E40AF" />
                 <Text style={styles.stripeNoticeText}>
-                  You will be redirected to a secure payment page powered by
-                  Flutterwave to complete your payment.
+                  You will be redirected to a secure card payment page to complete your payment.
                 </Text>
               </View>
             )}
@@ -529,8 +528,8 @@ export default function SubscriptionScreen() {
               ) : (
                 <Text style={styles.subscribeButtonText}>
                   {isMobilePayment
-                    ? 'Continue to Flutterwave'
-                    : 'Pay with Flutterwave'}
+                    ? 'Pay with mobile money'
+                    : 'Pay by card'}
                 </Text>
               )}
             </TouchableOpacity>

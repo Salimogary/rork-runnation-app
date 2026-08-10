@@ -212,7 +212,7 @@ export async function fetchProfileCompletionInputs(
 
   const profile = profileResult.data as any;
   const contactEmail = profile?.contacts?.[0]?.email ?? profile?.contacts?.email;
-  const validActivityTypes = ["Run", "Walk", "Treadmill", "Tredmill"];
+  const validActivityTypes = ["Run", "Walk", "Treadmill", "Tredmill", "Stairs"];
   const eligibleActivities = (activitiesResult.data || []).filter((activity: any) =>
     validActivityTypes.includes(activity.exercise_type || "")
   );

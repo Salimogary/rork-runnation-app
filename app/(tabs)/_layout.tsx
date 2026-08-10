@@ -9,7 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useQuery } from "@tanstack/react-query";
 import { getServerClient } from "@/lib/server-client";
 
-const LOCKED_TABS = ["goals", "chat", "shop", "events"];
+const LOCKED_TABS = ["goals", "activity", "magazine", "chat", "shop", "events"];
 
 export default function TabLayout() {
   const router = useRouter();
@@ -125,18 +125,38 @@ export default function TabLayout() {
         name="activity"
         options={{
           title: "Leaderboard",
-          tabBarIcon: ({ color }) => <Users color={color} size={24} />,
+          tabBarIcon: ({ color }) => (
+            <View>
+              <Users color={getTabColor("activity", color)} size={24} />
+              {!isSubscribed && <Lock size={10} color={lockedColor} style={{ position: 'absolute', top: -4, right: -6 }} />}
+            </View>
+          ),
           tabBarItemStyle: { flex: 1.3 },
-          tabBarLabelStyle: compactTabLabelStyle,
+          tabBarLabelStyle: !isSubscribed ? getLockedTabLabelStyle() : compactTabLabelStyle,
+        }}
+        listeners={{
+          tabPress: (e) => {
+            if (!isSubscribed) handleLockedTabPress(e);
+          },
         }}
       />
       <Tabs.Screen
         name="magazine"
         options={{
           title: "Magazine",
-          tabBarIcon: ({ color }) => <BookOpen color={color} size={24} />,
+          tabBarIcon: ({ color }) => (
+            <View>
+              <BookOpen color={getTabColor("magazine", color)} size={24} />
+              {!isSubscribed && <Lock size={10} color={lockedColor} style={{ position: 'absolute', top: -4, right: -6 }} />}
+            </View>
+          ),
           tabBarItemStyle: { flex: 1.02 },
-          tabBarLabelStyle: compactTabLabelStyle,
+          tabBarLabelStyle: !isSubscribed ? getLockedTabLabelStyle() : compactTabLabelStyle,
+        }}
+        listeners={{
+          tabPress: (e) => {
+            if (!isSubscribed) handleLockedTabPress(e);
+          },
         }}
       />
       <Tabs.Screen

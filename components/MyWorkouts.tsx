@@ -14,6 +14,7 @@ interface ActivityData {
   activity_date: string;
   exercise_type: string;
   distance_km: number;
+  steps_count?: number | null;
   start_time: string;
   end_time: string;
   pace_min_per_km: number;
@@ -68,6 +69,13 @@ function formatPaceMinPerKm(paceMinPerKm: number): string {
   const minutes = Math.floor(totalSecondsPerKm / 60);
   const seconds = totalSecondsPerKm % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatActivityMeasure(activity: ActivityData): string {
+  if (activity.exercise_type === "Stairs") {
+    return `${Number(activity.steps_count || 0).toLocaleString()} steps`;
+  }
+  return `${Number(activity.distance_km || 0).toFixed(1)} km`;
 }
 
 export default function MyWorkouts() {
@@ -278,7 +286,7 @@ export default function MyWorkouts() {
                 <View style={styles.runsTableHeader}>
                   <Text style={[styles.runsTableHeaderText, styles.runsDateColumn]}>Date</Text>
                   <Text style={[styles.runsTableHeaderText, styles.runsTypeColumn]}>Type</Text>
-                  <Text style={[styles.runsTableHeaderText, styles.runsDistanceColumn]}>km</Text>
+                  <Text style={[styles.runsTableHeaderText, styles.runsDistanceColumn]}>km/steps</Text>
                   <Text style={[styles.runsTableHeaderText, styles.runsTimeColumn]}>Time</Text>
                   <Text style={[styles.runsTableHeaderText, styles.runsPaceColumn]}>Pace</Text>
                 </View>
@@ -302,7 +310,7 @@ export default function MyWorkouts() {
                   >
                     <Text style={[styles.runsTableCellText, styles.runsDateColumn]} numberOfLines={1}>{formatDate(activity.activity_date)}</Text>
                     <Text style={[styles.runsTableCellText, styles.runsTypeColumn]} numberOfLines={1}>{activity.exercise_type}</Text>
-                    <Text style={[styles.runsTableCellText, styles.runsDistanceColumn]}>{activity.distance_km.toFixed(1)}</Text>
+                    <Text style={[styles.runsTableCellText, styles.runsDistanceColumn]}>{formatActivityMeasure(activity)}</Text>
                     <Text style={[styles.runsTableCellText, styles.runsTimeColumn]} numberOfLines={1}>
                       {calculateDuration(activity.start_time, activity.end_time, activity.pause_duration_seconds || 0)}
                     </Text>

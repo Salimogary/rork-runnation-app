@@ -109,6 +109,7 @@ export default publicProcedure
         registration_id: activity.registration_id,
         activity_id: approvedActivity.activity_id,
         source_label: "Treadmill",
+        source_type: "treadmill",
       });
 
     if (notificationError) {

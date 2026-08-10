@@ -105,6 +105,8 @@ interface UserProfile {
   para_equipment_other?: string | null;
   does_indoor_workouts?: boolean | null;
   has_smart_watch?: boolean | null;
+  smart_watch_brand?: string | null;
+  smart_watch_model?: string | null;
 }
 
 interface GoalItem {
@@ -437,6 +439,8 @@ export default function ProfileScreen() {
         "para_equipment_other",
         "does_indoor_workouts",
         "has_smart_watch",
+        "smart_watch_brand",
+        "smart_watch_model",
         "travel_country",
         "travel_country_code",
         "travel_start_date",
@@ -621,6 +625,8 @@ export default function ProfileScreen() {
         para_equipment_other: profile.para_equipment_other ?? "",
         does_indoor_workouts: profile.does_indoor_workouts === true,
         has_smart_watch: profile.has_smart_watch === true,
+        smart_watch_brand: profile.smart_watch_brand ?? "",
+        smart_watch_model: profile.smart_watch_model ?? "",
       });
     } else if (section === "goals") {
       const userGoalTexts = userGoals.map((ug) => String(ug.goal || "")).filter(Boolean);
@@ -1354,8 +1360,32 @@ export default function ProfileScreen() {
         "Do you use a smart watch to record your workouts?",
         "If you also choose General Health as a goal, SmartFit Club appears in your special club options.",
         formData.has_smart_watch === true,
-        (value) => setFormData({ ...formData, has_smart_watch: value })
+        (value) => setFormData({
+          ...formData,
+          has_smart_watch: value,
+          smart_watch_brand: value ? formData.smart_watch_brand : null,
+          smart_watch_model: value ? formData.smart_watch_model : null,
+        })
       )}
+
+      {formData.has_smart_watch === true ? (
+        <View style={styles.smartWatchDetails}>
+          <Text style={styles.fieldLabel}>Smart watch details (optional)</Text>
+          <TextInput
+            style={styles.input}
+            value={String(formData.smart_watch_brand ?? "")}
+            onChangeText={(text) => setFormData({ ...formData, smart_watch_brand: text })}
+            placeholder="Brand, for example Garmin"
+          />
+          <TextInput
+            style={[styles.input, { marginTop: 10 }]}
+            value={String(formData.smart_watch_model ?? "")}
+            onChangeText={(text) => setFormData({ ...formData, smart_watch_model: text })}
+            placeholder="Model, for example Forerunner 165"
+          />
+          <Text style={styles.goalHelpText}>This can appear on approved smart-watch workouts, for example Smartwatch-Garmin Forerunner 165.</Text>
+        </View>
+      ) : null}
 
       <View style={styles.actionButtons}>
         <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
@@ -2475,6 +2505,14 @@ const styles = StyleSheet.create({
   },
   field: {
     gap: 6,
+  },
+  smartWatchDetails: {
+    gap: 6,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: "#f8fafc",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
   },
   fieldLabel: {
     fontSize: 13,

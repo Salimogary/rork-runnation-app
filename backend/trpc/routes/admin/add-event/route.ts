@@ -189,6 +189,7 @@ const addEventInput = z.object({
   organizerId: z.string().uuid().optional().nullable(),
   externalOrganizerName: z.string().optional().nullable(),
   eventLocation: z.string().optional().nullable(),
+  eventLocationPin: z.string().max(500).optional().nullable(),
   isVirtual: z.boolean().optional(),
   entry: z.enum(["free", "club_approved", "paid"]).optional(),
   entryFee: z.number().nonnegative().optional(),
@@ -279,6 +280,7 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
   const normalizedExternalOrganizerName = hasOrganizerOnlyAccess ? null : input.externalOrganizerName?.trim() || null;
   const normalizedClub = normalizedOrganizerId || normalizedExternalOrganizerName ? null : input.club?.trim() || null;
   const normalizedEventLocation = input.isVirtual === true ? "Virtual" : input.eventLocation?.trim() || null;
+  const normalizedEventLocationPin = input.eventLocationPin?.trim() || null;
   const normalizedEntry = input.entry ?? "free";
   const normalizedEventType = input.eventType;
   const normalizedRegistrationClosesAt = normalizeDateOnly(input.registrationClosesAt);
@@ -482,6 +484,7 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
       "external_organizer_name": normalizedExternalOrganizerName,
       "club": normalizedClub,
       "event_location": normalizedEventLocation,
+      "event_location_pin": normalizedEventLocationPin,
       "is_virtual": input.isVirtual === true,
       "entry": normalizedEntry,
       "entry_fee": normalizedEntry === "paid" ? normalizedEntryFee : null,
@@ -571,6 +574,7 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
       registrationClosesAt: normalizedRegistrationClosesAt,
       isVirtual: input.isVirtual === true,
       eventLocation: normalizedEventLocation,
+      eventLocationPin: normalizedEventLocationPin,
       entry: normalizedEntry,
       entryFee: normalizedEntry === "paid" ? normalizedEntryFee : null,
       hasMedal: normalizedHasMedal,

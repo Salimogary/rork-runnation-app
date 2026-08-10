@@ -1,0 +1,118 @@
+
+> runnation-backend@1.0.0 dev
+> ts-node-dev --files server.ts
+
+[INFO] 12:57:38 ts-node-dev ver. 2.0.0 (using ts-node ver. 10.9.2, typescript ver. 5.9.3)
+◇ injected env (14) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 13:34:39 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\create-ride-offer.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 13:38:26 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\create-ride-offer.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ enable debugging { debug: true }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 13:38:33 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\list-ride-shares.ts has been modified
+◇ injected env (14) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 13:57:40 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\create-ride-offer.ts has been modified
+◇ injected env (14) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 13:58:09 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\app-router.ts has been modified
+◇ injected env (14) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 14:18:23 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\create-ride-offer.ts has been modified
+◇ injected env (14) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 14:18:33 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\update-ride-offer.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ enable debugging { debug: true }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 14:18:47 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\list-ride-shares.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ enable debugging { debug: true }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 14:45:07 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\create-ride-offer.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ enable debugging { debug: true }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 14:45:14 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\update-ride-offer.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ suppress logs { quiet: true }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 14:45:21 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\list-ride-shares.ts has been modified
+◇ injected env (14) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 17:41:35 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\create-ride-offer.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ override existing { override: true }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 17:42:24 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\app-router.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 17:45:00 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\request-ride-booking.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ suppress logs { quiet: true }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 17:45:08 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\update-ride-booking.ts has been modified
+◇ injected env (14) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 17:52:58 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\admin\add-event\route.ts has been modified
+◇ injected env (14) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 18:09:45 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\app-router.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ suppress logs { quiet: true }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 18:36:09 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\create-accommodation-offer.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ suppress logs { quiet: true }
+[ERROR] 18:36:16 ⨯ Unable to compile TypeScript:
+trpc/routes/events/update-accommodation-offer.ts(69,46): error TS2339: Property 'reduce' does not exist on type 'number | never[]'.
+  Property 'reduce' does not exist on type 'number'.
+
+[INFO] 18:36:43 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\update-accommodation-offer.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ suppress logs { quiet: true }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 18:46:59 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\create-accommodation-offer.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 19:03:59 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\create-accommodation-offer.ts has been modified
+◇ injected env (14) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 19:09:11 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\events\create-accommodation-offer.ts has been modified
+◇ injected env (14) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 20:08:29 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\submit-external-activity\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 20:18:22 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\submit-external-activity\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+🚀 Server running on http://0.0.0.0:3000
+[getEvents] Starting query...
+[getEvents] Query result: { dataCount: 11, error: null }
+[getEvents] Returning 11 events
+[getEvents] Starting query...
+[getEvents] Query result: { dataCount: 11, error: null }
+[getEvents] Returning 11 events
+[INFO] 20:40:38 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\approve-external-submission\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ override existing { override: true }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 20:40:51 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+[ERROR] 20:40:54 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/get-external-submissions/route.ts(55,7): error TS2322: Type 'PostgrestSingleResponse<{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evidence_mime_type: an...' is not assignable to type 'PostgrestSingleResponse<{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; steps_count: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evid...'.
+  Type 'PostgrestResponseSuccess<{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evidence_mime_type: a...' is not assignable to type 'PostgrestSingleResponse<{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; steps_count: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evid...'.
+    Type 'PostgrestResponseSuccess<{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evidence_mime_type: a...' is not assignable to type 'PostgrestResponseSuccess<{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; steps_count: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evi...'.
+      Type '{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evidence_mime_type: any; }[]' is not assignable to type '{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; steps_count: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evidence_mime_type: any; }[]'.
+        Property 'steps_count' is missing in type '{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evidence_mime_type: any; }' but required in type '{ submission_id: any; registration_id: any; activity_date: any; exercise_type: any; start_time: any; duration: any; distance_km: any; steps_count: any; source_type: any; source_label: any; external_event_name: any; external_event_location: any; external_event_id: any; evidence_path: any; evidence_mime_type: any; }'.
+
+[INFO] 20:42:09 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ suppress logs { quiet: true }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 20:47:50 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts has been modified
+◇ injected env (14) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+[ERROR] 20:47:52 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/get-external-submissions/route.ts(87,27): error TS7006: Parameter 'r' implicitly has an 'any' type.
+trpc/routes/activities/get-external-submissions/route.ts(143,23): error TS2339: Property 'firstName' does not exist on type '{}'.
+trpc/routes/activities/get-external-submissions/route.ts(143,41): error TS2339: Property 'otherNames' does not exist on type '{}'.
+trpc/routes/activities/get-external-submissions/route.ts(143,69): error TS2339: Property 'username' does not exist on type '{}'.
+trpc/routes/activities/get-external-submissions/route.ts(145,24): error TS2339: Property 'email' does not exist on type '{}'.
+
+[INFO] 20:49:22 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-external-submissions\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 21:10:31 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-stair-leaderboard\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ override existing { override: true }
+🚀 Server running on http://0.0.0.0:3000

@@ -2,12 +2,15 @@ import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Platform, Modal, 
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge, Watch, Smartphone, ChevronRight, Heart, Activity, Droplets, Flame, Stethoscope, Bike, ArrowLeft, Share2, Save, Check } from "lucide-react-native";
+import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge, Watch, Smartphone, ChevronRight, Heart, Activity, Droplets, Flame, Stethoscope, Bike, ArrowLeft, Share2, Save, Check, Camera, Building2, QrCode, Printer } from "lucide-react-native";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import * as ImagePicker from "expo-image-picker";
 import * as Speech from "expo-speech";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import { Accelerometer } from "expo-sensors";
 import MapView, { Circle, Polyline } from "react-native-maps";
+import Svg, { Path } from "react-native-svg";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, useRouter } from "expo-router";
 import * as FileSystem from "expo-file-system/legacy";
@@ -20,6 +23,8 @@ import { WORLD_COUNTRIES } from "@/constants/countries";
 import { formatCountryName } from "@/constants/country-utils";
 import { useSubscription } from "@/contexts/SubscriptionContext";
 import SubscriptionGate from "@/components/SubscriptionGate";
+import WatchRunExperience from "@/components/WatchRunExperience";
+import { useIsWatchDisplay } from "@/utils/useWatchDisplay";
 import { getServerClient } from "@/lib/server-client";
 import { trpc } from "@/lib/trpc";
 import { getActivityVoiceAssistantEnabled } from "@/utils/activityVoice";
@@ -35,8 +40,32 @@ import MyWorkouts from "@/components/MyWorkouts";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type RunState = "idle" | "running" | "paused" | "finished";
-type ExerciseType = "Walk" | "Run" | "Cycle" | "Treadmill" | null;
+type ExerciseType = "Walk" | "Run" | "Cycle" | "Treadmill" | "Stairs" | null;
 type WorkoutTab = "record" | "event" | "sources";
+type StairScanMode = "short" | "full";
+
+type ActiveStairSession = {
+  sessionId: string;
+  lapId?: string | null;
+  buildingName?: string | null;
+  routeName?: string | null;
+  nextCheckpoint?: string | null;
+  completedAscents: number;
+  verifiedSteps: number;
+  startedAt: Date;
+  lastMessage: string;
+};
+
+function StaircaseIcon({ size = 28, color = "#FFFFFF" }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M4 20h16" stroke={color} strokeWidth={2.2} strokeLinecap="round" />
+      <Path d="M5 17h4v-4h4V9h4V5h2" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M6 5h5" stroke={color} strokeWidth={2.2} strokeLinecap="round" />
+      <Path d="M8.5 5v8" stroke={color} strokeWidth={2.2} strokeLinecap="round" />
+    </Svg>
+  );
+}
 
 interface Coordinates {
   latitude: number;
@@ -79,6 +108,19 @@ interface WorkoutLocationDetails {
   countryCode: string;
   countryFlag: string;
 }
+
+type MergeWorkoutBase = {
+  activityId: string;
+  activityDate: string;
+  exerciseType: Exclude<ExerciseType, null>;
+  distanceKm: number;
+  durationSeconds: number;
+  pauseDurationSeconds: number;
+  startTime: string;
+  endTime: string;
+  startedAt: string;
+  endedAt: string;
+};
 
 type ImportanceLevel = "VERY HIGH" | "HIGH" | "MEDIUM" | "LOW";
 
@@ -166,6 +208,7 @@ type PersistedWorkoutSession = {
   lastValidPoint: LocationPoint | null;
   lastProcessedLocationTimestamp: number | null;
   filteredPointCount: number;
+  mergeBase?: MergeWorkoutBase | null;
   updatedAt: number;
 };
 
@@ -419,6 +462,31 @@ if (Platform.OS !== "web" && !TaskManager.isTaskDefined(BACKGROUND_LOCATION_TASK
   });
 }
 
+function timeStringToSeconds(value?: string | null): number {
+  const parts = String(value || "00:00:00").split(":").map((part) => Number(part));
+  if (parts.length < 2 || parts.some((part) => !Number.isFinite(part))) return 0;
+  return (parts[0] || 0) * 3600 + (parts[1] || 0) * 60 + (parts[2] || 0);
+}
+
+function activityDurationSeconds(startTime?: string | null, endTime?: string | null, pauseDurationSeconds = 0): number {
+  const start = timeStringToSeconds(startTime);
+  let end = timeStringToSeconds(endTime);
+  if (end < start) end += 24 * 60 * 60;
+  return Math.max(0, end - start - Math.max(0, pauseDurationSeconds));
+}
+
+function combineActivityDateTime(activityDate: string, timeValue: string) {
+  const date = new Date(`${String(activityDate).slice(0, 10)}T${timeValue || "00:00:00"}`);
+  return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function localDateOnly(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 const countryFlagFromCountry = (country: string | null | undefined): string => {
   if (!country) return "";
 
@@ -452,7 +520,7 @@ const SMART_WATCH_FIELDS: SmartWatchField[] = [
   { key: "blood_pressure", label: "Blood Pressure", placeholder: "e.g., 120/80", importance: "VERY HIGH", keyboardType: "default", icon: <Stethoscope size={16} color="#DC2626" /> },
 ];
 
-export default function ExerciseScreen() {
+function PhoneExerciseScreen() {
   const router = useRouter();
   const { user, registrationId } = useAuth();
   const insets = useSafeAreaInsets();
@@ -489,6 +557,38 @@ export default function ExerciseScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [pendingWorkoutSyncCount, setPendingWorkoutSyncCount] = useState(0);
   const [isSyncingWorkouts, setIsSyncingWorkouts] = useState(false);
+  const [stairsStepsInput, setStairsStepsInput] = useState("");
+  const [showStairScannerModal, setShowStairScannerModal] = useState(false);
+  const [stairScanMode, setStairScanMode] = useState<StairScanMode>("full");
+  const [activeStairSession, setActiveStairSession] = useState<ActiveStairSession | null>(null);
+  const [isScanningStairQr, setIsScanningStairQr] = useState(false);
+  const [manualStairQrToken, setManualStairQrToken] = useState("");
+  const [stairSessionSeconds, setStairSessionSeconds] = useState(0);
+  const [stairBuildingSearch, setStairBuildingSearch] = useState("");
+  const [showStairSetupForm, setShowStairSetupForm] = useState(false);
+  const [isRegisteringStairRoute, setIsRegisteringStairRoute] = useState(false);
+  const [generatedStairStickers, setGeneratedStairStickers] = useState<any[]>([]);
+  const [stairSetupForm, setStairSetupForm] = useState({
+    buildingName: "",
+    city: "",
+    countryCode: "",
+    addressDescription: "",
+    accessType: "public" as "public" | "private" | "club" | "corporate" | "residential" | "other",
+    qrCustodianName: "",
+    qrCustodianPhone: "",
+    qrCustodianEmail: "",
+    routeName: "",
+    stairwellName: "",
+    floorSegments: "",
+    stepsGroundToFirst: "",
+    minimumDurationSeconds: "20",
+    maximumDurationSeconds: "7200",
+  });
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const stairSensorSessionStart = useRef<number | null>(null);
+  const stairSensorLastSample = useRef<{ magnitude: number; timestamp: number } | null>(null);
+  const stairSensorSamples = useRef(0);
+  const stairSensorActiveSamples = useRef(0);
 
   const [showSmartWatchModal, setShowSmartWatchModal] = useState(false);
   const [smartWatchValues, setSmartWatchValues] = useState<Record<string, string>>({
@@ -513,10 +613,11 @@ export default function ExerciseScreen() {
   const [otherSportsForm, setOtherSportsForm] = useState({
     sportsApp: "",
     activityDate: "",
-    exerciseType: "Run" as "Run" | "Walk" | "Cycle" | "Treadmill",
+    exerciseType: "Run" as "Run" | "Walk" | "Cycle" | "Treadmill" | "Stairs",
     startTime: "",
     duration: "",
     distanceKm: "",
+    stepsCount: "",
   });
   const [otherSportsEvidenceImage, setOtherSportsEvidenceImage] = useState<string | null>(null);
   const [isSubmittingOtherSports, setIsSubmittingOtherSports] = useState(false);
@@ -533,6 +634,61 @@ export default function ExerciseScreen() {
   const registeredEvents = remoteRegisteredEvents.length > 0
     ? remoteRegisteredEvents
     : cachedRegisteredEvents;
+  const { data: stairRoutes = [], refetch: refetchStairRoutes } = trpc.activities.getStairRoutes.useQuery(undefined, {
+    enabled: showStairScannerModal,
+    staleTime: 60000,
+  });
+  const filteredStairRoutes = useMemo(() => {
+    const query = stairBuildingSearch.trim().toLowerCase();
+    if (!query) return stairRoutes.slice(0, 6);
+    return stairRoutes.filter((route: any) => [
+      route.building?.buildingName,
+      route.building?.city,
+      route.routeName,
+      route.stairwellName,
+      route.building?.addressDescription,
+    ].filter(Boolean).join(" ").toLowerCase().includes(query)).slice(0, 8);
+  }, [stairBuildingSearch, stairRoutes]);
+
+  useEffect(() => {
+    if (!showStairScannerModal) {
+      return;
+    }
+
+    stairSensorSessionStart.current = Date.now();
+    stairSensorLastSample.current = null;
+    stairSensorSamples.current = 0;
+    stairSensorActiveSamples.current = 0;
+
+    Accelerometer.setUpdateInterval(500);
+    const subscription = Accelerometer.addListener((sample) => {
+      const timestamp = Date.now();
+      const magnitude = Math.sqrt(sample.x * sample.x + sample.y * sample.y + sample.z * sample.z);
+      const previous = stairSensorLastSample.current;
+      stairSensorSamples.current += 1;
+      if (previous && Math.abs(magnitude - previous.magnitude) >= 0.11) {
+        stairSensorActiveSamples.current += 1;
+      }
+      stairSensorLastSample.current = { magnitude, timestamp };
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [showStairScannerModal]);
+
+  useEffect(() => {
+    if (!activeStairSession) {
+      setStairSessionSeconds(0);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setStairSessionSeconds(Math.max(0, Math.floor((Date.now() - activeStairSession.startedAt.getTime()) / 1000)));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeStairSession]);
 
   useEffect(() => {
     if (!effectiveRegistrationId) {
@@ -601,6 +757,7 @@ export default function ExerciseScreen() {
   const exerciseTypeRef = useRef<ExerciseType>(null);
   const selectedEventRunRef = useRef<RegisteredEventRun | null>(null);
   const startTimeRef = useRef<Date | null>(null);
+  const mergeWorkoutBaseRef = useRef<MergeWorkoutBase | null>(null);
   const androidBottomInset = Platform.OS === "android" ? Math.max(insets.bottom, 48) : insets.bottom;
   const workoutBottomPadding = runState === "finished" ? androidBottomInset + 48 : androidBottomInset + 24;
   const runDetailsActionsBottomPadding = Math.max(insets.bottom, Platform.OS === "android" ? 8 : 12) + 8;
@@ -701,6 +858,7 @@ export default function ExerciseScreen() {
       lastValidPoint: lastValidPoint.current,
       lastProcessedLocationTimestamp: lastProcessedLocationTimestamp.current,
       filteredPointCount: filteredPointCount.current,
+      mergeBase: mergeWorkoutBaseRef.current,
       updatedAt: Date.now(),
     });
   }, [effectiveRegistrationId]);
@@ -990,6 +1148,316 @@ export default function ExerciseScreen() {
     return `${minutes} minute${minutes === 1 ? "" : "s"} ${seconds} second${seconds === 1 ? "" : "s"} per kilometre`;
   }, []);
 
+  const speakGoalReportAfterActivity = useCallback(async ({
+    registrationId: ownerRegistrationId,
+    activityId,
+    activityDate,
+    startTime,
+    endTime,
+    distanceKm,
+    durationSeconds,
+    eventIds,
+  }: {
+    registrationId: string;
+    activityId: string;
+    activityDate: string;
+    startTime: string;
+    endTime: string;
+    distanceKm: number;
+    durationSeconds: number;
+    eventIds: string[];
+  }) => {
+    const offlineMessage = "Iâ€™m unable to access your latest stats right now, so I canâ€™t give you a goal report summary.";
+    const dateOnlyLocal = (value?: string | null) => String(value || "").slice(0, 10);
+    const timeToMinutes = (value?: string | null): number | null => {
+      const parts = String(value || "").split(":").map(Number);
+      if (parts.length < 2 || parts.some((part) => !Number.isFinite(part))) return null;
+      return parts[0] * 60 + parts[1];
+    };
+    const isJunior = (dob?: string | null): boolean => {
+      if (!dob) return false;
+      const birthDate = new Date(dob);
+      if (Number.isNaN(birthDate.getTime())) return false;
+      const today = new Date();
+      let age = today.getFullYear() - birthDate.getFullYear();
+      const monthDiff = today.getMonth() - birthDate.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) age -= 1;
+      return age <= 15;
+    };
+    const isParaEquipmentUser = (registration: any): boolean =>
+      registration?.has_disability === true && registration?.para_uses_equipment === true;
+    const activityDurationMinutes = (activity: any): number => {
+      const start = timeToMinutes(activity.start_time);
+      let end = timeToMinutes(activity.end_time);
+      if (start === null || end === null) return 0;
+      if (end < start) end += 24 * 60;
+      const pauseMinutes = (Number(activity.pause_duration_seconds) || 0) / 60;
+      return Math.max(0, end - start - pauseMinutes);
+    };
+    const normalizeGoalKey = (goal: string): string | null => {
+      const value = goal.toLowerCase();
+      if (value.includes("keep active") || value.includes("daily run") || value.includes("just want to run")) return "keepActive";
+      if (value.includes("fitness") || value.includes("pace")) return "fitness";
+      if (value.includes("community") || value.includes("compete")) return "community";
+      if (value.includes("planned runs") || value.includes("habit") || value.includes("discipline")) return "plannedRuns";
+      if (value.includes("run window") || value.includes("time window")) return "runWindow";
+      if (value.includes("medal")) return "medals";
+      return null;
+    };
+    const clockFitsWindow = (window: any): boolean => {
+      const activityStart = timeToMinutes(startTime);
+      let activityEnd = timeToMinutes(endTime);
+      const windowStart = timeToMinutes(window?.start);
+      let windowEnd = timeToMinutes(window?.end);
+      if (activityStart === null || activityEnd === null || windowStart === null || windowEnd === null) return false;
+      if (activityEnd < activityStart) activityEnd += 24 * 60;
+      if (windowEnd < windowStart) windowEnd += 24 * 60;
+      return activityStart >= windowStart && activityEnd <= windowEnd;
+    };
+    const appendCurrentActivity = (activities: any[]) => {
+      const exists = activities.some((activity) => activity.activity_id === activityId);
+      if (exists) return activities;
+      return [
+        ...activities,
+        {
+          activity_id: activityId,
+          registration_id: ownerRegistrationId,
+          activity_date: activityDate,
+          exercise_type: exerciseType || "Run",
+          distance_km: distanceKm,
+          start_time: startTime,
+          end_time: endTime,
+          pause_duration_seconds: pauseDurationSecondsRef.current,
+          pace_min_per_km: durationSeconds > 0 && distanceKm > 0 ? (durationSeconds / 60) / distanceKm : 0,
+        },
+      ];
+    };
+
+    try {
+      const { data: userGoals, error: userGoalsError } = await supabase
+        .from("user_goals")
+        .select("goal")
+        .eq("registration_id", ownerRegistrationId);
+      if (userGoalsError) throw userGoalsError;
+
+      const selectedGoalKeys = new Set((userGoals || []).map((row: any) => normalizeGoalKey(String(row.goal || ""))).filter(Boolean));
+      if (selectedGoalKeys.size === 0) {
+        speakActivityMessage("Congratulations, activity completed. You have not selected any goals for a goal report yet.");
+        return;
+      }
+
+      const reports: string[] = [];
+
+      const [
+        activitiesResult,
+        dailyGoalResult,
+        fitnessGoalResult,
+        habitResult,
+        runWindowResult,
+      ] = await Promise.all([
+        supabase
+          .from("activities")
+          .select("activity_id, registration_id, activity_date, exercise_type, distance_km, start_time, end_time, pause_duration_seconds, pace_min_per_km")
+          .eq("registration_id", ownerRegistrationId),
+        selectedGoalKeys.has("keepActive")
+          ? supabase.from("daily_run_goal").select("*").eq("registration_id", ownerRegistrationId).order("created_at", { ascending: false }).limit(1).maybeSingle()
+          : Promise.resolve({ data: null, error: null } as any),
+        selectedGoalKeys.has("fitness")
+          ? supabase.from("fitness_goal").select("*").eq("registration_id", ownerRegistrationId).order("created_at", { ascending: false }).limit(1).maybeSingle()
+          : Promise.resolve({ data: null, error: null } as any),
+        selectedGoalKeys.has("plannedRuns")
+          ? supabase.from("habit_declarations").select("*").eq("registration_id", ownerRegistrationId).eq("is_active", true).order("created_at", { ascending: false }).limit(1).maybeSingle()
+          : Promise.resolve({ data: null, error: null } as any),
+        selectedGoalKeys.has("runWindow")
+          ? supabase.from("run_window_goal").select("*").eq("registration_id", ownerRegistrationId).order("created_at", { ascending: false }).limit(1).maybeSingle()
+          : Promise.resolve({ data: null, error: null } as any),
+      ]);
+      if (activitiesResult.error || dailyGoalResult.error || fitnessGoalResult.error || habitResult.error || runWindowResult.error) {
+        throw activitiesResult.error || dailyGoalResult.error || fitnessGoalResult.error || habitResult.error || runWindowResult.error;
+      }
+
+      const activities = appendCurrentActivity(activitiesResult.data || []);
+
+      if (selectedGoalKeys.has("keepActive") && dailyGoalResult.data) {
+        const goal = dailyGoalResult.data as any;
+        const goalActivities = activities.filter((activity: any) =>
+          activity.exercise_type === "Run" &&
+          dateOnlyLocal(activity.activity_date) >= goal.start_date &&
+          dateOnlyLocal(activity.activity_date) <= goal.end_date
+        );
+        const runDays = new Set(goalActivities.map((activity: any) => dateOnlyLocal(activity.activity_date))).size;
+        const start = new Date(`${goal.start_date}T00:00:00`);
+        const end = new Date(`${goal.end_date}T00:00:00`);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const effectiveEnd = today < end ? today : end;
+        const elapsedDays = Math.max(0, Math.floor((effectiveEnd.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1);
+        const targetRuns = elapsedDays > 0 ? Math.ceil((elapsedDays * Number(goal.target_percent || 0)) / 100) : 0;
+        reports.push(`Keep active goal-${runDays >= targetRuns ? "accomplished" : "fell short"}`);
+      }
+
+      if (selectedGoalKeys.has("fitness") && fitnessGoalResult.data) {
+        const goal = fitnessGoalResult.data as any;
+        const bands = Array.isArray(goal.target_bands) ? goal.target_bands : [];
+        const sortedBands = bands
+          .map((band: any) => ({
+            distanceKm: Number(band.distance_km),
+            targetPace: Number(band.target_pace_min_per_km),
+          }))
+          .filter((band: any) => band.distanceKm > 0 && band.targetPace > 0)
+          .sort((a: any, b: any) => a.distanceKm - b.distanceKm);
+        const targetPace = sortedBands.find((band: any) => distanceKm <= band.distanceKm)?.targetPace ||
+          sortedBands[sortedBands.length - 1]?.targetPace ||
+          Number(goal.target_pace_min_per_km || 0);
+        const activityPace = durationSeconds > 0 && distanceKm > 0 ? (durationSeconds / 60) / distanceKm : 0;
+        if (targetPace > 0 && activityPace > 0) {
+          reports.push(`Improve Fitness-${activityPace <= targetPace ? "accomplished" : "fell short"}`);
+        }
+      }
+
+      if (selectedGoalKeys.has("community")) {
+        const { data: allActivities, error: allActivitiesError } = await supabase
+          .from("activities")
+          .select("activity_id, registration_id, activity_date, distance_km, start_time, end_time, pause_duration_seconds, pace_min_per_km");
+        if (allActivitiesError) throw allActivitiesError;
+        const { data: registrations, error: registrationsError } = await supabase
+          .from("registrations")
+          .select("registration_id, first_name, other_names, dob, has_disability, para_uses_equipment");
+        if (registrationsError) throw registrationsError;
+
+        const allRankActivities = appendCurrentActivity(allActivities || []);
+        const eligibleIds = new Set((registrations || [])
+          .filter((registration: any) => !isJunior(registration.dob) && !isParaEquipmentUser(registration))
+          .map((registration: any) => registration.registration_id));
+        const statsByUser = new Map<string, { totalDistance: number; totalTime: number; paceSum: number; count: number; days: Set<string> }>();
+        allRankActivities.forEach((activity: any) => {
+          const regId = activity.registration_id;
+          if (!eligibleIds.has(regId)) return;
+          const existing = statsByUser.get(regId) || { totalDistance: 0, totalTime: 0, paceSum: 0, count: 0, days: new Set<string>() };
+          existing.totalDistance += Number(activity.distance_km) || 0;
+          existing.totalTime += activityDurationMinutes(activity);
+          existing.paceSum += Number(activity.pace_min_per_km) || 0;
+          existing.count += 1;
+          const date = dateOnlyLocal(activity.activity_date);
+          if (date) existing.days.add(date);
+          statsByUser.set(regId, existing);
+        });
+        const rankedRows = Array.from(statsByUser.entries())
+          .map(([regId, stats]) => ({
+            registrationId: regId,
+            avgDistance: stats.days.size > 0 ? stats.totalDistance / stats.days.size : 0,
+            activeDays: stats.days.size,
+            avgPace: stats.count > 0 ? stats.paceSum / stats.count : 0,
+            totalDistance: stats.totalDistance,
+            totalTime: stats.totalTime,
+          }))
+          .filter((row) => row.totalDistance >= 3 && row.totalTime >= 30 && row.activeDays > 0)
+          .sort((a, b) => b.avgDistance - a.avgDistance || b.activeDays - a.activeDays || a.avgPace - b.avgPace);
+        const currentIndex = rankedRows.findIndex((row) => row.registrationId === ownerRegistrationId);
+        if (currentIndex >= 0) {
+          const currentRank = currentIndex + 1;
+          const previousStored = await AsyncStorage.getItem(`community_rank_${ownerRegistrationId}`);
+          const previousRank = previousStored ? (JSON.parse(previousStored) as { rank?: number }).rank : null;
+          if (previousRank && Number.isFinite(previousRank)) {
+            if (currentRank < previousRank) {
+              reports.push(`Compete in community-Your rank improved from ${previousRank} to ${currentRank}`);
+            } else if (currentRank > previousRank) {
+              reports.push(`Compete in community-Your rank moved from ${previousRank} to ${currentRank}`);
+            } else {
+              reports.push(`Compete in community-Your rank stayed at ${currentRank}`);
+            }
+          } else {
+            reports.push(`Compete in community-Your current rank is ${currentRank}`);
+          }
+          await AsyncStorage.setItem(`community_rank_${ownerRegistrationId}`, JSON.stringify({
+            rank: currentRank,
+            totalParticipants: rankedRows.length,
+            timestamp: new Date().toISOString(),
+          }));
+        }
+      }
+
+      if (selectedGoalKeys.has("plannedRuns") && habitResult.data) {
+        const habit = habitResult.data as any;
+        const targetAmount = Number(habit.target_amount) || 0;
+        const unit = String(habit.unit || "").toLowerCase();
+        const targetKm = unit.includes("mile") ? targetAmount * 1.60934 : targetAmount;
+        if (targetKm > 0) {
+          reports.push(`Have planned runs-${distanceKm >= targetKm ? "accomplished" : "fell short"}`);
+        }
+      }
+
+      if (selectedGoalKeys.has("runWindow") && runWindowResult.data) {
+        const goal = runWindowResult.data as any;
+        const regularWindows = Array.isArray(goal.regular_windows) ? goal.regular_windows : [];
+        const eventWindows = Array.isArray(goal.event_windows) ? goal.event_windows : [];
+        const dateWindows = Array.isArray(goal.date_windows) ? goal.date_windows : [];
+        const candidateWindows = [
+          ...dateWindows.filter((window: any) => window.date === activityDate),
+          ...eventWindows.filter((window: any) => window.date === activityDate),
+          ...regularWindows,
+        ];
+        if (candidateWindows.length > 0) {
+          reports.push(`Run window-${candidateWindows.some(clockFitsWindow) ? "accomplished" : "fell short"}`);
+        }
+      }
+
+      let medalReport = "";
+      if (selectedGoalKeys.has("medals") && eventIds.length > 0) {
+        const { data: medalEvents, error: medalEventsError } = await supabase
+          .from("events")
+          .select("event_id, has_medal, event_name")
+          .in("event_id", eventIds)
+          .eq("has_medal", true);
+        if (medalEventsError) throw medalEventsError;
+        if ((medalEvents || []).length > 0) {
+          const { data: medalGoal, error: medalGoalError } = await supabase
+            .from("medal_goal")
+            .select("*")
+            .eq("registration_id", ownerRegistrationId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (medalGoalError) throw medalGoalError;
+          if (medalGoal) {
+            const { data: goalEvents, error: goalEventsError } = await supabase
+              .from("events")
+              .select("event_id, has_medal, starts_at, ends_at")
+              .eq("has_medal", true)
+              .lte("starts_at", medalGoal.end_date)
+              .gte("ends_at", medalGoal.start_date);
+            if (goalEventsError) throw goalEventsError;
+            const goalEventIds = (goalEvents || []).map((event: any) => event.event_id).filter(Boolean);
+            const { data: participants, error: participantsError } = goalEventIds.length > 0
+              ? await supabase
+                .from("events_participants")
+                .select("event_id, distance_km")
+                .eq("registration_id", ownerRegistrationId)
+                .in("event_id", goalEventIds)
+              : { data: [], error: null } as any;
+            if (participantsError) throw participantsError;
+            const earnedEventIds = new Set((participants || [])
+              .filter((participant: any) => Number(participant.distance_km) > 0)
+              .map((participant: any) => participant.event_id));
+            (medalEvents || []).forEach((event: any) => earnedEventIds.add(event.event_id));
+            const medalsEarned = earnedEventIds.size;
+            const targetMedals = Number(medalGoal.target_medals) || 0;
+            const medalsLeft = Math.max(0, targetMedals - medalsEarned);
+            medalReport = `Congratulations, you earned your ${medalsEarned}${medalsEarned === 1 ? "st" : medalsEarned === 2 ? "nd" : medalsEarned === 3 ? "rd" : "th"} medal out of your target of ${targetMedals}. ${medalsLeft} more medal${medalsLeft === 1 ? "" : "s"} to hit the target.`;
+          }
+        }
+      }
+
+      const summary = reports.length > 0
+        ? `Congratulations, activity completed. This is a summary of your goals: ${reports.join(", ")}.`
+        : "Congratulations, activity completed. I could not find any goal results linked to this activity.";
+      speakActivityMessage(medalReport ? `${summary} ${medalReport}` : summary);
+    } catch (error) {
+      console.warn("[Activity Voice] Goal report unavailable:", error);
+      speakActivityMessage(`Congratulations, activity completed. ${offlineMessage}`);
+    }
+  }, [exerciseType, speakActivityMessage]);
+
   const requestLocationPermission = async () => {
     if (Platform.OS === 'web') {
       return;
@@ -1197,6 +1665,9 @@ export default function ExerciseScreen() {
   }, [autoPauseWorkout, autoResumeWorkout]);
 
   const announceKilometerSplitIfNeeded = useCallback((nextDistanceKm: number) => {
+    if (exerciseTypeRef.current === "Stairs") {
+      return;
+    }
     const reachedKilometer = Math.floor(nextDistanceKm / KM_VOICE_ANNOUNCEMENT_INTERVAL);
     if (reachedKilometer <= lastAnnouncedKilometer.current || reachedKilometer < 1) {
       return;
@@ -1272,7 +1743,7 @@ export default function ExerciseScreen() {
     }
 
     if (isResuming.current) {
-      console.log('[GPS] First point after resume — skipping distance, updating anchor');
+      console.log('[GPS] First point after resume â€” skipping distance, updating anchor');
       lastValidPoint.current = newPoint;
       isResuming.current = false;
       const nextCoords = [...coordsRef.current, newCoord].slice(-MAX_ROUTE_POINTS);
@@ -1434,7 +1905,7 @@ export default function ExerciseScreen() {
       stationaryStartTimestamp.current = session.stationaryStartTimestamp ?? null;
       autoPauseAnchorPoint.current = session.autoPauseAnchorPoint ?? session.lastValidPoint;
       lastAnnouncedKilometer.current = Math.floor(session.distance / KM_VOICE_ANNOUNCEMENT_INTERVAL);
-
+      mergeWorkoutBaseRef.current = session.mergeBase ?? null;
       setExerciseType(session.exerciseType);
       setSelectedEventRun(session.eventRun);
       setStartTime(startDate);
@@ -1478,7 +1949,78 @@ export default function ExerciseScreen() {
     void restoreActiveWorkout();
   }, [effectiveRegistrationId, startLocationWatch, startWorkoutTimer]);
 
-  const startTracking = useCallback(async (type: ExerciseType, eventRun: RegisteredEventRun | null = null, scheduledStartTimestamp = Date.now()) => {
+  const findSameDayMergeCandidate = useCallback(async (type: Exclude<ExerciseType, null>, ownerRegistrationId: string): Promise<MergeWorkoutBase | null> => {
+    if (type === "Treadmill") return null;
+    const today = localDateOnly();
+    const { data, error } = await supabase
+      .from("activities")
+      .select("activity_id, activity_date, exercise_type, distance_km, steps_count, start_time, end_time, pause_duration_seconds")
+      .eq("registration_id", ownerRegistrationId)
+      .eq("activity_date", today)
+      .eq("exercise_type", type)
+      .order("end_time", { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.warn("[Workout Merge] Could not check same-day activity:", error.message);
+      return null;
+    }
+
+    const activity = data?.[0] as any;
+    if (!activity?.activity_id) return null;
+
+    const pauseSeconds = Number(activity.pause_duration_seconds) || 0;
+    const durationSeconds = activityDurationSeconds(activity.start_time, activity.end_time, pauseSeconds);
+    const distanceKm = type === "Stairs" ? 0 : Number(activity.distance_km || 0);
+    const startedAt = combineActivityDateTime(activity.activity_date, activity.start_time);
+    const endedAt = combineActivityDateTime(activity.activity_date, activity.end_time);
+
+    return {
+      activityId: String(activity.activity_id),
+      activityDate: String(activity.activity_date).slice(0, 10),
+      exerciseType: type,
+      distanceKm,
+      durationSeconds,
+      pauseDurationSeconds: pauseSeconds,
+      startTime: String(activity.start_time || "00:00:00"),
+      endTime: String(activity.end_time || "00:00:00"),
+      startedAt: startedAt.toISOString(),
+      endedAt: endedAt.toISOString(),
+    };
+  }, []);
+
+  const askToMergeSameDayActivity = useCallback((candidate: MergeWorkoutBase) => {
+    return new Promise<boolean>((resolve) => {
+      const activityLabel = candidate.exerciseType === "Stairs" ? "Stairs" : candidate.exerciseType;
+      Alert.alert(
+        `Merge with earlier ${activityLabel}?`,
+        `You already completed ${candidate.distanceKm.toFixed(2)} km and ${formatTime(candidate.durationSeconds)} today. Start from that distance and time?`,
+        [
+          { text: "Start New", style: "cancel", onPress: () => resolve(false) },
+          { text: "Merge", onPress: () => resolve(true) },
+        ]
+      );
+    });
+  }, []);
+
+  const resolveMergeWorkoutBase = useCallback(async (type: ExerciseType, eventRun: RegisteredEventRun | null): Promise<MergeWorkoutBase | null> => {
+    if (!type || eventRun || type === "Treadmill") return null;
+    const ownerRegistrationId = effectiveRegistrationId || user?.id || "";
+    if (!ownerRegistrationId) return null;
+
+    const candidate = await findSameDayMergeCandidate(type, ownerRegistrationId);
+    if (!candidate) return null;
+
+    const shouldMerge = await askToMergeSameDayActivity(candidate);
+    return shouldMerge ? candidate : null;
+  }, [askToMergeSameDayActivity, effectiveRegistrationId, findSameDayMergeCandidate, user?.id]);
+
+  const startTracking = useCallback(async (
+    type: ExerciseType,
+    eventRun: RegisteredEventRun | null = null,
+    scheduledStartTimestamp = Date.now(),
+    mergeBase: MergeWorkoutBase | null = null
+  ) => {
     if (!type) return;
     const ownerRegistrationId = effectiveRegistrationId || user?.id || "";
     if (!ownerRegistrationId) {
@@ -1507,30 +2049,40 @@ export default function ExerciseScreen() {
     const hasLocationPermission = await ensureForegroundLocationPermission();
     if (!hasLocationPermission) return;
 
+    const previousEnd = mergeBase ? new Date(mergeBase.endedAt) : null;
+    const pauseGapSeconds =
+      previousEnd && !Number.isNaN(previousEnd.getTime())
+        ? Math.max(0, Math.floor((scheduledStartTimestamp - previousEnd.getTime()) / 1000))
+        : 0;
+    const initialDistance = mergeBase?.distanceKm ?? 0;
+    const initialElapsed = mergeBase?.durationSeconds ?? 0;
+    const initialPauseSeconds = (mergeBase?.pauseDurationSeconds ?? 0) + pauseGapSeconds;
+
     setCoords([]);
     coordsRef.current = [];
-    setDistance(0);
-    distanceRef.current = 0;
-    setDuration(0);
-    durationRef.current = 0;
-    setPauseDurationSeconds(0);
-    pauseDurationSecondsRef.current = 0;
+    setDistance(initialDistance);
+    distanceRef.current = initialDistance;
+    setDuration(initialElapsed);
+    durationRef.current = initialElapsed;
+    setPauseDurationSeconds(initialPauseSeconds);
+    pauseDurationSecondsRef.current = initialPauseSeconds;
     lastValidPoint.current = null;
     lastProcessedLocationTimestamp.current = null;
     isResuming.current = false;
-    totalPauseDuration.current = 0;
+    totalPauseDuration.current = initialPauseSeconds * 1000;
     pauseStartTimestamp.current = null;
     filteredPointCount.current = 0;
     lastAnnouncedKilometer.current = 0;
     stationaryStartTimestamp.current = null;
     autoPaused.current = false;
     autoPauseAnchorPoint.current = null;
-    elapsedBeforePause.current = 0;
-    const sessionId = uuidv4();
+    elapsedBeforePause.current = initialElapsed;
+    const sessionId = mergeBase?.activityId ?? uuidv4();
     autoPauseEnabled.current = await getWorkoutAutoPauseEnabled();
     const startDate = new Date(scheduledStartTimestamp);
     activeWorkoutSessionId.current = sessionId;
     workoutOwnerRegistrationId.current = ownerRegistrationId;
+    mergeWorkoutBaseRef.current = mergeBase;
     runningStartTimestamp.current = scheduledStartTimestamp;
     exerciseTypeRef.current = type;
     selectedEventRunRef.current = eventRun;
@@ -1550,19 +2102,20 @@ export default function ExerciseScreen() {
       startTimeIso: startDate.toISOString(),
       startTimestamp: scheduledStartTimestamp,
       runningStartTimestamp: scheduledStartTimestamp,
-      elapsedBeforePause: 0,
+      elapsedBeforePause: initialElapsed,
       pauseStartTimestamp: null,
-      totalPauseDuration: 0,
-      pauseDurationSeconds: 0,
+      totalPauseDuration: initialPauseSeconds * 1000,
+      pauseDurationSeconds: initialPauseSeconds,
       autoPaused: false,
       autoPauseEnabled: autoPauseEnabled.current,
       stationaryStartTimestamp: null,
       autoPauseAnchorPoint: null,
-      distance: 0,
+      distance: initialDistance,
       coords: [],
       lastValidPoint: null,
       lastProcessedLocationTimestamp: null,
       filteredPointCount: 0,
+      mergeBase,
       updatedAt: Date.now(),
     });
 
@@ -1646,10 +2199,12 @@ export default function ExerciseScreen() {
       return;
     }
 
+    const mergeBase = await resolveMergeWorkoutBase(type, eventRun);
+
     setIsCountdownActive(true);
     try {
       const officialStartTimestamp = Date.now() + WORKOUT_COUNTDOWN_MS;
-      await startTracking(type, eventRun, officialStartTimestamp);
+      await startTracking(type, eventRun, officialStartTimestamp, mergeBase);
       if (!activeWorkoutSessionId.current || runStateRef.current === "idle") {
         return;
       }
@@ -1664,7 +2219,188 @@ export default function ExerciseScreen() {
       setIsCountdownActive(false);
       countdownTimeouts.current = [];
     }
-  }, [canUseCycleWorkout, cycleWorkoutOnly, isCountdownActive, playCountdownCue, runState, startTracking, waitForCountdownStep]);
+  }, [canUseCycleWorkout, cycleWorkoutOnly, isCountdownActive, playCountdownCue, resolveMergeWorkoutBase, runState, startTracking, waitForCountdownStep]);
+
+  const getStairSensorSummary = useCallback(() => {
+    const samples = stairSensorSamples.current;
+    const activeSamples = stairSensorActiveSamples.current;
+    const elapsedSeconds = stairSensorSessionStart.current
+      ? Math.max(0, Math.floor((Date.now() - stairSensorSessionStart.current) / 1000))
+      : 0;
+    const movementRatio = samples > 0 ? activeSamples / samples : 0;
+    return {
+      movementActiveSeconds: Math.max(0, Math.floor(elapsedSeconds * movementRatio)),
+      sensorDataCoverage: samples > 0 ? 1 : 0,
+      detectedStepEvents: activeSamples,
+      barometricElevationChangeM: null,
+    };
+  }, []);
+
+  const openStairScanner = useCallback(async () => {
+    if (runState !== "idle") {
+      Alert.alert("Workout Active", "Finish or close the current workout before starting a Stair Climb.");
+      return;
+    }
+    if (!cameraPermission?.granted) {
+      const result = await requestCameraPermission();
+      if (!result.granted) {
+        Alert.alert("Camera Permission Needed", "RunNation needs camera access to scan staircase QR checkpoints.");
+        return;
+      }
+    }
+    setShowStairScannerModal(true);
+  }, [cameraPermission?.granted, requestCameraPermission, runState]);
+
+  const handleStairQrToken = useCallback(async (rawToken: string) => {
+    const token = rawToken.trim();
+    if (!token || isScanningStairQr) return;
+    if (!effectiveRegistrationId) {
+      Alert.alert("Error", "You must be logged in to record a Stair Climb.");
+      return;
+    }
+
+    setIsScanningStairQr(true);
+    try {
+      const result = await getServerClient().activities.scanStairCheckpoint.mutate({
+        registrationId: effectiveRegistrationId,
+        qrToken: token,
+        sessionId: activeStairSession?.sessionId || null,
+        selectedAscentType: stairScanMode,
+        devicePlatform: Platform.OS,
+        deviceModel: Platform.OS,
+        availableSensors: { accelerometer: true },
+        sensorSummary: getStairSensorSummary(),
+      });
+
+      if (!result.sessionId) {
+        throw new Error("Stair scan did not return an active session.");
+      }
+
+      const nextSession: ActiveStairSession = {
+        sessionId: result.sessionId,
+        lapId: result.lapId,
+        buildingName: result.route?.buildingName,
+        routeName: result.route?.routeName,
+        nextCheckpoint: result.nextCheckpoint,
+        completedAscents: result.completedAscents ?? activeStairSession?.completedAscents ?? 0,
+        verifiedSteps: result.totalSteps ?? activeStairSession?.verifiedSteps ?? 0,
+        startedAt: activeStairSession?.startedAt ?? new Date(),
+        lastMessage: result.message || "Checkpoint scanned.",
+      };
+      setActiveStairSession(nextSession);
+      setManualStairQrToken("");
+      stairSensorSessionStart.current = Date.now();
+      stairSensorSamples.current = 0;
+      stairSensorActiveSamples.current = 0;
+      stairSensorLastSample.current = null;
+      speakActivityMessage(result.message || "Stair checkpoint scanned.");
+    } catch (error: any) {
+      Alert.alert("Stair QR Not Accepted", error?.message || "This checkpoint could not be used for the current stair activity.");
+    } finally {
+      setTimeout(() => setIsScanningStairQr(false), 1200);
+    }
+  }, [activeStairSession, effectiveRegistrationId, getStairSensorSummary, isScanningStairQr, speakActivityMessage, stairScanMode]);
+
+  const registerStairBuildingRoute = useCallback(async () => {
+    if (!effectiveRegistrationId) {
+      Alert.alert("Error", "You must be logged in to set up a staircase.");
+      return;
+    }
+
+    const floorSegments = parseInt(stairSetupForm.floorSegments, 10);
+    const stepsGroundToFirst = parseInt(stairSetupForm.stepsGroundToFirst, 10);
+    const middleRequired = floorSegments > 7;
+    const bottomToMiddleSegments = middleRequired ? Math.ceil(floorSegments / 2) : null;
+    const middleToTopSegments = middleRequired && bottomToMiddleSegments ? floorSegments - bottomToMiddleSegments : null;
+    const bottomToMiddleSteps = bottomToMiddleSegments ? bottomToMiddleSegments * stepsGroundToFirst : null;
+    const middleToTopSteps = middleToTopSegments ? middleToTopSegments * stepsGroundToFirst : null;
+    const bottomToTopSteps = floorSegments * stepsGroundToFirst;
+
+    if (!stairSetupForm.buildingName.trim()) {
+      Alert.alert("Missing Details", "Enter the building name.");
+      return;
+    }
+    if (!floorSegments || floorSegments < 3) {
+      Alert.alert("Building Does Not Qualify", "A building needs at least 3 staircase segments, including basement segments where applicable, to qualify.");
+      return;
+    }
+    if (!stepsGroundToFirst || stepsGroundToFirst <= 0) {
+      Alert.alert("Invalid Stair Count", "Enter the physically counted steps from the ground floor to the first floor.");
+      return;
+    }
+
+    setIsRegisteringStairRoute(true);
+    try {
+      const result = await getServerClient().activities.registerStairRoute.mutate({
+        registrationId: effectiveRegistrationId,
+        buildingName: stairSetupForm.buildingName.trim(),
+        countryCode: stairSetupForm.countryCode.trim() || null,
+        city: stairSetupForm.city.trim() || null,
+        addressDescription: stairSetupForm.addressDescription.trim() || null,
+        accessType: stairSetupForm.accessType,
+        qrTagType: "permanent_tag",
+        qrCustodianName: stairSetupForm.qrCustodianName.trim() || null,
+        qrCustodianPhone: stairSetupForm.qrCustodianPhone.trim() || null,
+        qrCustodianEmail: stairSetupForm.qrCustodianEmail.trim() || null,
+        routeName: stairSetupForm.routeName.trim() || "Main staircase",
+        stairwellName: stairSetupForm.stairwellName.trim() || null,
+        bottomFloorLabel: "Bottom",
+        middleFloorLabel: middleRequired ? `Segment ${bottomToMiddleSegments}` : null,
+        topFloorLabel: `Segment ${floorSegments}`,
+        floorSegments,
+        bottomToMiddleSteps: middleRequired ? bottomToMiddleSteps : null,
+        middleToTopSteps: middleRequired ? middleToTopSteps : null,
+        bottomToTopSteps,
+        minimumDurationSeconds: parseInt(stairSetupForm.minimumDurationSeconds, 10) || 20,
+        maximumDurationSeconds: parseInt(stairSetupForm.maximumDurationSeconds, 10) || 7200,
+        measurementMethod: "User counted ground-to-first-floor steps; total calculated from building floor count",
+        activateCheckpoints: false,
+      });
+      setGeneratedStairStickers(result.printableStickers || []);
+      setShowStairSetupForm(false);
+      await refetchStairRoutes();
+      Alert.alert("Staircase Registered", "Printable QR stickers were generated. They should be approved and activated before competitive use.");
+    } catch (error: any) {
+      Alert.alert("Could Not Register Staircase", error?.message || "Please check the details and try again.");
+    } finally {
+      setIsRegisteringStairRoute(false);
+    }
+  }, [effectiveRegistrationId, refetchStairRoutes, stairSetupForm]);
+
+  const endActiveStairSession = useCallback(async () => {
+    if (!activeStairSession || !effectiveRegistrationId) {
+      setShowStairScannerModal(false);
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const result = await getServerClient().activities.endStairSession.mutate({
+        registrationId: effectiveRegistrationId,
+        sessionId: activeStairSession.sessionId,
+      });
+      setActiveStairSession(null);
+      setShowStairScannerModal(false);
+      Alert.alert(
+        "Stair Climb Saved",
+        `${Number(result.session.verifiedAscendingSteps || 0).toLocaleString()} verified stair steps across ${result.session.completedAscents} ascent${result.session.completedAscents === 1 ? "" : "s"}.`
+      );
+      void speakGoalReportAfterActivity({
+        registrationId: effectiveRegistrationId,
+        activityId: result.session.activityId || activeStairSession.sessionId,
+        activityDate: new Date().toISOString().split("T")[0],
+        startTime: new Date(activeStairSession.startedAt).toISOString().split("T")[1].split(".")[0],
+        endTime: new Date().toISOString().split("T")[1].split(".")[0],
+        distanceKm: 0,
+        durationSeconds: result.session.totalDurationSeconds || stairSessionSeconds,
+        eventIds: [],
+      });
+    } catch (error: any) {
+      Alert.alert("Could Not End Stair Climb", error?.message || "Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [activeStairSession, effectiveRegistrationId, speakGoalReportAfterActivity, stairSessionSeconds]);
 
   const pauseTracking = () => {
     if (runningStartTimestamp.current !== null) {
@@ -1806,9 +2542,10 @@ export default function ExerciseScreen() {
       return;
     }
 
+    const requiresDistance = exerciseType === "Walk" || exerciseType === "Run" || exerciseType === "Cycle";
     const requiredDistance = exerciseType === "Walk" ? MIN_DISTANCE_WALK : MIN_DISTANCE_RUN;
-    const needsDistance = (exerciseType === "Walk" || exerciseType === "Run" || exerciseType === "Cycle") && distance < requiredDistance;
-    const needsTime = (exerciseType === "Walk" || exerciseType === "Run" || exerciseType === "Cycle") && durationMinutes < MIN_ACTIVITY_DURATION_MINUTES;
+    const needsDistance = requiresDistance && distance < requiredDistance;
+    const needsTime = (requiresDistance || exerciseType === "Stairs") && durationMinutes < MIN_ACTIVITY_DURATION_MINUTES;
     if (needsDistance || needsTime) {
       if (pauseStartTimestamp.current === null) {
         pauseStartTimestamp.current = Date.now();
@@ -1826,7 +2563,9 @@ export default function ExerciseScreen() {
       void persistActiveWorkoutSession("paused");
       Alert.alert(
         "Pause and Resume Later",
-        `Recordable workouts need at least ${requiredDistance} km and ${MIN_ACTIVITY_DURATION_MINUTES} minutes. You have ${distance.toFixed(2)} km and ${Math.floor(durationMinutes)} minutes so far.`,
+        exerciseType === "Stairs"
+          ? `Stairs workouts need at least ${MIN_ACTIVITY_DURATION_MINUTES} minutes. You have ${Math.floor(durationMinutes)} minutes so far.`
+          : `Recordable workouts need at least ${requiredDistance} km and ${MIN_ACTIVITY_DURATION_MINUTES} minutes. You have ${distance.toFixed(2)} km and ${Math.floor(durationMinutes)} minutes so far.`,
         [
           { text: "Resume Later", style: "cancel" },
           { text: "Discard", style: "destructive", onPress: resetTracking },
@@ -1877,14 +2616,24 @@ export default function ExerciseScreen() {
     }
 
     const finalDuration = duration;
+    const isStairsWorkout = exerciseType === "Stairs";
+    const stairsSteps = isStairsWorkout ? parseInt(stairsStepsInput.replace(/,/g, ""), 10) : null;
+    if (isStairsWorkout && (!stairsSteps || isNaN(stairsSteps) || stairsSteps <= 0)) {
+      Alert.alert("Stair Steps Required", "Enter the number of stair steps climbed before saving this workout.");
+      return;
+    }
+
     setIsSaving(true);
     try {
-      const today = startTime.toISOString().split('T')[0];
-      const calculatedPace = finalDuration > 0 && distance > 0 ? (finalDuration / 60) / distance : 0;
-      const actualEndTime = new Date(startTime.getTime() + ((finalDuration + pauseDurationSeconds) * 1000));
-      const startTimeStr = startTime.toISOString().split('T')[1].split('.')[0];
+      const activeMergeBase = mergeWorkoutBaseRef.current;
+      const savedStartTime = activeMergeBase ? new Date(activeMergeBase.startedAt) : startTime;
+      const today = activeMergeBase?.activityDate || savedStartTime.toISOString().split('T')[0];
+      const savedDistanceKm = isStairsWorkout ? 0 : parseFloat(distance.toFixed(2));
+      const calculatedPace = !isStairsWorkout && finalDuration > 0 && distance > 0 ? (finalDuration / 60) / distance : 0;
+      const actualEndTime = new Date(savedStartTime.getTime() + ((finalDuration + pauseDurationSeconds) * 1000));
+      const startTimeStr = activeMergeBase?.startTime || savedStartTime.toISOString().split('T')[1].split('.')[0];
       const endTimeStr = actualEndTime.toISOString().split('T')[1].split('.')[0];
-      const nextActivityId = activeWorkoutSessionId.current || uuidv4();
+      const nextActivityId = activeMergeBase?.activityId || activeWorkoutSessionId.current || uuidv4();
       const eventIds = selectedEventRun
         ? selectedEventRun.eventIds?.length
           ? selectedEventRun.eventIds
@@ -1899,20 +2648,21 @@ export default function ExerciseScreen() {
           registration_id: ownerRegistrationId,
           activity_date: today,
           exercise_type: exerciseType || "Run",
-          distance_km: parseFloat(distance.toFixed(2)),
+          distance_km: savedDistanceKm,
+          steps_count: isStairsWorkout ? stairsSteps : null,
           pause_duration_seconds: pauseDurationSeconds,
           start_time: startTimeStr,
           end_time: endTimeStr,
           pace_min_per_km: parseFloat(calculatedPace.toFixed(2)),
         },
-        eventResults: eventIds.map((eventId) => ({
+        eventResults: isStairsWorkout ? [] : eventIds.map((eventId) => ({
           eventId,
           registrationId: ownerRegistrationId,
-          distanceKm: parseFloat(distance.toFixed(2)),
+          distanceKm: savedDistanceKm,
           timeSeconds: finalDuration,
         })),
         snapshot: {
-          startTimeIso: startTime.toISOString(),
+          startTimeIso: savedStartTime.toISOString(),
           durationSeconds: finalDuration,
           pauseDurationSeconds,
           distanceKm: distance,
@@ -1922,17 +2672,26 @@ export default function ExerciseScreen() {
 
       setActivitySaved(true);
       setPendingWorkoutSyncCount(pendingCount);
-      speakActivityMessage("Congratulations, activity completed");
+      void speakGoalReportAfterActivity({
+        registrationId: ownerRegistrationId,
+        activityId: nextActivityId,
+        activityDate: today,
+        startTime: startTimeStr,
+        endTime: endTimeStr,
+        distanceKm: savedDistanceKm,
+        durationSeconds: finalDuration,
+        eventIds: isStairsWorkout ? [] : eventIds,
+      });
       const { data: savedActivities } = await supabase
         .from("activities")
         .select("activity_id, distance_km")
         .eq("registration_id", ownerRegistrationId);
-      const alreadySynced = (savedActivities || []).some((activity: any) => activity.activity_id === nextActivityId);
-      const totalDistance = (savedActivities || []).reduce((sum: number, activity: any) => sum + (Number(activity.distance_km) || 0), 0)
-        + (alreadySynced ? 0 : distance);
-      const totalActivities = (savedActivities?.length || 0) + (alreadySynced ? 0 : 1);
-      const previousDistance = totalDistance - (alreadySynced ? 0 : distance);
-      const previousActivities = totalActivities - (alreadySynced ? 0 : 1);
+      const existingSavedActivity = (savedActivities || []).find((activity: any) => activity.activity_id === nextActivityId);
+      const existingDistance = Number(existingSavedActivity?.distance_km || 0);
+      const previousDistance = (savedActivities || []).reduce((sum: number, activity: any) => sum + (Number(activity.distance_km) || 0), 0);
+      const previousActivities = savedActivities?.length || 0;
+      const totalDistance = previousDistance - existingDistance + savedDistanceKm;
+      const totalActivities = previousActivities + (existingSavedActivity ? 0 : 1);
       void checkAndNotifyWorkoutMilestones(
         ownerRegistrationId,
         totalDistance,
@@ -1965,6 +2724,7 @@ export default function ExerciseScreen() {
     setPauseDurationSeconds(0);
     pauseDurationSecondsRef.current = 0;
     setPace(0);
+    setStairsStepsInput("");
     setCoords([]);
     coordsRef.current = [];
     setStartTime(null);
@@ -1974,6 +2734,7 @@ export default function ExerciseScreen() {
     setSelectedEventRun(null);
     selectedEventRunRef.current = null;
     setWorkoutLocation(null);
+    mergeWorkoutBaseRef.current = null;
     setShowRunDetailsModal(false);
     setActivitySaved(false);
     elapsedBeforePause.current = 0;
@@ -2031,12 +2792,14 @@ export default function ExerciseScreen() {
     const eventLine = selectedEventRun ? `\nEvent: ${selectedEventRun.eventName}` : "";
     const dateLine = startTime ? startTime.toLocaleDateString() : new Date().toLocaleDateString();
     const startLine = startTime ? startTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-";
+    const isStairsWorkout = exerciseType === "Stairs";
+    const stairsSteps = parseInt(stairsStepsInput.replace(/,/g, ""), 10) || 0;
 
     return [
       `${runnerName} completed a ${exerciseType || "Run"} on RunNation.`,
-      `Distance: ${distance.toFixed(2)} km`,
+      isStairsWorkout ? `Stair steps: ${stairsSteps.toLocaleString()}` : `Distance: ${distance.toFixed(2)} km`,
       `Time: ${formatTime(duration)}`,
-      `Pace: ${formatPaceMinPerKm()} /km`,
+      isStairsWorkout ? null : `Pace: ${formatPaceMinPerKm()} /km`,
       `Date: ${dateLine}`,
       `Start: ${startLine}${eventLine}`,
       "RunNation - Where runners belong",
@@ -2044,7 +2807,7 @@ export default function ExerciseScreen() {
       Platform.OS === "ios"
         ? "Get RunNation on iOS: coming soon"
         : `Get RunNation Android APK: ${RUNNATION_ANDROID_APK_LINK}`,
-    ].join("\n");
+    ].filter(Boolean).join("\n");
   };
 
   const formatPaceMinPerKm = () => {
@@ -2105,10 +2868,10 @@ export default function ExerciseScreen() {
     const month = startTime?.getMonth() ?? new Date().getMonth();
     const hour = startTime?.getHours() ?? new Date().getHours();
 
-    if (month === 11 || month === 0 || month === 1) return "❄️ Snow";
-    if (month >= 2 && month <= 4) return "🌦️ Rainy";
-    if (hour >= 18 || hour < 6) return "🌙 Cool";
-    return "☀️ Sunny";
+    if (month === 11 || month === 0 || month === 1) return "â„ï¸ Snow";
+    if (month >= 2 && month <= 4) return "ðŸŒ¦ï¸ Rainy";
+    if (hour >= 18 || hour < 6) return "ðŸŒ™ Cool";
+    return "â˜€ï¸ Sunny";
   };
 
   const shareRunDetails = async () => {
@@ -2414,7 +3177,10 @@ export default function ExerciseScreen() {
       return;
     }
 
-    if (!otherSportsForm.activityDate || !otherSportsForm.startTime || !otherSportsForm.duration || !otherSportsForm.distanceKm) {
+    const isStairs = otherSportsForm.exerciseType === "Stairs";
+    const requiredMeasure = isStairs ? otherSportsForm.stepsCount : otherSportsForm.distanceKm;
+
+    if (!otherSportsForm.activityDate || !otherSportsForm.startTime || !otherSportsForm.duration || !requiredMeasure) {
       Alert.alert("Error", "Please fill in all fields");
       return;
     }
@@ -2445,9 +3211,15 @@ export default function ExerciseScreen() {
       return;
     }
 
-    const distanceNum = parseFloat(otherSportsForm.distanceKm);
-    if (isNaN(distanceNum) || distanceNum <= 0) {
+    const distanceNum = isStairs ? 0 : parseFloat(otherSportsForm.distanceKm);
+    const stepsNum = isStairs ? parseInt(otherSportsForm.stepsCount.replace(/,/g, ""), 10) : null;
+    if (!isStairs && (isNaN(distanceNum) || distanceNum <= 0)) {
       Alert.alert("Error", "Please enter a valid distance");
+      return;
+    }
+
+    if (isStairs && (!stepsNum || isNaN(stepsNum) || stepsNum <= 0)) {
+      Alert.alert("Error", "Please enter a valid stair step count");
       return;
     }
 
@@ -2486,7 +3258,8 @@ export default function ExerciseScreen() {
         exerciseType: otherSportsForm.exerciseType,
         startTime: `${otherSportsForm.startTime}:00`,
         duration: otherSportsForm.duration,
-        distanceKm: distanceNum,
+        distanceKm: isStairs ? null : distanceNum,
+        stepsCount: isStairs ? stepsNum : null,
         sourceType: "other_sports_app",
         sourceLabel: otherSportsForm.sportsApp.trim(),
         ...evidencePayload,
@@ -2501,11 +3274,12 @@ export default function ExerciseScreen() {
         startTime: "",
         duration: "",
         distanceKm: "",
+        stepsCount: "",
       });
       setOtherSportsEvidenceImage(null);
     } catch (error: any) {
       console.error("[Submit Other Sports] Error:", error);
-      Alert.alert("Error", "Something went wrong. Please try again.");
+      Alert.alert("Error", error?.message || "Something went wrong. Please try again.");
     } finally {
       setIsSubmittingOtherSports(false);
     }
@@ -2682,9 +3456,11 @@ export default function ExerciseScreen() {
         {runState !== 'idle' && (
           <View style={styles.statsContainer}>
             <LinearGradient colors={colors.gradient.orange} style={styles.statCardSmall}>
-              <Text style={styles.statLabel}>Distance</Text>
-              <Text style={styles.statValue}>{distance.toFixed(2)}</Text>
-              <Text style={styles.statUnit}>km</Text>
+              <Text style={styles.statLabel}>{exerciseType === "Stairs" ? "Steps" : "Distance"}</Text>
+              <Text style={styles.statValue}>
+                {exerciseType === "Stairs" ? (parseInt(stairsStepsInput.replace(/,/g, ""), 10) || 0).toLocaleString() : distance.toFixed(2)}
+              </Text>
+              <Text style={styles.statUnit}>{exerciseType === "Stairs" ? "stairs" : "km"}</Text>
             </LinearGradient>
             <LinearGradient colors={colors.gradient.teal} style={styles.statCardLarge}>
               <Timer size={18} color={colors.white} style={styles.statIcon} />
@@ -2693,9 +3469,9 @@ export default function ExerciseScreen() {
             </LinearGradient>
             <LinearGradient colors={colors.gradient.blue} style={styles.statCardSmall}>
               <Gauge size={18} color={colors.white} style={styles.statIcon} />
-              <Text style={styles.statLabel}>Pace</Text>
-              <Text style={styles.statValue}>{formatPaceMinPerKm()}</Text>
-              <Text style={styles.statUnit}>/km</Text>
+              <Text style={styles.statLabel}>{exerciseType === "Stairs" ? "Measure" : "Pace"}</Text>
+              <Text style={styles.statValue}>{exerciseType === "Stairs" ? "Steps" : formatPaceMinPerKm()}</Text>
+              <Text style={styles.statUnit}>{exerciseType === "Stairs" ? "count" : "/km"}</Text>
             </LinearGradient>
           </View>
         )}
@@ -2717,15 +3493,6 @@ export default function ExerciseScreen() {
                 </View>
               ) : (
                 <>
-                  <LinearGradient colors={["#111827", "#FF6B35"]} style={styles.workoutWelcomeCard}>
-                    <View style={styles.workoutWelcomeCopy}>
-                      <Text style={styles.workoutWelcomeKicker}>Workout</Text>
-                      <Text style={styles.workoutWelcomeTitle}>Ready to move</Text>
-                    </View>
-                    <View style={styles.workoutWelcomeIcon}>
-                      <Activity size={28} color={colors.white} />
-                    </View>
-                  </LinearGradient>
                   <View style={styles.workoutTabs}>
                     {([
                       { key: "record", label: "Record" },
@@ -2757,6 +3524,9 @@ export default function ExerciseScreen() {
                 </View>
                 <Text style={[styles.categorySubtitle, { color: themeColors.textSecondary }]}>
                   Records multiday events plus non event activity
+                </Text>
+                <Text style={[styles.workoutHeadNote, { color: themeColors.textSecondary }]}>
+                  Stairs records staircase climbing workouts using QR checkpoints and verified step counts.
                 </Text>
                 <Text style={[styles.workoutHeadNote, { color: themeColors.textSecondary }]}>
                   {cycleWorkoutOnly
@@ -2810,6 +3580,22 @@ export default function ExerciseScreen() {
                     >
                       <Bike size={28} color={colors.white} />
                       <Text style={styles.exerciseCardTitle}>Cycle</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.exerciseCard, cycleWorkoutOnly && styles.exerciseCardDisabled]}
+                    onPress={() => void openStairScanner()}
+                    disabled={isCountdownActive || cycleWorkoutOnly}
+                    activeOpacity={0.7}
+                    testID="exercise-stairs"
+                  >
+                    <LinearGradient
+                      colors={cycleWorkoutOnly ? ['#9CA3AF', '#6B7280'] : ['#14B8A6', '#0F766E']}
+                      style={styles.exerciseCardGradient}
+                    >
+                      <StaircaseIcon size={30} color={colors.white} />
+                      <Text style={styles.exerciseCardTitle}>Stairs</Text>
                     </LinearGradient>
                   </TouchableOpacity>
                 </View>
@@ -3084,10 +3870,24 @@ export default function ExerciseScreen() {
                 {selectedEventRun ? (
                   <Text style={styles.finishedSubtitle}>{selectedEventRun.eventName}</Text>
                 ) : null}
-                <View style={styles.finishedDistanceRow}>
-                  <Text style={styles.finishedDistanceValue}>{distance.toFixed(2)}</Text>
-                  <Text style={styles.finishedDistanceUnit}>km</Text>
-                </View>
+                {exerciseType === "Stairs" ? (
+                  <View style={styles.stairsStepsCard}>
+                    <Text style={styles.stairsStepsLabel}>Stair steps climbed</Text>
+                    <TextInput
+                      style={styles.stairsStepsInput}
+                      value={stairsStepsInput}
+                      onChangeText={setStairsStepsInput}
+                      placeholder="e.g., 720"
+                      placeholderTextColor="rgba(255,255,255,0.65)"
+                      keyboardType="numeric"
+                    />
+                  </View>
+                ) : (
+                  <View style={styles.finishedDistanceRow}>
+                    <Text style={styles.finishedDistanceValue}>{distance.toFixed(2)}</Text>
+                    <Text style={styles.finishedDistanceUnit}>km</Text>
+                  </View>
+                )}
                 <View style={styles.summaryRow}>
                   <View style={styles.summaryItem}>
                     <Text style={styles.summaryLabel}>Moving time</Text>
@@ -3095,8 +3895,8 @@ export default function ExerciseScreen() {
                   </View>
                   <View style={styles.summaryDivider} />
                   <View style={styles.summaryItem}>
-                    <Text style={styles.summaryLabel}>Average pace</Text>
-                    <Text style={styles.summaryValue}>{formatPaceMinPerKm()} /km</Text>
+                    <Text style={styles.summaryLabel}>{exerciseType === "Stairs" ? "Measure" : "Average pace"}</Text>
+                    <Text style={styles.summaryValue}>{exerciseType === "Stairs" ? "Steps" : `${formatPaceMinPerKm()} /km`}</Text>
                   </View>
                   <View style={styles.summaryDivider} />
                   <View style={styles.summaryItem}>
@@ -3198,9 +3998,34 @@ export default function ExerciseScreen() {
                   </View>
 
                   <View style={styles.shareDistanceHero}>
-                    <Text style={[styles.shareDistanceValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{distance.toFixed(2)}</Text>
-                    <Text style={[styles.shareDistanceUnit, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]}>kilometres</Text>
+                    <Text style={[styles.shareDistanceValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>
+                      {exerciseType === "Stairs"
+                        ? (parseInt(stairsStepsInput.replace(/,/g, ""), 10) || 0).toLocaleString()
+                        : distance.toFixed(2)}
+                    </Text>
+                    <Text style={[styles.shareDistanceUnit, runCardTheme === "dark" ? styles.shareTextMutedDark : styles.shareTextMutedLight]}>
+                      {exerciseType === "Stairs" ? "stair steps" : "kilometres"}
+                    </Text>
                   </View>
+
+                  {exerciseType === "Stairs" && !activitySaved ? (
+                    <View style={styles.runDetailsStairsInputBlock}>
+                      <Text style={[styles.runDetailsOptionTitle, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>
+                        Stair steps climbed
+                      </Text>
+                      <TextInput
+                        style={[
+                          styles.runDetailsStairsInput,
+                          runCardTheme === "dark" ? styles.runDetailsStairsInputDark : styles.runDetailsStairsInputLight,
+                        ]}
+                        value={stairsStepsInput}
+                        onChangeText={setStairsStepsInput}
+                        placeholder="e.g., 720"
+                        placeholderTextColor={runCardTheme === "dark" ? "rgba(255,255,255,0.5)" : "#9CA3AF"}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                  ) : null}
 
                   <View style={styles.shareRunnerStrip}>
                     <View style={styles.shareRunnerIdentity}>
@@ -3237,8 +4062,10 @@ export default function ExerciseScreen() {
                     </View>
                     <View style={[styles.shareMetric, runCardTheme === "dark" ? styles.shareMetricDark : styles.shareMetricLight]}>
                       <Gauge size={17} color="#2563EB" />
-                      <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>{formatPaceMinPerKm()}</Text>
-                      <Text style={styles.shareMetricLabel}>Average pace /km</Text>
+                      <Text style={[styles.shareMetricValue, runCardTheme === "dark" ? styles.shareTextLight : styles.shareTextDark]}>
+                        {exerciseType === "Stairs" ? "Steps" : formatPaceMinPerKm()}
+                      </Text>
+                      <Text style={styles.shareMetricLabel}>{exerciseType === "Stairs" ? "Primary measure" : "Average pace /km"}</Text>
                     </View>
                     <View style={[styles.shareMetric, runCardTheme === "dark" ? styles.shareMetricDark : styles.shareMetricLight]}>
                       <Pause size={17} color="#8B5CF6" />
@@ -3342,6 +4169,299 @@ export default function ExerciseScreen() {
           <LinearGradient colors={colors.gradient.orange} style={styles.countdownCircle}>
             <Text style={styles.countdownText}>{countdownValue}</Text>
           </LinearGradient>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showStairScannerModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          if (activeStairSession) {
+            Alert.alert("End Stair Climb?", "End the current Stair Climb session before closing this scanner.", [
+              { text: "Keep Scanning", style: "cancel" },
+              { text: "End Session", style: "destructive", onPress: () => void endActiveStairSession() },
+            ]);
+          } else {
+            setShowStairScannerModal(false);
+          }
+        }}
+      >
+        <View style={[styles.modalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
+          <View style={[styles.modalContentCenter, styles.stairScannerContent, { backgroundColor: themeColors.surface }]}>
+            <LinearGradient colors={['#0F766E', '#14B8A6']} style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Stair Climb QR</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  if (activeStairSession) {
+                    void endActiveStairSession();
+                  } else {
+                    setShowStairScannerModal(false);
+                  }
+                }}
+              >
+                <X size={24} color={colors.white} />
+              </TouchableOpacity>
+            </LinearGradient>
+
+            <ScrollView style={styles.modalBody} contentContainerStyle={styles.stairScannerBody}>
+              <View style={styles.stairSummaryRow}>
+                <View style={[styles.stairSummaryTile, { backgroundColor: themeColors.cardBackground }]}>
+                  <Text style={[styles.stairSummaryLabel, { color: themeColors.textSecondary }]}>Verified steps</Text>
+                  <Text style={[styles.stairSummaryValue, { color: themeColors.text }]}>
+                    {Number(activeStairSession?.verifiedSteps || 0).toLocaleString()}
+                  </Text>
+                </View>
+                <View style={[styles.stairSummaryTile, { backgroundColor: themeColors.cardBackground }]}>
+                  <Text style={[styles.stairSummaryLabel, { color: themeColors.textSecondary }]}>Ascents</Text>
+                  <Text style={[styles.stairSummaryValue, { color: themeColors.text }]}>
+                    {Number(activeStairSession?.completedAscents || 0).toLocaleString()}
+                  </Text>
+                </View>
+                <View style={[styles.stairSummaryTile, { backgroundColor: themeColors.cardBackground }]}>
+                  <Text style={[styles.stairSummaryLabel, { color: themeColors.textSecondary }]}>Time</Text>
+                  <Text style={[styles.stairSummaryValue, { color: themeColors.text }]}>
+                    {formatTime(stairSessionSeconds)}
+                  </Text>
+                </View>
+              </View>
+
+              {!activeStairSession ? (
+                <View style={[styles.stairFirstUsePanel, { backgroundColor: themeColors.cardBackground }]}>
+                  <Text style={[styles.stairFirstUseTitle, { color: themeColors.text }]}>First time using Stair Climb?</Text>
+                  <Text style={[styles.stairFirstUseText, { color: themeColors.textSecondary }]}>
+                    Scan a posted QR tag. If no QR code is available, search the building name to see whether it is registered and get the tag custodian contact, or create a permanent QR tag for a qualifying building.
+                  </Text>
+                  <Text style={[styles.stairStickerAdvice, { color: themeColors.textSecondary }]}>
+                    Each building has a permanent calculated stair count from the number of floors and the counted steps from ground floor to first floor. New users can help verify or confirm that number on the building profile.
+                  </Text>
+                  <View style={styles.stairFirstUseActions}>
+                    <View style={styles.stairFirstUseAction}>
+                      <QrCode size={20} color="#0F766E" />
+                      <Text style={[styles.stairFirstUseActionText, { color: themeColors.text }]}>Scan QR tag</Text>
+                    </View>
+                    <View style={styles.stairFirstUseAction}>
+                      <Building2 size={20} color="#0F766E" />
+                      <Text style={[styles.stairFirstUseActionText, { color: themeColors.text }]}>Find building</Text>
+                    </View>
+                    <View style={styles.stairFirstUseAction}>
+                      <Printer size={20} color="#0F766E" />
+                      <Text style={[styles.stairFirstUseActionText, { color: themeColors.text }]}>Create QR tag</Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.stairStickerAdvice, { color: themeColors.textSecondary }]}>
+                    Scanning a bottom, middle, or top QR tag awards the fixed measured steps between the accepted QR checkpoints. Permanent QR tags may be held by a custodian; if stair exercise is not permitted during certain work hours, use a removable hanging tag so it appears only when use is allowed.
+                  </Text>
+                </View>
+              ) : null}
+
+              {!activeStairSession ? (
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.inputLabel, { color: themeColors.text }]}>No QR code available? Search building</Text>
+                  <TextInput
+                    style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                    value={stairBuildingSearch}
+                    onChangeText={setStairBuildingSearch}
+                    placeholder="Town, building, route, stairwell"
+                    placeholderTextColor={themeColors.textLight}
+                  />
+                  <View style={styles.stairRouteList}>
+                    {filteredStairRoutes.length > 0 ? filteredStairRoutes.map((route: any) => (
+                      <TouchableOpacity
+                        key={route.routeId}
+                        style={[styles.stairRouteCard, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder }]}
+                        onPress={() => {
+                          setStairBuildingSearch(`${route.building?.buildingName || "Building"} - ${route.routeName}`);
+                          Alert.alert(
+                            "Route Found",
+                            [
+                              `${route.building?.buildingName || "Building"} is registered with ${Number(route.bottomToTopSteps || 0).toLocaleString()} measured steps.`,
+                              route.building?.qrCustodianName ? `Custodian: ${route.building.qrCustodianName}` : null,
+                              route.building?.qrCustodianPhone ? `Phone: ${route.building.qrCustodianPhone}` : null,
+                              route.building?.qrCustodianEmail ? `Email: ${route.building.qrCustodianEmail}` : null,
+                              "Ask the custodian for the QR tag, or scan it if it is posted.",
+                            ].filter(Boolean).join("\n")
+                          );
+                        }}
+                        activeOpacity={0.75}
+                      >
+                        <StaircaseIcon size={22} color="#0F766E" />
+                        <View style={styles.stairRouteCardCopy}>
+                          <Text style={[styles.stairRouteTitle, { color: themeColors.text }]} numberOfLines={1}>
+                            {route.building?.buildingName || "Registered building"}
+                          </Text>
+                          <Text style={[styles.stairRouteMeta, { color: themeColors.textSecondary }]} numberOfLines={2}>
+                            {route.routeName} - {route.building?.city || "Unknown town"} - custodian {route.building?.qrCustodianName || "not listed"}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    )) : (
+                      <Text style={[styles.stairNoRoutesText, { color: themeColors.textSecondary }]}>
+                        No registered building matched. A founder user can create a permanent QR tag for this building below.
+                      </Text>
+                    )}
+                  </View>
+                  <TouchableOpacity
+                    style={styles.stairSetupToggle}
+                    onPress={() => setShowStairSetupForm((prev) => !prev)}
+                    activeOpacity={0.75}
+                  >
+                    <Building2 size={18} color="#0F766E" />
+                    <Text style={styles.stairSetupToggleText}>
+                      {showStairSetupForm ? "Hide building QR setup" : "Create QR code for this building"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              {!activeStairSession && showStairSetupForm ? (
+                <View style={[styles.stairSetupForm, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.inputBorder }]}>
+                  {([
+                    ["buildingName", "Building name", "e.g., Acacia Towers"],
+                    ["city", "Town or city", "e.g., Kampala"],
+                    ["countryCode", "Country code", "e.g., UG"],
+                    ["addressDescription", "Address / location hint", "Street, estate, campus, block"],
+                    ["qrCustodianName", "QR tag custodian", "Person who keeps or hangs the tag"],
+                    ["qrCustodianPhone", "Custodian phone", "Searchable contact"],
+                    ["qrCustodianEmail", "Custodian email", "Optional"],
+                    ["routeName", "Route name", "e.g., Main staircase"],
+                    ["stairwellName", "Stairwell name", "Optional"],
+                    ["floorSegments", "Number of floors", "Minimum 3, include basement floors"],
+                    ["stepsGroundToFirst", "Steps from ground to 1st floor", "Physically counted steps"],
+                  ] as const).map(([key, label, placeholder]) => (
+                    <View key={key} style={styles.inputGroup}>
+                      <Text style={[styles.inputLabel, { color: themeColors.text }]}>{label}</Text>
+                      <TextInput
+                        style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                        value={String(stairSetupForm[key] || "")}
+                        onChangeText={(text) => setStairSetupForm((prev) => ({ ...prev, [key]: text }))}
+                        placeholder={placeholder}
+                        placeholderTextColor={themeColors.textLight}
+                        keyboardType={["floorSegments", "stepsGroundToFirst"].includes(key) ? "numeric" : "default"}
+                      />
+                    </View>
+                  ))}
+                  <TouchableOpacity
+                    style={[styles.stairRegisterButton, isRegisteringStairRoute && styles.actionButtonDisabled]}
+                    onPress={() => void registerStairBuildingRoute()}
+                    disabled={isRegisteringStairRoute}
+                    activeOpacity={0.75}
+                  >
+                    <Printer size={18} color={colors.white} />
+                    <Text style={styles.stairRegisterButtonText}>
+                      {isRegisteringStairRoute ? "Generating..." : "Create permanent QR tag"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              {generatedStairStickers.length > 0 ? (
+                <View style={styles.stairStickerPreviewList}>
+                  <Text style={[styles.inputLabel, { color: themeColors.text }]}>Printable stickers</Text>
+                  {generatedStairStickers.map((sticker) => (
+                    <View key={sticker.checkpointId} style={[styles.stairStickerPreview, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.inputBorder }]}>
+                      <Image source={{ uri: sticker.qrDataUrl }} style={styles.stairStickerQr} resizeMode="contain" />
+                      <View style={styles.stairStickerCopy}>
+                        <Text style={[styles.stairStickerTitle, { color: themeColors.text }]}>{sticker.label}</Text>
+                        <Text style={[styles.stairStickerMeta, { color: themeColors.textSecondary }]}>
+                          Print as a permanent building tag. If building rules limit stair exercise during work hours, keep it with the custodian as a removable hang tag.
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              <View style={[styles.stairStatusCard, { backgroundColor: themeColors.cardBackground }]}>
+                <Text style={[styles.stairStatusTitle, { color: themeColors.text }]}>
+                  {activeStairSession
+                    ? `${activeStairSession.buildingName || "Staircase"}${activeStairSession.routeName ? ` - ${activeStairSession.routeName}` : ""}`
+                    : "Scan the bottom QR to start"}
+                </Text>
+                <Text style={[styles.stairStatusText, { color: themeColors.textSecondary }]}>
+                  {activeStairSession?.lastMessage || "The QR code identifies the staircase route. RunNation awards only the fixed measured steps for accepted checkpoint sequences."}
+                </Text>
+                <Text style={[styles.stairNextCheckpointText, { color: colors.primary }]}>
+                  Next scan: {activeStairSession?.nextCheckpoint ? String(activeStairSession.nextCheckpoint).toUpperCase() : "BOTTOM"}
+                </Text>
+              </View>
+
+              {!activeStairSession ? (
+                <View style={styles.stairModeRow}>
+                  {(["full", "short"] as const).map((mode) => (
+                    <TouchableOpacity
+                      key={mode}
+                      style={[styles.stairModeButton, stairScanMode === mode && styles.stairModeButtonActive]}
+                      onPress={() => setStairScanMode(mode)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={[styles.stairModeButtonText, stairScanMode === mode && styles.stairModeButtonTextActive]}>
+                        {mode === "full" ? "Climb to Top" : "Climb to Middle"}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
+
+              <View style={styles.stairCameraFrame}>
+                {Platform.OS !== "web" && cameraPermission?.granted ? (
+                  <CameraView
+                    style={styles.stairCamera}
+                    facing="back"
+                    barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                    onBarcodeScanned={isScanningStairQr ? undefined : ({ data }) => void handleStairQrToken(String(data || ""))}
+                  >
+                    <View style={styles.stairCameraReticle} />
+                  </CameraView>
+                ) : (
+                  <View style={[styles.stairCameraFallback, { backgroundColor: themeColors.inputBackground }]}>
+                    <Camera size={36} color={themeColors.textLight} />
+                    <Text style={[styles.stairCameraFallbackText, { color: themeColors.textSecondary }]}>
+                      {Platform.OS === "web" ? "Camera scanning is available on device builds." : "Camera permission is required for QR scanning."}
+                    </Text>
+                    {Platform.OS !== "web" ? (
+                      <TouchableOpacity style={styles.stairPermissionButton} onPress={() => void requestCameraPermission()}>
+                        <Text style={styles.stairPermissionButtonText}>Allow Camera</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Manual QR token</Text>
+                <View style={styles.stairManualTokenRow}>
+                  <TextInput
+                    style={[styles.input, styles.stairManualTokenInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                    value={manualStairQrToken}
+                    onChangeText={setManualStairQrToken}
+                    placeholder="Paste QR token for testing"
+                    placeholderTextColor={themeColors.textLight}
+                    autoCapitalize="none"
+                  />
+                  <TouchableOpacity
+                    style={[styles.stairScanButton, isScanningStairQr && styles.actionButtonDisabled]}
+                    disabled={isScanningStairQr}
+                    onPress={() => void handleStairQrToken(manualStairQrToken)}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={styles.stairScanButtonText}>{isScanningStairQr ? "Scanning" : "Scan"}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </ScrollView>
+
+            <View style={styles.stairScannerFooter}>
+              <TouchableOpacity
+                style={[styles.submitButton, !activeStairSession && styles.actionButtonDisabled]}
+                disabled={!activeStairSession || isSaving}
+                onPress={() => void endActiveStairSession()}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.submitButtonText}>{isSaving ? "Ending..." : "End Session"}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </Modal>
 
@@ -3491,7 +4611,7 @@ export default function ExerciseScreen() {
               </View>
 
               <Text style={[styles.infoText, { color: themeColors.textSecondary }]}>
-                📸 Your submission will be reviewed by an admin
+                ðŸ“¸ Your submission will be reviewed by an admin
               </Text>
             </ScrollView>
 
@@ -3673,7 +4793,7 @@ export default function ExerciseScreen() {
               <View style={styles.inputGroup}>
                 <Text style={[styles.inputLabel, { color: themeColors.text }]}>Activity Type *</Text>
                 <View style={styles.typeChipsContainer}>
-                  {(["Run", "Walk", "Cycle"] as const).map((type) => {
+                  {(["Run", "Walk", "Cycle", "Stairs"] as const).map((type) => {
                     const isTypeDisabled =
                       (type === "Cycle" && !canUseCycleWorkout) ||
                       ((type === "Walk" || type === "Run") && cycleWorkoutOnly);
@@ -3736,13 +4856,21 @@ export default function ExerciseScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Distance (km) *</Text>
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>
+                  {otherSportsForm.exerciseType === "Stairs" ? "Stair Steps *" : "Distance (km) *"}
+                </Text>
                 <TextInput
                   style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
-                  placeholder="e.g., 5.5"
+                  placeholder={otherSportsForm.exerciseType === "Stairs" ? "e.g., 720" : "e.g., 5.5"}
                   keyboardType="numeric"
-                  value={otherSportsForm.distanceKm}
-                  onChangeText={(text) => setOtherSportsForm((prev) => ({ ...prev, distanceKm: text }))}
+                  value={otherSportsForm.exerciseType === "Stairs" ? otherSportsForm.stepsCount : otherSportsForm.distanceKm}
+                  onChangeText={(text) =>
+                    setOtherSportsForm((prev) =>
+                      otherSportsForm.exerciseType === "Stairs"
+                        ? { ...prev, stepsCount: text }
+                        : { ...prev, distanceKm: text }
+                    )
+                  }
                   placeholderTextColor={themeColors.textLight}
                 />
               </View>
@@ -3791,6 +4919,16 @@ export default function ExerciseScreen() {
       </Modal>
     </View>
   );
+}
+
+export default function ExerciseScreen() {
+  const isWatchDisplay = useIsWatchDisplay();
+
+  if (isWatchDisplay) {
+    return <WatchRunExperience />;
+  }
+
+  return <PhoneExerciseScreen />;
 }
 
 const styles = StyleSheet.create({
@@ -4355,6 +5493,28 @@ const styles = StyleSheet.create({
     alignItems: "center" as const,
     paddingVertical: 12,
   },
+  runDetailsStairsInputBlock: {
+    gap: 8,
+    marginBottom: 18,
+  },
+  runDetailsStairsInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    fontSize: 18,
+    fontWeight: "800" as const,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  runDetailsStairsInputDark: {
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    color: colors.white,
+  },
+  runDetailsStairsInputLight: {
+    borderColor: "#E5E7EB",
+    backgroundColor: "#F9FAFB",
+    color: "#111827",
+  },
   shareRunnerStrip: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
@@ -4666,6 +5826,30 @@ const styles = StyleSheet.create({
     fontWeight: "900" as const,
     marginBottom: 8,
   },
+  stairsStepsCard: {
+    width: "100%",
+    marginTop: 12,
+    marginBottom: 18,
+    gap: 8,
+  },
+  stairsStepsLabel: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 13,
+    fontWeight: "800" as const,
+    textAlign: "center" as const,
+  },
+  stairsStepsInput: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.55)",
+    backgroundColor: "rgba(17,24,39,0.28)",
+    borderRadius: 8,
+    color: colors.white,
+    fontSize: 30,
+    fontWeight: "900" as const,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    textAlign: "center" as const,
+  },
   summaryRow: {
     flexDirection: "row",
     width: "100%",
@@ -4834,6 +6018,280 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700" as const,
   },
+  stairScannerContent: {
+    maxHeight: "96%",
+  },
+  stairScannerBody: {
+    paddingBottom: 14,
+  },
+  stairFirstUsePanel: {
+    borderRadius: 8,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.22)",
+    gap: 10,
+  },
+  stairFirstUseTitle: {
+    fontSize: 17,
+    fontWeight: "900" as const,
+  },
+  stairFirstUseText: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  stairFirstUseActions: {
+    flexDirection: "row" as const,
+    gap: 8,
+  },
+  stairFirstUseAction: {
+    flex: 1,
+    minHeight: 72,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(15,118,110,0.28)",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    padding: 8,
+    gap: 6,
+  },
+  stairFirstUseActionText: {
+    fontSize: 12,
+    fontWeight: "800" as const,
+    textAlign: "center" as const,
+  },
+  stairStickerAdvice: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "600" as const,
+  },
+  stairRouteList: {
+    gap: 10,
+    marginTop: 10,
+  },
+  stairRouteCard: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+  },
+  stairRouteCardCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  stairRouteTitle: {
+    fontSize: 14,
+    fontWeight: "900" as const,
+  },
+  stairRouteMeta: {
+    marginTop: 3,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  stairNoRoutesText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  stairSetupToggle: {
+    marginTop: 12,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: "rgba(15,118,110,0.1)",
+  },
+  stairSetupToggleText: {
+    color: "#0F766E",
+    fontSize: 14,
+    fontWeight: "900" as const,
+  },
+  stairSetupForm: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 14,
+    marginBottom: 14,
+  },
+  stairRegisterButton: {
+    backgroundColor: "#0F766E",
+    borderRadius: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 8,
+  },
+  stairRegisterButtonText: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: "900" as const,
+  },
+  stairStickerPreviewList: {
+    gap: 10,
+    marginBottom: 14,
+  },
+  stairStickerPreview: {
+    flexDirection: "row" as const,
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+  },
+  stairStickerQr: {
+    width: 86,
+    height: 86,
+    borderRadius: 6,
+    backgroundColor: colors.white,
+  },
+  stairStickerCopy: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: "center" as const,
+  },
+  stairStickerTitle: {
+    fontSize: 14,
+    fontWeight: "900" as const,
+  },
+  stairStickerMeta: {
+    marginTop: 5,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  stairSummaryRow: {
+    flexDirection: "row" as const,
+    gap: 10,
+    marginBottom: 14,
+  },
+  stairSummaryTile: {
+    flex: 1,
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.22)",
+  },
+  stairSummaryLabel: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+    marginBottom: 5,
+  },
+  stairSummaryValue: {
+    fontSize: 18,
+    fontWeight: "900" as const,
+  },
+  stairStatusCard: {
+    borderRadius: 8,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.22)",
+    gap: 7,
+  },
+  stairStatusTitle: {
+    fontSize: 17,
+    fontWeight: "800" as const,
+  },
+  stairStatusText: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  stairNextCheckpointText: {
+    fontSize: 13,
+    fontWeight: "900" as const,
+  },
+  stairModeRow: {
+    flexDirection: "row" as const,
+    gap: 10,
+    marginBottom: 14,
+  },
+  stairModeButton: {
+    flex: 1,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: colors.border,
+    paddingVertical: 12,
+    alignItems: "center" as const,
+  },
+  stairModeButtonActive: {
+    backgroundColor: "#0F766E",
+    borderColor: "#0F766E",
+  },
+  stairModeButtonText: {
+    fontSize: 14,
+    fontWeight: "800" as const,
+    color: colors.textSecondary,
+  },
+  stairModeButtonTextActive: {
+    color: colors.white,
+  },
+  stairCameraFrame: {
+    height: 280,
+    borderRadius: 8,
+    overflow: "hidden" as const,
+    marginBottom: 16,
+    backgroundColor: "#111827",
+  },
+  stairCamera: {
+    flex: 1,
+  },
+  stairCameraReticle: {
+    alignSelf: "center" as const,
+    marginTop: 70,
+    width: 160,
+    height: 160,
+    borderWidth: 3,
+    borderColor: "rgba(255,255,255,0.9)",
+    borderRadius: 8,
+  },
+  stairCameraFallback: {
+    flex: 1,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 10,
+    padding: 20,
+  },
+  stairCameraFallbackText: {
+    fontSize: 14,
+    textAlign: "center" as const,
+    lineHeight: 20,
+  },
+  stairPermissionButton: {
+    backgroundColor: "#0F766E",
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  stairPermissionButtonText: {
+    color: colors.white,
+    fontWeight: "800" as const,
+  },
+  stairManualTokenRow: {
+    flexDirection: "row" as const,
+    gap: 10,
+    alignItems: "center" as const,
+  },
+  stairManualTokenInput: {
+    flex: 1,
+  },
+  stairScanButton: {
+    backgroundColor: "#0F766E",
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  stairScanButtonText: {
+    color: colors.white,
+    fontWeight: "900" as const,
+  },
+  stairScannerFooter: {
+    padding: 18,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.white,
+  },
   inputGroup: {
     marginBottom: 18,
   },
@@ -4874,10 +6332,12 @@ const styles = StyleSheet.create({
   },
   typeChipsContainer: {
     flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
     gap: 10,
   },
   typeChip: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: "47%",
     paddingVertical: 12,
     paddingHorizontal: 14,
     borderRadius: 12,
