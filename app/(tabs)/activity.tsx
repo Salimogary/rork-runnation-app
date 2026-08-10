@@ -1,4 +1,4 @@
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, RefreshControl, Alert, Modal, TextInput, ActivityIndicator } from "react-native";
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, RefreshControl, Alert, Modal, TextInput, ActivityIndicator, useWindowDimensions } from "react-native";
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
@@ -484,6 +484,7 @@ export default function ActivityScreen() {
   const { user, privateMode, roleSession } = useAuth();
   const { colors: themeColors } = useTheme();
   const { isSubscribed } = useSubscription();
+  const { height: windowHeight } = useWindowDimensions();
   const currentRegistrationId = roleSession.registrationId || user?.id || null;
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("community");
@@ -2929,44 +2930,46 @@ export default function ActivityScreen() {
             <Text style={styles.leaderTableHeaderText}>Av.Pace</Text>
           </View>
         </View>
-        {rows.map((item, index) => (
-          <View key={item.registrationId} style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt, item.registrationId === currentRegistrationId && styles.currentUserLeaderboardRow]}>
-            <View style={[styles.leaderRankColumn, styles.leaderRankCell]}>
-              <Text style={styles.leaderFlagText}>{getCountryFlag(item.Country)}</Text>
-              <Text style={styles.leaderTableCellText}>{index + 1}</Text>
-            </View>
-            <View style={styles.leaderNameColumn}>
-              <Text style={[styles.leaderTableCellText, item.registrationId === currentRegistrationId && styles.currentUserLeaderboardText]} numberOfLines={1}>{item.Name}</Text>
-            </View>
-            {showClub ? (
-              <View style={styles.leaderClubColumn}>
-                <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.Club || "-"}</Text>
+        {renderFrozenLeaderboardRows(
+          rows.map((item, index) => (
+            <View key={item.registrationId} style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt, item.registrationId === currentRegistrationId && styles.currentUserLeaderboardRow]}>
+              <View style={[styles.leaderRankColumn, styles.leaderRankCell]}>
+                <Text style={styles.leaderFlagText}>{getCountryFlag(item.Country)}</Text>
+                <Text style={styles.leaderTableCellText}>{index + 1}</Text>
               </View>
-            ) : null}
-            {showAge ? (
-              <View style={styles.leaderAgeColumn}>
-                <Text style={styles.leaderTableCellText}>{item.Age ?? "-"}</Text>
+              <View style={styles.leaderNameColumn}>
+                <Text style={[styles.leaderTableCellText, item.registrationId === currentRegistrationId && styles.currentUserLeaderboardText]} numberOfLines={1}>{item.Name}</Text>
               </View>
-            ) : null}
-            <View style={styles.leaderSexColumn}>
-              <Text style={styles.leaderTableCellText}>
-                {item.Sex === "Male" ? "M" : item.Sex === "Female" ? "F" : item.Sex || "-"}
-              </Text>
+              {showClub ? (
+                <View style={styles.leaderClubColumn}>
+                  <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.Club || "-"}</Text>
+                </View>
+              ) : null}
+              {showAge ? (
+                <View style={styles.leaderAgeColumn}>
+                  <Text style={styles.leaderTableCellText}>{item.Age ?? "-"}</Text>
+                </View>
+              ) : null}
+              <View style={styles.leaderSexColumn}>
+                <Text style={styles.leaderTableCellText}>
+                  {item.Sex === "Male" ? "M" : item.Sex === "Female" ? "F" : item.Sex || "-"}
+                </Text>
+              </View>
+              <View style={styles.leaderDaysColumn}>
+                <Text style={styles.leaderTableCellText}>{item.ActiveDays}</Text>
+              </View>
+              <View style={styles.leaderDistanceColumn}>
+                <Text style={styles.leaderTableCellText}>{item.AvgDistance.toFixed(1)}</Text>
+              </View>
+              <View style={styles.leaderTimeColumn}>
+                <Text style={styles.leaderTableCellText} numberOfLines={1}>{formatTime(item.AvgTime)}</Text>
+              </View>
+              <View style={styles.leaderPaceColumn}>
+                <Text style={styles.leaderTableCellText} numberOfLines={1}>{formatPaceMinPerKm(item.AveragePace)}</Text>
+              </View>
             </View>
-            <View style={styles.leaderDaysColumn}>
-              <Text style={styles.leaderTableCellText}>{item.ActiveDays}</Text>
-            </View>
-            <View style={styles.leaderDistanceColumn}>
-              <Text style={styles.leaderTableCellText}>{item.AvgDistance.toFixed(1)}</Text>
-            </View>
-            <View style={styles.leaderTimeColumn}>
-              <Text style={styles.leaderTableCellText} numberOfLines={1}>{formatTime(item.AvgTime)}</Text>
-            </View>
-            <View style={styles.leaderPaceColumn}>
-              <Text style={styles.leaderTableCellText} numberOfLines={1}>{formatPaceMinPerKm(item.AveragePace)}</Text>
-            </View>
-          </View>
-        ))}
+          ))
+        )}
       </View>
     );
   };
@@ -3196,33 +3199,35 @@ export default function ActivityScreen() {
             <Text style={styles.leaderTableHeaderText}>Pts</Text>
           </View>
         </View>
-        {rows.map((item, index) => (
-          <View key={item.registrationId} style={[styles.leaderboardTableRow, styles.medalLeaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt, item.registrationId === currentRegistrationId && styles.currentUserLeaderboardRow]}>
-            <View style={[styles.medalRankColumn, styles.leaderRankCell]}>
-              <Text style={styles.leaderFlagText}>{getCountryFlag(item.Country)}</Text>
-              <Text style={styles.leaderTableCellText}>{index + 1}</Text>
-            </View>
-            <View style={styles.medalNameColumn}>
-              <Text style={[styles.leaderTableCellText, item.registrationId === currentRegistrationId && styles.currentUserLeaderboardText]} numberOfLines={1}>{item.Name}</Text>
-            </View>
-            <View style={styles.medalSexColumn}>
-              <Text style={styles.leaderTableCellText}>
-                {item.Sex === "Male" ? "M" : item.Sex === "Female" ? "F" : item.Sex || "-"}
-              </Text>
-            </View>
-            <View style={styles.medalClubColumn}>
-              <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.Club || "-"}</Text>
-            </View>
-            {MEDAL_DISPLAY_BANDS.map((band) => (
-              <View key={band.key} style={styles.medalCountColumn}>
-                <Text style={styles.leaderTableCellText}>{item.medalCounts[band.key] || 0}</Text>
+        {renderFrozenLeaderboardRows(
+          rows.map((item, index) => (
+            <View key={item.registrationId} style={[styles.leaderboardTableRow, styles.medalLeaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt, item.registrationId === currentRegistrationId && styles.currentUserLeaderboardRow]}>
+              <View style={[styles.medalRankColumn, styles.leaderRankCell]}>
+                <Text style={styles.leaderFlagText}>{getCountryFlag(item.Country)}</Text>
+                <Text style={styles.leaderTableCellText}>{index + 1}</Text>
               </View>
-            ))}
-            <View style={styles.medalPointsColumn}>
-              <Text style={styles.leaderTableCellText}>{item.points}</Text>
+              <View style={styles.medalNameColumn}>
+                <Text style={[styles.leaderTableCellText, item.registrationId === currentRegistrationId && styles.currentUserLeaderboardText]} numberOfLines={1}>{item.Name}</Text>
+              </View>
+              <View style={styles.medalSexColumn}>
+                <Text style={styles.leaderTableCellText}>
+                  {item.Sex === "Male" ? "M" : item.Sex === "Female" ? "F" : item.Sex || "-"}
+                </Text>
+              </View>
+              <View style={styles.medalClubColumn}>
+                <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.Club || "-"}</Text>
+              </View>
+              {MEDAL_DISPLAY_BANDS.map((band) => (
+                <View key={band.key} style={styles.medalCountColumn}>
+                  <Text style={styles.leaderTableCellText}>{item.medalCounts[band.key] || 0}</Text>
+                </View>
+              ))}
+              <View style={styles.medalPointsColumn}>
+                <Text style={styles.leaderTableCellText}>{item.points}</Text>
+              </View>
             </View>
-          </View>
-        ))}
+          ))
+        )}
       </View>
     </ScrollView>
   );
@@ -3249,28 +3254,30 @@ export default function ActivityScreen() {
             <Text style={styles.leaderTableHeaderText}>Pts</Text>
           </View>
         </View>
-        {rows.map((item, index) => (
-          <View key={item.clubName} style={[styles.leaderboardTableRow, styles.medalLeaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt]}>
-            <View style={[styles.medalRankColumn, styles.leaderRankCell]}>
-              <Text style={styles.leaderFlagText}>{getCountryFlag(item.country)}</Text>
-              <Text style={styles.leaderTableCellText}>{index + 1}</Text>
-            </View>
-            <View style={styles.medalNameColumn}>
-              <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.clubName}</Text>
-            </View>
-            <View style={styles.medalSexColumn}>
-              <Text style={styles.leaderTableCellText}>{item.athleteCount}</Text>
-            </View>
-            {MEDAL_DISPLAY_BANDS.map((band) => (
-              <View key={band.key} style={styles.medalCountColumn}>
-                <Text style={styles.leaderTableCellText}>{item.medalCounts[band.key] || 0}</Text>
+        {renderFrozenLeaderboardRows(
+          rows.map((item, index) => (
+            <View key={item.clubName} style={[styles.leaderboardTableRow, styles.medalLeaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt]}>
+              <View style={[styles.medalRankColumn, styles.leaderRankCell]}>
+                <Text style={styles.leaderFlagText}>{getCountryFlag(item.country)}</Text>
+                <Text style={styles.leaderTableCellText}>{index + 1}</Text>
               </View>
-            ))}
-            <View style={styles.medalPointsColumn}>
-              <Text style={styles.leaderTableCellText}>{item.points}</Text>
+              <View style={styles.medalNameColumn}>
+                <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.clubName}</Text>
+              </View>
+              <View style={styles.medalSexColumn}>
+                <Text style={styles.leaderTableCellText}>{item.athleteCount}</Text>
+              </View>
+              {MEDAL_DISPLAY_BANDS.map((band) => (
+                <View key={band.key} style={styles.medalCountColumn}>
+                  <Text style={styles.leaderTableCellText}>{item.medalCounts[band.key] || 0}</Text>
+                </View>
+              ))}
+              <View style={styles.medalPointsColumn}>
+                <Text style={styles.leaderTableCellText}>{item.points}</Text>
+              </View>
             </View>
-          </View>
-        ))}
+          ))
+        )}
       </View>
     </ScrollView>
   );
@@ -3294,25 +3301,27 @@ export default function ActivityScreen() {
           <Text style={styles.leaderTableHeaderText}>Score</Text>
         </View>
       </View>
-      {rows.map((item, index) => (
-        <View key={item.clubId} style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt]}>
-          <View style={styles.clubActivityRankColumn}>
-            <Text style={styles.leaderTableCellText}>{index + 1}</Text>
+      {renderFrozenLeaderboardRows(
+        rows.map((item, index) => (
+          <View key={item.clubId} style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt]}>
+            <View style={styles.clubActivityRankColumn}>
+              <Text style={styles.leaderTableCellText}>{index + 1}</Text>
+            </View>
+            <View style={styles.clubActivityNameColumn}>
+              <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.Name}</Text>
+            </View>
+            <View style={styles.clubActivityCountryColumn}>
+              <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.country}</Text>
+            </View>
+            <View style={styles.clubActivityMembersColumn}>
+              <Text style={styles.leaderTableCellText}>{item.memberCount}</Text>
+            </View>
+            <View style={styles.clubActivityScoreColumn}>
+              <Text style={styles.leaderTableCellText}>{item.score.toFixed(1)}</Text>
+            </View>
           </View>
-          <View style={styles.clubActivityNameColumn}>
-            <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.Name}</Text>
-          </View>
-          <View style={styles.clubActivityCountryColumn}>
-            <Text style={styles.leaderTableCellText} numberOfLines={1}>{item.country}</Text>
-          </View>
-          <View style={styles.clubActivityMembersColumn}>
-            <Text style={styles.leaderTableCellText}>{item.memberCount}</Text>
-          </View>
-          <View style={styles.clubActivityScoreColumn}>
-            <Text style={styles.leaderTableCellText}>{item.score.toFixed(1)}</Text>
-          </View>
-        </View>
-      ))}
+        ))
+      )}
     </View>
   );
 
@@ -3496,6 +3505,16 @@ export default function ActivityScreen() {
 
   const communityBoardMode: CommunityBoardMode = communityLeaderboardView.startsWith("medals") ? "medals" : "activity";
   const communityBoardScope: CommunityBoardScope = communityLeaderboardView.endsWith("club") ? "clubs" : "individual";
+  const communityTableBodyMaxHeight = Math.max(280, Math.floor(windowHeight - 282));
+  const renderFrozenLeaderboardRows = (children: any) => (
+    <ScrollView
+      style={[styles.leaderboardTableBody, { maxHeight: communityTableBodyMaxHeight }]}
+      nestedScrollEnabled
+      showsVerticalScrollIndicator
+    >
+      {children}
+    </ScrollView>
+  );
   const setCommunityBoardMode = (mode: CommunityBoardMode) => {
     setCommunityLeaderboardView(mode === "activity" ? "activity_indv" : "medals_indv");
   };
@@ -3523,8 +3542,13 @@ export default function ActivityScreen() {
               }}
               activeOpacity={0.7}
             >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Text style={[styles.toggleText, activeTab === "community" && styles.toggleTextActive, !isSubscribed && styles.toggleTextLocked]}>
+              <View style={styles.toggleLabelRow}>
+                <Text
+                  style={[styles.toggleText, activeTab === "community" && styles.toggleTextActive, !isSubscribed && styles.toggleTextLocked]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.78}
+                >
                   Community
                 </Text>
                 {!isSubscribed && <Lock size={12} color="#9CA3AF" />}
@@ -3535,7 +3559,7 @@ export default function ActivityScreen() {
               onPress={() => setActiveTab("events")}
               activeOpacity={0.7}
             >
-              <Text style={[styles.toggleText, activeTab === "events" && styles.toggleTextActive]}>
+              <Text style={[styles.toggleText, activeTab === "events" && styles.toggleTextActive]} numberOfLines={1}>
                 Events
               </Text>
             </TouchableOpacity>
@@ -3550,8 +3574,8 @@ export default function ActivityScreen() {
               }}
               activeOpacity={0.7}
             >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Text style={[styles.toggleText, activeTab === "club" && styles.toggleTextActive, !isSubscribed && styles.toggleTextLocked]}>
+              <View style={styles.toggleLabelRow}>
+                <Text style={[styles.toggleText, activeTab === "club" && styles.toggleTextActive, !isSubscribed && styles.toggleTextLocked]} numberOfLines={1}>
                   Club
                 </Text>
                 {!isSubscribed && <Lock size={12} color="#9CA3AF" />}
@@ -3562,7 +3586,7 @@ export default function ActivityScreen() {
               onPress={() => setActiveTab("stairs")}
               activeOpacity={0.7}
             >
-              <Text style={[styles.toggleText, activeTab === "stairs" && styles.toggleTextActive]}>
+              <Text style={[styles.toggleText, activeTab === "stairs" && styles.toggleTextActive]} numberOfLines={1}>
                 Stairs
               </Text>
             </TouchableOpacity>
@@ -3571,7 +3595,7 @@ export default function ActivityScreen() {
               onPress={() => setActiveTab("family")}
               activeOpacity={0.7}
             >
-              <Text style={[styles.toggleText, activeTab === "family" && styles.toggleTextActive]}>
+              <Text style={[styles.toggleText, activeTab === "family" && styles.toggleTextActive]} numberOfLines={1}>
                 Family
               </Text>
             </TouchableOpacity>
@@ -4296,38 +4320,51 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   header: {
-    padding: 20,
-    paddingTop: 16,
-    gap: 12,
+    paddingHorizontal: 10,
+    paddingTop: 10,
+    paddingBottom: 9,
+    gap: 7,
   },
   reportTabsRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
   },
   toggleContainer: {
     flex: 1,
     flexDirection: "row",
     backgroundColor: "rgba(255,255,255,0.2)",
-    borderRadius: 12,
-    padding: 4,
+    borderRadius: 10,
+    padding: 3,
   },
   toggleButton: {
     flex: 1,
-    paddingVertical: 10,
+    minWidth: 0,
+    paddingHorizontal: 1,
+    paddingVertical: 7,
     alignItems: "center",
-    borderRadius: 8,
+    borderRadius: 7,
   },
   toggleButtonActive: {
     backgroundColor: colors.white,
   },
   toggleText: {
-    fontSize: 15,
-    fontWeight: "700" as const,
+    flexShrink: 1,
+    fontSize: 11,
+    fontWeight: "800" as const,
     color: colors.white,
+    includeFontPadding: false,
+    textAlign: "center" as const,
   },
   toggleTextActive: {
     color: colors.primary,
+  },
+  toggleLabelRow: {
+    minWidth: 0,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 2,
   },
   headerButtonsRow: {
     flexDirection: "row" as const,
@@ -4401,19 +4438,19 @@ const styles = StyleSheet.create({
     color: "#9CA3AF",
   },
   filterPanel: {
-    marginTop: 12,
+    marginTop: 7,
     backgroundColor: "rgba(255,255,255,0.14)",
-    borderRadius: 14,
-    padding: 12,
-    gap: 12,
+    borderRadius: 11,
+    padding: 8,
+    gap: 8,
   },
   filterRow: {
     flexDirection: "row" as const,
-    gap: 10,
+    gap: 7,
   },
   filterField: {
     flex: 1,
-    gap: 6,
+    gap: 4,
   },
   filterFieldLabel: {
     fontSize: 12,
@@ -4423,41 +4460,41 @@ const styles = StyleSheet.create({
   filterInput: {
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 13,
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    fontSize: 12,
     color: colors.white,
     backgroundColor: "rgba(255,255,255,0.08)",
   },
   filterDateButton: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: 8,
+    gap: 6,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 8,
     backgroundColor: "rgba(255,255,255,0.08)",
   },
   filterDateButtonText: {
-    fontSize: 13,
+    fontSize: 12,
     color: colors.white,
     fontWeight: "600" as const,
   },
   filterGroup: {
-    gap: 8,
+    gap: 5,
   },
   filterChipRow: {
     flexDirection: "row" as const,
-    gap: 8,
+    gap: 6,
     paddingRight: 4,
   },
   filterChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
     backgroundColor: "rgba(255,255,255,0.14)",
   },
   filterChipActive: {
@@ -4626,7 +4663,7 @@ const styles = StyleSheet.create({
   },
   leaderboardTableContainer: {
     margin: 6,
-    marginBottom: 10,
+    marginBottom: 8,
     borderRadius: 8,
     overflow: "hidden" as const,
     backgroundColor: colors.white,
@@ -4638,7 +4675,10 @@ const styles = StyleSheet.create({
     alignItems: "center" as const,
     backgroundColor: colors.primary,
     paddingHorizontal: 2,
-    paddingVertical: 4,
+    paddingVertical: 3,
+  },
+  leaderboardTableBody: {
+    backgroundColor: colors.white,
   },
   clubDistanceCountTable: {
     minWidth: 680,
@@ -4657,7 +4697,7 @@ const styles = StyleSheet.create({
     flexDirection: "row" as const,
     alignItems: "center" as const,
     paddingHorizontal: 2,
-    paddingVertical: 4,
+    paddingVertical: 3,
     borderBottomWidth: 1,
     borderBottomColor: colors.divider,
   },
@@ -4991,24 +5031,24 @@ const styles = StyleSheet.create({
   communityBoardTabs: {
     flexDirection: "row" as const,
     alignItems: "flex-start" as const,
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingTop: 10,
+    gap: 6,
+    paddingHorizontal: 0,
+    paddingTop: 2,
   },
   communityBoardTabStack: {
     flex: 1,
-    gap: 6,
+    gap: 4,
   },
   communityBoardTabGroup: {
     flexDirection: "row" as const,
-    gap: 6,
+    gap: 5,
   },
   communityBoardTab: {
     flex: 1,
-    minHeight: 32,
+    minHeight: 29,
     alignItems: "center" as const,
     justifyContent: "center" as const,
-    borderRadius: 8,
+    borderRadius: 7,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.4)",
     backgroundColor: "rgba(255,255,255,0.12)",
@@ -5018,23 +5058,24 @@ const styles = StyleSheet.create({
     borderColor: colors.white,
   },
   communityBoardTabText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: "800" as const,
     color: colors.white,
+    includeFontPadding: false,
   },
   communityBoardTabTextActive: {
     color: colors.primary,
   },
   communityBoardSubTabGroup: {
     flexDirection: "row" as const,
-    gap: 6,
+    gap: 5,
   },
   communityBoardSubTab: {
     flex: 1,
-    minHeight: 28,
+    minHeight: 26,
     alignItems: "center" as const,
     justifyContent: "center" as const,
-    borderRadius: 7,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.28)",
     backgroundColor: "rgba(255,255,255,0.08)",
@@ -5047,16 +5088,17 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "800" as const,
     color: "rgba(255,255,255,0.78)",
+    includeFontPadding: false,
   },
   communityBoardSubTabTextActive: {
     color: colors.white,
   },
   leaderboardIconButton: {
-    width: 36,
-    height: 32,
+    width: 32,
+    height: 29,
     alignItems: "center" as const,
     justifyContent: "center" as const,
-    borderRadius: 8,
+    borderRadius: 7,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.4)",
     backgroundColor: "rgba(255,255,255,0.12)",
@@ -5068,28 +5110,28 @@ const styles = StyleSheet.create({
   searchPanel: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: 8,
-    marginTop: 10,
-    marginHorizontal: 16,
-    minHeight: 42,
-    borderRadius: 12,
+    gap: 6,
+    marginTop: 7,
+    marginHorizontal: 0,
+    minHeight: 34,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.24)",
     backgroundColor: "rgba(255,255,255,0.12)",
-    paddingHorizontal: 12,
+    paddingHorizontal: 9,
   },
   searchInput: {
     flex: 1,
     minWidth: 0,
     color: colors.white,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "700" as const,
-    paddingVertical: 9,
+    paddingVertical: 6,
   },
   medalLeaderboardTableContainer: {
     minWidth: 382,
     margin: 6,
-    marginBottom: 10,
+    marginBottom: 8,
     borderRadius: 8,
     overflow: "hidden" as const,
     backgroundColor: colors.white,
@@ -5098,11 +5140,11 @@ const styles = StyleSheet.create({
   },
   medalLeaderboardTableHeader: {
     paddingHorizontal: 1,
-    paddingVertical: 3,
+    paddingVertical: 2,
   },
   medalLeaderboardTableRow: {
     paddingHorizontal: 1,
-    paddingVertical: 3,
+    paddingVertical: 2,
   },
   medalRankColumn: {
     width: 28,
@@ -5126,7 +5168,7 @@ const styles = StyleSheet.create({
   },
   clubActivityTableContainer: {
     margin: 6,
-    marginBottom: 10,
+    marginBottom: 8,
     borderRadius: 8,
     overflow: "hidden" as const,
     backgroundColor: colors.white,
