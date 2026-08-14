@@ -38,6 +38,7 @@ import rejectExternalSubmissionRoute from "./routes/activities/reject-external-s
 import completeEventRunRoute from "./routes/activities/complete-event-run/route";
 import getStairRoutesRoute from "./routes/activities/get-stair-routes/route";
 import registerStairRouteRoute from "./routes/activities/register-stair-route/route";
+import markStairRoutePrintedRoute from "./routes/activities/mark-stair-route-printed/route";
 import scanStairCheckpointRoute from "./routes/activities/scan-stair-checkpoint/route";
 import endStairSessionRoute from "./routes/activities/end-stair-session/route";
 import getStairLeaderboardRoute from "./routes/activities/get-stair-leaderboard/route";
@@ -288,6 +289,7 @@ export const appRouter = createTRPCRouter({
     completeEventRun: completeEventRunRoute,
     getStairRoutes: getStairRoutesRoute,
     registerStairRoute: registerStairRouteRoute,
+    markStairRoutePrinted: markStairRoutePrintedRoute,
     scanStairCheckpoint: scanStairCheckpointRoute,
     endStairSession: endStairSessionRoute,
     getStairLeaderboard: getStairLeaderboardRoute,

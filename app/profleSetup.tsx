@@ -35,6 +35,7 @@ import { clubMatchesTown, filterVisibleClubsForAge, getAgeFromDob, isAtLeastRunN
 import { useDistanceUnit } from '@/contexts/DistanceUnitContext';
 import { useWeightUnit } from '@/contexts/WeightUnitContext';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getGoalDisplayDescription, getGoalDisplayLabel } from '@/utils/goalDisplay';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -213,15 +214,15 @@ const PARA_EQUIPMENT_OPTIONS = [
 ];
 
 const FALLBACK_GOALS: GoalItem[] = [
-  { goal_id: 1, goal: 'Keep active', description: 'Build consistency by choosing how often you want to run during a date range.' },
-  { goal_id: 2, goal: 'Weight Loss', description: 'Track your target weight and log progress as your running supports healthy weight change.' },
-  { goal_id: 3, goal: 'Improve Fitness', description: 'Set pace targets for different distances and compare each run against your target.' },
-  { goal_id: 4, goal: 'Earn Medals', description: 'Set a medal target for a date range and track approved internal and external race medals.' },
-  { goal_id: 5, goal: 'Compete in Community', description: 'Follow your ranking across family, club, and community leaderboards as your activities grow.' },
-  { goal_id: 6, goal: 'General Health', description: 'Use smartwatch-style health readings such as steps, sleep, heart rate, and SpO2 to monitor wellness.' },
-  { goal_id: 7, goal: 'Have planned runs', description: 'Declare planned running commitments and check whether completed runs match your plan.' },
-  { goal_id: 8, goal: 'Run Window', description: 'Set preferred run time windows and see whether completed runs happened within those hours.' },
-  { goal_id: 9, goal: 'Running Budget', description: 'Set a running expense budget and track race, travel, gear, and nutrition spending against it.' },
+  { goal_id: 1, goal: 'Meet my exercise goals', description: 'Set a date range and target percentage, then measure whether your completed exercise days meet that goal.' },
+  { goal_id: 2, goal: 'Loose some weight', description: 'Track your target weight and log progress as your running supports healthy weight change.' },
+  { goal_id: 3, goal: 'Work on my pace', description: 'Set pace targets for different distances and compare each run against your target.' },
+  { goal_id: 4, goal: 'Get medals', description: 'Set a medal target for a date range and track approved internal and external race medals.' },
+  { goal_id: 5, goal: 'Be part in the community', description: 'Follow your ranking across family, club, and community leaderboards as your activities grow.' },
+  { goal_id: 6, goal: 'Monitor my health', description: 'Use smartwatch-style health readings such as steps, sleep, heart rate, and SpO2 to monitor wellness.' },
+  { goal_id: 7, goal: 'Follow an exercise plan', description: 'Declare planned running commitments and check whether completed runs match your plan.' },
+  { goal_id: 8, goal: 'Set exercise time', description: 'Set one goal duration and one regular exercise time.' },
+  { goal_id: 9, goal: 'Manage running Expenditure', description: 'Set a duration, three category targets, and a grand total for Event expenses, Gear, and Registrations.' },
 ];
 
 function isGeneralHealthGoal(value: string | null | undefined): boolean {
@@ -1557,7 +1558,7 @@ export default function RegisterScreen() {
       <View style={styles.inputContainer}>
         {renderYesNoOption(
           'Do you use a smart watch to record your workouts?',
-          'If you also choose General Health as a goal, SmartFit Club will appear as a special club option.',
+          'If you also choose Monitor my health as a goal, SmartFit Club will appear as a special club option.',
           registrationData.hasSmartWatch,
           (value) => updateRegistrationField('hasSmartWatch', value)
         )}
@@ -1822,11 +1823,11 @@ export default function RegisterScreen() {
                 </View>
                 <View style={styles.goalCardCopy}>
                   <Text style={[styles.goalCardText, isSelected && styles.goalCardTextSelected]}>
-                    {goal.goal}
+                    {getGoalDisplayLabel(goal.goal)}
                   </Text>
-                  {goal.description ? (
+                  {getGoalDisplayDescription(goal.goal, goal.description) ? (
                     <Text style={[styles.goalCardDescription, isSelected && styles.goalCardDescriptionSelected]}>
-                      {goal.description}
+                      {getGoalDisplayDescription(goal.goal, goal.description)}
                     </Text>
                   ) : null}
                 </View>

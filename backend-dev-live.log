@@ -80,3 +80,30 @@ trpc/routes/activities/get-external-submissions/route.ts(145,24): error TS2339: 
 trpc/routes/activities/register-stair-route/route.ts(2,20): error TS7016: Could not find a declaration file for module 'qrcode'. 'C:/Users/salim/rork-runnation-app/node_modules/qrcode/lib/index.js' implicitly has an 'any' type.
   Try `npm i --save-dev @types/qrcode` if it exists or add a new declaration (.d.ts) file containing `declare module 'qrcode';`
 
+[INFO] 21:23:26 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-stair-routes\route.ts has been modified
+◇ injected env (14) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+[ERROR] 21:23:34 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/register-stair-route/route.ts(2,20): error TS7016: Could not find a declaration file for module 'qrcode'. 'C:/Users/salim/rork-runnation-app/node_modules/qrcode/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/qrcode` if it exists or add a new declaration (.d.ts) file containing `declare module 'qrcode';`
+
+[INFO] 21:23:40 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-stair-routes\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ suppress logs { quiet: true }
+[ERROR] 21:23:42 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/register-stair-route/route.ts(2,20): error TS7016: Could not find a declaration file for module 'qrcode'. 'C:/Users/salim/rork-runnation-app/node_modules/qrcode/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/qrcode` if it exists or add a new declaration (.d.ts) file containing `declare module 'qrcode';`
+
+[INFO] 21:23:59 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\app-router.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ suppress logs { quiet: true }
+[ERROR] 21:24:29 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/register-stair-route/route.ts(2,20): error TS7016: Could not find a declaration file for module 'qrcode'. 'C:/Users/salim/rork-runnation-app/node_modules/qrcode/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/qrcode` if it exists or add a new declaration (.d.ts) file containing `declare module 'qrcode';`
+
+[INFO] 21:25:25 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\register-stair-route\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ enable debugging { debug: true }
+[ERROR] 21:25:27 ⨯ Unable to compile TypeScript:
+trpc/routes/activities/register-stair-route/route.ts(2,20): error TS7016: Could not find a declaration file for module 'qrcode'. 'C:/Users/salim/rork-runnation-app/node_modules/qrcode/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/qrcode` if it exists or add a new declaration (.d.ts) file containing `declare module 'qrcode';`
+
+[INFO] 21:41:35 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\register-stair-route\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+🚀 Server running on http://0.0.0.0:3000

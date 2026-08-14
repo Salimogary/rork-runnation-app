@@ -146,6 +146,7 @@ export default publicProcedure.input(inputSchema).mutation(async ({ ctx, input }
   if (lapFetchError) throw new Error(lapFetchError.message || "Could not load stair lap.");
 
   const routeInfo = {
+    routeId: route.route_id,
     buildingName: route.stair_buildings?.building_name,
     routeName: route.route_name,
     middleCheckpointRequired: route.middle_checkpoint_required,

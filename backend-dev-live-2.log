@@ -116,3 +116,18 @@ trpc/routes/activities/get-external-submissions/route.ts(145,24): error TS2339: 
 [INFO] 21:10:31 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-stair-leaderboard\route.ts has been modified
 ◇ injected env (14) from .env // tip: ⌘ override existing { override: true }
 🚀 Server running on http://0.0.0.0:3000
+[INFO] 21:23:26 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-stair-routes\route.ts has been modified
+◇ injected env (14) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 21:23:40 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\get-stair-routes\route.ts has been modified
+◇ injected env (14) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 21:23:59 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\app-router.ts has been modified
+◇ injected env (14) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 21:25:25 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\register-stair-route\route.ts has been modified
+◇ injected env (14) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+🚀 Server running on http://0.0.0.0:3000
+[INFO] 21:41:35 Restarting: C:\Users\salim\rork-runnation-app\backend\trpc\routes\activities\register-stair-route\route.ts has been modified
+◇ injected env (14) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+🚀 Server running on http://0.0.0.0:3000

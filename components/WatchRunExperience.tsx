@@ -105,7 +105,6 @@ const WATCH_ACTIVITIES: { type: WatchActivityType; label: string; hint: string }
   { type: "Walk", label: "Walk", hint: "easy outdoor effort" },
   { type: "Run", label: "Run", hint: "distance + time" },
   { type: "Cycle", label: "Cycle", hint: "GPS ride timer" },
-  { type: "Stairs", label: "Stairs", hint: "climb session" },
   { type: "Event Run", label: "Event Run", hint: "registered event" },
 ];
 

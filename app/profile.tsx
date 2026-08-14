@@ -61,6 +61,7 @@ import { clubMatchesTown, filterVisibleClubsForAge, getAgeFromDob, isAtLeastRunN
 import { useDistanceUnit, type DistanceUnit } from "@/contexts/DistanceUnitContext";
 import { useWeightUnit, type WeightUnit } from "@/contexts/WeightUnitContext";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { getGoalDisplayLabel } from "@/utils/goalDisplay";
 
 const FALLBACK_COUNTRIES = WORLD_COUNTRIES;
 const RUNNATION_APP_LINK = "https://expo.dev/artifacts/eas/27LbCHM76M74izfEPYt1pN.apk";
@@ -1358,7 +1359,7 @@ export default function ProfileScreen() {
 
       {renderYesNoField(
         "Do you use a smart watch to record your workouts?",
-        "If you also choose General Health as a goal, SmartFit Club appears in your special club options.",
+        "If you also choose Monitor my health as a goal, SmartFit Club appears in your special club options.",
         formData.has_smart_watch === true,
         (value) => setFormData({
           ...formData,
@@ -1499,7 +1500,7 @@ export default function ProfileScreen() {
                   {isSelected && <Check size={14} color="#fff" />}
                 </View>
                 <Text style={[styles.goalCardText, isSelected && styles.goalCardTextSelected]}>
-                  {goal.goal}
+                  {getGoalDisplayLabel(goal.goal)}
                 </Text>
               </TouchableOpacity>
             );
@@ -2160,7 +2161,7 @@ export default function ProfileScreen() {
           <View style={styles.goalsTagsRow}>
             {userGoals.map((ug) => (
               <View key={ug.user_goals_id} style={styles.goalTag}>
-                <Text style={styles.goalTagText}>{ug.goal}</Text>
+                <Text style={styles.goalTagText}>{getGoalDisplayLabel(ug.goal)}</Text>
               </View>
             ))}
           </View>

@@ -49,7 +49,7 @@ function assertClubAllowedForProfile(club: any, registration: any, countryAliase
     throw new Error("Para Runners is only available if you have indicated a disability.");
   }
   if (code === "smartfit_club" && !(registration?.has_smart_watch === true && registration?.has_general_health_goal === true)) {
-    throw new Error("SmartFit Club is available when you use a smart watch and have selected General Health as a goal.");
+    throw new Error("SmartFit Club is available when you use a smart watch and have selected Monitor my health as a goal.");
   }
   if (!code && age !== null && age >= 8 && age <= 15) {
     throw new Error("Runners aged 8 to 15 can only join Junior Runners.");

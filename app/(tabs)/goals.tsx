@@ -86,6 +86,9 @@ interface RunningBudgetGoal {
   start_date: string;
   end_date: string;
   budget_amount: number;
+  event_expenses_amount?: number | null;
+  gear_amount?: number | null;
+  registrations_amount?: number | null;
   currency: string;
 }
 
@@ -325,8 +328,31 @@ const DEFAULT_FITNESS_GOAL_SLOTS: FitnessGoalSlotInput[] = [
   { distanceKm: "80", hours: "12", minutes: "0" },
 ];
 
-const BUDGET_CATEGORIES = ["Race registration", "Transport", "Lodging", "Shoes", "Watch", "Electrolytes", "Other"];
+const BUDGET_CATEGORIES = ["Event expenses", "Gear", "Registrations"];
 const DEFAULT_BUDGET_CURRENCIES = ["USD", "UGX", "KES", "TZS", "RWF", "EUR", "GBP"];
+
+const parseMoneyInput = (value: string): number => {
+  const amount = Number.parseFloat(value.replace(/,/g, ""));
+  return Number.isFinite(amount) ? amount : 0;
+};
+
+const getBudgetCategoryTargets = (goal?: RunningBudgetGoal | null): Record<string, number> => {
+  const eventTarget = Number(goal?.event_expenses_amount) || 0;
+  const gearTarget = Number(goal?.gear_amount) || 0;
+  const registrationsTarget = Number(goal?.registrations_amount) || 0;
+  if (eventTarget > 0 || gearTarget > 0 || registrationsTarget > 0) {
+    return {
+      "Event expenses": eventTarget,
+      Gear: gearTarget,
+      Registrations: registrationsTarget,
+    };
+  }
+  return {
+    "Event expenses": Number(goal?.budget_amount) || 0,
+    Gear: 0,
+    Registrations: 0,
+  };
+};
 
 const normalizeClockInput = (value: string): string => {
   const trimmed = value.trim();
@@ -346,18 +372,28 @@ const clockToMinutes = (value?: string | null): number | null => {
   return parts[0] * 60 + parts[1];
 };
 
-const activityFitsWindow = (activity: RunWindowActivity, window: TimeWindow): boolean => {
+const getActivityWindowStatus = (activity: RunWindowActivity, window: TimeWindow) => {
   const start = clockToMinutes(activity.start_time);
   let end = clockToMinutes(activity.end_time);
-  const windowStart = clockToMinutes(window.start);
-  let windowEnd = clockToMinutes(window.end);
-  if (start === null || end === null || windowStart === null || windowEnd === null) return false;
+  const targetStart = clockToMinutes(window.start);
+  let targetEnd = clockToMinutes(window.end);
+  if (start === null || end === null || targetStart === null || targetEnd === null) {
+    return { startOnTarget: false, endOnTarget: false };
+  }
   if (end < start) end += 24 * 60;
-  if (windowEnd < windowStart) windowEnd += 24 * 60;
-  return start >= windowStart && end <= windowEnd;
+  if (targetEnd < targetStart) targetEnd += 24 * 60;
+  return {
+    startOnTarget: start <= targetStart,
+    endOnTarget: end <= targetEnd,
+  };
 };
 
 const formatClock = (value?: string | null): string => String(value || "").slice(0, 5) || "--:--";
+
+const formatDateRange = (startDate?: string | null, endDate?: string | null): string => {
+  if (!startDate || !endDate) return "Duration not set";
+  return `${startDate} to ${endDate}`;
+};
 
 const getFitnessBands = (fitnessGoal?: FitnessGoal | null): FitnessPaceBand[] => {
   const storedBands = Array.isArray(fitnessGoal?.target_bands) ? fitnessGoal?.target_bands || [] : [];
@@ -735,24 +771,18 @@ export default function GoalsScreen() {
   const [runWindowEndDateInput, setRunWindowEndDateInput] = useState("");
   const [regularWindowOneStart, setRegularWindowOneStart] = useState("");
   const [regularWindowOneEnd, setRegularWindowOneEnd] = useState("");
-  const [regularWindowTwoStart, setRegularWindowTwoStart] = useState("");
-  const [regularWindowTwoEnd, setRegularWindowTwoEnd] = useState("");
-  const [eventWindowDateInput, setEventWindowDateInput] = useState("");
-  const [eventWindowStartInput, setEventWindowStartInput] = useState("");
-  const [eventWindowEndInput, setEventWindowEndInput] = useState("");
-  const [dateWindowDateInput, setDateWindowDateInput] = useState("");
-  const [dateWindowStartInput, setDateWindowStartInput] = useState("");
-  const [dateWindowEndInput, setDateWindowEndInput] = useState("");
   const [showBudgetGoalForm, setShowBudgetGoalForm] = useState(false);
   const [budgetStartDateInput, setBudgetStartDateInput] = useState("");
   const [budgetEndDateInput, setBudgetEndDateInput] = useState("");
-  const [budgetAmountInput, setBudgetAmountInput] = useState("");
+  const [eventExpensesTargetInput, setEventExpensesTargetInput] = useState("");
+  const [gearTargetInput, setGearTargetInput] = useState("");
+  const [registrationsTargetInput, setRegistrationsTargetInput] = useState("");
   const [budgetCurrencyInput, setBudgetCurrencyInput] = useState("USD");
   const [showBudgetExpenseForm, setShowBudgetExpenseForm] = useState(false);
-  const [expenseCategoryInput, setExpenseCategoryInput] = useState("Race registration");
+  const [expenseCategoryInput, setExpenseCategoryInput] = useState(BUDGET_CATEGORIES[0]);
   const [expenseAmountInput, setExpenseAmountInput] = useState("");
-  const [expenseRaceNameInput, setExpenseRaceNameInput] = useState("");
   const [expenseOtherInput, setExpenseOtherInput] = useState("");
+  const [activeBudgetCategory, setActiveBudgetCategory] = useState(BUDGET_CATEGORIES[0]);
   const [showWeightTargetForm, setShowWeightTargetForm] = useState(false);
   const [showWeightLogForm, setShowWeightLogForm] = useState(false);
   const [weightTargetInput, setWeightTargetInput] = useState("");
@@ -822,9 +852,9 @@ export default function GoalsScreen() {
 
   const goalNameToKey = useCallback((goalName: string): string | null => {
     const name = goalName.toLowerCase().trim();
-    if (name.includes("run window") || name.includes("time management") || name.includes("time window")) return "runWindow";
-    if (name.includes("running budget") || name.includes("expense")) return "budget";
-    if (name.includes("just want to run") || name.includes("daily run") || name.includes("keep active")) return "dailyRun";
+    if (name.includes("run window") || name.includes("manage exercise time") || name.includes("set exercise time") || name.includes("time management") || name.includes("time window")) return "runWindow";
+    if (name.includes("running budget") || name.includes("expense") || name.includes("expenditure")) return "budget";
+    if (name.includes("just want to run") || name.includes("daily run") || name.includes("keep active") || name.includes("meet my exercise goals")) return "dailyRun";
     if (name.includes("fitness") || name.includes("pace")) return "fitness";
     if (name.includes("weight")) return "weight";
     if (name.includes("health")) return "health";
@@ -832,7 +862,8 @@ export default function GoalsScreen() {
       name.includes("habit") ||
       name.includes("discipline") ||
       name.includes("training plan") ||
-      name.includes("planned runs")
+      name.includes("planned runs") ||
+      name.includes("exercise plan")
     ) return "habit";
     if (name.includes("medal")) return "medals";
     if (name.includes("community") || name.includes("compete")) return "community";
@@ -994,10 +1025,10 @@ export default function GoalsScreen() {
       void queryClient.invalidateQueries({ queryKey: ["runWindowGoal", user?.id] });
       void queryClient.invalidateQueries({ queryKey: ["runWindowActivities", user?.id] });
       setShowRunWindowForm(false);
-      Alert.alert("Success", "Run Window goal saved!");
+      Alert.alert("Success", "Set exercise time goal saved!");
     },
     onError: (error: any) => {
-      Alert.alert("Error", error?.message || "Failed to save Run Window goal");
+      Alert.alert("Error", error?.message || "Failed to save Set exercise time goal");
     },
   });
 
@@ -1486,13 +1517,32 @@ export default function GoalsScreen() {
   });
 
   const saveRunningBudgetGoalMutation = useMutation({
-    mutationFn: async ({ startDate, endDate, budgetAmount, currency }: { startDate: string; endDate: string; budgetAmount: number; currency: string }) => {
+    mutationFn: async ({
+      startDate,
+      endDate,
+      budgetAmount,
+      eventExpensesAmount,
+      gearAmount,
+      registrationsAmount,
+      currency,
+    }: {
+      startDate: string;
+      endDate: string;
+      budgetAmount: number;
+      eventExpensesAmount: number;
+      gearAmount: number;
+      registrationsAmount: number;
+      currency: string;
+    }) => {
       if (!user?.id) throw new Error("Not logged in");
       const payload = {
         registration_id: user.id,
         start_date: startDate,
         end_date: endDate,
         budget_amount: budgetAmount,
+        event_expenses_amount: eventExpensesAmount,
+        gear_amount: gearAmount,
+        registrations_amount: registrationsAmount,
         currency,
         updated_at: new Date().toISOString(),
       };
@@ -1506,16 +1556,16 @@ export default function GoalsScreen() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["runningBudgetGoal", user?.id] });
       setShowBudgetGoalForm(false);
-      Alert.alert("Success", "Running Budget goal saved!");
+      Alert.alert("Success", "Running expenditure goal saved!");
     },
     onError: (error: any) => {
-      Alert.alert("Error", error?.message || "Failed to save Running Budget goal");
+      Alert.alert("Error", error?.message || "Failed to save running expenditure goal");
     },
   });
 
   const addRunningBudgetExpenseMutation = useMutation({
     mutationFn: async ({ category, amount, raceName, otherLabel }: { category: string; amount: number; raceName?: string; otherLabel?: string }) => {
-      if (!user?.id || !runningBudgetGoal) throw new Error("Set a Running Budget goal first.");
+      if (!user?.id || !runningBudgetGoal) throw new Error("Set a running expenditure goal first.");
       const { data, error } = await supabase
         .from("running_budget_expenses")
         .insert({
@@ -1535,7 +1585,6 @@ export default function GoalsScreen() {
       void queryClient.invalidateQueries({ queryKey: ["runningBudgetExpenses", user?.id] });
       setShowBudgetExpenseForm(false);
       setExpenseAmountInput("");
-      setExpenseRaceNameInput("");
       setExpenseOtherInput("");
       Alert.alert("Success", "Expense added.");
     },
@@ -3080,11 +3129,11 @@ export default function GoalsScreen() {
       void queryClient.invalidateQueries({ queryKey: ["medalTargetGoal", user?.id] });
       void queryClient.invalidateQueries({ queryKey: ["medalGoalData", user?.id] });
       setShowMedalGoalModal(false);
-      Alert.alert("Success", "Earn Medals goal saved!");
+      Alert.alert("Success", "Get medals goal saved!");
     },
     onError: (error: any) => {
       console.error("[Goals] Save medal goal error:", JSON.stringify(error));
-      Alert.alert("Error", error?.message || "Failed to save Earn Medals goal");
+      Alert.alert("Error", error?.message || "Failed to save Get medals goal");
     },
   });
 
@@ -3236,57 +3285,45 @@ export default function GoalsScreen() {
   const runWindowProgress = useMemo(() => {
     if (!runWindowGoal) return null;
     const regularWindows = Array.isArray(runWindowGoal.regular_windows) ? runWindowGoal.regular_windows : [];
-    const eventWindows = Array.isArray(runWindowGoal.event_windows) ? runWindowGoal.event_windows : [];
-    const dateWindows = Array.isArray(runWindowGoal.date_windows) ? runWindowGoal.date_windows : [];
+    const primaryWindow = regularWindows[0] || null;
     const days = runWindowActivities.map((activity) => {
       const date = String(activity.activity_date || "").split("T")[0];
-      const matchingDateWindow = dateWindows.find((window) => window.date === date);
-      const matchingEventWindow = eventWindows.find((window) => window.date === date);
-      const candidateWindows = [
-        ...(matchingDateWindow ? [{ ...matchingDateWindow, label: matchingDateWindow.label || "Date specific" }] : []),
-        ...(matchingEventWindow ? [{ ...matchingEventWindow, label: matchingEventWindow.label || "Event" }] : []),
-        ...regularWindows.map((window, index) => ({ ...window, label: window.label || `Regular ${index + 1}` })),
-      ];
-      const matchedWindow = candidateWindows.find((window) => activityFitsWindow(activity, window)) || null;
+      const selectedWindow = primaryWindow ? { ...primaryWindow, label: primaryWindow.label || "Regular exercise time" } : null;
+      const status = selectedWindow ? getActivityWindowStatus(activity, selectedWindow) : { startOnTarget: false, endOnTarget: false };
       return {
         date,
         day: new Date(`${date}T00:00:00`).getDate(),
         startTime: activity.start_time,
         endTime: activity.end_time,
         distanceKm: Number(activity.distance_km) || 0,
-        isOnTarget: !!matchedWindow,
-        windowLabel: matchedWindow?.label || candidateWindows[0]?.label || "No window",
+        isOnTarget: status.startOnTarget && status.endOnTarget,
+        startOnTarget: status.startOnTarget,
+        endOnTarget: status.endOnTarget,
+        targetStart: selectedWindow?.start || null,
+        targetEnd: selectedWindow?.end || null,
+        windowLabel: selectedWindow?.label || "No window",
       };
     }).filter((day) => day.date);
-    const onTargetDays = days.filter((day) => day.isOnTarget).length;
+    const onTargetBlocks = days.reduce((total, day) => total + (day.startOnTarget ? 1 : 0) + (day.endOnTarget ? 1 : 0), 0);
+    const totalBlocks = days.length * 2;
     return {
       days,
-      onTargetDays,
+      onTargetDays: days.filter((day) => day.isOnTarget).length,
+      onTargetBlocks,
+      totalBlocks,
       totalDays: days.length,
-      scorePercent: days.length > 0 ? Math.round((onTargetDays / days.length) * 100) : 0,
-      isOnTrack: days.length > 0 && onTargetDays === days.length,
+      scorePercent: totalBlocks > 0 ? Math.round((onTargetBlocks / totalBlocks) * 100) : 0,
+      isOnTrack: totalBlocks > 0 && onTargetBlocks === totalBlocks,
       regularWindows,
-      eventWindows,
-      dateWindows,
     };
   }, [runWindowActivities, runWindowGoal]);
 
   const openRunWindowForm = useCallback(() => {
     const regularWindows = Array.isArray(runWindowGoal?.regular_windows) ? runWindowGoal?.regular_windows || [] : [];
-    const eventWindow = Array.isArray(runWindowGoal?.event_windows) ? runWindowGoal?.event_windows?.[0] : null;
-    const dateWindow = Array.isArray(runWindowGoal?.date_windows) ? runWindowGoal?.date_windows?.[0] : null;
     setRunWindowStartDateInput(runWindowGoal?.start_date || getLocalDateKey(new Date()));
     setRunWindowEndDateInput(runWindowGoal?.end_date || getLocalDateKey(new Date()));
     setRegularWindowOneStart(formatClock(regularWindows[0]?.start || "06:00:00"));
     setRegularWindowOneEnd(formatClock(regularWindows[0]?.end || "07:30:00"));
-    setRegularWindowTwoStart(formatClock(regularWindows[1]?.start || ""));
-    setRegularWindowTwoEnd(formatClock(regularWindows[1]?.end || ""));
-    setEventWindowDateInput(eventWindow?.date || "");
-    setEventWindowStartInput(formatClock(eventWindow?.start || ""));
-    setEventWindowEndInput(formatClock(eventWindow?.end || ""));
-    setDateWindowDateInput(dateWindow?.date || "");
-    setDateWindowStartInput(formatClock(dateWindow?.start || ""));
-    setDateWindowEndInput(formatClock(dateWindow?.end || ""));
     setShowRunWindowForm(true);
   }, [runWindowGoal]);
 
@@ -3302,19 +3339,10 @@ export default function GoalsScreen() {
     }
     const regularWindows: TimeWindow[] = [];
     if (regularWindowOneStart.trim() && regularWindowOneEnd.trim()) {
-      regularWindows.push({ label: "Regular", start: normalizeClockInput(regularWindowOneStart), end: normalizeClockInput(regularWindowOneEnd) });
+      regularWindows.push({ label: "Regular exercise time", start: normalizeClockInput(regularWindowOneStart), end: normalizeClockInput(regularWindowOneEnd) });
     }
-    if (regularWindowTwoStart.trim() && regularWindowTwoEnd.trim()) {
-      regularWindows.push({ label: "Regular evening", start: normalizeClockInput(regularWindowTwoStart), end: normalizeClockInput(regularWindowTwoEnd) });
-    }
-    const eventWindows: TimeWindow[] = eventWindowDateInput.trim() && eventWindowStartInput.trim() && eventWindowEndInput.trim()
-      ? [{ label: "Event", date: eventWindowDateInput.trim(), start: normalizeClockInput(eventWindowStartInput), end: normalizeClockInput(eventWindowEndInput) }]
-      : [];
-    const dateWindows: TimeWindow[] = dateWindowDateInput.trim() && dateWindowStartInput.trim() && dateWindowEndInput.trim()
-      ? [{ label: "Date specific", date: dateWindowDateInput.trim(), start: normalizeClockInput(dateWindowStartInput), end: normalizeClockInput(dateWindowEndInput) }]
-      : [];
-    if (regularWindows.length === 0 && eventWindows.length === 0 && dateWindows.length === 0) {
-      Alert.alert("Error", "Add at least one time window.");
+    if (regularWindows.length === 0) {
+      Alert.alert("Error", "Add the exercise start and end times.");
       return;
     }
     saveRunWindowGoalMutation.mutate({
@@ -3322,33 +3350,50 @@ export default function GoalsScreen() {
       start_date: runWindowStartDateInput,
       end_date: runWindowEndDateInput,
       regular_windows: regularWindows,
-      event_windows: eventWindows,
-      date_windows: dateWindows,
+      event_windows: [],
+      date_windows: [],
     });
-  }, [dateWindowDateInput, dateWindowEndInput, dateWindowStartInput, eventWindowDateInput, eventWindowEndInput, eventWindowStartInput, regularWindowOneEnd, regularWindowOneStart, regularWindowTwoEnd, regularWindowTwoStart, runWindowEndDateInput, runWindowStartDateInput, saveRunWindowGoalMutation, user?.id]);
+  }, [regularWindowOneEnd, regularWindowOneStart, runWindowEndDateInput, runWindowStartDateInput, saveRunWindowGoalMutation, user?.id]);
 
   const runningBudgetProgress = useMemo(() => {
     if (!runningBudgetGoal) return null;
     const spent = runningBudgetExpenses.reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
-    const budget = Number(runningBudgetGoal.budget_amount) || 0;
+    const categoryTargets = getBudgetCategoryTargets(runningBudgetGoal);
+    const budget = Object.values(categoryTargets).reduce((sum, amount) => sum + amount, 0) || Number(runningBudgetGoal.budget_amount) || 0;
     const remaining = budget - spent;
     const spentPercent = budget > 0 ? Math.round((spent / budget) * 100) : 0;
     const status = spent > budget ? "over" : spentPercent >= 85 ? "near" : "good";
-    return { spent, budget, remaining, spentPercent, status };
+    const categoryTotals = BUDGET_CATEGORIES.reduce<Record<string, number>>((totals, category) => {
+      totals[category] = runningBudgetExpenses
+        .filter((expense) => expense.category === category)
+        .reduce((sum, expense) => sum + (Number(expense.amount) || 0), 0);
+      return totals;
+    }, {});
+    const categoryRemaining = BUDGET_CATEGORIES.reduce<Record<string, number>>((totals, category) => {
+      totals[category] = (categoryTargets[category] || 0) - (categoryTotals[category] || 0);
+      return totals;
+    }, {});
+    return { spent, budget, remaining, spentPercent, status, categoryTargets, categoryTotals, categoryRemaining };
   }, [runningBudgetExpenses, runningBudgetGoal]);
 
   const openRunningBudgetForm = useCallback(() => {
+    const targets = getBudgetCategoryTargets(runningBudgetGoal);
     setBudgetStartDateInput(runningBudgetGoal?.start_date || getLocalDateKey(new Date()));
     setBudgetEndDateInput(runningBudgetGoal?.end_date || getLocalDateKey(new Date()));
-    setBudgetAmountInput(runningBudgetGoal ? String(runningBudgetGoal.budget_amount) : "");
+    setEventExpensesTargetInput(targets["Event expenses"] ? String(targets["Event expenses"]) : "");
+    setGearTargetInput(targets.Gear ? String(targets.Gear) : "");
+    setRegistrationsTargetInput(targets.Registrations ? String(targets.Registrations) : "");
     setBudgetCurrencyInput(runningBudgetGoal?.currency || "USD");
     setShowBudgetGoalForm(true);
   }, [runningBudgetGoal]);
 
   const handleSaveRunningBudgetGoal = useCallback(() => {
-    const budgetAmount = Number.parseFloat(budgetAmountInput.replace(/,/g, ""));
-    if (!Number.isFinite(budgetAmount) || budgetAmount <= 0) {
-      Alert.alert("Error", "Enter a valid budget amount.");
+    const eventExpensesAmount = parseMoneyInput(eventExpensesTargetInput);
+    const gearAmount = parseMoneyInput(gearTargetInput);
+    const registrationsAmount = parseMoneyInput(registrationsTargetInput);
+    const budgetAmount = eventExpensesAmount + gearAmount + registrationsAmount;
+    if (budgetAmount <= 0) {
+      Alert.alert("Error", "Enter at least one target amount.");
       return;
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(budgetStartDateInput) || !/^\d{4}-\d{2}-\d{2}$/.test(budgetEndDateInput)) {
@@ -3363,9 +3408,12 @@ export default function GoalsScreen() {
       startDate: budgetStartDateInput,
       endDate: budgetEndDateInput,
       budgetAmount,
+      eventExpensesAmount,
+      gearAmount,
+      registrationsAmount,
       currency: budgetCurrencyInput.trim().toUpperCase() || "USD",
     });
-  }, [budgetAmountInput, budgetCurrencyInput, budgetEndDateInput, budgetStartDateInput, saveRunningBudgetGoalMutation]);
+  }, [budgetCurrencyInput, budgetEndDateInput, budgetStartDateInput, eventExpensesTargetInput, gearTargetInput, registrationsTargetInput, saveRunningBudgetGoalMutation]);
 
   const handleAddRunningBudgetExpense = useCallback(() => {
     const amount = Number.parseFloat(expenseAmountInput.replace(/,/g, ""));
@@ -3373,21 +3421,17 @@ export default function GoalsScreen() {
       Alert.alert("Error", "Enter a valid expense amount.");
       return;
     }
-    if (expenseCategoryInput === "Race registration" && !expenseRaceNameInput.trim()) {
-      Alert.alert("Race name", "Please add the race name.");
-      return;
-    }
-    if (expenseCategoryInput === "Other" && !expenseOtherInput.trim()) {
-      Alert.alert("Other expense", "Please describe the expense.");
+    if (!expenseOtherInput.trim()) {
+      Alert.alert("Expense name", "Please add the expense name.");
       return;
     }
     addRunningBudgetExpenseMutation.mutate({
       category: expenseCategoryInput,
       amount,
-      raceName: expenseRaceNameInput.trim(),
+      raceName: "",
       otherLabel: expenseOtherInput.trim(),
     });
-  }, [addRunningBudgetExpenseMutation, expenseAmountInput, expenseCategoryInput, expenseOtherInput, expenseRaceNameInput]);
+  }, [addRunningBudgetExpenseMutation, expenseAmountInput, expenseCategoryInput, expenseOtherInput]);
 
   const dailyRunProgress = useMemo(() => {
     if (!dailyRunGoal) return null;
@@ -3647,7 +3691,7 @@ export default function GoalsScreen() {
     const map: Record<string, { key: string; label: string; isTracked: boolean; icon: "zap" | "calendar" | "scale" | "heart" | "flame" | "trophy" | "users" | "clock" | "card"; overview: string; measuredBy: string }> = {
       fitness: {
         key: "fitness",
-        label: "Improve Fitness",
+        label: "Work on my pace",
         isTracked: !!fitnessGoal,
         icon: "zap",
         overview: "Declare distance/time targets, then see each run graded by pace for its distance band.",
@@ -3655,31 +3699,31 @@ export default function GoalsScreen() {
       },
       dailyRun: {
         key: "dailyRun",
-        label: "Keep active",
+        label: "Meet my exercise goals",
         isTracked: hasRunningGoal,
         icon: "calendar",
-        overview: "This keeps the goal simple: decide how often you want to run, then check whether you are keeping that commitment.",
-        measuredBy: "Measured by actual run days between the start date and today against the target runs expected by today.",
+        overview: "Set a date range and target percentage for exercise days, then check whether your completed activities meet the goal.",
+        measuredBy: "Measured by actual exercise days between the start date and today against the target exercise days expected by today.",
       },
       runWindow: {
         key: "runWindow",
-        label: "Run Window",
+        label: "Set exercise time",
         isTracked: !!runWindowGoal,
         icon: "clock",
-        overview: "Set regular, event, and date-specific run time windows for better time management.",
-        measuredBy: "Measured only on dates where a run exists. Each run earns a tick when its start and end time fall inside the right window.",
+        overview: "Set one goal duration and one regular exercise time.",
+        measuredBy: "Measured on activity dates with two checks: S for starting on time and E for ending on time. Green is on time; red is late.",
       },
       budget: {
         key: "budget",
-        label: "Running Budget",
+        label: "Manage running Expenditure",
         isTracked: !!runningBudgetGoal,
         icon: "card",
-        overview: "Set a budget for running expenses and log costs such as race registration, transport, shoes, watch, and electrolytes.",
-        measuredBy: "Measured by total expenses against your budget. The score tile turns green, amber, or red as spending approaches or exceeds budget.",
+        overview: "Plan your running spend for a date range by setting separate targets for Event expenses, Gear, and Registrations.",
+        measuredBy: "Each expense is subtracted from its category target, and the scorecard shows both category balances and the grand total remaining.",
       },
       habit: {
         key: "habit",
-        label: "Have planned runs",
+        label: "Follow an exercise plan",
         isTracked: !!habitDeclaration,
         icon: "flame",
         overview: "Declare the distance you plan to run and track each committed day against that target.",
@@ -3687,7 +3731,7 @@ export default function GoalsScreen() {
       },
       weight: {
         key: "weight",
-        label: "Weight Loss",
+        label: "Loose some weight",
         isTracked: !!weightTargetGoal,
         icon: "scale",
         overview: "This is linked to the Weight Loss Club and focuses on actual weight change plus the effort behind it.",
@@ -3695,7 +3739,7 @@ export default function GoalsScreen() {
       },
       health: {
         key: "health",
-        label: "General Health",
+        label: "Monitor my health",
         isTracked: healthEntries.length > 0,
         icon: "heart",
         overview: "Track Your Health uses smartwatch-style readings to show whether your daily movement is improving.",
@@ -3703,7 +3747,7 @@ export default function GoalsScreen() {
       },
       medals: {
         key: "medals",
-        label: "Earn Medals",
+        label: "Get medals",
         isTracked: !!medalTargetGoal,
         icon: "trophy",
         overview: "Set a medal target for a date range, then track internal and approved external medals against it.",
@@ -3711,10 +3755,10 @@ export default function GoalsScreen() {
       },
       community: {
         key: "community",
-        label: "Compete in Community",
+        label: "Be part in the community",
         isTracked: eligibleCommunityGoalRanks.length > 0,
         icon: "users",
-        overview: "Compete in Community tracks how your rank changes across Family, Club, and Community.",
+        overview: "Be part in the community tracks how your rank changes across Family, Club, and Community.",
         measuredBy: "Measured by daily rank snapshots from Family, Club, and Community Activity tables when those groups are available.",
       },
     };
@@ -3888,9 +3932,9 @@ export default function GoalsScreen() {
                 <TouchableOpacity style={styles.setGoalActionCard} onPress={openDailyRunGoalForm} activeOpacity={0.85}>
                   <Calendar size={22} color="#0EA5E9" />
                   <View style={styles.setGoalActionInfo}>
-                    <Text style={styles.setGoalActionTitle}>Keep active</Text>
+                    <Text style={styles.setGoalActionTitle}>Meet my exercise goals</Text>
                     <Text style={styles.setGoalActionText}>
-                      {dailyRunGoal ? "Update your running days target." : "Set your running days target."}
+                      {dailyRunGoal ? "Update your exercise-days target." : "Set your exercise-days target."}
                     </Text>
                   </View>
                   <ChevronRight size={16} color={colors.textLight} />
@@ -3901,9 +3945,9 @@ export default function GoalsScreen() {
                 <TouchableOpacity style={styles.setGoalActionCard} onPress={openRunWindowForm} activeOpacity={0.85}>
                   <Clock size={22} color="#2563EB" />
                   <View style={styles.setGoalActionInfo}>
-                    <Text style={styles.setGoalActionTitle}>Run Window</Text>
+                    <Text style={styles.setGoalActionTitle}>Set exercise time</Text>
                     <Text style={styles.setGoalActionText}>
-                      {runWindowGoal ? "Update your regular, event, and date-specific windows." : "Set the hours your runs should happen in."}
+                      {runWindowGoal ? "Update your duration and regular exercise time." : "Set your duration and regular exercise time."}
                     </Text>
                   </View>
                   <ChevronRight size={16} color={colors.textLight} />
@@ -3914,9 +3958,9 @@ export default function GoalsScreen() {
                 <TouchableOpacity style={styles.setGoalActionCard} onPress={openRunningBudgetForm} activeOpacity={0.85}>
                   <CreditCard size={22} color="#059669" />
                   <View style={styles.setGoalActionInfo}>
-                    <Text style={styles.setGoalActionTitle}>Running Budget</Text>
+                    <Text style={styles.setGoalActionTitle}>Manage running Expenditure</Text>
                     <Text style={styles.setGoalActionText}>
-                      {runningBudgetGoal ? "Update your expense budget and currency." : "Set a running expense budget."}
+                      {runningBudgetGoal ? "Update duration and category targets." : "Set targets for Event expenses, Gear, and Registrations."}
                     </Text>
                   </View>
                   <ChevronRight size={16} color={colors.textLight} />
@@ -3933,7 +3977,7 @@ export default function GoalsScreen() {
                 >
                   <Flame size={22} color="#0D9488" />
                   <View style={styles.setGoalActionInfo}>
-                    <Text style={styles.setGoalActionTitle}>Have planned runs</Text>
+                    <Text style={styles.setGoalActionTitle}>Follow an exercise plan</Text>
                     <Text style={styles.setGoalActionText}>
                       {habitDeclaration ? "Update your planned runs declaration." : "Add planned runs to this goal."}
                     </Text>
@@ -3946,7 +3990,7 @@ export default function GoalsScreen() {
                 <TouchableOpacity style={styles.setGoalActionCard} onPress={openEditGoalForm} activeOpacity={0.85}>
                   <Zap size={22} color={colors.primary} />
                   <View style={styles.setGoalActionInfo}>
-                    <Text style={styles.setGoalActionTitle}>Improve Fitness</Text>
+                    <Text style={styles.setGoalActionTitle}>Work on my pace</Text>
                     <Text style={styles.setGoalActionText}>{fitnessGoal ? "Update your pace target." : "Set a pace target."}</Text>
                   </View>
                   <ChevronRight size={16} color={colors.textLight} />
@@ -3957,7 +4001,7 @@ export default function GoalsScreen() {
                 <TouchableOpacity style={styles.setGoalActionCard} onPress={openEditWeightTarget} activeOpacity={0.85}>
                   <Scale size={22} color="#10B981" />
                   <View style={styles.setGoalActionInfo}>
-                    <Text style={styles.setGoalActionTitle}>Weight Loss</Text>
+                    <Text style={styles.setGoalActionTitle}>Loose some weight</Text>
                     <Text style={styles.setGoalActionText}>{weightTargetGoal ? "Update your target weight." : "Set a target weight."}</Text>
                   </View>
                   <ChevronRight size={16} color={colors.textLight} />
@@ -3968,7 +4012,7 @@ export default function GoalsScreen() {
                 <TouchableOpacity style={styles.setGoalActionCard} onPress={() => setShowHealthForm(true)} activeOpacity={0.85}>
                   <Heart size={22} color="#EF4444" />
                   <View style={styles.setGoalActionInfo}>
-                    <Text style={styles.setGoalActionTitle}>General Health</Text>
+                    <Text style={styles.setGoalActionTitle}>Monitor my health</Text>
                     <Text style={styles.setGoalActionText}>Log health readings for your score.</Text>
                   </View>
                   <ChevronRight size={16} color={colors.textLight} />
@@ -3979,7 +4023,7 @@ export default function GoalsScreen() {
                 <TouchableOpacity style={styles.setGoalActionCard} onPress={openEditMedalGoal} activeOpacity={0.85}>
                   <Trophy size={22} color="#D97706" />
                   <View style={styles.setGoalActionInfo}>
-                    <Text style={styles.setGoalActionTitle}>Earn Medals</Text>
+                    <Text style={styles.setGoalActionTitle}>Get medals</Text>
                     <Text style={styles.setGoalActionText}>
                       {medalTargetGoal ? "Update medal target and dates." : "Set target medals and date range."}
                     </Text>
@@ -3992,7 +4036,7 @@ export default function GoalsScreen() {
                 <View style={[styles.setGoalActionCard, styles.setGoalActionCardDisabled]}>
                   <Users size={22} color={colors.textLight} />
                   <View style={styles.setGoalActionInfo}>
-                    <Text style={[styles.setGoalActionTitle, styles.setGoalActionTitleDisabled]}>Compete in Community</Text>
+                    <Text style={[styles.setGoalActionTitle, styles.setGoalActionTitleDisabled]}>Be part in the community</Text>
                     <Text style={styles.setGoalActionText}>No target setup required. Rankings update automatically from eligible activities.</Text>
                   </View>
                 </View>
@@ -4010,7 +4054,7 @@ export default function GoalsScreen() {
               <View key="fitness" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Zap size={18} color={colors.primary} />
-                  <Text style={styles.sectionTitle}>Improve Fitness</Text>
+                  <Text style={styles.sectionTitle}>Work on my pace</Text>
                   <TouchableOpacity onPress={openEditGoalForm} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4075,7 +4119,7 @@ export default function GoalsScreen() {
               <View key="fitness" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Zap size={18} color={colors.primary} />
-                  <Text style={styles.sectionTitle}>Improve Fitness</Text>
+                  <Text style={styles.sectionTitle}>Work on my pace</Text>
                   <TouchableOpacity onPress={openEditGoalForm} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4095,7 +4139,7 @@ export default function GoalsScreen() {
               <View key="fitness" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Zap size={18} color={colors.primary} />
-                  <Text style={styles.sectionTitle}>Improve Fitness</Text>
+                  <Text style={styles.sectionTitle}>Work on my pace</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={openEditGoalForm} activeOpacity={0.8}>
                   <LinearGradient colors={["#FF6B35", "#FF8C42"]} style={styles.setupGoalGradient}>
@@ -4119,7 +4163,7 @@ export default function GoalsScreen() {
               <View key="dailyRun" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Calendar size={18} color="#0EA5E9" />
-                  <Text style={styles.sectionTitle}>Keep active</Text>
+                  <Text style={styles.sectionTitle}>Meet my exercise goals</Text>
                   <TouchableOpacity onPress={openDailyRunGoalForm} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4131,7 +4175,7 @@ export default function GoalsScreen() {
                       <Text style={[styles.dailyRunScore, dailyRunProgress.isOnTrack ? styles.paceGood : styles.paceBehind]}>
                         {dailyRunProgress.scorePercent}%
                       </Text>
-                      <Text style={styles.dailyRunScoreLabel}>Run days score</Text>
+                      <Text style={styles.dailyRunScoreLabel}>Exercise days score</Text>
                     </View>
                     <View style={[styles.dailyRunTargetPill, dailyRunProgress.isOnTrack ? styles.statusPillGood : styles.statusPillBehind]}>
                       <Text style={dailyRunProgress.isOnTrack ? styles.statusPillTextGood : styles.statusPillTextBehind}>
@@ -4193,7 +4237,7 @@ export default function GoalsScreen() {
               <View key="dailyRun" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Calendar size={18} color="#0EA5E9" />
-                  <Text style={styles.sectionTitle}>Keep active</Text>
+                  <Text style={styles.sectionTitle}>Meet my exercise goals</Text>
                   <TouchableOpacity onPress={openEditHabit} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4203,12 +4247,12 @@ export default function GoalsScreen() {
                   <TouchableOpacity style={[styles.setupGoalCard, styles.combinedHabitCard]} onPress={openDailyRunGoalForm} activeOpacity={0.8}>
                     <LinearGradient colors={["#0EA5E9", "#38BDF8"]} style={styles.setupGoalGradient}>
                       <Calendar size={32} color={colors.white} />
-                      <Text style={styles.setupGoalTitle}>Add Running Days</Text>
+                      <Text style={styles.setupGoalTitle}>Add Exercise Days</Text>
                       <Text style={styles.setupGoalSubtext}>
-                        Add a date range and run-day target to complete this goal.
+                        Add a date range and exercise-day target to complete this goal.
                       </Text>
                       <View style={styles.setupGoalButton}>
-                        <Text style={[styles.setupGoalButtonText, { color: "#0EA5E9" }]}>Set Running Days</Text>
+                        <Text style={[styles.setupGoalButtonText, { color: "#0EA5E9" }]}>Set Exercise Days</Text>
                         <ChevronRight size={16} color="#0EA5E9" />
                       </View>
                     </LinearGradient>
@@ -4219,14 +4263,14 @@ export default function GoalsScreen() {
               <View key="dailyRun" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Calendar size={18} color="#0EA5E9" />
-                  <Text style={styles.sectionTitle}>Keep active</Text>
+                  <Text style={styles.sectionTitle}>Meet my exercise goals</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={openDailyRunGoalForm} activeOpacity={0.8}>
                   <LinearGradient colors={["#0EA5E9", "#38BDF8"]} style={styles.setupGoalGradient}>
                     <Calendar size={32} color={colors.white} />
-                    <Text style={styles.setupGoalTitle}>Set Your Running Days Goal</Text>
+                    <Text style={styles.setupGoalTitle}>Set Your Exercise Days Goal</Text>
                     <Text style={styles.setupGoalSubtext}>
-                      Choose a date range and target percentage, then track daily run consistency.
+                      Choose a date range and target percentage, then track exercise-day consistency.
                     </Text>
                     <View style={styles.setupGoalButton}>
                       <Text style={[styles.setupGoalButtonText, { color: "#0EA5E9" }]}>Get Started</Text>
@@ -4243,7 +4287,7 @@ export default function GoalsScreen() {
               <View key="runWindow" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Clock size={18} color="#2563EB" />
-                  <Text style={styles.sectionTitle}>Run Window</Text>
+                  <Text style={styles.sectionTitle}>Set exercise time</Text>
                   <TouchableOpacity onPress={openRunWindowForm} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4259,24 +4303,30 @@ export default function GoalsScreen() {
                     </View>
                     <View style={[styles.dailyRunTargetPill, runWindowProgress.isOnTrack ? styles.statusPillGood : styles.statusPillBehind]}>
                       <Text style={runWindowProgress.isOnTrack ? styles.statusPillTextGood : styles.statusPillTextBehind}>
-                        {runWindowProgress.onTargetDays} / {runWindowProgress.totalDays} runs
+                        {runWindowProgress.onTargetBlocks} / {runWindowProgress.totalBlocks} checks
                       </Text>
                     </View>
                   </View>
+
+                  <Text style={styles.goalDurationText}>
+                    Duration: {formatDateRange(runWindowGoal.start_date, runWindowGoal.end_date)}
+                  </Text>
 
                   <View style={styles.dailyRunCalendarGrid}>
                     {runWindowProgress.days.map((day, index) => (
                       <View
                         key={`${day.date}-${index}`}
-                        style={[
-                          styles.dailyRunDayCell,
-                          day.isOnTarget ? styles.dailyRunDayDone : styles.dailyRunDayMissed,
-                        ]}
+                        style={styles.runWindowDayCell}
                       >
                         <Text style={styles.dailyRunDayNumber}>{day.day}</Text>
-                        <Text style={[styles.dailyRunDayMark, day.isOnTarget ? styles.dailyRunDayMarkDone : styles.dailyRunDayMarkMissed]}>
-                          {day.isOnTarget ? "✓" : "×"}
-                        </Text>
+                        <View style={styles.runWindowCheckRow}>
+                          <View style={[styles.runWindowCheckBlock, day.startOnTarget ? styles.goalCalendarCellGood : styles.goalCalendarCellBad]}>
+                            <Text style={[styles.runWindowCheckText, day.startOnTarget ? styles.dailyRunDayMarkDone : styles.dailyRunDayMarkMissed]}>S</Text>
+                          </View>
+                          <View style={[styles.runWindowCheckBlock, day.endOnTarget ? styles.goalCalendarCellGood : styles.goalCalendarCellBad]}>
+                            <Text style={[styles.runWindowCheckText, day.endOnTarget ? styles.dailyRunDayMarkDone : styles.dailyRunDayMarkMissed]}>E</Text>
+                          </View>
+                        </View>
                       </View>
                     ))}
                   </View>
@@ -4284,12 +4334,14 @@ export default function GoalsScreen() {
                   {runWindowProgress.days.slice(-3).map((day, index) => (
                     <View key={`run-window-detail-${day.date}-${index}`} style={styles.weightHistoryRow}>
                       <Text style={styles.weightHistoryDate}>{day.date}</Text>
-                      <Text style={styles.weightHistoryValue}>{formatClock(day.startTime)}-{formatClock(day.endTime)} · {day.windowLabel}</Text>
+                      <Text style={styles.weightHistoryValue}>
+                        S {formatClock(day.startTime)}/{formatClock(day.targetStart)} · E {formatClock(day.endTime)}/{formatClock(day.targetEnd)}
+                      </Text>
                     </View>
                   ))}
 
                   <Text style={styles.fitnessFootnote}>
-                    Only days with an activity get cards. Regular windows apply unless an event or date-specific window is set for that date.
+                    Each activity date has S for start and E for end. Green means the workout started or ended within the target time; red means it was late.
                   </Text>
                 </View>
               </View>
@@ -4297,13 +4349,13 @@ export default function GoalsScreen() {
               <View key="runWindow" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Clock size={18} color="#2563EB" />
-                  <Text style={styles.sectionTitle}>Run Window</Text>
+                  <Text style={styles.sectionTitle}>Set exercise time</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={openRunWindowForm} activeOpacity={0.8}>
                   <LinearGradient colors={["#2563EB", "#38BDF8"]} style={styles.setupGoalGradient}>
                     <Clock size={32} color={colors.white} />
-                    <Text style={styles.setupGoalTitle}>Set Your Run Window</Text>
-                    <Text style={styles.setupGoalSubtext}>Choose the time windows when your regular and event runs should happen.</Text>
+                    <Text style={styles.setupGoalTitle}>Set exercise time</Text>
+                    <Text style={styles.setupGoalSubtext}>Choose one duration and one regular exercise time.</Text>
                     <View style={styles.setupGoalButton}>
                       <Text style={[styles.setupGoalButtonText, { color: "#2563EB" }]}>Set Window</Text>
                       <ChevronRight size={16} color="#2563EB" />
@@ -4319,7 +4371,7 @@ export default function GoalsScreen() {
               <View key="budget" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <CreditCard size={18} color="#059669" />
-                  <Text style={styles.sectionTitle}>Running Budget</Text>
+                  <Text style={styles.sectionTitle}>Manage running Expenditure</Text>
                   <TouchableOpacity onPress={openRunningBudgetForm} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4354,7 +4406,7 @@ export default function GoalsScreen() {
                   <View style={styles.communityStatsRow}>
                     <View style={styles.communityStatItem}>
                       <Text style={styles.communityStatValue}>{runningBudgetGoal.currency} {runningBudgetProgress.budget.toFixed(0)}</Text>
-                      <Text style={styles.communityStatLabel}>Budget</Text>
+                      <Text style={styles.communityStatLabel}>Grand total</Text>
                     </View>
                     <View style={styles.communityStatDivider} />
                     <View style={styles.communityStatItem}>
@@ -4368,15 +4420,51 @@ export default function GoalsScreen() {
                     </View>
                   </View>
 
-                  <TouchableOpacity style={styles.logWeightButton} onPress={() => setShowBudgetExpenseForm(true)} activeOpacity={0.8}>
+                  <Text style={styles.goalDurationText}>
+                    Duration: {formatDateRange(runningBudgetGoal.start_date, runningBudgetGoal.end_date)}
+                  </Text>
+
+                  <View style={styles.budgetCategoryTabs}>
+                    {BUDGET_CATEGORIES.map((category) => {
+                      const isActive = activeBudgetCategory === category;
+                      return (
+                        <TouchableOpacity
+                          key={category}
+                          style={[styles.budgetCategoryTab, isActive && styles.budgetCategoryTabActive]}
+                          onPress={() => {
+                            setActiveBudgetCategory(category);
+                            setExpenseCategoryInput(category);
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={[styles.budgetCategoryTabText, isActive && styles.budgetCategoryTabTextActive]} numberOfLines={1}>{category}</Text>
+                          <Text style={[styles.budgetCategoryTabAmount, isActive && styles.budgetCategoryTabTextActive]}>
+                            {runningBudgetGoal.currency} {(runningBudgetProgress.categoryTotals[category] || 0).toFixed(0)} / {(runningBudgetProgress.categoryTargets[category] || 0).toFixed(0)}
+                          </Text>
+                          <Text style={[styles.budgetCategoryTabMeta, isActive && styles.budgetCategoryTabTextActive]}>
+                            Rem {runningBudgetGoal.currency} {(runningBudgetProgress.categoryRemaining[category] || 0).toFixed(0)}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.logWeightButton}
+                    onPress={() => {
+                      setExpenseCategoryInput(activeBudgetCategory);
+                      setShowBudgetExpenseForm(true);
+                    }}
+                    activeOpacity={0.8}
+                  >
                     <Plus size={16} color={colors.white} />
                     <Text style={styles.logWeightButtonText}>Add Expense</Text>
                   </TouchableOpacity>
 
-                  {runningBudgetExpenses.slice(0, 5).map((expense) => (
+                  {runningBudgetExpenses.filter((expense) => expense.category === activeBudgetCategory).slice(0, 5).map((expense) => (
                     <View key={expense.expense_id} style={styles.weightHistoryRow}>
                       <Text style={styles.weightHistoryDate} numberOfLines={1}>
-                        {expense.category === "Race registration" ? expense.race_name || expense.category : expense.other_label || expense.category}
+                        {expense.other_label || expense.race_name || expense.category}
                       </Text>
                       <Text style={styles.weightHistoryValue}>{runningBudgetGoal.currency} {Number(expense.amount).toFixed(0)}</Text>
                     </View>
@@ -4387,13 +4475,13 @@ export default function GoalsScreen() {
               <View key="budget" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <CreditCard size={18} color="#059669" />
-                  <Text style={styles.sectionTitle}>Running Budget</Text>
+                  <Text style={styles.sectionTitle}>Manage running Expenditure</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={openRunningBudgetForm} activeOpacity={0.8}>
                   <LinearGradient colors={["#059669", "#34D399"]} style={styles.setupGoalGradient}>
                     <CreditCard size={32} color={colors.white} />
-                    <Text style={styles.setupGoalTitle}>Set Running Budget</Text>
-                    <Text style={styles.setupGoalSubtext}>Track race fees, travel, gear, and running supplies against a budget.</Text>
+                    <Text style={styles.setupGoalTitle}>Set Running Expenditure</Text>
+                    <Text style={styles.setupGoalSubtext}>Set a duration, add category targets, and track spending against the grand total.</Text>
                     <View style={styles.setupGoalButton}>
                       <Text style={[styles.setupGoalButtonText, { color: "#059669" }]}>Set Budget</Text>
                       <ChevronRight size={16} color="#059669" />
@@ -4409,7 +4497,7 @@ export default function GoalsScreen() {
               <View key="weight" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Scale size={18} color={colors.primary} />
-                  <Text style={styles.sectionTitle}>Weight Loss</Text>
+                  <Text style={styles.sectionTitle}>Loose some weight</Text>
                   <TouchableOpacity onPress={openEditWeightTarget} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4559,7 +4647,7 @@ export default function GoalsScreen() {
               <View key="weight" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Scale size={18} color={colors.primary} />
-                  <Text style={styles.sectionTitle}>Weight Loss</Text>
+                  <Text style={styles.sectionTitle}>Loose some weight</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={openEditWeightTarget} activeOpacity={0.8}>
                   <LinearGradient colors={["#10B981", "#34D399"]} style={styles.setupGoalGradient}>
@@ -4583,7 +4671,7 @@ export default function GoalsScreen() {
               <View key="health" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Heart size={18} color="#E11D48" />
-                  <Text style={styles.sectionTitle}>General Health</Text>
+                  <Text style={styles.sectionTitle}>Monitor my health</Text>
                   <TouchableOpacity onPress={() => setShowHealthForm(true)} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Log</Text>
                     <Plus size={14} color={colors.primary} />
@@ -4698,12 +4786,12 @@ export default function GoalsScreen() {
               <View key="health" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Heart size={18} color="#E11D48" />
-                  <Text style={styles.sectionTitle}>General Health</Text>
+                  <Text style={styles.sectionTitle}>Monitor my health</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={() => setShowHealthForm(true)} activeOpacity={0.8}>
                   <LinearGradient colors={["#E11D48", "#F43F5E"]} style={styles.setupGoalGradient}>
                     <Heart size={32} color={colors.white} />
-                    <Text style={styles.setupGoalTitle}>Track Your Health</Text>
+                    <Text style={styles.setupGoalTitle}>Monitor my health</Text>
                     <Text style={styles.setupGoalSubtext}>
                       Enter daily data from your smartwatch to get an overall health score based on steps, heart rate, sleep, and blood oxygen
                     </Text>
@@ -4722,7 +4810,7 @@ export default function GoalsScreen() {
               <View key="habit" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Flame size={18} color="#0D9488" />
-                  <Text style={styles.sectionTitle}>Have planned runs</Text>
+                  <Text style={styles.sectionTitle}>Follow an exercise plan</Text>
                   <TouchableOpacity onPress={openEditHabit} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4817,12 +4905,12 @@ export default function GoalsScreen() {
               <View key="habit" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Flame size={18} color="#0D9488" />
-                  <Text style={styles.sectionTitle}>Have planned runs</Text>
+                  <Text style={styles.sectionTitle}>Follow an exercise plan</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={() => { resetHabitForm(); setShowHabitModal(true); }} activeOpacity={0.8}>
                   <LinearGradient colors={["#0D9488", "#14B8A6"]} style={styles.setupGoalGradient}>
                     <Flame size={32} color={colors.white} />
-                    <Text style={styles.setupGoalTitle}>Have planned runs</Text>
+                    <Text style={styles.setupGoalTitle}>Follow an exercise plan</Text>
                     <Text style={styles.setupGoalSubtext}>
                       Declare your planned runs and track your consistency
                     </Text>
@@ -4841,7 +4929,7 @@ export default function GoalsScreen() {
               <View key="medals" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Trophy size={18} color="#D97706" />
-                  <Text style={styles.sectionTitle}>Earn Medals</Text>
+                  <Text style={styles.sectionTitle}>Get medals</Text>
                   <TouchableOpacity onPress={openEditMedalGoal} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4975,12 +5063,12 @@ export default function GoalsScreen() {
               <View key="medals" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Trophy size={18} color="#D97706" />
-                  <Text style={styles.sectionTitle}>Earn Medals</Text>
+                  <Text style={styles.sectionTitle}>Get medals</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={openEditMedalGoal} activeOpacity={0.8}>
                   <LinearGradient colors={["#D97706", "#F59E0B"]} style={styles.setupGoalGradient}>
                     <Trophy size={32} color={colors.white} />
-                    <Text style={styles.setupGoalTitle}>Set Earn Medals Goal</Text>
+                    <Text style={styles.setupGoalTitle}>Set Get Medals Goal</Text>
                     <Text style={styles.setupGoalSubtext}>Choose a medal target and date range to track internal and approved external medals.</Text>
                     <View style={styles.setupGoalButton}>
                       <Text style={[styles.setupGoalButtonText, { color: "#D97706" }]}>Set Goal</Text>
@@ -4997,7 +5085,7 @@ export default function GoalsScreen() {
               <View key="community" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Users size={18} color="#0EA5E9" />
-                  <Text style={styles.sectionTitle}>Compete in Community</Text>
+                  <Text style={styles.sectionTitle}>Be part in the community</Text>
                 </View>
                 <View style={styles.communityCard}>
                   <RankHistoryGraph
@@ -5047,7 +5135,7 @@ export default function GoalsScreen() {
               <View key="community" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Users size={18} color="#0EA5E9" />
-                  <Text style={styles.sectionTitle}>Compete in Community</Text>
+                  <Text style={styles.sectionTitle}>Be part in the community</Text>
                 </View>
                 <View style={styles.communityCard}>
                   <View style={styles.noActivitiesInfo}>
@@ -5165,7 +5253,7 @@ export default function GoalsScreen() {
           <View style={styles.modalContent}>
             <LinearGradient colors={["#0EA5E9", "#38BDF8"]} style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
-                {dailyRunGoal ? "Update Running Days Goal" : "Set Running Days Goal"}
+                {dailyRunGoal ? "Update Exercise Days Goal" : "Set Exercise Days Goal"}
               </Text>
               <TouchableOpacity onPress={() => setShowDailyRunGoalForm(false)}>
                 <X size={24} color={colors.white} />
@@ -5174,7 +5262,7 @@ export default function GoalsScreen() {
 
             <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
               <Text style={styles.modalSubtitle}>
-                Pick a date range and the percentage of days you want to run.
+                Pick a date range and the percentage of days you want to exercise.
               </Text>
 
               <View style={styles.inputGroup}>
@@ -5209,7 +5297,7 @@ export default function GoalsScreen() {
                   keyboardType="decimal-pad"
                   placeholderTextColor={colors.textLight}
                 />
-                <Text style={styles.inputHint}>Example: 80 means run on 80% of days in the date range.</Text>
+                <Text style={styles.inputHint}>Example: 80 means exercise on 80% of days in the date range.</Text>
               </View>
 
               <TouchableOpacity
@@ -5238,60 +5326,46 @@ export default function GoalsScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <LinearGradient colors={["#2563EB", "#38BDF8"]} style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{runWindowGoal ? "Update Run Window" : "Set Run Window"}</Text>
+              <Text style={styles.modalTitle}>{runWindowGoal ? "Update Exercise Time" : "Set Exercise Time"}</Text>
               <TouchableOpacity onPress={() => setShowRunWindowForm(false)}>
                 <X size={24} color={colors.white} />
               </TouchableOpacity>
             </LinearGradient>
 
             <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
-              <Text style={styles.modalSubtitle}>Set when runs should start and finish. Cards are created only for dates with activities.</Text>
+              <Text style={styles.modalSubtitle}>Set the goal duration, then enter the latest start and end times for exercise.</Text>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Goal Duration *</Text>
                 <View style={styles.twoColumnInputs}>
-                  <TextInput style={[styles.input, styles.twoColumnInput]} placeholder="Start YYYY-MM-DD" value={runWindowStartDateInput} onChangeText={setRunWindowStartDateInput} placeholderTextColor={colors.textLight} />
-                  <TextInput style={[styles.input, styles.twoColumnInput]} placeholder="End YYYY-MM-DD" value={runWindowEndDateInput} onChangeText={setRunWindowEndDateInput} placeholderTextColor={colors.textLight} />
+                  <View style={styles.labeledColumnInput}>
+                    <Text style={styles.inlineInputLabel}>Start</Text>
+                    <TextInput style={styles.input} placeholder="YYYY-MM-DD" value={runWindowStartDateInput} onChangeText={setRunWindowStartDateInput} placeholderTextColor={colors.textLight} />
+                  </View>
+                  <View style={styles.labeledColumnInput}>
+                    <Text style={styles.inlineInputLabel}>End</Text>
+                    <TextInput style={styles.input} placeholder="YYYY-MM-DD" value={runWindowEndDateInput} onChangeText={setRunWindowEndDateInput} placeholderTextColor={colors.textLight} />
+                  </View>
                 </View>
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Regular Window 1 *</Text>
+                <Text style={styles.inputLabel}>Regular exercise time *</Text>
                 <View style={styles.twoColumnInputs}>
-                  <TextInput style={[styles.input, styles.twoColumnInput]} placeholder="06:00" value={regularWindowOneStart} onChangeText={setRegularWindowOneStart} placeholderTextColor={colors.textLight} />
-                  <TextInput style={[styles.input, styles.twoColumnInput]} placeholder="07:30" value={regularWindowOneEnd} onChangeText={setRegularWindowOneEnd} placeholderTextColor={colors.textLight} />
-                </View>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Regular Window 2</Text>
-                <View style={styles.twoColumnInputs}>
-                  <TextInput style={[styles.input, styles.twoColumnInput]} placeholder="17:30" value={regularWindowTwoStart} onChangeText={setRegularWindowTwoStart} placeholderTextColor={colors.textLight} />
-                  <TextInput style={[styles.input, styles.twoColumnInput]} placeholder="19:00" value={regularWindowTwoEnd} onChangeText={setRegularWindowTwoEnd} placeholderTextColor={colors.textLight} />
-                </View>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Event Window</Text>
-                <TextInput style={styles.input} placeholder="Event date YYYY-MM-DD" value={eventWindowDateInput} onChangeText={setEventWindowDateInput} placeholderTextColor={colors.textLight} />
-                <View style={[styles.twoColumnInputs, { marginTop: 8 }]}>
-                  <TextInput style={[styles.input, styles.twoColumnInput]} placeholder="06:00" value={eventWindowStartInput} onChangeText={setEventWindowStartInput} placeholderTextColor={colors.textLight} />
-                  <TextInput style={[styles.input, styles.twoColumnInput]} placeholder="12:00" value={eventWindowEndInput} onChangeText={setEventWindowEndInput} placeholderTextColor={colors.textLight} />
-                </View>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Date-Specific Window</Text>
-                <TextInput style={styles.input} placeholder="Date YYYY-MM-DD" value={dateWindowDateInput} onChangeText={setDateWindowDateInput} placeholderTextColor={colors.textLight} />
-                <View style={[styles.twoColumnInputs, { marginTop: 8 }]}>
-                  <TextInput style={[styles.input, styles.twoColumnInput]} placeholder="Start" value={dateWindowStartInput} onChangeText={setDateWindowStartInput} placeholderTextColor={colors.textLight} />
-                  <TextInput style={[styles.input, styles.twoColumnInput]} placeholder="End" value={dateWindowEndInput} onChangeText={setDateWindowEndInput} placeholderTextColor={colors.textLight} />
+                  <View style={styles.labeledColumnInput}>
+                    <Text style={styles.inlineInputLabel}>Start before</Text>
+                    <TextInput style={styles.input} placeholder="06:00" value={regularWindowOneStart} onChangeText={setRegularWindowOneStart} placeholderTextColor={colors.textLight} />
+                  </View>
+                  <View style={styles.labeledColumnInput}>
+                    <Text style={styles.inlineInputLabel}>End before</Text>
+                    <TextInput style={styles.input} placeholder="07:30" value={regularWindowOneEnd} onChangeText={setRegularWindowOneEnd} placeholderTextColor={colors.textLight} />
+                  </View>
                 </View>
               </View>
 
               <TouchableOpacity style={[styles.saveButton, saveRunWindowGoalMutation.isPending && styles.saveButtonDisabled]} onPress={handleSaveRunWindowGoal} disabled={saveRunWindowGoalMutation.isPending} activeOpacity={0.8}>
                 <LinearGradient colors={["#2563EB", "#38BDF8"]} style={styles.saveButtonGradient}>
-                  <Text style={styles.saveButtonText}>{saveRunWindowGoalMutation.isPending ? "Saving..." : "Save Window"}</Text>
+                  <Text style={styles.saveButtonText}>{saveRunWindowGoalMutation.isPending ? "Saving..." : "Save Exercise Time"}</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </ScrollView>
@@ -5308,24 +5382,53 @@ export default function GoalsScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <LinearGradient colors={["#059669", "#34D399"]} style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{runningBudgetGoal ? "Update Running Budget" : "Set Running Budget"}</Text>
+              <Text style={styles.modalTitle}>{runningBudgetGoal ? "Update Running Expenditure" : "Set Running Expenditure"}</Text>
               <TouchableOpacity onPress={() => setShowBudgetGoalForm(false)}>
                 <X size={24} color={colors.white} />
               </TouchableOpacity>
             </LinearGradient>
 
             <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
+              <Text style={styles.modalSubtitle}>
+                Set target amounts for each category. The grand total is calculated automatically.
+              </Text>
+
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Goal Duration *</Text>
                 <View style={styles.twoColumnInputs}>
-                  <TextInput style={[styles.input, styles.twoColumnInput]} placeholder="Start YYYY-MM-DD" value={budgetStartDateInput} onChangeText={setBudgetStartDateInput} placeholderTextColor={colors.textLight} />
-                  <TextInput style={[styles.input, styles.twoColumnInput]} placeholder="End YYYY-MM-DD" value={budgetEndDateInput} onChangeText={setBudgetEndDateInput} placeholderTextColor={colors.textLight} />
+                  <View style={styles.labeledColumnInput}>
+                    <Text style={styles.inlineInputLabel}>Start</Text>
+                    <TextInput style={styles.input} placeholder="YYYY-MM-DD" value={budgetStartDateInput} onChangeText={setBudgetStartDateInput} placeholderTextColor={colors.textLight} />
+                  </View>
+                  <View style={styles.labeledColumnInput}>
+                    <Text style={styles.inlineInputLabel}>End</Text>
+                    <TextInput style={styles.input} placeholder="YYYY-MM-DD" value={budgetEndDateInput} onChangeText={setBudgetEndDateInput} placeholderTextColor={colors.textLight} />
+                  </View>
                 </View>
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Budget *</Text>
-                <TextInput style={styles.input} placeholder="Amount" value={budgetAmountInput} onChangeText={setBudgetAmountInput} keyboardType="decimal-pad" placeholderTextColor={colors.textLight} />
+                <Text style={styles.inputLabel}>Category Target Amounts *</Text>
+                <View style={styles.budgetTargetGrid}>
+                  <View style={styles.budgetTargetInputCard}>
+                    <Text style={styles.inlineInputLabel}>Event expenses</Text>
+                    <TextInput style={styles.input} placeholder="Amount" value={eventExpensesTargetInput} onChangeText={setEventExpensesTargetInput} keyboardType="decimal-pad" placeholderTextColor={colors.textLight} />
+                  </View>
+                  <View style={styles.budgetTargetInputCard}>
+                    <Text style={styles.inlineInputLabel}>Gear</Text>
+                    <TextInput style={styles.input} placeholder="Amount" value={gearTargetInput} onChangeText={setGearTargetInput} keyboardType="decimal-pad" placeholderTextColor={colors.textLight} />
+                  </View>
+                  <View style={styles.budgetTargetInputCard}>
+                    <Text style={styles.inlineInputLabel}>Registrations</Text>
+                    <TextInput style={styles.input} placeholder="Amount" value={registrationsTargetInput} onChangeText={setRegistrationsTargetInput} keyboardType="decimal-pad" placeholderTextColor={colors.textLight} />
+                  </View>
+                </View>
+                <View style={styles.budgetGrandTotalRow}>
+                  <Text style={styles.budgetGrandTotalLabel}>Grand total</Text>
+                  <Text style={styles.budgetGrandTotalValue}>
+                    {(budgetCurrencyInput || runningBudgetGoal?.currency || "USD").toUpperCase()} {(parseMoneyInput(eventExpensesTargetInput) + parseMoneyInput(gearTargetInput) + parseMoneyInput(registrationsTargetInput)).toFixed(0)}
+                  </Text>
+                </View>
               </View>
 
               <View style={styles.inputGroup}>
@@ -5342,7 +5445,7 @@ export default function GoalsScreen() {
 
               <TouchableOpacity style={[styles.saveButton, saveRunningBudgetGoalMutation.isPending && styles.saveButtonDisabled]} onPress={handleSaveRunningBudgetGoal} disabled={saveRunningBudgetGoalMutation.isPending} activeOpacity={0.8}>
                 <LinearGradient colors={["#059669", "#34D399"]} style={styles.saveButtonGradient}>
-                  <Text style={styles.saveButtonText}>{saveRunningBudgetGoalMutation.isPending ? "Saving..." : "Save Budget"}</Text>
+                  <Text style={styles.saveButtonText}>{saveRunningBudgetGoalMutation.isPending ? "Saving..." : "Save Target"}</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </ScrollView>
@@ -5359,7 +5462,7 @@ export default function GoalsScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <LinearGradient colors={["#059669", "#34D399"]} style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Running Expense</Text>
+              <Text style={styles.modalTitle}>Add Running Expenditure</Text>
               <TouchableOpacity onPress={() => setShowBudgetExpenseForm(false)}>
                 <X size={24} color={colors.white} />
               </TouchableOpacity>
@@ -5370,26 +5473,25 @@ export default function GoalsScreen() {
                 <Text style={styles.inputLabel}>Category</Text>
                 <View style={styles.habitChipRow}>
                   {BUDGET_CATEGORIES.map((category) => (
-                    <TouchableOpacity key={category} style={[styles.habitChip, expenseCategoryInput === category && styles.habitChipActive]} onPress={() => setExpenseCategoryInput(category)} activeOpacity={0.8}>
+                    <TouchableOpacity
+                      key={category}
+                      style={[styles.habitChip, expenseCategoryInput === category && styles.habitChipActive]}
+                      onPress={() => {
+                        setExpenseCategoryInput(category);
+                        setActiveBudgetCategory(category);
+                      }}
+                      activeOpacity={0.8}
+                    >
                       <Text style={[styles.habitChipText, expenseCategoryInput === category && styles.habitChipTextActive]}>{category}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
               </View>
 
-              {expenseCategoryInput === "Race registration" ? (
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Race Name *</Text>
-                  <TextInput style={styles.input} value={expenseRaceNameInput} onChangeText={setExpenseRaceNameInput} placeholder="Race name" placeholderTextColor={colors.textLight} />
-                </View>
-              ) : null}
-
-              {expenseCategoryInput === "Other" ? (
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Expense Name *</Text>
-                  <TextInput style={styles.input} value={expenseOtherInput} onChangeText={setExpenseOtherInput} placeholder="Describe expense" placeholderTextColor={colors.textLight} />
-                </View>
-              ) : null}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Expense Name *</Text>
+                <TextInput style={styles.input} value={expenseOtherInput} onChangeText={setExpenseOtherInput} placeholder="Expense name" placeholderTextColor={colors.textLight} />
+              </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Amount *</Text>
@@ -5770,7 +5872,7 @@ export default function GoalsScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <LinearGradient colors={["#D97706", "#F59E0B"]} style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Earn Medals Goal</Text>
+              <Text style={styles.modalTitle}>Get Medals Goal</Text>
               <TouchableOpacity onPress={() => setShowMedalGoalModal(false)}>
                 <X size={24} color={colors.white} />
               </TouchableOpacity>
@@ -5845,7 +5947,7 @@ export default function GoalsScreen() {
 
             <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
               <Text style={styles.modalSubtitle}>
-                Submit an external medal for admin approval. Approved medals feed Earn Medals and the Community Medals leaderboard.
+                Submit an external medal for admin approval. Approved medals feed Get medals and the Community Medals leaderboard.
               </Text>
 
               <View style={styles.externalMedalTable}>
@@ -6874,6 +6976,48 @@ const styles = StyleSheet.create({
   twoColumnInput: {
     flex: 1,
   },
+  labeledColumnInput: {
+    flex: 1,
+    minWidth: 0,
+  },
+  inlineInputLabel: {
+    fontSize: 11,
+    fontWeight: "800" as const,
+    color: colors.textSecondary,
+    marginBottom: 4,
+  },
+  budgetTargetGrid: {
+    gap: 10,
+  },
+  budgetTargetInputCard: {
+    borderWidth: 1,
+    borderColor: colors.divider,
+    borderRadius: 8,
+    padding: 10,
+    backgroundColor: colors.extraLightGray,
+  },
+  budgetGrandTotalRow: {
+    marginTop: 10,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+  },
+  budgetGrandTotalLabel: {
+    fontSize: 13,
+    fontWeight: "900" as const,
+    color: "#047857",
+  },
+  budgetGrandTotalValue: {
+    fontSize: 15,
+    fontWeight: "900" as const,
+    color: "#047857",
+  },
   inputLabel: {
     fontSize: 14,
     fontWeight: "600" as const,
@@ -7589,6 +7733,85 @@ const styles = StyleSheet.create({
   budgetCardOver: {
     backgroundColor: "#FEF2F2",
     borderColor: "#FCA5A5",
+  },
+  goalDurationText: {
+    fontSize: 12,
+    fontWeight: "800" as const,
+    color: colors.textSecondary,
+    marginBottom: 8,
+  },
+  runWindowDayCell: {
+    width: 48,
+    minHeight: 44,
+    borderRadius: 7,
+    backgroundColor: colors.extraLightGray,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    paddingVertical: 4,
+    gap: 3,
+  },
+  runWindowCheckRow: {
+    flexDirection: "row" as const,
+    gap: 3,
+  },
+  runWindowCheckBlock: {
+    width: 18,
+    height: 18,
+    borderRadius: 5,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    borderWidth: 1,
+  },
+  runWindowCheckText: {
+    fontSize: 10,
+    fontWeight: "900" as const,
+    lineHeight: 12,
+  },
+  budgetCategoryTabs: {
+    flexDirection: "row" as const,
+    gap: 6,
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  budgetCategoryTab: {
+    flex: 1,
+    minHeight: 54,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    backgroundColor: colors.white,
+    paddingHorizontal: 6,
+    paddingVertical: 7,
+    justifyContent: "center" as const,
+  },
+  budgetCategoryTabActive: {
+    backgroundColor: "#059669",
+    borderColor: "#059669",
+  },
+  budgetCategoryTabText: {
+    fontSize: 10,
+    fontWeight: "900" as const,
+    color: "#047857",
+    textAlign: "center" as const,
+  },
+  budgetCategoryTabAmount: {
+    fontSize: 11,
+    fontWeight: "900" as const,
+    color: colors.text,
+    textAlign: "center" as const,
+    marginTop: 3,
+  },
+  budgetCategoryTabMeta: {
+    fontSize: 9,
+    fontWeight: "800" as const,
+    color: colors.textSecondary,
+    textAlign: "center" as const,
+    marginTop: 2,
+  },
+  budgetCategoryTabTextActive: {
+    color: colors.white,
   },
   fitnessScorecard: {
     backgroundColor: "#FFF7ED",

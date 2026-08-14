@@ -47,7 +47,7 @@ const DEFAULT_FAQS = [
     faq_id: "default-7",
     question: "Who can join each special club?",
     answer:
-      "Junior Runners is for users aged 8 to 15. Golden Age Runners is for users aged 60 and above. Para Runners is available when your profile says you have a disability, with an extra equipment question for wheelchair, handcycle, prosthetic blades, or other gear. Treadmill Runners is available when your profile says you do indoor workouts. SmartFit Club is available when your profile says you use a smart watch to record workouts and you have selected General Health as one of your goals.",
+      "Junior Runners is for users aged 8 to 15. Golden Age Runners is for users aged 60 and above. Para Runners is available when your profile says you have a disability, with an extra equipment question for wheelchair, handcycle, prosthetic blades, or other gear. Treadmill Runners is available when your profile says you do indoor workouts. SmartFit Club is available when your profile says you use a smart watch to record workouts and you have selected Monitor my health as one of your goals.",
     display_order: 50,
   },
   {
@@ -68,7 +68,7 @@ const DEFAULT_FAQS = [
     faq_id: "default-10",
     question: "How do goals, scorecards, and special club rankings connect?",
     answer:
-      "Goal pages show the goals you selected. Related special club ranks may appear where relevant, such as SmartFit rank inside General Health. Unselected goals may be shown separately as inactive options rather than mixed into your active scorecard.",
+      "Goal pages show the goals you selected. Related special club ranks may appear where relevant, such as SmartFit rank inside Monitor my health. Unselected goals may be shown separately as inactive options rather than mixed into your active scorecard.",
     display_order: 80,
   },
   {

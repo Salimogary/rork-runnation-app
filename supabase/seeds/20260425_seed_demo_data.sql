@@ -13,12 +13,12 @@ set
 
 insert into public.goals (goal_id, goal)
 values
-  (1, 'Lose weight'),
-  (2, 'Get fit'),
-  (3, 'Improve pace'),
-  (4, 'Stay consistent'),
-  (5, 'Join a community'),
-  (6, 'Train for an event')
+  (1, 'Meet my exercise goals'),
+  (2, 'Loose some weight'),
+  (3, 'Work on my pace'),
+  (4, 'Get medals'),
+  (5, 'Be part in the community'),
+  (6, 'Monitor my health')
 on conflict do nothing;
 
 insert into public.registrations (

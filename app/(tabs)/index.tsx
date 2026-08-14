@@ -2,7 +2,7 @@ import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Platform, Modal, 
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge, Watch, Smartphone, ChevronRight, Heart, Activity, Droplets, Flame, Stethoscope, Bike, ArrowLeft, Share2, Save, Check, Camera, Building2, QrCode, Printer } from "lucide-react-native";
+import { Play, Pause, Square, Footprints, Dumbbell, Upload, X, Timer, Gauge, Watch, Smartphone, ChevronRight, Heart, Activity, Droplets, Flame, Stethoscope, Bike, ArrowLeft, Share2, Save, Check, Camera, Building2, QrCode, Printer, Search, Filter, Plus, Download } from "lucide-react-native";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import * as ImagePicker from "expo-image-picker";
@@ -49,6 +49,7 @@ type ActiveStairSession = {
   lapId?: string | null;
   buildingName?: string | null;
   routeName?: string | null;
+  routeId?: string | null;
   nextCheckpoint?: string | null;
   completedAscents: number;
   verifiedSteps: number;
@@ -564,10 +565,19 @@ function PhoneExerciseScreen() {
   const [isScanningStairQr, setIsScanningStairQr] = useState(false);
   const [manualStairQrToken, setManualStairQrToken] = useState("");
   const [stairSessionSeconds, setStairSessionSeconds] = useState(0);
+  const [stairLandingSection, setStairLandingSection] = useState<"menu" | "start" | "setup" | "instructions">("menu");
   const [stairBuildingSearch, setStairBuildingSearch] = useState("");
+  const [selectedStairRoute, setSelectedStairRoute] = useState<any | null>(null);
+  const [stairCameraEnabled, setStairCameraEnabled] = useState(false);
+  const [showStairRouteFilters, setShowStairRouteFilters] = useState(false);
+  const [stairFilterCountry, setStairFilterCountry] = useState("");
+  const [stairFilterCity, setStairFilterCity] = useState("");
+  const [stairFilterAccess, setStairFilterAccess] = useState<"all" | "public" | "residential">("all");
+  const [stairFilterFloorTier, setStairFilterFloorTier] = useState<"all" | "low" | "mid" | "high">("all");
   const [showStairSetupForm, setShowStairSetupForm] = useState(false);
   const [isRegisteringStairRoute, setIsRegisteringStairRoute] = useState(false);
   const [generatedStairStickers, setGeneratedStairStickers] = useState<any[]>([]);
+  const [generatedStairRouteId, setGeneratedStairRouteId] = useState<string | null>(null);
   const [stairSetupForm, setStairSetupForm] = useState({
     buildingName: "",
     city: "",
@@ -589,6 +599,7 @@ function PhoneExerciseScreen() {
   const stairSensorLastSample = useRef<{ magnitude: number; timestamp: number } | null>(null);
   const stairSensorSamples = useRef(0);
   const stairSensorActiveSamples = useRef(0);
+  const stairScanAutoCloseTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [showSmartWatchModal, setShowSmartWatchModal] = useState(false);
   const [smartWatchValues, setSmartWatchValues] = useState<Record<string, string>>({
@@ -634,21 +645,50 @@ function PhoneExerciseScreen() {
   const registeredEvents = remoteRegisteredEvents.length > 0
     ? remoteRegisteredEvents
     : cachedRegisteredEvents;
-  const { data: stairRoutes = [], refetch: refetchStairRoutes } = trpc.activities.getStairRoutes.useQuery(undefined, {
+  const { data: stairRoutes = [], refetch: refetchStairRoutes } = trpc.activities.getStairRoutes.useQuery(
+    { registrationId: effectiveRegistrationId || null },
+    {
     enabled: showStairScannerModal,
     staleTime: 60000,
-  });
+    }
+  );
+  const myStairWorkoutSpots = useMemo(
+    () => stairRoutes.filter((route: any) => Number(route.mySessionCount || 0) > 0).slice(0, 6),
+    [stairRoutes]
+  );
   const filteredStairRoutes = useMemo(() => {
     const query = stairBuildingSearch.trim().toLowerCase();
-    if (!query) return stairRoutes.slice(0, 6);
-    return stairRoutes.filter((route: any) => [
+    return stairRoutes.filter((route: any) => {
+      const searchText = [
       route.building?.buildingName,
       route.building?.city,
+      route.building?.countryCode,
       route.routeName,
       route.stairwellName,
       route.building?.addressDescription,
-    ].filter(Boolean).join(" ").toLowerCase().includes(query)).slice(0, 8);
-  }, [stairBuildingSearch, stairRoutes]);
+      ].filter(Boolean).join(" ").toLowerCase();
+      const floorSegments = Number(route.floorSegments || 0);
+      const matchesQuery = !query || searchText.includes(query);
+      const matchesCountry = !stairFilterCountry.trim() || String(route.building?.countryCode || "").toLowerCase().includes(stairFilterCountry.trim().toLowerCase());
+      const matchesCity = !stairFilterCity.trim() || String(route.building?.city || "").toLowerCase().includes(stairFilterCity.trim().toLowerCase());
+      const accessType = String(route.building?.accessType || "");
+      const matchesAccess =
+        stairFilterAccess === "all"
+          ? true
+          : stairFilterAccess === "public"
+            ? accessType === "public"
+            : accessType === "residential";
+      const matchesTier =
+        stairFilterFloorTier === "all"
+          ? true
+          : stairFilterFloorTier === "low"
+            ? floorSegments <= 5
+            : stairFilterFloorTier === "mid"
+              ? floorSegments >= 6 && floorSegments <= 10
+              : floorSegments > 10;
+      return matchesQuery && matchesCountry && matchesCity && matchesAccess && matchesTier;
+    }).slice(0, 10);
+  }, [stairBuildingSearch, stairFilterAccess, stairFilterCity, stairFilterCountry, stairFilterFloorTier, stairRoutes]);
 
   useEffect(() => {
     if (!showStairScannerModal) {
@@ -676,6 +716,30 @@ function PhoneExerciseScreen() {
       subscription.remove();
     };
   }, [showStairScannerModal]);
+
+  useEffect(() => {
+    if (!showStairScannerModal || !stairCameraEnabled || activeStairSession) {
+      return;
+    }
+
+    if (stairScanAutoCloseTimeout.current) {
+      clearTimeout(stairScanAutoCloseTimeout.current);
+    }
+
+    stairScanAutoCloseTimeout.current = setTimeout(() => {
+      setStairCameraEnabled(false);
+      setStairLandingSection("menu");
+      setManualStairQrToken("");
+      Alert.alert("QR Scan Closed", "No stair QR code was scanned within 30 seconds.");
+    }, 30000);
+
+    return () => {
+      if (stairScanAutoCloseTimeout.current) {
+        clearTimeout(stairScanAutoCloseTimeout.current);
+        stairScanAutoCloseTimeout.current = null;
+      }
+    };
+  }, [activeStairSession, showStairScannerModal, stairCameraEnabled]);
 
   useEffect(() => {
     if (!activeStairSession) {
@@ -1196,11 +1260,11 @@ function PhoneExerciseScreen() {
     };
     const normalizeGoalKey = (goal: string): string | null => {
       const value = goal.toLowerCase();
-      if (value.includes("keep active") || value.includes("daily run") || value.includes("just want to run")) return "keepActive";
+      if (value.includes("keep active") || value.includes("daily run") || value.includes("just want to run") || value.includes("meet my exercise goals")) return "keepActive";
       if (value.includes("fitness") || value.includes("pace")) return "fitness";
       if (value.includes("community") || value.includes("compete")) return "community";
-      if (value.includes("planned runs") || value.includes("habit") || value.includes("discipline")) return "plannedRuns";
-      if (value.includes("run window") || value.includes("time window")) return "runWindow";
+      if (value.includes("planned runs") || value.includes("habit") || value.includes("discipline") || value.includes("exercise plan")) return "plannedRuns";
+      if (value.includes("run window") || value.includes("time window") || value.includes("manage exercise time") || value.includes("set exercise time")) return "runWindow";
       if (value.includes("medal")) return "medals";
       return null;
     };
@@ -1293,7 +1357,7 @@ function PhoneExerciseScreen() {
         const effectiveEnd = today < end ? today : end;
         const elapsedDays = Math.max(0, Math.floor((effectiveEnd.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1);
         const targetRuns = elapsedDays > 0 ? Math.ceil((elapsedDays * Number(goal.target_percent || 0)) / 100) : 0;
-        reports.push(`Keep active goal-${runDays >= targetRuns ? "accomplished" : "fell short"}`);
+        reports.push(`Meet my exercise goals-${runDays >= targetRuns ? "accomplished" : "fell short"}`);
       }
 
       if (selectedGoalKeys.has("fitness") && fitnessGoalResult.data) {
@@ -1311,7 +1375,7 @@ function PhoneExerciseScreen() {
           Number(goal.target_pace_min_per_km || 0);
         const activityPace = durationSeconds > 0 && distanceKm > 0 ? (durationSeconds / 60) / distanceKm : 0;
         if (targetPace > 0 && activityPace > 0) {
-          reports.push(`Improve Fitness-${activityPace <= targetPace ? "accomplished" : "fell short"}`);
+          reports.push(`Work on my pace-${activityPace <= targetPace ? "accomplished" : "fell short"}`);
         }
       }
 
@@ -1360,14 +1424,14 @@ function PhoneExerciseScreen() {
           const previousRank = previousStored ? (JSON.parse(previousStored) as { rank?: number }).rank : null;
           if (previousRank && Number.isFinite(previousRank)) {
             if (currentRank < previousRank) {
-              reports.push(`Compete in community-Your rank improved from ${previousRank} to ${currentRank}`);
+              reports.push(`Be part in the community-Your rank improved from ${previousRank} to ${currentRank}`);
             } else if (currentRank > previousRank) {
-              reports.push(`Compete in community-Your rank moved from ${previousRank} to ${currentRank}`);
+              reports.push(`Be part in the community-Your rank moved from ${previousRank} to ${currentRank}`);
             } else {
-              reports.push(`Compete in community-Your rank stayed at ${currentRank}`);
+              reports.push(`Be part in the community-Your rank stayed at ${currentRank}`);
             }
           } else {
-            reports.push(`Compete in community-Your current rank is ${currentRank}`);
+            reports.push(`Be part in the community-Your current rank is ${currentRank}`);
           }
           await AsyncStorage.setItem(`community_rank_${ownerRegistrationId}`, JSON.stringify({
             rank: currentRank,
@@ -1383,22 +1447,16 @@ function PhoneExerciseScreen() {
         const unit = String(habit.unit || "").toLowerCase();
         const targetKm = unit.includes("mile") ? targetAmount * 1.60934 : targetAmount;
         if (targetKm > 0) {
-          reports.push(`Have planned runs-${distanceKm >= targetKm ? "accomplished" : "fell short"}`);
+          reports.push(`Follow an exercise plan-${distanceKm >= targetKm ? "accomplished" : "fell short"}`);
         }
       }
 
       if (selectedGoalKeys.has("runWindow") && runWindowResult.data) {
         const goal = runWindowResult.data as any;
         const regularWindows = Array.isArray(goal.regular_windows) ? goal.regular_windows : [];
-        const eventWindows = Array.isArray(goal.event_windows) ? goal.event_windows : [];
-        const dateWindows = Array.isArray(goal.date_windows) ? goal.date_windows : [];
-        const candidateWindows = [
-          ...dateWindows.filter((window: any) => window.date === activityDate),
-          ...eventWindows.filter((window: any) => window.date === activityDate),
-          ...regularWindows,
-        ];
-        if (candidateWindows.length > 0) {
-          reports.push(`Run window-${candidateWindows.some(clockFitsWindow) ? "accomplished" : "fell short"}`);
+        const regularWindow = regularWindows[0];
+        if (regularWindow) {
+          reports.push(`Set exercise time-${clockFitsWindow(regularWindow) ? "accomplished" : "fell short"}`);
         }
       }
 
@@ -2236,20 +2294,88 @@ function PhoneExerciseScreen() {
     };
   }, []);
 
-  const openStairScanner = useCallback(async () => {
+  const openStairScanner = useCallback(() => {
     if (runState !== "idle") {
       Alert.alert("Workout Active", "Finish or close the current workout before starting a Stair Climb.");
+      return;
+    }
+    setStairCameraEnabled(false);
+    setStairLandingSection("menu");
+    setShowStairScannerModal(true);
+  }, [runState]);
+
+  const canRouteUseScanner = useCallback((route: any | null) => {
+    if (!route) return false;
+    return Boolean(
+      route.hasPrintableQrs &&
+      route.hasPrintedQrs &&
+      Number(route.qrCheckpointCount || 0) >= (route.middleCheckpointRequired ? 3 : 2)
+    );
+  }, []);
+
+  const startSelectedStairScanner = useCallback(async () => {
+    if (Platform.OS === "web") {
+      Alert.alert("Camera Not Available", "This device cannot scan stair QR codes here. Use a phone build with camera QR scanning.");
       return;
     }
     if (!cameraPermission?.granted) {
       const result = await requestCameraPermission();
       if (!result.granted) {
-        Alert.alert("Camera Permission Needed", "RunNation needs camera access to scan staircase QR checkpoints.");
+        Alert.alert(
+          "Camera Permission Needed",
+          "RunNation needs camera access to scan staircase QR checkpoints. If the device cannot read QR codes, this stairs activity cannot be performed on it."
+        );
         return;
       }
     }
-    setShowStairScannerModal(true);
-  }, [cameraPermission?.granted, requestCameraPermission, runState]);
+    setStairLandingSection("start");
+    setStairCameraEnabled(true);
+  }, [cameraPermission?.granted, requestCameraPermission]);
+
+  const downloadGeneratedStairQrSheet = useCallback(async () => {
+    if (!generatedStairRouteId || generatedStairStickers.length === 0 || !effectiveRegistrationId) {
+      Alert.alert("No QR Sheet", "Create a building first so RunNation can generate its stair QR sheet.");
+      return;
+    }
+
+    const buildingName = stairSetupForm.buildingName.trim() || "Stair building";
+    const qrBlocks = generatedStairStickers.map((sticker) => `
+      <section class="tag">
+        <h1>RunNation</h1>
+        <h2>Stairs Workout</h2>
+        <img src="${sticker.qrDataUrl}" />
+        <p class="floor">Floor: ${sticker.floorLabel || sticker.checkpointType}</p>
+        <p>${sticker.label}</p>
+      </section>
+    `).join("");
+    const html = `<!doctype html><html><head><meta charset="utf-8" />
+      <style>
+        body{font-family:Arial,sans-serif;padding:24px;color:#111827}
+        .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+        .tag{border:2px solid #0F766E;border-radius:12px;padding:18px;text-align:center;page-break-inside:avoid}
+        h1{margin:0;color:#0F766E;font-size:28px} h2{margin:4px 0 12px;font-size:20px}
+        img{width:240px;height:240px}.floor{font-weight:700;font-size:18px}
+      </style></head><body><h1>${buildingName}</h1><div class="grid">${qrBlocks}</div></body></html>`;
+    const fileName = `runnation-stairs-${Date.now()}.html`;
+    const fileUri = `${FileSystem.documentDirectory || ""}${fileName}`;
+
+    try {
+      await FileSystem.writeAsStringAsync(fileUri, html, { encoding: FileSystem.EncodingType.UTF8 });
+      await getServerClient().activities.markStairRoutePrinted.mutate({
+        registrationId: effectiveRegistrationId,
+        routeId: generatedStairRouteId,
+      });
+      await refetchStairRoutes();
+      await Share.share({
+        title: "RunNation Stairs QR Sheet",
+        message: `Printable RunNation stairs QR sheet created for ${buildingName}: ${fileUri}`,
+        url: fileUri,
+      } as any);
+      Alert.alert("QR Sheet Ready", "The QR sheet was generated and recorded as downloaded/printed for this building.");
+    } catch (error: any) {
+      Alert.alert("QR Sheet Failed", error?.message || "Could not generate the printable QR sheet.");
+    }
+  }, [effectiveRegistrationId, generatedStairRouteId, generatedStairStickers, refetchStairRoutes, stairSetupForm.buildingName]);
 
   const handleStairQrToken = useCallback(async (rawToken: string) => {
     const token = rawToken.trim();
@@ -2279,6 +2405,7 @@ function PhoneExerciseScreen() {
       const nextSession: ActiveStairSession = {
         sessionId: result.sessionId,
         lapId: result.lapId,
+        routeId: result.route?.routeId,
         buildingName: result.route?.buildingName,
         routeName: result.route?.routeName,
         nextCheckpoint: result.nextCheckpoint,
@@ -2288,6 +2415,18 @@ function PhoneExerciseScreen() {
         lastMessage: result.message || "Checkpoint scanned.",
       };
       setActiveStairSession(nextSession);
+      if (stairScanAutoCloseTimeout.current) {
+        clearTimeout(stairScanAutoCloseTimeout.current);
+        stairScanAutoCloseTimeout.current = null;
+      }
+      if (result.route?.routeId) {
+        const matchedRoute = stairRoutes.find((route: any) => route.routeId === result.route?.routeId);
+        setSelectedStairRoute(matchedRoute || {
+          routeId: result.route.routeId,
+          routeName: result.route.routeName,
+          building: { buildingName: result.route.buildingName },
+        });
+      }
       setManualStairQrToken("");
       stairSensorSessionStart.current = Date.now();
       stairSensorSamples.current = 0;
@@ -2299,7 +2438,7 @@ function PhoneExerciseScreen() {
     } finally {
       setTimeout(() => setIsScanningStairQr(false), 1200);
     }
-  }, [activeStairSession, effectiveRegistrationId, getStairSensorSummary, isScanningStairQr, speakActivityMessage, stairScanMode]);
+  }, [activeStairSession, effectiveRegistrationId, getStairSensorSummary, isScanningStairQr, speakActivityMessage, stairRoutes, stairScanMode]);
 
   const registerStairBuildingRoute = useCallback(async () => {
     if (!effectiveRegistrationId) {
@@ -2357,6 +2496,7 @@ function PhoneExerciseScreen() {
         activateCheckpoints: false,
       });
       setGeneratedStairStickers(result.printableStickers || []);
+      setGeneratedStairRouteId(result.route?.routeId || null);
       setShowStairSetupForm(false);
       await refetchStairRoutes();
       Alert.alert("Staircase Registered", "Printable QR stickers were generated. They should be approved and activated before competitive use.");
@@ -4196,6 +4336,7 @@ function PhoneExerciseScreen() {
                   if (activeStairSession) {
                     void endActiveStairSession();
                   } else {
+                    setStairCameraEnabled(false);
                     setShowStairScannerModal(false);
                   }
                 }}
@@ -4226,62 +4367,177 @@ function PhoneExerciseScreen() {
                 </View>
               </View>
 
-              {!activeStairSession ? (
+              {!activeStairSession && stairLandingSection === "menu" ? (
                 <View style={[styles.stairFirstUsePanel, { backgroundColor: themeColors.cardBackground }]}>
-                  <Text style={[styles.stairFirstUseTitle, { color: themeColors.text }]}>First time using Stair Climb?</Text>
+                  <Text style={[styles.stairFirstUseTitle, { color: themeColors.text }]}>Stairs</Text>
                   <Text style={[styles.stairFirstUseText, { color: themeColors.textSecondary }]}>
-                    Scan a posted QR tag. If no QR code is available, search the building name to see whether it is registered and get the tag custodian contact, or create a permanent QR tag for a qualifying building.
+                    Choose how you want to use RunNation Stairs.
                   </Text>
-                  <Text style={[styles.stairStickerAdvice, { color: themeColors.textSecondary }]}>
-                    Each building has a permanent calculated stair count from the number of floors and the counted steps from ground floor to first floor. New users can help verify or confirm that number on the building profile.
-                  </Text>
-                  <View style={styles.stairFirstUseActions}>
-                    <View style={styles.stairFirstUseAction}>
+                  <View style={styles.stairLandingActions}>
+                    <TouchableOpacity style={styles.stairLandingActionButton} onPress={() => void startSelectedStairScanner()} activeOpacity={0.75}>
                       <QrCode size={20} color="#0F766E" />
-                      <Text style={[styles.stairFirstUseActionText, { color: themeColors.text }]}>Scan QR tag</Text>
-                    </View>
-                    <View style={styles.stairFirstUseAction}>
+                      <View style={styles.stairRouteCardCopy}>
+                        <Text style={[styles.stairFirstUseActionText, { color: themeColors.text }]}>Start</Text>
+                        <Text style={[styles.stairRouteMeta, { color: themeColors.textSecondary }]}>Scan a stair QR code to begin.</Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.stairLandingActionButton} onPress={() => setStairLandingSection("setup")} activeOpacity={0.75}>
                       <Building2 size={20} color="#0F766E" />
-                      <Text style={[styles.stairFirstUseActionText, { color: themeColors.text }]}>Find building</Text>
-                    </View>
-                    <View style={styles.stairFirstUseAction}>
+                      <View style={styles.stairRouteCardCopy}>
+                        <Text style={[styles.stairFirstUseActionText, { color: themeColors.text }]}>Set up</Text>
+                        <Text style={[styles.stairRouteMeta, { color: themeColors.textSecondary }]}>Search, add buildings, and print QR sheets.</Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.stairLandingActionButton} onPress={() => setStairLandingSection("instructions")} activeOpacity={0.75}>
                       <Printer size={20} color="#0F766E" />
-                      <Text style={[styles.stairFirstUseActionText, { color: themeColors.text }]}>Create QR tag</Text>
-                    </View>
+                      <View style={styles.stairRouteCardCopy}>
+                        <Text style={[styles.stairFirstUseActionText, { color: themeColors.text }]}>Instructions</Text>
+                        <Text style={[styles.stairRouteMeta, { color: themeColors.textSecondary }]}>Read the activity and setup guide.</Text>
+                      </View>
+                    </TouchableOpacity>
                   </View>
+                  {myStairWorkoutSpots.length > 0 ? (
+                    <View style={styles.stairRouteList}>
+                      {myStairWorkoutSpots.map((route: any) => (
+                        <TouchableOpacity
+                          key={`mine-${route.routeId}`}
+                          style={[
+                            styles.stairRouteCard,
+                            selectedStairRoute?.routeId === route.routeId && styles.stairRouteCardSelected,
+                            { backgroundColor: themeColors.inputBackground, borderColor: selectedStairRoute?.routeId === route.routeId ? "#0F766E" : themeColors.inputBorder },
+                          ]}
+                          onPress={() => {
+                            setSelectedStairRoute(route);
+                            setStairCameraEnabled(false);
+                          }}
+                          activeOpacity={0.75}
+                        >
+                          <Building2 size={22} color="#0F766E" />
+                          <View style={styles.stairRouteCardCopy}>
+                            <Text style={[styles.stairRouteTitle, { color: themeColors.text }]} numberOfLines={1}>{route.building?.buildingName || "Registered building"}</Text>
+                            <Text style={[styles.stairRouteMeta, { color: themeColors.textSecondary }]} numberOfLines={2}>
+                              {route.building?.city || "Unknown town"} - {Number(route.mySessionCount || 0)} workout{Number(route.mySessionCount || 0) === 1 ? "" : "s"} - {route.hasPrintedQrs ? "QR sheet ready" : "QR sheet not printed"}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={[styles.stairNoRoutesText, { color: themeColors.textSecondary }]}>
+                      No stairs workout spot history yet. Search registered buildings or add a building below.
+                    </Text>
+                  )}
+                </View>
+              ) : null}
+
+              {!activeStairSession && stairLandingSection === "instructions" ? (
+                <View style={[styles.stairFirstUsePanel, { backgroundColor: themeColors.cardBackground }]}>
+                  <TouchableOpacity style={styles.stairInlineBackButton} onPress={() => setStairLandingSection("menu")} activeOpacity={0.75}>
+                    <ArrowLeft size={16} color="#0F766E" />
+                    <Text style={styles.stairSetupToggleText}>Back</Text>
+                  </TouchableOpacity>
+                  <Text style={[styles.stairFirstUseTitle, { color: themeColors.text }]}>How Stairs Works</Text>
+                  <Text style={[styles.stairFirstUseText, { color: themeColors.textSecondary }]}>
+                    Start opens the QR scanner. Scan the bottom QR code on a registered building to populate the building details and begin the workout. Continue scanning the required middle or top QR codes as you climb.
+                  </Text>
                   <Text style={[styles.stairStickerAdvice, { color: themeColors.textSecondary }]}>
-                    Scanning a bottom, middle, or top QR tag awards the fixed measured steps between the accepted QR checkpoints. Permanent QR tags may be held by a custodian; if stair exercise is not permitted during certain work hours, use a removable hanging tag so it appears only when use is allowed.
+                    If you cannot find QR codes in your building, use Set up to search/filter registered buildings, add a qualifying building with country, city/town and address details, then download/print the generated QR sheet.
+                  </Text>
+                  <Text style={[styles.stairStickerAdvice, { color: themeColors.textSecondary }]}>
+                    QR codes should be labelled RunNation, Stairs Workout and Floor. You can create a sticker or hanger, but first make sure building management permits stair exercise.
+                  </Text>
+                  <Text style={[styles.stairStickerAdvice, { color: themeColors.textSecondary }]}>
+                    Community Stairs results are viewed in Leaderboard. Your personal Stairs records are viewed in My Workouts.
                   </Text>
                 </View>
               ) : null}
 
-              {!activeStairSession ? (
+              {!activeStairSession && stairLandingSection === "setup" ? (
                 <View style={styles.inputGroup}>
-                  <Text style={[styles.inputLabel, { color: themeColors.text }]}>No QR code available? Search building</Text>
-                  <TextInput
-                    style={[styles.input, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
-                    value={stairBuildingSearch}
-                    onChangeText={setStairBuildingSearch}
-                    placeholder="Town, building, route, stairwell"
-                    placeholderTextColor={themeColors.textLight}
-                  />
+                  <TouchableOpacity style={styles.stairInlineBackButton} onPress={() => setStairLandingSection("menu")} activeOpacity={0.75}>
+                    <ArrowLeft size={16} color="#0F766E" />
+                    <Text style={styles.stairSetupToggleText}>Back</Text>
+                  </TouchableOpacity>
+                  <View style={styles.stairSearchHeader}>
+                    <Text style={[styles.inputLabel, styles.stairSearchLabel, { color: themeColors.text }]}>Search registered buildings</Text>
+                    <TouchableOpacity style={styles.stairIconActionButton} onPress={() => setShowStairRouteFilters((value) => !value)} activeOpacity={0.75}>
+                      <Filter size={16} color="#0F766E" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.stairIconActionButton} onPress={() => setShowStairSetupForm((prev) => !prev)} activeOpacity={0.75}>
+                      <Plus size={16} color="#0F766E" />
+                    </TouchableOpacity>
+                  </View>
+                  <View style={[styles.stairSearchBox, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder }]}>
+                    <Search size={17} color={themeColors.textLight} />
+                    <TextInput
+                      style={[styles.stairSearchInput, { color: themeColors.text }]}
+                      value={stairBuildingSearch}
+                      onChangeText={setStairBuildingSearch}
+                      placeholder="Building, town, route, address"
+                      placeholderTextColor={themeColors.textLight}
+                    />
+                  </View>
+                  {showStairRouteFilters ? (
+                    <View style={[styles.stairFilterPanel, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.inputBorder }]}>
+                      <View style={styles.stairFilterGrid}>
+                        <TextInput
+                          style={[styles.stairFilterInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                          value={stairFilterCountry}
+                          onChangeText={setStairFilterCountry}
+                          placeholder="Country"
+                          placeholderTextColor={themeColors.textLight}
+                        />
+                        <TextInput
+                          style={[styles.stairFilterInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                          value={stairFilterCity}
+                          onChangeText={setStairFilterCity}
+                          placeholder="City/town"
+                          placeholderTextColor={themeColors.textLight}
+                        />
+                      </View>
+                      <View style={styles.stairChipRow}>
+                        {(["all", "public", "residential"] as const).map((option) => (
+                          <TouchableOpacity
+                            key={option}
+                            style={[styles.stairFilterChip, stairFilterAccess === option && styles.stairFilterChipActive]}
+                            onPress={() => setStairFilterAccess(option)}
+                          >
+                            <Text style={[styles.stairFilterChipText, stairFilterAccess === option && styles.stairFilterChipTextActive]}>
+                              {option === "all" ? "All access" : option === "public" ? "Public access" : "Residents only"}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                      <View style={styles.stairChipRow}>
+                        {([
+                          ["all", "All floors"],
+                          ["low", "5 & below"],
+                          ["mid", "6-10"],
+                          ["high", "Above 10"],
+                        ] as const).map(([key, label]) => (
+                          <TouchableOpacity
+                            key={key}
+                            style={[styles.stairFilterChip, stairFilterFloorTier === key && styles.stairFilterChipActive]}
+                            onPress={() => setStairFilterFloorTier(key)}
+                          >
+                            <Text style={[styles.stairFilterChipText, stairFilterFloorTier === key && styles.stairFilterChipTextActive]}>{label}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  ) : null}
                   <View style={styles.stairRouteList}>
                     {filteredStairRoutes.length > 0 ? filteredStairRoutes.map((route: any) => (
                       <TouchableOpacity
                         key={route.routeId}
-                        style={[styles.stairRouteCard, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder }]}
+                        style={[
+                          styles.stairRouteCard,
+                          selectedStairRoute?.routeId === route.routeId && styles.stairRouteCardSelected,
+                          { backgroundColor: themeColors.inputBackground, borderColor: selectedStairRoute?.routeId === route.routeId ? "#0F766E" : themeColors.inputBorder },
+                        ]}
                         onPress={() => {
-                          setStairBuildingSearch(`${route.building?.buildingName || "Building"} - ${route.routeName}`);
-                          Alert.alert(
-                            "Route Found",
-                            [
-                              `${route.building?.buildingName || "Building"} is registered with ${Number(route.bottomToTopSteps || 0).toLocaleString()} measured steps.`,
-                              route.building?.qrCustodianName ? `Custodian: ${route.building.qrCustodianName}` : null,
-                              route.building?.qrCustodianPhone ? `Phone: ${route.building.qrCustodianPhone}` : null,
-                              route.building?.qrCustodianEmail ? `Email: ${route.building.qrCustodianEmail}` : null,
-                              "Ask the custodian for the QR tag, or scan it if it is posted.",
-                            ].filter(Boolean).join("\n")
-                          );
+                          setSelectedStairRoute(route);
+                          setStairCameraEnabled(false);
                         }}
                         activeOpacity={0.75}
                       >
@@ -4291,7 +4547,10 @@ function PhoneExerciseScreen() {
                             {route.building?.buildingName || "Registered building"}
                           </Text>
                           <Text style={[styles.stairRouteMeta, { color: themeColors.textSecondary }]} numberOfLines={2}>
-                            {route.routeName} - {route.building?.city || "Unknown town"} - custodian {route.building?.qrCustodianName || "not listed"}
+                            {route.routeName} - {route.building?.city || "Unknown town"} - {route.building?.accessType === "residential" ? "Residents only" : route.building?.accessType || "public"} - {Number(route.floorSegments || 0)} floors
+                          </Text>
+                          <Text style={[styles.stairRouteMeta, { color: route.hasPrintedQrs ? "#0F766E" : colors.primary }]} numberOfLines={1}>
+                            {route.hasPrintedQrs ? "QR sheet downloaded/printed" : "QR sheet not printed yet"} - {Number(route.qrCheckpointCount || 0)} QR codes
                           </Text>
                         </View>
                       </TouchableOpacity>
@@ -4301,20 +4560,10 @@ function PhoneExerciseScreen() {
                       </Text>
                     )}
                   </View>
-                  <TouchableOpacity
-                    style={styles.stairSetupToggle}
-                    onPress={() => setShowStairSetupForm((prev) => !prev)}
-                    activeOpacity={0.75}
-                  >
-                    <Building2 size={18} color="#0F766E" />
-                    <Text style={styles.stairSetupToggleText}>
-                      {showStairSetupForm ? "Hide building QR setup" : "Create QR code for this building"}
-                    </Text>
-                  </TouchableOpacity>
                 </View>
               ) : null}
 
-              {!activeStairSession && showStairSetupForm ? (
+              {!activeStairSession && stairLandingSection === "setup" && showStairSetupForm ? (
                 <View style={[styles.stairSetupForm, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.inputBorder }]}>
                   {([
                     ["buildingName", "Building name", "e.g., Acacia Towers"],
@@ -4341,6 +4590,28 @@ function PhoneExerciseScreen() {
                       />
                     </View>
                   ))}
+                  <View style={styles.inputGroup}>
+                    <Text style={[styles.inputLabel, { color: themeColors.text }]}>Access</Text>
+                    <View style={styles.stairChipRow}>
+                      {([
+                        ["public", "Public access"],
+                        ["residential", "Residents only"],
+                        ["club", "Club"],
+                        ["corporate", "Corporate"],
+                        ["private", "Private"],
+                        ["other", "Other"],
+                      ] as const).map(([key, label]) => (
+                        <TouchableOpacity
+                          key={key}
+                          style={[styles.stairFilterChip, stairSetupForm.accessType === key && styles.stairFilterChipActive]}
+                          onPress={() => setStairSetupForm((prev) => ({ ...prev, accessType: key }))}
+                          activeOpacity={0.75}
+                        >
+                          <Text style={[styles.stairFilterChipText, stairSetupForm.accessType === key && styles.stairFilterChipTextActive]}>{label}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
                   <TouchableOpacity
                     style={[styles.stairRegisterButton, isRegisteringStairRoute && styles.actionButtonDisabled]}
                     onPress={() => void registerStairBuildingRoute()}
@@ -4355,9 +4626,17 @@ function PhoneExerciseScreen() {
                 </View>
               ) : null}
 
-              {generatedStairStickers.length > 0 ? (
+              {stairLandingSection === "setup" && generatedStairStickers.length > 0 ? (
                 <View style={styles.stairStickerPreviewList}>
                   <Text style={[styles.inputLabel, { color: themeColors.text }]}>Printable stickers</Text>
+                  <TouchableOpacity
+                    style={styles.stairDownloadSheetButton}
+                    onPress={() => void downloadGeneratedStairQrSheet()}
+                    activeOpacity={0.75}
+                  >
+                    <Download size={18} color={colors.white} />
+                    <Text style={styles.stairDownloadSheetText}>Download / print QR sheet</Text>
+                  </TouchableOpacity>
                   {generatedStairStickers.map((sticker) => (
                     <View key={sticker.checkpointId} style={[styles.stairStickerPreview, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.inputBorder }]}>
                       <Image source={{ uri: sticker.qrDataUrl }} style={styles.stairStickerQr} resizeMode="contain" />
@@ -4372,11 +4651,50 @@ function PhoneExerciseScreen() {
                 </View>
               ) : null}
 
+              {!activeStairSession && stairLandingSection === "setup" && selectedStairRoute ? (
+                <View style={[styles.stairSelectedRoutePanel, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.inputBorder }]}>
+                  <View style={styles.stairSelectedRouteHeader}>
+                    <Building2 size={22} color="#0F766E" />
+                    <View style={styles.stairRouteCardCopy}>
+                      <Text style={[styles.stairRouteTitle, { color: themeColors.text }]} numberOfLines={1}>
+                        {selectedStairRoute.building?.buildingName || "Selected building"}
+                      </Text>
+                      <Text style={[styles.stairRouteMeta, { color: themeColors.textSecondary }]} numberOfLines={2}>
+                        {selectedStairRoute.building?.countryCode || "Country"} - {selectedStairRoute.building?.city || "City/town"} - {selectedStairRoute.building?.addressDescription || "Address not listed"}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.stairReadinessRow}>
+                    <Text style={[styles.stairReadinessText, { color: selectedStairRoute.hasPrintableQrs ? "#0F766E" : colors.primary }]}>
+                      QR codes: {Number(selectedStairRoute.qrCheckpointCount || 0)}
+                    </Text>
+                    <Text style={[styles.stairReadinessText, { color: selectedStairRoute.hasPrintedQrs ? "#0F766E" : colors.primary }]}>
+                      {selectedStairRoute.hasPrintedQrs ? "Printed/downloaded" : "Needs QR sheet print"}
+                    </Text>
+                  </View>
+                  <Text style={[styles.stairStickerAdvice, { color: themeColors.textSecondary }]}>
+                    Captain: {selectedStairRoute.building?.qrCustodianName || "not listed"}
+                    {selectedStairRoute.building?.qrCustodianPhone ? ` - ${selectedStairRoute.building.qrCustodianPhone}` : ""}
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.stairStartScannerButton, !canRouteUseScanner(selectedStairRoute) && styles.actionButtonDisabled]}
+                    onPress={() => void startSelectedStairScanner()}
+                    activeOpacity={0.75}
+                  >
+                    <Camera size={18} color={colors.white} />
+                    <Text style={styles.stairStartScannerText}>Start QR scanner</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              {(activeStairSession || stairLandingSection === "start") ? (
               <View style={[styles.stairStatusCard, { backgroundColor: themeColors.cardBackground }]}>
                 <Text style={[styles.stairStatusTitle, { color: themeColors.text }]}>
                   {activeStairSession
                     ? `${activeStairSession.buildingName || "Staircase"}${activeStairSession.routeName ? ` - ${activeStairSession.routeName}` : ""}`
-                    : "Scan the bottom QR to start"}
+                    : selectedStairRoute
+                      ? "Ready when QR scanner is started"
+                      : "Select a building to start"}
                 </Text>
                 <Text style={[styles.stairStatusText, { color: themeColors.textSecondary }]}>
                   {activeStairSession?.lastMessage || "The QR code identifies the staircase route. RunNation awards only the fixed measured steps for accepted checkpoint sequences."}
@@ -4385,8 +4703,9 @@ function PhoneExerciseScreen() {
                   Next scan: {activeStairSession?.nextCheckpoint ? String(activeStairSession.nextCheckpoint).toUpperCase() : "BOTTOM"}
                 </Text>
               </View>
+              ) : null}
 
-              {!activeStairSession ? (
+              {!activeStairSession && stairLandingSection === "start" ? (
                 <View style={styles.stairModeRow}>
                   {(["full", "short"] as const).map((mode) => (
                     <TouchableOpacity
@@ -4403,8 +4722,9 @@ function PhoneExerciseScreen() {
                 </View>
               ) : null}
 
+              {(activeStairSession || stairLandingSection === "start") ? (
               <View style={styles.stairCameraFrame}>
-                {Platform.OS !== "web" && cameraPermission?.granted ? (
+                {Platform.OS !== "web" && cameraPermission?.granted && stairCameraEnabled ? (
                   <CameraView
                     style={styles.stairCamera}
                     facing="back"
@@ -4417,17 +4737,23 @@ function PhoneExerciseScreen() {
                   <View style={[styles.stairCameraFallback, { backgroundColor: themeColors.inputBackground }]}>
                     <Camera size={36} color={themeColors.textLight} />
                     <Text style={[styles.stairCameraFallbackText, { color: themeColors.textSecondary }]}>
-                      {Platform.OS === "web" ? "Camera scanning is available on device builds." : "Camera permission is required for QR scanning."}
+                      {Platform.OS === "web"
+                            ? "Camera scanning is available on phone builds. This device cannot perform stairs QR activity here."
+                            : stairCameraEnabled
+                              ? "Camera permission is required for QR scanning."
+                              : "Tap Start to open the QR scanner."}
                     </Text>
                     {Platform.OS !== "web" ? (
-                      <TouchableOpacity style={styles.stairPermissionButton} onPress={() => void requestCameraPermission()}>
-                        <Text style={styles.stairPermissionButtonText}>Allow Camera</Text>
+                      <TouchableOpacity style={styles.stairPermissionButton} onPress={() => void startSelectedStairScanner()}>
+                        <Text style={styles.stairPermissionButtonText}>Start QR scanner</Text>
                       </TouchableOpacity>
                     ) : null}
                   </View>
                 )}
               </View>
+              ) : null}
 
+              {(activeStairSession || stairLandingSection === "start") ? (
               <View style={styles.inputGroup}>
                 <Text style={[styles.inputLabel, { color: themeColors.text }]}>Manual QR token</Text>
                 <View style={styles.stairManualTokenRow}>
@@ -4449,6 +4775,7 @@ function PhoneExerciseScreen() {
                   </TouchableOpacity>
                 </View>
               </View>
+              ) : null}
             </ScrollView>
 
             <View style={styles.stairScannerFooter}>
@@ -6044,6 +6371,28 @@ const styles = StyleSheet.create({
     flexDirection: "row" as const,
     gap: 8,
   },
+  stairLandingActions: {
+    gap: 10,
+  },
+  stairLandingActionButton: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(15,118,110,0.28)",
+    padding: 12,
+    backgroundColor: "rgba(15,118,110,0.08)",
+  },
+  stairInlineBackButton: {
+    alignSelf: "flex-start" as const,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 6,
+    marginBottom: 10,
+    paddingVertical: 6,
+    paddingRight: 10,
+  },
   stairFirstUseAction: {
     flex: 1,
     minHeight: 72,
@@ -6077,6 +6426,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
   },
+  stairRouteCardSelected: {
+    borderWidth: 2,
+  },
   stairRouteCardCopy: {
     flex: 1,
     minWidth: 0,
@@ -6093,6 +6445,81 @@ const styles = StyleSheet.create({
   stairNoRoutesText: {
     fontSize: 13,
     lineHeight: 18,
+  },
+  stairSearchHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+    marginBottom: 8,
+  },
+  stairSearchLabel: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  stairIconActionButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    backgroundColor: "rgba(15,118,110,0.1)",
+  },
+  stairSearchBox: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+    borderWidth: 2,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+  },
+  stairSearchInput: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 14,
+    fontWeight: "700" as const,
+    paddingVertical: 12,
+  },
+  stairFilterPanel: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    gap: 10,
+  },
+  stairFilterGrid: {
+    flexDirection: "row" as const,
+    gap: 8,
+  },
+  stairFilterInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    fontSize: 13,
+    fontWeight: "700" as const,
+  },
+  stairChipRow: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 8,
+  },
+  stairFilterChip: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: "rgba(15,118,110,0.1)",
+  },
+  stairFilterChipActive: {
+    backgroundColor: "#0F766E",
+  },
+  stairFilterChipText: {
+    fontSize: 12,
+    fontWeight: "800" as const,
+    color: "#0F766E",
+  },
+  stairFilterChipTextActive: {
+    color: colors.white,
   },
   stairSetupToggle: {
     marginTop: 12,
@@ -6133,6 +6560,21 @@ const styles = StyleSheet.create({
   stairStickerPreviewList: {
     gap: 10,
     marginBottom: 14,
+  },
+  stairDownloadSheetButton: {
+    backgroundColor: "#0F766E",
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 8,
+  },
+  stairDownloadSheetText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: "900" as const,
   },
   stairStickerPreview: {
     flexDirection: "row" as const,
@@ -6189,6 +6631,46 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(148,163,184,0.22)",
     gap: 7,
+  },
+  stairSelectedRoutePanel: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 14,
+    gap: 10,
+  },
+  stairSelectedRouteHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+  },
+  stairReadinessRow: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 8,
+  },
+  stairReadinessText: {
+    fontSize: 12,
+    fontWeight: "900" as const,
+    backgroundColor: "rgba(15,118,110,0.08)",
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  stairStartScannerButton: {
+    backgroundColor: "#0F766E",
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 8,
+  },
+  stairStartScannerText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: "900" as const,
   },
   stairStatusTitle: {
     fontSize: 17,

@@ -1,8 +1,11 @@
 import { z } from "zod";
-import QRCode from "qrcode";
 import { publicProcedure } from "../../../create-context";
 import { getActorRoleSession } from "../../../rbac";
 import { createCheckpointToken, hashCheckpointToken, qrPayloadForToken } from "../stair-utils";
+
+const QRCode = require("qrcode") as {
+  toDataURL(text: string, options?: { margin?: number; width?: number }): Promise<string>;
+};
 
 const inputSchema = z.object({
   registrationId: z.string(),
@@ -139,7 +142,7 @@ export default publicProcedure.input(inputSchema).mutation(async ({ ctx, input }
       qrVersion: checkpoint.qr_version,
       qrPayload: generated?.payload,
       qrDataUrl,
-      label: `${building.building_name} - ${route.route_name} - ${String(checkpoint.checkpoint_type).toUpperCase()}`,
+      label: `RunNation - Stairs Workout - Floor: ${checkpoint.floor_label} - ${building.building_name}`,
     };
   }));
 

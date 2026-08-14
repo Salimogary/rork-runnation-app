@@ -25,12 +25,14 @@ interface ActivityMonthGroup {
   key: string;
   label: string;
   totalDistance: number;
+  totalSteps: number;
   activities: ActivityData[];
 }
 
 interface ActivityYearGroup {
   year: string;
   totalDistance: number;
+  totalSteps: number;
   activityCount: number;
   months: ActivityMonthGroup[];
 }
@@ -83,6 +85,7 @@ export default function MyWorkouts() {
   const { colors: themeColors } = useTheme();
   const queryClient = useQueryClient();
   const [deletingActivityId, setDeletingActivityId] = useState<string | null>(null);
+  const [activeHistoryTab, setActiveHistoryTab] = useState<"all" | "stairs">("all");
 
   const { data: activities = [], isLoading, error } = useQuery<ActivityData[]>({
     queryKey: ["my-workouts", user?.id],
@@ -104,6 +107,12 @@ export default function MyWorkouts() {
   const sortedActivities = useMemo(
     () => [...activities].sort((a, b) => new Date(b.activity_date).getTime() - new Date(a.activity_date).getTime()),
     [activities]
+  );
+  const visibleActivities = useMemo(
+    () => activeHistoryTab === "stairs"
+      ? sortedActivities.filter((activity) => activity.exercise_type === "Stairs")
+      : sortedActivities,
+    [activeHistoryTab, sortedActivities]
   );
 
   const deleteWorkout = async (activity: ActivityData) => {
@@ -156,11 +165,12 @@ export default function MyWorkouts() {
   const groupedActivities = useMemo<ActivityYearGroup[]>(() => {
     const years = new Map<string, {
       totalDistance: number;
+      totalSteps: number;
       activityCount: number;
       months: Map<string, ActivityMonthGroup>;
     }>();
 
-    sortedActivities.forEach((activity) => {
+    visibleActivities.forEach((activity) => {
       const date = new Date(activity.activity_date);
       const validDate = !Number.isNaN(date.getTime());
       const year = validDate ? String(date.getFullYear()) : "Unknown Year";
@@ -169,6 +179,7 @@ export default function MyWorkouts() {
       const monthLabel = validDate ? date.toLocaleDateString("en-US", { month: "long" }) : "Unknown Month";
       const yearGroup = years.get(year) || {
         totalDistance: 0,
+        totalSteps: 0,
         activityCount: 0,
         months: new Map<string, ActivityMonthGroup>(),
       };
@@ -176,12 +187,15 @@ export default function MyWorkouts() {
         key: monthKey,
         label: monthLabel,
         totalDistance: 0,
+        totalSteps: 0,
         activities: [],
       };
 
       yearGroup.totalDistance += activity.distance_km || 0;
+      yearGroup.totalSteps += Number(activity.steps_count || 0);
       yearGroup.activityCount += 1;
       monthGroup.totalDistance += activity.distance_km || 0;
+      monthGroup.totalSteps += Number(activity.steps_count || 0);
       monthGroup.activities.push(activity);
       yearGroup.months.set(monthKey, monthGroup);
       years.set(year, yearGroup);
@@ -192,23 +206,29 @@ export default function MyWorkouts() {
       .map(([year, group]) => ({
         year,
         totalDistance: group.totalDistance,
+        totalSteps: group.totalSteps,
         activityCount: group.activityCount,
         months: [...group.months.values()].sort((a, b) => b.key.localeCompare(a.key)),
       }));
-  }, [sortedActivities]);
+  }, [visibleActivities]);
 
   const uniqueDaysCount = useMemo(
-    () => new Set(activities.map((activity) => String(activity.activity_date || "").split("T")[0]).filter(Boolean)).size,
-    [activities]
+    () => new Set(visibleActivities.map((activity) => String(activity.activity_date || "").split("T")[0]).filter(Boolean)).size,
+    [visibleActivities]
   );
 
   const totalDistance = useMemo(
-    () => activities.reduce((sum, activity) => sum + (activity.distance_km || 0), 0),
-    [activities]
+    () => visibleActivities.reduce((sum, activity) => sum + (activity.distance_km || 0), 0),
+    [visibleActivities]
+  );
+
+  const totalSteps = useMemo(
+    () => visibleActivities.reduce((sum, activity) => sum + Number(activity.steps_count || 0), 0),
+    [visibleActivities]
   );
 
   const totalTimeMinutes = useMemo(
-    () => activities.reduce((sum, activity) => {
+    () => visibleActivities.reduce((sum, activity) => {
       const startParts = activity.start_time.split(":");
       const endParts = activity.end_time.split(":");
       const startMinutes = parseInt(startParts[0], 10) * 60 + parseInt(startParts[1], 10);
@@ -218,7 +238,7 @@ export default function MyWorkouts() {
       duration = Math.max(0, duration - Math.floor((activity.pause_duration_seconds || 0) / 60));
       return sum + duration;
     }, 0),
-    [activities]
+    [visibleActivities]
   );
 
   if (error) {
@@ -251,14 +271,30 @@ export default function MyWorkouts() {
 
   return (
     <View>
+      <View style={styles.historyTabs}>
+        {([
+          ["all", "All"],
+          ["stairs", "Stairs"],
+        ] as const).map(([key, label]) => (
+          <TouchableOpacity
+            key={key}
+            style={[styles.historyTabButton, activeHistoryTab === key && styles.historyTabButtonActive]}
+            onPress={() => setActiveHistoryTab(key)}
+            activeOpacity={0.75}
+          >
+            <Text style={[styles.historyTabText, activeHistoryTab === key && styles.historyTabTextActive]}>{label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <View style={styles.statsSection}>
         <LinearGradient colors={colors.gradient.orange} style={styles.statCard}>
           <Text style={styles.statValue}>{uniqueDaysCount}</Text>
           <Text style={styles.statLabel}>Active Days</Text>
         </LinearGradient>
         <LinearGradient colors={colors.gradient.teal} style={styles.statCard}>
-          <Text style={styles.statValue}>{totalDistance.toFixed(1)}</Text>
-          <Text style={styles.statLabel}>Total km</Text>
+          <Text style={styles.statValue}>{activeHistoryTab === "stairs" ? totalSteps.toLocaleString() : totalDistance.toFixed(1)}</Text>
+          <Text style={styles.statLabel}>{activeHistoryTab === "stairs" ? "Total Steps" : "Total km"}</Text>
         </LinearGradient>
         <LinearGradient colors={colors.gradient.blue} style={styles.statCard}>
           <Text style={styles.statValue}>{formatTotalTime(totalTimeMinutes)}</Text>
@@ -266,13 +302,19 @@ export default function MyWorkouts() {
         </LinearGradient>
       </View>
 
+      {visibleActivities.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>{activeHistoryTab === "stairs" ? "No stairs workouts yet" : "No workouts yet"}</Text>
+          <Text style={styles.emptySubtext}>{activeHistoryTab === "stairs" ? "Your staircase QR workouts will appear here" : "Record your first workout to see it here"}</Text>
+        </View>
+      ) : (
       <View style={styles.runsTableContainer}>
         {groupedActivities.map((yearGroup) => (
           <View key={yearGroup.year} style={styles.runsYearGroup}>
             <View style={styles.runsYearHeader}>
               <Text style={[styles.runsYearTitle, { color: themeColors.text }]}>{yearGroup.year}</Text>
               <Text style={styles.runsYearSummary}>
-                {yearGroup.activityCount} workouts | {yearGroup.totalDistance.toFixed(1)} km
+                {yearGroup.activityCount} workouts | {activeHistoryTab === "stairs" ? `${yearGroup.totalSteps.toLocaleString()} steps` : `${yearGroup.totalDistance.toFixed(1)} km`}
               </Text>
             </View>
             {yearGroup.months.map((monthGroup) => (
@@ -280,7 +322,7 @@ export default function MyWorkouts() {
                 <View style={styles.runsMonthHeader}>
                   <Text style={[styles.runsMonthTitle, { color: themeColors.text }]}>{monthGroup.label}</Text>
                   <Text style={styles.runsMonthSummary}>
-                    {monthGroup.activities.length} | {monthGroup.totalDistance.toFixed(1)} km
+                    {monthGroup.activities.length} | {activeHistoryTab === "stairs" ? `${monthGroup.totalSteps.toLocaleString()} steps` : `${monthGroup.totalDistance.toFixed(1)} km`}
                   </Text>
                 </View>
                 <View style={styles.runsTableHeader}>
@@ -331,11 +373,35 @@ export default function MyWorkouts() {
           </View>
         ))}
       </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  historyTabs: {
+    flexDirection: "row",
+    gap: 8,
+    paddingBottom: 12,
+  },
+  historyTabButton: {
+    flex: 1,
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: "center",
+    backgroundColor: colors.extraLightGray,
+  },
+  historyTabButtonActive: {
+    backgroundColor: colors.primary,
+  },
+  historyTabText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.textSecondary,
+  },
+  historyTabTextActive: {
+    color: colors.white,
+  },
   statsSection: {
     flexDirection: "row",
     gap: 12,
