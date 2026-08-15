@@ -5,6 +5,7 @@ import { getBaseUrl } from "./api-base-url";
 import { supabase } from "./supabase";
 
 let client: ReturnType<typeof createTRPCProxyClient<AppRouter>> | null = null;
+let accessTokenOverride: string | null = null;
 
 function isInvalidRefreshTokenError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error || "");
@@ -13,6 +14,12 @@ function isInvalidRefreshTokenError(error: unknown): boolean {
 }
 
 async function getAuthHeaders() {
+  if (accessTokenOverride) {
+    return {
+      Authorization: `Bearer ${accessTokenOverride}`,
+    };
+  }
+
   try {
     const {
       data: { session },
@@ -32,6 +39,10 @@ async function getAuthHeaders() {
     }
     throw error;
   }
+}
+
+export function setServerClientAccessTokenOverride(accessToken: string | null) {
+  accessTokenOverride = accessToken;
 }
 
 export function getServerClient() {

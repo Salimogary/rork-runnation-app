@@ -5,6 +5,7 @@ node_modules/
 android/
 ios/
 *.apk
+*.aab
 runnation-*.png
 smoke-*.png
 Screenshot*.jpg

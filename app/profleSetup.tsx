@@ -28,7 +28,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { Picker } from '@react-native-picker/picker';
-import { getServerClient } from '@/lib/server-client';
+import { getServerClient, setServerClientAccessTokenOverride } from '@/lib/server-client';
 import { supabase } from '@/lib/supabase';
 import { WORLD_COUNTRIES } from '@/constants/countries';
 import { clubMatchesTown, filterVisibleClubsForAge, getAgeFromDob, isAtLeastRunNationAge } from '@/utils/specialClubs';
@@ -765,6 +765,16 @@ export default function RegisterScreen() {
         throw new Error('Google sign-in returned without a session. Please try again.');
       }
 
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error('Google sign-in completed, but the secure session token was not available.');
+      }
+
+      setServerClientAccessTokenOverride(session.access_token);
+
       let refreshedRoleSession;
       try {
         await getServerClient().auth.ensureOauthRegistration.mutate();
@@ -840,6 +850,7 @@ export default function RegisterScreen() {
       console.error('[Register] Google auth error:', error);
       Alert.alert('Google Sign-In Failed', getErrorMessage(error, 'Unable to sign in with Google right now.'));
     } finally {
+      setServerClientAccessTokenOverride(null);
       setIsLoading(false);
     }
   };
