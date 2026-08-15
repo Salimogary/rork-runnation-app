@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { v4 as uuidv4 } from "uuid";
 import { publicProcedure } from "../../../create-context";
 import { requireRegistrationOwner } from "../../../rbac";
 import {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import { publicProcedure } from "../../../create-context";
 import { requireRegistrationOwner } from "../../../rbac";
 import { secondsBetween } from "../stair-utils";
@@ -47,7 +47,7 @@ export default publicProcedure
         .maybeSingle();
       if (existingError) throw new Error(existingError.message || "Could not check stair activity.");
 
-      activityId = existingActivity?.activity_id || uuidv4();
+      activityId = existingActivity?.activity_id || randomUUID();
       if (!existingActivity) {
         const startedAt = new Date(updatedSession.started_at);
         const endedAtDate = new Date(updatedSession.ended_at);
