@@ -142,7 +142,7 @@ export default function AboutUsScreen() {
               <View style={styles.platformMilestones}>
                 <View style={styles.platformMilestoneRow}>
                   <Play size={15} color={themeColors.text} />
-                  {soonBadge}
+                  <Text style={[styles.metaSubValue, { color: themeColors.text }]}>Google Play Store - 15/08/2026</Text>
                 </View>
                 <View style={styles.platformMilestoneRow}>
                   <Apple size={15} color={themeColors.text} />

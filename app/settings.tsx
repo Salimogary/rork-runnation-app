@@ -245,6 +245,7 @@ export default function SettingsScreen() {
   const updateAlertShown = useRef(false);
   const helpGridColumns = width >= 700 ? 2 : 1;
   const hasAdminPortalAccess = getHasAdminPortalAccess(roleSession);
+  const appVersion = Constants.expoConfig?.version || "1.0.0";
 
   const handleVersionTap = useCallback(() => {
     adminTapCount.current += 1;
@@ -1545,7 +1546,7 @@ export default function SettingsScreen() {
 
       <View style={styles.footer}>
         <TouchableOpacity activeOpacity={1} onPress={handleVersionTap}>
-          <Text style={[styles.footerText, { color: themeColors.textLight }]}>Version 1.0.0</Text>
+          <Text style={[styles.footerText, { color: themeColors.textLight }]}>Version {appVersion}</Text>
         </TouchableOpacity>
         {user && 'username' in user && user.username && (
           <Text style={[styles.footerSubtext, { color: themeColors.textLight }]}>Signed in as: {user.username}</Text>

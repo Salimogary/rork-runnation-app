@@ -448,6 +448,9 @@ export default function RegisterScreen() {
 
   const getErrorMessage = (error: unknown, fallback: string) => {
     if (error instanceof Error && error.message) {
+      if (error.message.includes('Unexpected character: <')) {
+        return 'RunNation services are temporarily unavailable. Please try again shortly.';
+      }
       return error.message;
     }
 
@@ -460,6 +463,16 @@ export default function RegisterScreen() {
     }
 
     return fallback;
+  };
+
+  const continueAfterBackendUnavailable = async (error: unknown) => {
+    console.warn('[Register] Google sign-in finished, but backend sync failed:', error);
+    await AsyncStorage.setItem('hasSeenOnboarding', 'true');
+    Alert.alert(
+      'Google Sign-In Complete',
+      'You are signed in, but RunNation services are temporarily unavailable. You can continue to Workout now and profile sync will finish when services are back online.',
+      [{ text: 'Continue', onPress: () => router.replace('/(tabs)') }]
+    );
   };
 
   const getAuthParamsFromUrl = (url: string) => {
@@ -752,9 +765,15 @@ export default function RegisterScreen() {
         throw new Error('Google sign-in returned without a session. Please try again.');
       }
 
-      await getServerClient().auth.ensureOauthRegistration.mutate();
-      const refreshedRoleSession = await refreshRoleSession();
-      await AsyncStorage.setItem('hasSeenOnboarding', 'true');
+      let refreshedRoleSession;
+      try {
+        await getServerClient().auth.ensureOauthRegistration.mutate();
+        refreshedRoleSession = await refreshRoleSession();
+        await AsyncStorage.setItem('hasSeenOnboarding', 'true');
+      } catch (backendSyncError) {
+        await continueAfterBackendUnavailable(backendSyncError);
+        return;
+      }
 
       const {
         data: { user: authUser },

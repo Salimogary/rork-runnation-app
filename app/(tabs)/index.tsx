@@ -21,8 +21,6 @@ import { useTheme } from "@/contexts/ThemeContext";
 import colors from "@/constants/colors";
 import { WORLD_COUNTRIES } from "@/constants/countries";
 import { formatCountryName } from "@/constants/country-utils";
-import { useSubscription } from "@/contexts/SubscriptionContext";
-import SubscriptionGate from "@/components/SubscriptionGate";
 import WatchRunExperience from "@/components/WatchRunExperience";
 import { useIsWatchDisplay } from "@/utils/useWatchDisplay";
 import { getServerClient } from "@/lib/server-client";
@@ -528,7 +526,6 @@ function PhoneExerciseScreen() {
   const trpcUtils = trpc.useUtils();
   const effectiveRegistrationId = registrationId || user?.id || "";
   const { colors: themeColors } = useTheme();
-  const { isSubscribed } = useSubscription();
 
   const [runState, setRunState] = useState<RunState>("idle");
   const [distance, setDistance] = useState(0);
@@ -3540,14 +3537,6 @@ function PhoneExerciseScreen() {
       setPace(calculatedPace);
     }
   }, [distance, duration]);
-
-  if (!isSubscribed) {
-    return (
-      <SubscriptionGate featureName="Workout">
-        <></>
-      </SubscriptionGate>
-    );
-  }
 
   const renderImportanceBadge = (importance: ImportanceLevel) => {
     const bgColor = IMPORTANCE_COLORS[importance];

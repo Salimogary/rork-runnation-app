@@ -79,8 +79,12 @@ const FREE_ADMIN_SUBSCRIPTION_ROLE_NAMES = new Set([
   "shop_manager",
 ]);
 
+function normalizeRoleName(roleName: string | null | undefined): string {
+  return (roleName ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
 export function roleNameHasFreeAdminSubscriptionAccess(roleName: string | null | undefined): boolean {
-  return FREE_ADMIN_SUBSCRIPTION_ROLE_NAMES.has((roleName ?? "").trim().toLowerCase());
+  return FREE_ADMIN_SUBSCRIPTION_ROLE_NAMES.has(normalizeRoleName(roleName));
 }
 
 export function hasFreeAdminSubscriptionAccess(roleSession: RoleSession): boolean {
