@@ -8,7 +8,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { calculateProfileCompletion, fetchProfileCompletionInputs } from "@/utils/profileCompletion";
 import { hasFreeAdminSubscriptionAccess } from "@/lib/role-session";
-import { registerDevicePushToken, sendLocalNotification, sendMorningDigestOnce, setupNotifications, type MorningNotificationItem } from "@/utils/notifications";
+import { registerDevicePushToken, sendAppUpdateNotificationOnce, sendLocalNotification, sendMorningDigestOnce, setupNotifications, type MorningNotificationItem } from "@/utils/notifications";
+
+const PLAY_STORE_INTERNAL_TEST_URL = "https://play.google.com/apps/internaltest/4701478024923253059";
 
 function dateOnly(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -25,11 +27,16 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
   const registrationId = roleSession.registrationId || user?.id || null;
 
   const openNotification = useCallback((data?: Record<string, unknown>) => {
-    if (data?.type !== "activity_approved" || !data.activityId) return;
-    router.push({
-      pathname: "/activity-complete",
-      params: { activityId: String(data.activityId) },
-    } as never);
+    if (data?.type === "activity_approved" && data.activityId) {
+      router.push({
+        pathname: "/activity-complete",
+        params: { activityId: String(data.activityId) },
+      } as never);
+      return;
+    }
+    if (data?.type === "app_update") {
+      router.push("/settings" as never);
+    }
   }, [router]);
 
   useEffect(() => {
@@ -214,6 +221,31 @@ export const [NotificationProvider, useNotifications] = createContextHook(() => 
     if (!user?.id || Platform.OS === "web") return;
     void sendMorningDigestOnce(user.id, morningItems);
   }, [morningItems, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || Platform.OS === "web") return;
+    const buildKey = Platform.OS === "ios" ? "ios_build_number" : "android_apk_build_number";
+    const urlKey = Platform.OS === "ios" ? "ios_app_url" : "android_apk_url";
+
+    const checkForUpdate = async () => {
+      const { data, error } = await supabase
+        .from("app_settings")
+        .select("key, value")
+        .in("key", [buildKey, urlKey]);
+      if (error) {
+        console.warn("[Notifications] Could not check app update:", error.message);
+        return;
+      }
+
+      const settings = new Map((data || []).map((row: any) => [String(row.key), row.value]));
+      const availableBuild = Number(settings.get(buildKey) || 0);
+      const installedBuild = Number(Constants.nativeBuildVersion || 0);
+      const updateUrl = String(settings.get(urlKey) || PLAY_STORE_INTERNAL_TEST_URL);
+      await sendAppUpdateNotificationOnce(user.id, availableBuild, installedBuild, updateUrl);
+    };
+
+    void checkForUpdate();
+  }, [user?.id]);
 
   const refreshNotificationData = useCallback(() => {
     void refetch();

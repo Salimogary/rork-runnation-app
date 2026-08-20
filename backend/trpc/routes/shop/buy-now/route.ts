@@ -44,6 +44,9 @@ export default publicProcedure
       if (productError || !product) {
         throw new Error("Product not found");
       }
+      if (product.listing_status && product.listing_status !== "approved") {
+        throw new Error(`${product.catalogue_item || "This item"} is not available yet`);
+      }
 
       const stock = product.quantity ?? 0;
       console.log(`[buyNow] Product ${product.catalogue_item} stock check:`, JSON.stringify({ rawProduct: product, resolvedStock: stock, requestedQty: item.quantity }));

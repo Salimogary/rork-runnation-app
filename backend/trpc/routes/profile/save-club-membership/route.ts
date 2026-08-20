@@ -54,8 +54,12 @@ function assertClubAllowedForProfile(club: any, registration: any, countryAliase
   if (!code && age !== null && age >= 8 && age <= 15) {
     throw new Error("Runners aged 8 to 15 can only join Junior Runners.");
   }
-  if (!code && normalizeCountry(club?.country, countryAliases) !== normalizeCountry(registration?.country, countryAliases)) {
-    throw new Error("Please choose a club from your profile country.");
+  if (
+    !code &&
+    normalizeCountry(club?.country, countryAliases) !== normalizeCountry(registration?.country, countryAliases) &&
+    club?.virtual_membership_enabled !== true
+  ) {
+    throw new Error("You can only join a club in another country when that club offers virtual membership.");
   }
 }
 
@@ -107,7 +111,7 @@ export default publicProcedure
         ctx.supabase.from("registrations").select("dob, country, has_disability, does_indoor_workouts, has_smart_watch").eq("registration_id", input.registrationId).maybeSingle(),
         ctx.supabase
           .from("clubs")
-          .select("club_id, country, special_club_code, is_special_club")
+          .select("club_id, country, special_club_code, is_special_club, virtual_membership_enabled")
           .in("club_id", membershipInputs.map((membership) => membership.clubId)),
         ctx.supabase
           .from("user_goals")

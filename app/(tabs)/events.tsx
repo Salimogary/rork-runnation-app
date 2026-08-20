@@ -1572,7 +1572,7 @@ export default function EventsScreen() {
         <View style={styles.rideShareHeroTextBlock}>
           <Text style={styles.rideShareHeroTitle}>Event Ride Share</Text>
           <Text style={styles.rideShareHeroText}>
-            Find a car to the race, or list seats for runners leaving from your town.
+            Find a car to the race, or list seats for runners leaving from your town. Drivers get 30 days free, then a separate ride-share listing fee applies.
           </Text>
         </View>
       </View>
@@ -2424,7 +2424,7 @@ export default function EventsScreen() {
         <View style={styles.rideShareHeroTextBlock}>
           <Text style={styles.rideShareHeroTitle}>Event Accommodation</Text>
           <Text style={styles.rideShareHeroText}>
-            Find a place near the race, or list rooms available for runners.
+            Find a place near the race, or list rooms available for runners. Hosts get 30 days free, then a separate accommodation listing fee applies.
           </Text>
         </View>
       </View>
@@ -3075,7 +3075,7 @@ export default function EventsScreen() {
             onPress={() => setMainTab(value)}
           >
             <Text style={[styles.eventsMainTabText, mainTab === value && styles.eventsMainTabTextActive]}>
-              {value === "events" ? "Events" : value === "rideShare" ? "Ride Share" : "Accommodation"}
+              {value === "events" ? "Calendar" : value === "rideShare" ? "Ride Share" : "Accommodation"}
             </Text>
           </Pressable>
         ))}

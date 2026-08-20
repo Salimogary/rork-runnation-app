@@ -9,6 +9,8 @@ import checkoutRoute from "./routes/shop/checkout/route";
 import getOrdersRoute from "./routes/shop/get-orders/route";
 import getOrderDetailsRoute from "./routes/shop/get-order-details/route";
 import buyNowRoute from "./routes/shop/buy-now/route";
+import getMyShopRoute from "./routes/shop/get-my-shop/route";
+import registerShopOwnerRoute from "./routes/shop/register-owner/route";
 import getAllOrdersRoute from "./routes/admin/get-all-orders/route";
 import updateOrderStatusRoute from "./routes/admin/update-order-status/route";
 import updateStockRoute from "./routes/admin/update-stock/route";
@@ -101,9 +103,12 @@ import updateMagazineEntryRoute from "./routes/admin/update-magazine-entry/route
 import createClubProfileRoute from "./routes/admin/create-club-profile/route";
 import getAdminProfileRoute from "./routes/admin/get-admin-profile/route";
 import updateAdminProfileRoute from "./routes/admin/update-admin-profile/route";
+import getShopOwnerApplicationsRoute from "./routes/admin/get-shop-owner-applications/route";
+import updateShopOwnerApplicationRoute from "./routes/admin/update-shop-owner-application/route";
 import getClubMemberDirectoryRoute from "./routes/admin/get-club-member-directory/route";
 import upsertClubMemberDirectoryRoute from "./routes/admin/upsert-club-member-directory/route";
 import deleteClubMemberDirectoryRoute from "./routes/admin/delete-club-member-directory/route";
+import updateAppShareLinkRoute from "./routes/admin/update-app-share-link/route";
 import registerRoute from "./routes/auth/register/route";
 import saveContactsRoute from "./routes/auth/save-contacts/route";
 import saveGoalsRoute from "./routes/auth/save-goals/route";
@@ -140,6 +145,7 @@ import uploadProfilePhotoRoute from "./routes/profile/upload-photo/route";
 import sendEmailVerificationRoute from "./routes/profile/send-email-verification/route";
 import verifyEmailCodeRoute from "./routes/profile/verify-email-code/route";
 import getClubPaymentStatusRoute from "./routes/profile/get-club-payment-status/route";
+import getListingSubscriptionsRoute from "./routes/profile/get-listing-subscriptions/route";
 import leaveClubMembershipRoute from "./routes/profile/leave-club-membership/route";
 import getRoleSessionRoute from "./routes/session/get-role-session/route";
 import getPublicEventsRoute from "./routes/events/get-events/route";
@@ -179,6 +185,7 @@ import startWearableConnectionRoute from "./routes/wearables/start-connection/ro
 import createSubscriptionPaymentRoute from "./routes/payments/create-subscription-payment/route";
 import createFlutterwaveClubPaymentRoute from "./routes/payments/create-club-payment/route";
 import createDonationPaymentRoute from "./routes/payments/create-donation-payment/route";
+import createListingSubscriptionPaymentRoute from "./routes/payments/create-listing-subscription-payment/route";
 
 export const appRouter = createTRPCRouter({
   example: createTRPCRouter({
@@ -194,6 +201,8 @@ export const appRouter = createTRPCRouter({
     getOrders: getOrdersRoute,
     getOrderDetails: getOrderDetailsRoute,
     buyNow: buyNowRoute,
+    getMyShop: getMyShopRoute,
+    registerOwner: registerShopOwnerRoute,
   }),
   admin: createTRPCRouter({
     getAllOrders: getAllOrdersRoute,
@@ -279,6 +288,9 @@ export const appRouter = createTRPCRouter({
     createClubProfile: createClubProfileRoute,
     getAdminProfile: getAdminProfileRoute,
     updateAdminProfile: updateAdminProfileRoute,
+    getShopOwnerApplications: getShopOwnerApplicationsRoute,
+    updateShopOwnerApplication: updateShopOwnerApplicationRoute,
+    updateAppShareLink: updateAppShareLinkRoute,
   }),
   activities: createTRPCRouter({
     submitTreadmillActivity: submitTreadmillActivityRoute,
@@ -337,6 +349,7 @@ export const appRouter = createTRPCRouter({
     sendEmailVerification: sendEmailVerificationRoute,
     verifyEmailCode: verifyEmailCodeRoute,
     getClubPaymentStatus: getClubPaymentStatusRoute,
+    getListingSubscriptions: getListingSubscriptionsRoute,
     leaveClubMembership: leaveClubMembershipRoute,
   }),
   session: createTRPCRouter({
@@ -392,6 +405,7 @@ export const appRouter = createTRPCRouter({
     createSubscriptionPayment: createSubscriptionPaymentRoute,
     createClubPayment: createFlutterwaveClubPaymentRoute,
     createDonationPayment: createDonationPaymentRoute,
+    createListingSubscriptionPayment: createListingSubscriptionPaymentRoute,
   }),
 });
 

@@ -193,9 +193,14 @@ export default function CheckoutScreen() {
             const product = item.product;
             return (
               <View key={item.cart_id} style={styles.summaryItem}>
-                <Text style={[styles.summaryItemName, { color: themeColors.text }]} numberOfLines={1}>
-                  {product?.catalogue_item} x{item.quantity}
-                </Text>
+                <View style={styles.summaryItemDetails}>
+                  <Text style={[styles.summaryItemName, { color: themeColors.text }]} numberOfLines={1}>
+                    {product?.catalogue_item} x{item.quantity}
+                  </Text>
+                  <Text style={[styles.summaryItemCondition, { color: themeColors.textSecondary }]}>
+                    Condition: {product?.condition || "New"}
+                  </Text>
+                </View>
                 <Text style={[styles.summaryItemPrice, { color: themeColors.text }]}>
                   ugx.{((product?.price || 0) * item.quantity).toLocaleString("en-US", { maximumFractionDigits: 0 })}
                 </Text>
@@ -341,13 +346,20 @@ const styles = StyleSheet.create({
   summaryItem: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
     paddingVertical: 6,
+  },
+  summaryItemDetails: {
+    flex: 1,
+    marginRight: 12,
   },
   summaryItemName: {
     fontSize: 15,
-    flex: 1,
-    marginRight: 12,
+  },
+  summaryItemCondition: {
+    fontSize: 12,
+    marginTop: 2,
+    fontWeight: "600" as const,
   },
   summaryItemPrice: {
     fontSize: 15,

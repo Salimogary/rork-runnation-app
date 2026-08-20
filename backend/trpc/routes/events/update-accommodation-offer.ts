@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { publicProcedure } from "../../create-context";
+import { requireActiveListingEntitlement } from "../../listing-entitlements";
 import { isRideShareEventExpired } from "./ride-share-permissions";
 import { resolveRideShareRegistrationId } from "./ride-share-utils";
 
@@ -34,6 +35,7 @@ export default publicProcedure
   }))
   .mutation(async ({ ctx, input }) => {
     const hostRegistrationId = await resolveRideShareRegistrationId(ctx, input.registrationId);
+    const entitlement = await requireActiveListingEntitlement(ctx, hostRegistrationId, "accommodation");
 
     const { data: offer, error: offerError } = await ctx.supabase
       .from("event_accommodation_offers")
@@ -91,6 +93,7 @@ export default publicProcedure
         preferred_guest_sex: input.preferredGuestSex && input.preferredGuestSex !== "Any" ? input.preferredGuestSex : null,
         requires_commitment_fee: input.requiresCommitmentFee,
         commitment_fee: input.requiresCommitmentFee ? input.commitmentFee : 0,
+        listing_entitlement_id: entitlement.entitlement_id,
         status: confirmedOccupants >= input.roomsAvailable ? "full" : "active",
         updated_at: new Date().toISOString(),
       })

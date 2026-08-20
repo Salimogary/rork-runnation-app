@@ -204,7 +204,7 @@ export default publicProcedure
       ctx.supabase.from("activities").select("distance_km, exercise_type").eq("registration_id", registrationId),
       ctx.supabase.from("goals").select("goal_id, goal").order("goal_id", { ascending: true }),
       ctx.supabase.from("user_goals").select("*").eq("registration_id", registrationId),
-      ctx.supabase.from("clubs").select("club_id, club_name, country, location, description, presence_towns, is_special_club, special_club_code, age_min, age_max").order("club_name", { ascending: true }),
+      ctx.supabase.from("clubs").select("club_id, club_name, country, location, description, presence_towns, membership_type, virtual_membership_enabled, meeting_point, meeting_time, activity_options, is_special_club, special_club_code, age_min, age_max").order("club_name", { ascending: true }),
       ctx.supabase
         .from("club_membership_request")
         .select("*")

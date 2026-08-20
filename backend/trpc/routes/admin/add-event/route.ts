@@ -2,6 +2,7 @@ import { publicProcedure } from "../../../create-context";
 import { z } from "zod";
 import { logAdminAction, requireAdminPermission } from "../../../rbac";
 import { uploadMagazineImage } from "../../../magazine-image";
+import { sendNewEventAlertPush } from "../../../push-notifications";
 
 const EVENT_POSTER_BUCKET = "event_poster";
 const EVENT_POSTER_ALLOWED_MIME_TYPES = new Set([
@@ -511,9 +512,20 @@ export default publicProcedure.input(addEventInput).mutation(async ({ input, ctx
     throw new Error(error.message || "Failed to add event");
   }
 
+  const insertedEvent = data?.[0];
+  if (insertedEvent?.event_id && resolvedCountryCode) {
+    void sendNewEventAlertPush(ctx, {
+      eventId: insertedEvent.event_id,
+      eventName: input.eventName.trim(),
+      date: normalizedStartsAt,
+      location: normalizedEventLocation || "Virtual",
+      countryCode: resolvedCountryCode,
+      countryName: resolvedCountry,
+    });
+  }
+
   try {
-    const eventRow = data?.[0];
-    const eventId = eventRow?.event_id ?? nextEventId;
+    const eventId = insertedEvent?.event_id ?? nextEventId;
     const { data: actorUser } = actor.authUserId
       ? await ctx.supabase.auth.admin.getUserById(actor.authUserId)
       : { data: null };

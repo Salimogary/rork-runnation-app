@@ -244,8 +244,8 @@ export default function MyWorkouts() {
   if (error) {
     return (
       <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>Connection Error</Text>
-        <Text style={styles.emptySubtext}>Check your internet connection</Text>
+        <Text style={[styles.emptyText, { color: themeColors.text }]}>Connection Error</Text>
+        <Text style={[styles.emptySubtext, { color: themeColors.textSecondary }]}>Check your internet connection</Text>
       </View>
     );
   }
@@ -254,7 +254,7 @@ export default function MyWorkouts() {
     return (
       <View style={styles.emptyContainer}>
         <ActivityIndicator color={colors.primary} />
-        <Text style={styles.emptyText}>Loading workouts...</Text>
+        <Text style={[styles.emptyText, { color: themeColors.text }]}>Loading workouts...</Text>
       </View>
     );
   }
@@ -263,8 +263,8 @@ export default function MyWorkouts() {
     return (
       <View style={styles.emptyContainer}>
         <Text style={styles.emptyEmoji}>!</Text>
-        <Text style={styles.emptyText}>No workouts yet</Text>
-        <Text style={styles.emptySubtext}>Record your first workout to see it here</Text>
+        <Text style={[styles.emptyText, { color: themeColors.text }]}>No workouts yet</Text>
+        <Text style={[styles.emptySubtext, { color: themeColors.textSecondary }]}>Record your first workout to see it here</Text>
       </View>
     );
   }
@@ -278,11 +278,19 @@ export default function MyWorkouts() {
         ] as const).map(([key, label]) => (
           <TouchableOpacity
             key={key}
-            style={[styles.historyTabButton, activeHistoryTab === key && styles.historyTabButtonActive]}
+            style={[
+              styles.historyTabButton,
+              { backgroundColor: themeColors.inputBackground },
+              activeHistoryTab === key && styles.historyTabButtonActive,
+            ]}
             onPress={() => setActiveHistoryTab(key)}
             activeOpacity={0.75}
           >
-            <Text style={[styles.historyTabText, activeHistoryTab === key && styles.historyTabTextActive]}>{label}</Text>
+            <Text style={[
+              styles.historyTabText,
+              { color: themeColors.textSecondary },
+              activeHistoryTab === key && styles.historyTabTextActive,
+            ]}>{label}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -304,8 +312,8 @@ export default function MyWorkouts() {
 
       {visibleActivities.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>{activeHistoryTab === "stairs" ? "No stairs workouts yet" : "No workouts yet"}</Text>
-          <Text style={styles.emptySubtext}>{activeHistoryTab === "stairs" ? "Your staircase QR workouts will appear here" : "Record your first workout to see it here"}</Text>
+          <Text style={[styles.emptyText, { color: themeColors.text }]}>{activeHistoryTab === "stairs" ? "No stairs workouts yet" : "No workouts yet"}</Text>
+          <Text style={[styles.emptySubtext, { color: themeColors.textSecondary }]}>{activeHistoryTab === "stairs" ? "Your staircase QR workouts will appear here" : "Record your first workout to see it here"}</Text>
         </View>
       ) : (
       <View style={styles.runsTableContainer}>
@@ -313,24 +321,24 @@ export default function MyWorkouts() {
           <View key={yearGroup.year} style={styles.runsYearGroup}>
             <View style={styles.runsYearHeader}>
               <Text style={[styles.runsYearTitle, { color: themeColors.text }]}>{yearGroup.year}</Text>
-              <Text style={styles.runsYearSummary}>
+              <Text style={[styles.runsYearSummary, { color: themeColors.textSecondary }]}>
                 {yearGroup.activityCount} workouts | {activeHistoryTab === "stairs" ? `${yearGroup.totalSteps.toLocaleString()} steps` : `${yearGroup.totalDistance.toFixed(1)} km`}
               </Text>
             </View>
             {yearGroup.months.map((monthGroup) => (
-              <View key={monthGroup.key} style={[styles.runsMonthTable, { backgroundColor: themeColors.cardBackground }]}>
-                <View style={styles.runsMonthHeader}>
+              <View key={monthGroup.key} style={[styles.runsMonthTable, { backgroundColor: themeColors.cardBackground, borderColor: themeColors.border }]}>
+                <View style={[styles.runsMonthHeader, { backgroundColor: themeColors.inputBackground }]}>
                   <Text style={[styles.runsMonthTitle, { color: themeColors.text }]}>{monthGroup.label}</Text>
-                  <Text style={styles.runsMonthSummary}>
+                  <Text style={[styles.runsMonthSummary, { color: themeColors.textSecondary }]}>
                     {monthGroup.activities.length} | {activeHistoryTab === "stairs" ? `${monthGroup.totalSteps.toLocaleString()} steps` : `${monthGroup.totalDistance.toFixed(1)} km`}
                   </Text>
                 </View>
-                <View style={styles.runsTableHeader}>
-                  <Text style={[styles.runsTableHeaderText, styles.runsDateColumn]}>Date</Text>
-                  <Text style={[styles.runsTableHeaderText, styles.runsTypeColumn]}>Type</Text>
-                  <Text style={[styles.runsTableHeaderText, styles.runsDistanceColumn]}>km/steps</Text>
-                  <Text style={[styles.runsTableHeaderText, styles.runsTimeColumn]}>Time</Text>
-                  <Text style={[styles.runsTableHeaderText, styles.runsPaceColumn]}>Pace</Text>
+                <View style={[styles.runsTableHeader, { backgroundColor: themeColors.border }]}>
+                  <Text style={[styles.runsTableHeaderText, styles.runsDateColumn, { color: themeColors.textSecondary }]}>Date</Text>
+                  <Text style={[styles.runsTableHeaderText, styles.runsTypeColumn, { color: themeColors.textSecondary }]}>Type</Text>
+                  <Text style={[styles.runsTableHeaderText, styles.runsDistanceColumn, { color: themeColors.textSecondary }]}>km/steps</Text>
+                  <Text style={[styles.runsTableHeaderText, styles.runsTimeColumn, { color: themeColors.textSecondary }]}>Time</Text>
+                  <Text style={[styles.runsTableHeaderText, styles.runsPaceColumn, { color: themeColors.textSecondary }]}>Pace</Text>
                 </View>
                 {monthGroup.activities.map((activity, index) => {
                   const isDeleting = deletingActivityId === activity.activity_id;
@@ -339,7 +347,11 @@ export default function MyWorkouts() {
                     key={activity.activity_id}
                     style={[
                       styles.runsTableRow,
-                      index % 2 === 1 && styles.runsTableRowAlt,
+                      {
+                        backgroundColor: index % 2 === 1
+                          ? themeColors.inputBackground
+                          : themeColors.cardBackground,
+                      },
                       isDeleting && styles.runsTableRowDeleting,
                     ]}
                     onLongPress={() => confirmDeleteWorkout(activity)}
@@ -350,10 +362,10 @@ export default function MyWorkouts() {
                     accessibilityLabel={`Workout ${activity.exercise_type} on ${formatDate(activity.activity_date)}`}
                     accessibilityHint="Long press to delete this workout"
                   >
-                    <Text style={[styles.runsTableCellText, styles.runsDateColumn]} numberOfLines={1}>{formatDate(activity.activity_date)}</Text>
-                    <Text style={[styles.runsTableCellText, styles.runsTypeColumn]} numberOfLines={1}>{activity.exercise_type}</Text>
-                    <Text style={[styles.runsTableCellText, styles.runsDistanceColumn]}>{formatActivityMeasure(activity)}</Text>
-                    <Text style={[styles.runsTableCellText, styles.runsTimeColumn]} numberOfLines={1}>
+                    <Text style={[styles.runsTableCellText, styles.runsDateColumn, { color: themeColors.text }]} numberOfLines={1}>{formatDate(activity.activity_date)}</Text>
+                    <Text style={[styles.runsTableCellText, styles.runsTypeColumn, { color: themeColors.text }]} numberOfLines={1}>{activity.exercise_type}</Text>
+                    <Text style={[styles.runsTableCellText, styles.runsDistanceColumn, { color: themeColors.text }]}>{formatActivityMeasure(activity)}</Text>
+                    <Text style={[styles.runsTableCellText, styles.runsTimeColumn, { color: themeColors.text }]} numberOfLines={1}>
                       {calculateDuration(activity.start_time, activity.end_time, activity.pause_duration_seconds || 0)}
                     </Text>
                     {isDeleting ? (
@@ -361,7 +373,7 @@ export default function MyWorkouts() {
                         <ActivityIndicator size="small" color={colors.primary} />
                       </View>
                     ) : (
-                      <Text style={[styles.runsTableCellText, styles.runsPaceColumn]} numberOfLines={1}>
+                      <Text style={[styles.runsTableCellText, styles.runsPaceColumn, { color: themeColors.text }]} numberOfLines={1}>
                         {formatPaceMinPerKm(activity.pace_min_per_km)}
                       </Text>
                     )}

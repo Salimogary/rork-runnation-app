@@ -61,7 +61,8 @@ type AdminTab =
   | "moderation"
   | "reports"
   | "myTeam"
-  | "archive";
+  | "archive"
+  | "shareApp";
 
 type AuditLogUserType = "all" | "country_admin" | "country_coordinator" | "club_coordinator";
 type ClubRequestStatusFilter = "pending" | "approved" | "rejected";
@@ -135,6 +136,7 @@ const SPECIAL_CLUB_ROLE_CLUB_NAMES: Partial<Record<ManageableRoleName, string>> 
 };
 
 const MAGAZINE_CREATE_PAGES: MagazineCreatePage[] = ["News", "Events", "Community", "Columns", "Gallery"];
+const CATALOGUE_CONDITION_OPTIONS = ["New", "Used", "Refurbished"] as const;
 const MAGAZINE_REVIEW_STATUS_TABS: Array<{ key: MagazineReviewStatusFilter; label: string }> = [
   { key: "pending", label: "Pending" },
   { key: "accepted", label: "Accepted" },
@@ -909,6 +911,7 @@ export default function AdminScreen() {
   const [showStockModal, setShowStockModal] = useState<boolean>(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [newStock, setNewStock] = useState<string>("");
+  const [selectedProductCondition, setSelectedProductCondition] = useState<string>("New");
   const [selectedActivity, setSelectedActivity] = useState<PendingActivity | null>(null);
   const [showActivityModal, setShowActivityModal] = useState<boolean>(false);
   const [showEventModal, setShowEventModal] = useState<boolean>(false);
@@ -1057,6 +1060,7 @@ export default function AdminScreen() {
   const [selectedReportEventId, setSelectedReportEventId] = useState<string>("");
   const [isExportingClubStatus, setIsExportingClubStatus] = useState(false);
   const [isExportingEventResults, setIsExportingEventResults] = useState(false);
+  const [shareAppLinkInput, setShareAppLinkInput] = useState("");
 
   const queryClient = useQueryClient();
   const hasRoleBasedAccess = hasAdminPortalAccess(roleSession);
@@ -1093,11 +1097,29 @@ export default function AdminScreen() {
     isClubCoordinator ||
     isSpecialClubCoordinator ||
     isEventOrganizer;
-  const protectedTabs: AdminTab[] = ["orders", "events", "enrollments", "payments", "whatsapp", "clubAdmin", "clubRequests", "activityUploads", "externalActivities", "moderation", "adminTerms", "roles", "dataHealth", "auditLog", "milestones", "reports", "myTeam", "myArticles", "archive"];
+  const { data: appLinks, refetch: refetchAppLinks } = trpc.support.getAppLinks.useQuery(undefined, {
+    enabled: canUseProtectedAdminRoutes && isSuperAdmin,
+    staleTime: 0,
+  });
+  const updateAppShareLinkMutation = trpc.admin.updateAppShareLink.useMutation({
+    onSuccess: (result) => {
+      setShareAppLinkInput(result.androidApkUrl);
+      void refetchAppLinks();
+      Alert.alert("Share App Updated", "The app share button now uses the saved link.");
+    },
+    onError: (error: any) => Alert.alert("Could Not Save", error?.message || "Please enter a valid link."),
+  });
+
+  useEffect(() => {
+    if (activeTab === "shareApp") {
+      setShareAppLinkInput(appLinks?.androidApkUrl || "");
+    }
+  }, [activeTab, appLinks?.androidApkUrl]);
+  const protectedTabs: AdminTab[] = ["orders", "events", "enrollments", "payments", "whatsapp", "clubAdmin", "clubRequests", "activityUploads", "externalActivities", "moderation", "adminTerms", "roles", "dataHealth", "auditLog", "milestones", "reports", "myTeam", "myArticles", "archive", "shareApp"];
 
   const allowedTabs = useMemo<AdminTab[]>(() => {
     if (isSuperAdmin) {
-      return ["orders", "stock", "approvals", "events", "enrollments", "payments", "whatsapp", "clubAdmin", "clubRequests", "activityUploads", "externalActivities", "ratings", "suggestions", "magazine", "moderation", "reports", "myTeam", "adminTerms", "roles", "dataHealth", "auditLog", "milestones", "archive"];
+      return ["orders", "stock", "approvals", "events", "enrollments", "payments", "shareApp", "whatsapp", "clubAdmin", "clubRequests", "activityUploads", "externalActivities", "ratings", "suggestions", "magazine", "moderation", "reports", "myTeam", "adminTerms", "roles", "dataHealth", "auditLog", "milestones", "archive"];
     }
     if (isCountryAdmin) {
       return ["orders", "stock", "events", "enrollments", "payments", "whatsapp", "clubAdmin", "clubRequests", "activityUploads", "externalActivities", "magazine", "reports", "adminTerms", "resign"];
@@ -3017,7 +3039,8 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
 
   const handleUpdateStock = (product: any) => {
     setSelectedProduct(product);
-    setNewStock(String(product.Quanity || 0));
+    setNewStock(String(product.quantity || 0));
+    setSelectedProductCondition(product.condition || "New");
     setShowStockModal(true);
   };
 
@@ -3033,6 +3056,7 @@ const handleUpdateOrderStatus = (orderId: string, status: string) => {
     updateStockMutation.mutate({
       catalogueId: selectedProduct.catalogue_id,
       quantity: stockValue,
+      condition: selectedProductCondition as "New" | "Used" | "Refurbished",
     });
   };
 
@@ -4296,6 +4320,7 @@ const getStatusLabel = (status: string) => {
       case "reports": return "Reports";
       case "myTeam": return "My Team";
       case "archive": return "Archive";
+      case "shareApp": return "Share App";
       default: return "Admin Dashboard";
     }
   };
@@ -4312,6 +4337,7 @@ const getStatusLabel = (status: string) => {
     { key: "events", label: "Events", icon: <Calendar size={24} color="#10b981" /> },
     { key: "enrollments", label: "Participant Approvals", icon: <UserPlus size={24} color="#10b981" /> },
     { key: "payments", label: "Payments", icon: <CreditCard size={24} color="#10b981" />, badgeCount: clubPayoutRequests.filter((request) => request.status === "pending").length },
+    { key: "shareApp", label: "Share App", icon: <Download size={24} color="#10b981" /> },
     { key: "whatsapp", label: "WhatsApp Group", icon: <MessageCircle size={24} color="#10b981" /> },
     { key: "clubAdmin", label: needsClubProfileSetup ? "Create Club" : isEventOrganizer && !isClubCoordinator ? "Organization Profile" : "Club Admin", icon: <Building2 size={24} color="#10b981" />, badgeCount: needsClubProfileSetup ? 1 : pendingClubDeletionRequests.length },
     { key: "clubRequests", label: "Membership Approvals", icon: <Users size={24} color="#10b981" />, badgeCount: pendingClubMembershipRequests.length },
@@ -4343,6 +4369,7 @@ const getStatusLabel = (status: string) => {
         "orders",
         "events",
         "payments",
+        "shareApp",
         "whatsapp",
         "clubAdmin",
         "stock",
@@ -4699,6 +4726,60 @@ const getStatusLabel = (status: string) => {
       presenceTowns: adminProfile.type === "club" ? presenceTowns : [],
     });
   };
+
+  const renderShareAppContent = () => (
+    <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+      <View style={styles.auditFilterCard}>
+        <View style={styles.auditFilterHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.auditFilterTitle}>Share App</Text>
+            <Text style={styles.auditFilterSubtitle}>
+              Save the Android APK link used by the Share App button across RunNation.
+            </Text>
+          </View>
+          <View style={styles.healthSeverityBadge}>
+            <Text style={styles.healthSeverityText}>Live link</Text>
+          </View>
+        </View>
+
+        <Text style={styles.label}>Latest APK link</Text>
+        <TextInput
+          style={[styles.input, styles.inputMultiline]}
+          value={shareAppLinkInput}
+          onChangeText={setShareAppLinkInput}
+          placeholder="Paste Google Drive APK link"
+          placeholderTextColor="#9ca3af"
+          autoCapitalize="none"
+          autoCorrect={false}
+          multiline
+          textAlignVertical="top"
+        />
+        {appLinks?.androidUpdatedAt ? (
+          <Text style={styles.eventPosterHint}>Last updated {formatDate(appLinks.androidUpdatedAt)}</Text>
+        ) : null}
+        <View style={styles.submissionActions}>
+          <TouchableOpacity
+            style={[styles.downloadButton, styles.adminDataActionNeutral]}
+            onPress={() => appLinks?.androidApkUrl && Linking.openURL(appLinks.androidApkUrl)}
+            disabled={!appLinks?.androidApkUrl}
+          >
+            <Globe2 size={18} color="#fff" />
+            <Text style={styles.downloadButtonText}>Open Current</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.approveButton, updateAppShareLinkMutation.isPending && styles.disabledButton]}
+            disabled={updateAppShareLinkMutation.isPending}
+            onPress={() => updateAppShareLinkMutation.mutate({ androidApkUrl: shareAppLinkInput.trim() })}
+          >
+            <Save size={18} color="#fff" />
+            <Text style={styles.actionButtonText}>
+              {updateAppShareLinkMutation.isPending ? "Saving..." : "Save Link"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </ScrollView>
+  );
 
   const renderClubAdminContent = () => (
     <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
@@ -5327,6 +5408,18 @@ const getStatusLabel = (status: string) => {
         }} 
       />
 
+      {activeTab ? (
+        <View style={styles.portalBackBar}>
+          <TouchableOpacity style={styles.portalBackButton} onPress={() => setActiveTab(null)}>
+            <ArrowLeft size={18} color="#111827" />
+            <Text style={styles.portalBackText}>Back to Admin Portal</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.portalCloseButton} onPress={() => setActiveTab(null)} accessibilityLabel="Close tile">
+            <X size={18} color="#111827" />
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       {mustAcceptAdminTerms ? (
       renderAdminTermsContent()
       ) : activeTab === null ? (
@@ -5464,6 +5557,8 @@ const getStatusLabel = (status: string) => {
         renderRoleAccessContent()
       ) : activeTab === "clubAdmin" ? (
         renderClubAdminContent()
+      ) : activeTab === "shareApp" ? (
+        renderShareAppContent()
       ) : activeTab === "resign" ? (
         renderResignContent()
       ) : activeTab === "reports" ? (
@@ -7243,6 +7338,9 @@ const getStatusLabel = (status: string) => {
                   <View style={[styles.adminDataCell, { width: 120 }]}>
                     <Text style={styles.adminDataHeaderText}>Size</Text>
                   </View>
+                  <View style={[styles.adminDataCell, { width: 140 }]}>
+                    <Text style={styles.adminDataHeaderText}>Condition</Text>
+                  </View>
                   <View style={[styles.adminDataCell, { width: 120 }]}>
                     <Text style={styles.adminDataHeaderText}>Stock</Text>
                   </View>
@@ -7261,6 +7359,9 @@ const getStatusLabel = (status: string) => {
                       </View>
                       <View style={[styles.adminDataCell, { width: 120 }]}>
                         <Text style={styles.adminDataCellText}>{product.size || "-"}</Text>
+                      </View>
+                      <View style={[styles.adminDataCell, { width: 140 }]}>
+                        <Text style={styles.adminDataCellText}>{product.condition || "New"}</Text>
                       </View>
                       <View style={[styles.adminDataCell, { width: 120 }]}>
                         <Text
@@ -8689,6 +8790,9 @@ const getStatusLabel = (status: string) => {
               <View style={styles.productInfo}>
                 <Text style={styles.productName}>{selectedProduct.catalogue_item}</Text>
                 <Text style={styles.productCurrentStock}>
+                  Condition: {selectedProduct.condition || "New"}
+                </Text>
+                <Text style={styles.productCurrentStock}>
                   Current Stock: {selectedProduct.quantity || 0}
                 </Text>
               </View>
@@ -8704,6 +8808,31 @@ const getStatusLabel = (status: string) => {
                 placeholderTextColor="#9ca3af"
                 keyboardType="number-pad"
               />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Condition</Text>
+              <View style={styles.statusOptions}>
+                {CATALOGUE_CONDITION_OPTIONS.map((condition) => (
+                  <TouchableOpacity
+                    key={condition}
+                    style={[
+                      styles.statusOption,
+                      selectedProductCondition === condition && styles.statusOptionSelected,
+                    ]}
+                    onPress={() => setSelectedProductCondition(condition)}
+                  >
+                    <Text
+                      style={[
+                        styles.statusOptionText,
+                        selectedProductCondition === condition && styles.statusOptionTextSelected,
+                      ]}
+                    >
+                      {condition}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
 
             <TouchableOpacity
@@ -10262,6 +10391,39 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 16,
     color: "#6b7280",
+  },
+  portalBackBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: "#ffffff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+  },
+  portalBackButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    minHeight: 38,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: "#f3f4f6",
+  },
+  portalBackText: {
+    fontSize: 13,
+    fontWeight: "800" as const,
+    color: "#111827",
+  },
+  portalCloseButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f3f4f6",
   },
   menuGridScroll: {
     padding: 12,

@@ -7,6 +7,11 @@ const inputSchema = z.object({
   location: z.string().trim().max(120).nullable().optional(),
   description: z.string().trim().max(1000).nullable().optional(),
   presenceTowns: z.array(z.string().trim().max(80)).max(12).optional(),
+  membershipType: z.enum(["free", "paid"]).optional().default("free"),
+  virtualMembershipEnabled: z.boolean().optional().default(false),
+  meetingPoint: z.string().trim().max(160).nullable().optional(),
+  meetingTime: z.string().trim().max(160).nullable().optional(),
+  activityOptions: z.array(z.enum(["walk", "run", "stairs", "cycle", "treadmill"])).max(5).optional().default([]),
 });
 
 function normalizeClubName(value: string | null | undefined): string {
@@ -81,6 +86,11 @@ export default publicProcedure
         created_by_user_id: ctx.authUserId,
         is_active: true,
         presence_towns: presenceTowns,
+        membership_type: input.membershipType,
+        virtual_membership_enabled: input.virtualMembershipEnabled,
+        meeting_point: cleanOptionalText(input.meetingPoint),
+        meeting_time: cleanOptionalText(input.meetingTime),
+        activity_options: input.activityOptions,
       })
       .select("club_id, club_name, country")
       .maybeSingle();
@@ -137,6 +147,11 @@ export default publicProcedure
         clubName: club.club_name,
         location: cleanOptionalText(input.location),
         presenceTowns,
+        membershipType: input.membershipType,
+        virtualMembershipEnabled: input.virtualMembershipEnabled,
+        meetingPoint: cleanOptionalText(input.meetingPoint),
+        meetingTime: cleanOptionalText(input.meetingTime),
+        activityOptions: input.activityOptions,
       },
     });
 

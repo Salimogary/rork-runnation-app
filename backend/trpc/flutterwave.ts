@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
 import { env } from "./env";
 
-type PaymentPurpose = "subscription" | "shop_order" | "event_enrollment" | "club_payment" | "donation";
+type PaymentPurpose = "subscription" | "shop_order" | "event_enrollment" | "club_payment" | "donation" | "listing_subscription";
 
 type SubscriptionPlanDetails = {
   planId: string;
@@ -671,6 +671,29 @@ export async function applySuccessfulPayment(supabase: SupabaseClient, payment: 
       },
       { onConflict: "payment_id,registration_id" }
     );
+  }
+
+  if (intent.purpose === "listing_subscription") {
+    const metadata = (intent.metadata ?? {}) as Record<string, any>;
+    const listingKind = String(metadata.listing_kind || String(intent.purpose_id || "").split(":")[0] || "").trim();
+    const tier = String(metadata.tier || String(intent.purpose_id || "").split(":")[1] || "quarterly").trim();
+    const durationDays = Number(metadata.duration_days || (tier === "annual" ? 365 : 90));
+    if (listingKind === "ride_share" || listingKind === "accommodation") {
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000);
+      await supabase
+        .from("event_listing_entitlements")
+        .update({
+          status: "active",
+          tier,
+          started_at: now.toISOString(),
+          expires_at: expiresAt.toISOString(),
+          payment_reference: intent.provider_reference,
+          updated_at: now.toISOString(),
+        })
+        .eq("registration_id", intent.registration_id)
+        .eq("listing_kind", listingKind);
+    }
   }
 
   if (intent.purpose === "donation" && intent.purpose_id) {

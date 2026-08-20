@@ -8,7 +8,7 @@ export default publicProcedure.query(async ({ ctx }) => {
   if (clubId) {
     const { data: club, error } = await ctx.supabase
       .from("clubs")
-      .select("club_id, club_name, description, location, country, presence_towns, is_active")
+      .select("club_id, club_name, description, location, country, presence_towns, membership_type, virtual_membership_enabled, meeting_point, meeting_time, activity_options, is_active")
       .eq("club_id", clubId)
       .maybeSingle();
 
@@ -25,6 +25,11 @@ export default publicProcedure.query(async ({ ctx }) => {
           location: club.location ?? "",
           country: club.country ?? null,
           presenceTowns: Array.isArray(club.presence_towns) ? club.presence_towns : [],
+          membershipType: club.membership_type ?? "free",
+          virtualMembershipEnabled: club.virtual_membership_enabled === true,
+          meetingPoint: club.meeting_point ?? "",
+          meetingTime: club.meeting_time ?? "",
+          activityOptions: Array.isArray(club.activity_options) ? club.activity_options : [],
           isActive: club.is_active !== false,
         }
       : null;

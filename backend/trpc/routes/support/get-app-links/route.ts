@@ -1,6 +1,6 @@
 import { publicProcedure } from "../../../create-context";
 
-const FALLBACK_ANDROID_APK_URL = "https://expo.dev/artifacts/eas/27LbCHM76M74izfEPYt1pN.apk";
+const FALLBACK_ANDROID_APK_URL = "https://drive.google.com/file/d/1bAThGh2w8YR69wHKdmJwGtC5HAZfySkB/view?usp=drive_link";
 const SETTINGS_KEYS = ["android_apk_url", "android_apk_build_number", "ios_app_url", "ios_build_number"] as const;
 
 function cleanUrl(value: unknown): string | null {

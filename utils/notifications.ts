@@ -15,6 +15,7 @@ const STORAGE_KEYS = {
   NOTIFICATIONS_ENABLED: 'notif_enabled',
   TRIAL_NOTIFIED_MILESTONES: 'notif_trial_milestones',
   MORNING_DIGEST_DATE: 'notif_morning_digest_date',
+  APP_UPDATE_NOTIFIED_BUILD: 'notif_app_update_build',
 };
 
 export type MorningNotificationItem = {
@@ -440,6 +441,31 @@ export async function sendMorningDigestOnce(
     { type: 'morning_digest', categories: items.map((item) => item.type) }
   );
   await AsyncStorage.setItem(storageKey, dateKey);
+}
+
+export async function sendAppUpdateNotificationOnce(
+  userId: string,
+  availableBuild: number,
+  installedBuild: number,
+  updateUrl?: string | null
+): Promise<void> {
+  try {
+    if (!Number.isFinite(availableBuild) || availableBuild <= installedBuild) return;
+    const storageKey = `${STORAGE_KEYS.APP_UPDATE_NOTIFIED_BUILD}_${userId}`;
+    const buildKey = String(availableBuild);
+    if (await AsyncStorage.getItem(storageKey) === buildKey) return;
+
+    const sent = await sendLocalNotification(
+      `RunNation version code ${availableBuild} is available`,
+      "Open Settings > App Update to update from the Play Store.",
+      { type: "app_update", availableBuild, installedBuild, updateUrl: updateUrl ?? null }
+    );
+    if (sent) {
+      await AsyncStorage.setItem(storageKey, buildKey);
+    }
+  } catch (error) {
+    console.error("[Notifications] App update notification error:", error);
+  }
 }
 
 export async function checkAndNotifyWorkoutMilestones(

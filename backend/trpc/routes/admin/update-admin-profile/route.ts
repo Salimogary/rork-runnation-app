@@ -9,6 +9,11 @@ const inputSchema = z.object({
   location: z.string().trim().max(120).optional().nullable(),
   description: z.string().trim().max(1000).optional().nullable(),
   presenceTowns: z.array(z.string().trim().max(80)).max(12).optional(),
+  membershipType: z.enum(["free", "paid"]).optional(),
+  virtualMembershipEnabled: z.boolean().optional(),
+  meetingPoint: z.string().trim().max(160).optional().nullable(),
+  meetingTime: z.string().trim().max(160).optional().nullable(),
+  activityOptions: z.array(z.enum(["walk", "run", "stairs", "cycle", "treadmill"])).max(5).optional(),
 });
 
 function cleanText(value: string | null | undefined): string | null {
@@ -40,6 +45,11 @@ export default publicProcedure
           location: cleanText(input.location),
           description: cleanText(input.description),
           presence_towns: presenceTowns,
+          ...(input.membershipType !== undefined ? { membership_type: input.membershipType } : {}),
+          ...(input.virtualMembershipEnabled !== undefined ? { virtual_membership_enabled: input.virtualMembershipEnabled } : {}),
+          ...(input.meetingPoint !== undefined ? { meeting_point: cleanText(input.meetingPoint) } : {}),
+          ...(input.meetingTime !== undefined ? { meeting_time: cleanText(input.meetingTime) } : {}),
+          ...(input.activityOptions !== undefined ? { activity_options: input.activityOptions } : {}),
         })
         .eq("club_id", input.profileId)
         .select("club_id, club_name, country")
@@ -58,6 +68,11 @@ export default publicProcedure
           clubName: data.club_name,
           location: cleanText(input.location),
           presenceTowns,
+          membershipType: input.membershipType,
+          virtualMembershipEnabled: input.virtualMembershipEnabled,
+          meetingPoint: cleanText(input.meetingPoint),
+          meetingTime: cleanText(input.meetingTime),
+          activityOptions: input.activityOptions,
         },
       });
 

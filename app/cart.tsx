@@ -203,6 +203,12 @@ export default function CartScreen() {
                       </View>
                     )}
 
+                    <View style={styles.conditionTag}>
+                      <Text style={styles.conditionText}>
+                        {product?.condition || "New"}
+                      </Text>
+                    </View>
+
                     <View style={styles.itemFooter}>
                       <View style={[styles.quantityControl, { backgroundColor: themeColors.inputBackground }]}>
                         <TouchableOpacity
@@ -404,6 +410,19 @@ const styles = StyleSheet.create({
   sizeText: {
     fontSize: 12,
     fontWeight: "500" as const,
+  },
+  conditionTag: {
+    alignSelf: "flex-start" as const,
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginTop: 6,
+  },
+  conditionText: {
+    fontSize: 12,
+    fontWeight: "700" as const,
+    color: "#047857",
   },
   itemFooter: {
     flexDirection: "row" as const,

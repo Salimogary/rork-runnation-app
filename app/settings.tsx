@@ -17,7 +17,7 @@ import {
   isServiceTeamMinor,
 } from "@/utils/serviceTeam";
 import * as Haptics from "expo-haptics";
-import { getNotificationsEnabled, setNotificationsEnabled as saveNotificationsEnabled } from "@/utils/notifications";
+import { getNotificationsEnabled, sendLocalNotification, setNotificationsEnabled as saveNotificationsEnabled } from "@/utils/notifications";
 import { getServerClient } from "@/lib/server-client";
 import { hasAdminPortalAccess as getHasAdminPortalAccess } from "@/lib/role-session";
 import { formatCountryName } from "@/constants/country-utils";
@@ -26,7 +26,6 @@ import { getActivityVoiceAssistantEnabled, setActivityVoiceAssistantEnabled as s
 import { getWorkoutAutoPauseEnabled, setWorkoutAutoPauseEnabled as saveWorkoutAutoPauseEnabled } from "@/utils/workoutPreferences";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
-import * as IntentLauncher from "expo-intent-launcher";
 import Constants from "expo-constants";
 
 function normalizeSettingsCountryCode(country: string | null | undefined): string | null {
@@ -52,7 +51,52 @@ const SERVICE_APPLICANT_LINKS_HELPER =
 const SERVICE_APPLICANT_STATEMENT_HELPER =
   "Optional: briefly explain why admins should consider you for this role. Use 25-250 words if you choose to add it.";
 
+const PLAY_STORE_INTERNAL_TEST_URL = "https://drive.google.com/file/d/1bAThGh2w8YR69wHKdmJwGtC5HAZfySkB/view?usp=drive_link";
+
+const CLUB_ACTIVITY_OPTIONS = [
+  { key: "walk", label: "Walk" },
+  { key: "run", label: "Run" },
+  { key: "stairs", label: "Stairs" },
+  { key: "cycle", label: "Cycle" },
+  { key: "treadmill", label: "Treadmill" },
+] as const;
+
 const REQUIRED_FRONTEND_FAQS = [
+  {
+    faq_id: "frontend-create-club",
+    question: "How to create club",
+    answer:
+      "Open Settings > Join Service Team, choose the Club Coordinator role, and submit the club details requested there. After approval, the club profile becomes available for runners in its country.",
+    display_order: 1,
+  },
+  {
+    faq_id: "frontend-add-event",
+    question: "How to add event",
+    answer:
+      "Open Settings > Join Service Team and apply for the Event Organizer role. Approved event organizers and admins can add events, set event details, and manage participation rules.",
+    display_order: 2,
+  },
+  {
+    faq_id: "frontend-runnation-free",
+    question: "Is RunNation free",
+    answer:
+      "RunNation is subscription based with options to pay per quota or per year. However the first quota (90 days) is free.",
+    display_order: 3,
+  },
+  {
+    faq_id: "frontend-shop-works",
+    question: "How does the Shop work",
+    answer:
+      "All users can register as apparel sellers from the Shop. Listings must be approved by the country shop manager or Global Admin, and only running-related gear or club apparel is allowed. Approved sellers get 30 days free before shop listing fees apply.",
+    display_order: 4,
+  },
+  {
+    faq_id: "frontend-event-listings-work",
+    question: "How do Ride Share and Accommodation listings work",
+    answer:
+      "Drivers and accommodation hosts register their car or stay from Events. Each listing type gets its own 30-day free trial, then a separate listing subscription applies: UGX 20,000 or USD 4 quarterly, or UGX 60,000 or USD 12 annually. These fees are separate from RunNation membership, club membership, and shop listings.",
+    display_order: 5,
+  },
   {
     faq_id: "frontend-special-club-eligibility",
     question: "Who can join each special club?",
@@ -239,6 +283,11 @@ export default function SettingsScreen() {
   const [serviceProposedNames, setServiceProposedNames] = useState<Record<string, string>>({});
   const [serviceProposedLocations, setServiceProposedLocations] = useState<Record<string, string>>({});
   const [serviceProposedDescriptions, setServiceProposedDescriptions] = useState<Record<string, string>>({});
+  const [serviceClubMembershipTypes, setServiceClubMembershipTypes] = useState<Record<string, "free" | "paid">>({});
+  const [serviceClubVirtualMemberships, setServiceClubVirtualMemberships] = useState<Record<string, boolean>>({});
+  const [serviceClubMeetingPoints, setServiceClubMeetingPoints] = useState<Record<string, string>>({});
+  const [serviceClubMeetingTimes, setServiceClubMeetingTimes] = useState<Record<string, string>>({});
+  const [serviceClubActivityOptions, setServiceClubActivityOptions] = useState<Record<string, string[]>>({});
   const [expandedFaqIds, setExpandedFaqIds] = useState<string[]>([]);
   const adminTapCount = useRef<number>(0);
   const adminTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -474,7 +523,7 @@ export default function SettingsScreen() {
     return raw;
   };
 
-  const APP_DOWNLOAD_LINK = appLinks?.androidApkUrl || "";
+  const APP_DOWNLOAD_LINK = appLinks?.androidApkUrl || PLAY_STORE_INTERNAL_TEST_URL;
   const APP_STORE_URL = appLinks?.iosAppUrl || "";
   const installedAndroidBuildNumber = getInstalledAndroidBuildNumber();
   const latestAndroidBuildNumber = Number(appLinks?.androidBuildNumber || 0);
@@ -552,10 +601,19 @@ export default function SettingsScreen() {
       if (error) throw error;
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, pauseType) => {
       setShowGoalPauseModal(false);
       void queryClient.invalidateQueries({ queryKey: ["activeGoalPause", user?.id] });
       void queryClient.invalidateQueries({ queryKey: ["goalPausePeriods", user?.id] });
+      void queryClient.invalidateQueries({ queryKey: ["family-leaderboard"] });
+      void queryClient.invalidateQueries({ queryKey: ["club-leaderboard-groups"] });
+      if (pauseType === "sick") {
+        void sendLocalNotification(
+          "Sick status is active",
+          "When you feel better and can exercise again, remove Sick Status from Settings > Injury / Sick Status.",
+          { screen: "settings", status: "sick" }
+        );
+      }
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
     onError: (error: any) => {
@@ -580,6 +638,8 @@ export default function SettingsScreen() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["activeGoalPause", user?.id] });
       void queryClient.invalidateQueries({ queryKey: ["goalPausePeriods", user?.id] });
+      void queryClient.invalidateQueries({ queryKey: ["family-leaderboard"] });
+      void queryClient.invalidateQueries({ queryKey: ["club-leaderboard-groups"] });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
     onError: (error: any) => {
@@ -641,6 +701,7 @@ export default function SettingsScreen() {
     const proposedName = serviceProposedNames[role.roleName] || "";
     const proposedLocation = serviceProposedLocations[role.roleName] || "";
     const proposedDescription = serviceProposedDescriptions[role.roleName] || "";
+    const clubActivityOptions = serviceClubActivityOptions[role.roleName] || [];
     const statementWordCount = countWords(applicantStatement);
 
     if (needsProposedProfile && (!proposedName.trim() || !proposedLocation.trim())) {
@@ -678,6 +739,11 @@ export default function SettingsScreen() {
       proposedName: needsProposedProfile ? proposedName.trim() : null,
       proposedLocation: needsProposedProfile ? proposedLocation.trim() : null,
       proposedDescription: needsProposedProfile ? proposedDescription.trim() || null : null,
+      clubMembershipType: role.roleName === "club_coordinator" ? serviceClubMembershipTypes[role.roleName] || "free" : "free",
+      clubVirtualMembershipEnabled: role.roleName === "club_coordinator" ? serviceClubVirtualMemberships[role.roleName] === true : false,
+      clubMeetingPoint: role.roleName === "club_coordinator" ? serviceClubMeetingPoints[role.roleName]?.trim() || null : null,
+      clubMeetingTime: role.roleName === "club_coordinator" ? serviceClubMeetingTimes[role.roleName]?.trim() || null : null,
+      clubActivityOptions: role.roleName === "club_coordinator" ? (clubActivityOptions as Array<typeof CLUB_ACTIVITY_OPTIONS[number]["key"]>) : [],
     });
   }, [
     getServiceRoleAllowsApplicantLinks,
@@ -690,6 +756,11 @@ export default function SettingsScreen() {
     serviceProposedDescriptions,
     serviceProposedLocations,
     serviceProposedNames,
+    serviceClubActivityOptions,
+    serviceClubMeetingPoints,
+    serviceClubMeetingTimes,
+    serviceClubMembershipTypes,
+    serviceClubVirtualMemberships,
     serviceSocialUrl,
     serviceWebsiteUrl,
   ]);
@@ -898,8 +969,8 @@ export default function SettingsScreen() {
           ? `RunNation iOS: ${String(iosLink)}`
           : "RunNation iOS: coming soon"
         : link
-          ? `RunNation Android APK: ${String(link)}`
-          : 'RunNation Android APK: download link coming soon.';
+          ? `RunNation Android: ${String(link)}`
+          : 'RunNation Android: Play Store link coming soon.';
     if (Platform.OS === 'web') {
       if (navigator.clipboard) {
         void navigator.clipboard.writeText(shareMessage);
@@ -917,9 +988,9 @@ export default function SettingsScreen() {
     updateAlertShown.current = true;
     Alert.alert(
       "RunNation Update Available",
-      "A newer Android APK is available for testing. Open Settings > App Update to install it."
+      `A newer Android version code ${latestAndroidBuildNumber} is available. Open Settings > App Update to update from the Play Store.`
     );
-  }, [androidUpdateAvailable]);
+  }, [androidUpdateAvailable, latestAndroidBuildNumber]);
 
   const handleUpdateApp = async () => {
     let androidLink = APP_DOWNLOAD_LINK;
@@ -939,29 +1010,17 @@ export default function SettingsScreen() {
     }
 
     if (!androidLink) {
-      Alert.alert("No APK Link", "The Android APK link is not available yet.");
+      Alert.alert("No Play Store Link", "The Android Play Store testing link is not available yet.");
       return;
     }
 
-    const installApk = async () => {
+    const openPlayStore = async () => {
       setIsInstallingUpdate(true);
       try {
-        const buildLabel = latestBuild > 0 ? latestBuild : Date.now();
-        const destination = `${FileSystem.cacheDirectory}RunNation-build-${buildLabel}.apk`;
-        const download = await FileSystem.downloadAsync(androidLink, destination);
-        const contentUri = await FileSystem.getContentUriAsync(download.uri);
-        await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
-          data: contentUri,
-          type: "application/vnd.android.package-archive",
-          flags: 268435457,
-        });
+        await Linking.openURL(androidLink);
       } catch (error) {
-        console.warn("[App Update] Installer launch failed, opening APK link:", error);
-        try {
-          await Linking.openURL(androidLink);
-        } catch {
-          Alert.alert("Update Failed", "The APK could not be downloaded. Please try again when connected.");
-        }
+        console.warn("[App Update] Could not open Play Store link:", error);
+        Alert.alert("Update Failed", "The Play Store testing link could not be opened. Please try again when connected.");
       } finally {
         setIsInstallingUpdate(false);
       }
@@ -970,13 +1029,13 @@ export default function SettingsScreen() {
     const isCurrentBuild =
       latestBuild > 0 && installedAndroidBuildNumber >= latestBuild;
     Alert.alert(
-      isCurrentBuild ? "Reinstall RunNation" : "Install RunNation Update",
+      isCurrentBuild ? "RunNation Play Store" : "RunNation Update",
       isCurrentBuild
-        ? "This is the latest advertised build. Download and reinstall it?"
-        : `Download${latestBuild > 0 ? ` build ${latestBuild}` : " the latest build"} and open the Android installer?`,
+        ? "Open the Play Store testing page for the current advertised version?"
+        : `Open the Play Store testing page${latestBuild > 0 ? ` for version code ${latestBuild}` : ""}?`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Install", onPress: () => void installApk() },
+        { text: "Open", onPress: () => void openPlayStore() },
       ]
     );
   };
@@ -1467,14 +1526,14 @@ export default function SettingsScreen() {
                 {Platform.OS === "ios"
                   ? "iOS TestFlight coming soon"
                   : isInstallingUpdate
-                    ? "Downloading latest APK..."
+                    ? "Opening Play Store..."
                   : androidUpdateAvailable
-                    ? `New APK available: build ${latestAndroidBuildNumber}`
+                    ? `New version code available: ${latestAndroidBuildNumber}`
                     : APP_DOWNLOAD_LINK
                       ? latestAndroidBuildNumber > 0
-                        ? `Install RunNation APK build ${latestAndroidBuildNumber}`
-                        : "Install latest RunNation APK"
-                      : "Checking latest APK"}
+                        ? `Open Play Store version code ${latestAndroidBuildNumber}`
+                        : "Open RunNation on Play Store"
+                      : "Checking Play Store link"}
               </Text>
             </View>
           </View>
@@ -2594,6 +2653,80 @@ export default function SettingsScreen() {
                         multiline
                         textAlignVertical="top"
                       />
+                      {role.roleName === "club_coordinator" ? (
+                        <>
+                          <View style={styles.serviceSegmentRow}>
+                            {(["free", "paid"] as const).map((option) => {
+                              const active = (serviceClubMembershipTypes[role.roleName] || "free") === option;
+                              return (
+                                <TouchableOpacity
+                                  key={option}
+                                  style={[styles.serviceSegmentButton, active && styles.serviceSegmentButtonActive]}
+                                  onPress={() => setServiceClubMembershipTypes((current) => ({ ...current, [role.roleName]: option }))}
+                                >
+                                  <Text style={[styles.serviceSegmentButtonText, active && styles.serviceSegmentButtonTextActive]}>
+                                    {option === "free" ? "Free" : "Paid"}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                          <TouchableOpacity
+                            style={styles.serviceCheckboxRow}
+                            onPress={() =>
+                              setServiceClubVirtualMemberships((current) => ({
+                                ...current,
+                                [role.roleName]: current[role.roleName] !== true,
+                              }))
+                            }
+                          >
+                            <View style={[styles.serviceCheckboxBox, serviceClubVirtualMemberships[role.roleName] === true && styles.serviceCheckboxBoxChecked]}>
+                              {serviceClubVirtualMemberships[role.roleName] === true ? <Check size={14} color="#fff" /> : null}
+                            </View>
+                            <Text style={[styles.serviceCheckboxText, { color: themeColors.text }]}>Virtual membership available</Text>
+                          </TouchableOpacity>
+                          <TextInput
+                            style={[styles.serviceLinkInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                            value={serviceClubMeetingPoints[role.roleName] || ""}
+                            onChangeText={(text) => setServiceClubMeetingPoints((current) => ({ ...current, [role.roleName]: text }))}
+                            placeholder="Meeting point"
+                            placeholderTextColor={themeColors.textLight}
+                          />
+                          <TextInput
+                            style={[styles.serviceLinkInput, { backgroundColor: themeColors.inputBackground, borderColor: themeColors.inputBorder, color: themeColors.text }]}
+                            value={serviceClubMeetingTimes[role.roleName] || ""}
+                            onChangeText={(text) => setServiceClubMeetingTimes((current) => ({ ...current, [role.roleName]: text }))}
+                            placeholder="Meeting time"
+                            placeholderTextColor={themeColors.textLight}
+                          />
+                          <View style={styles.serviceActivityPicker}>
+                            {CLUB_ACTIVITY_OPTIONS.map((activity) => {
+                              const selected = (serviceClubActivityOptions[role.roleName] || []).includes(activity.key);
+                              return (
+                                <TouchableOpacity
+                                  key={activity.key}
+                                  style={[styles.serviceActivityChip, selected && styles.serviceActivityChipActive]}
+                                  onPress={() =>
+                                    setServiceClubActivityOptions((current) => {
+                                      const values = current[role.roleName] || [];
+                                      return {
+                                        ...current,
+                                        [role.roleName]: selected
+                                          ? values.filter((value) => value !== activity.key)
+                                          : [...values, activity.key],
+                                      };
+                                    })
+                                  }
+                                >
+                                  <Text style={[styles.serviceActivityChipText, selected && styles.serviceActivityChipTextActive]}>
+                                    {activity.label}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </>
+                      ) : null}
                     </View>
                   ) : null}
 
@@ -2729,7 +2862,16 @@ export default function SettingsScreen() {
         onRequestClose={() => setShowFaqModal(false)}
       >
         <View style={[styles.detailModalOverlay, { backgroundColor: themeColors.modalOverlay }]}>
-          <View style={[styles.helpModalContent, { backgroundColor: themeColors.modalBackground }]}>
+          <View
+            style={[
+              styles.helpModalContent,
+              styles.faqModalContent,
+              {
+                backgroundColor: themeColors.modalBackground,
+                marginBottom: Platform.OS === "android" ? Math.max(insets.bottom, 16) : 0,
+              },
+            ]}
+          >
             <View style={[styles.detailHeader, { borderBottomColor: themeColors.border }]}>
               <Text style={[styles.detailTitle, { color: themeColors.text }]}>FAQ</Text>
               <TouchableOpacity onPress={() => setShowFaqModal(false)}>
@@ -2737,7 +2879,11 @@ export default function SettingsScreen() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.helpBody}>
+            <ScrollView
+              style={styles.helpBody}
+              contentContainerStyle={styles.faqBodyContent}
+              showsVerticalScrollIndicator={false}
+            >
               <Text style={[styles.helpSectionLabel, { color: themeColors.textSecondary }]}>COMMON QUESTIONS</Text>
 
               {isLoadingFaqs ? (
@@ -3615,8 +3761,14 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     maxHeight: "85%",
   },
+  faqModalContent: {
+    maxHeight: "82%",
+  },
   helpBody: {
     padding: 20,
+  },
+  faqBodyContent: {
+    paddingBottom: 12,
   },
   helpSectionLabel: {
     fontSize: 12,
@@ -3927,6 +4079,56 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700" as const,
     lineHeight: 18,
+  },
+  serviceSegmentRow: {
+    flexDirection: "row" as const,
+    gap: 8,
+  },
+  serviceSegmentButton: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    paddingVertical: 10,
+    alignItems: "center" as const,
+    backgroundColor: "#fff",
+  },
+  serviceSegmentButtonActive: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#3B82F6",
+  },
+  serviceSegmentButtonText: {
+    fontSize: 13,
+    fontWeight: "800" as const,
+    color: "#6B7280",
+  },
+  serviceSegmentButtonTextActive: {
+    color: "#1D4ED8",
+  },
+  serviceActivityPicker: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 8,
+  },
+  serviceActivityChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: "#fff",
+  },
+  serviceActivityChipActive: {
+    backgroundColor: "#ECFDF5",
+    borderColor: "#10B981",
+  },
+  serviceActivityChipText: {
+    fontSize: 12,
+    fontWeight: "800" as const,
+    color: "#6B7280",
+  },
+  serviceActivityChipTextActive: {
+    color: "#047857",
   },
   serviceTakeRoleButton: {
     marginTop: 12,

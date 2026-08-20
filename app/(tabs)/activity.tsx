@@ -72,6 +72,7 @@ interface FamilyLeaderboardRow {
   pace: number;
   sex?: string;
   country?: string;
+  activePauseType?: "injury" | "sick" | null;
   distanceCounts?: Record<MedalBand, number>;
 }
 
@@ -229,6 +230,7 @@ const EMPTY_LEADERBOARD_FILTERS: LeaderboardFilters = {
   sex: "all",
   country: "all",
 };
+const ACTIVE_PAUSE_TYPES = new Set(["injury", "sick"]);
 const MIN_DISTANCE_ACTIVITY = 0.5;
 const MIN_ACTIVITY_DURATION_MINUTES = 5;
 const JUNIOR_RUNNERS_SPECIAL_CLUB_CODE = "junior_runners";
@@ -729,6 +731,34 @@ export default function ActivityScreen() {
     });
 
     return resolved;
+  }, []);
+
+  const loadActivePauseTypes = useCallback(async (registrationIds: string[]) => {
+    const uniqueRegistrationIds = Array.from(new Set(registrationIds.filter(Boolean)));
+    if (uniqueRegistrationIds.length === 0) {
+      return new Map<string, "injury" | "sick">();
+    }
+
+    const { data, error } = await supabase
+      .from("user_goal_pause_periods")
+      .select("registration_id, pause_type")
+      .in("registration_id", uniqueRegistrationIds)
+      .eq("is_active", true);
+
+    if (error) {
+      console.warn("[LeaderboardStatus] Could not load active injury/sick statuses:", error);
+      return new Map<string, "injury" | "sick">();
+    }
+
+    const statusMap = new Map<string, "injury" | "sick">();
+    (data || []).forEach((row: any) => {
+      const registrationId = String(row.registration_id || "").trim();
+      const pauseType = String(row.pause_type || "").trim();
+      if (registrationId && ACTIVE_PAUSE_TYPES.has(pauseType)) {
+        statusMap.set(registrationId, pauseType as "injury" | "sick");
+      }
+    });
+    return statusMap;
   }, []);
 
   const handleSaveCSV = async () => {
@@ -1297,6 +1327,11 @@ export default function ActivityScreen() {
 
       const canonicalMap = await resolveCanonicalRegistrationIds(familyRegistrationIds);
       const canonicalIds = Array.from(new Set(familyRegistrationIds.map((id) => canonicalMap.get(id) || id).filter(Boolean)));
+      const rawActivePauseTypes = await loadActivePauseTypes([...familyRegistrationIds, ...canonicalIds]);
+      const activePauseTypes = new Map<string, "injury" | "sick">();
+      rawActivePauseTypes.forEach((pauseType, registrationId) => {
+        activePauseTypes.set(canonicalMap.get(registrationId) || registrationId, pauseType);
+      });
 
       let activitiesQuery = supabase
         .from("activities")
@@ -1371,6 +1406,7 @@ export default function ActivityScreen() {
                       distance: stats.distance,
                       time: stats.time,
                       pace: stats.distance > 0 ? stats.time / stats.distance : 0,
+                      activePauseType: activePauseTypes.get(registrationId) ?? null,
                     }))
                     .sort((a, b) => b.distance - a.distance || b.days - a.days || a.pace - b.pace);
                   return { key: weekKey, label: weekGroup.label, rows };
@@ -1405,6 +1441,11 @@ export default function ActivityScreen() {
       const canonicalIds = Array.from(
         new Set(clubMemberIds.map((id) => canonicalMap.get(id) || id).filter(Boolean))
       );
+      const rawActivePauseTypes = await loadActivePauseTypes([...clubMemberIds, ...canonicalIds]);
+      const activePauseTypes = new Map<string, "injury" | "sick">();
+      rawActivePauseTypes.forEach((pauseType, registrationId) => {
+        activePauseTypes.set(canonicalMap.get(registrationId) || registrationId, pauseType);
+      });
 
       let activitiesQuery = supabase
         .from("activities")
@@ -1523,6 +1564,7 @@ export default function ActivityScreen() {
               distance: values.distance,
               time: values.time,
               pace: values.distance > 0 ? values.time / values.distance : 0,
+              activePauseType: activePauseTypes.get(registrationId) ?? null,
               distanceCounts: values.distanceCounts,
             };
           })
@@ -2724,6 +2766,16 @@ export default function ActivityScreen() {
     </View>
   );
 
+  const renderCloseCircleStatusIcon = (pauseType?: "injury" | "sick" | null) =>
+    pauseType ? (
+      <Text
+        style={styles.leaderHealthStatusText}
+        accessibilityLabel={pauseType === "injury" ? "Injury status active" : "Sick status active"}
+      >
+        🏥
+      </Text>
+    ) : null;
+
   const renderGroupedLeaderboard = (groups: FamilyYearGroup[]) => (
     <View style={styles.familyLeaderboardContainer}>
       {groups.map((yearGroup) => (
@@ -2747,7 +2799,10 @@ export default function ActivityScreen() {
                       </View>
                       {weekGroup.rows.map((row, index) => (
                         <View key={`${weekGroup.key}-${row.registrationId}`} style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt, row.registrationId === currentRegistrationId && styles.currentUserLeaderboardRow]}>
-                          <View style={styles.familyRankColumn}><Text style={styles.leaderTableCellText}>{index + 1}</Text></View>
+                          <View style={[styles.familyRankColumn, styles.closeCircleRankCell]}>
+                            {renderCloseCircleStatusIcon(row.activePauseType)}
+                            <Text style={styles.leaderTableCellText}>{index + 1}</Text>
+                          </View>
                           <View style={styles.familyNameColumn}><Text style={[styles.leaderTableCellText, row.registrationId === currentRegistrationId && styles.currentUserLeaderboardText]} numberOfLines={1}>{row.name}</Text></View>
                           <View style={styles.familyDaysColumn}><Text style={styles.leaderTableCellText}>{row.days}</Text></View>
                           <View style={styles.familyDistanceColumn}><Text style={styles.leaderTableCellText}>{row.distance.toFixed(1)} km</Text></View>
@@ -2782,7 +2837,10 @@ export default function ActivityScreen() {
             key={`${keyPrefix}-${row.registrationId}`}
             style={[styles.leaderboardTableRow, index % 2 === 1 && styles.leaderboardTableRowAlt, row.registrationId === currentRegistrationId && styles.currentUserLeaderboardRow]}
           >
-            <View style={styles.familyRankColumn}><Text style={styles.leaderTableCellText}>{index + 1}</Text></View>
+            <View style={[styles.familyRankColumn, styles.closeCircleRankCell]}>
+              {renderCloseCircleStatusIcon(row.activePauseType)}
+              <Text style={styles.leaderTableCellText}>{index + 1}</Text>
+            </View>
             <View style={styles.familyNameColumn}><Text style={[styles.leaderTableCellText, row.registrationId === currentRegistrationId && styles.currentUserLeaderboardText]} numberOfLines={1}>{row.name}</Text></View>
             <View style={styles.familyDaysColumn}><Text style={styles.leaderTableCellText}>{row.days}</Text></View>
             <View style={styles.familyDistanceColumn}><Text style={styles.leaderTableCellText}>{row.distance.toFixed(1)} km</Text></View>
@@ -2820,6 +2878,7 @@ export default function ActivityScreen() {
           >
             <View style={[styles.medalRankColumn, styles.leaderRankCell]}>
               <Text style={styles.leaderFlagText}>{getCountryFlag(row.country)}</Text>
+              {renderCloseCircleStatusIcon(row.activePauseType)}
               <Text style={styles.leaderTableCellText}>{index + 1}</Text>
             </View>
             <View style={styles.medalNameColumn}>
@@ -4780,7 +4839,16 @@ const styles = StyleSheet.create({
     alignItems: "center" as const,
     gap: 2,
   },
+  closeCircleRankCell: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 3,
+  },
   leaderFlagText: {
+    fontSize: 8,
+    lineHeight: 10,
+  },
+  leaderHealthStatusText: {
     fontSize: 8,
     lineHeight: 10,
   },

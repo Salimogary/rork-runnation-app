@@ -17,6 +17,7 @@ export interface SpecialClubLike {
   presence_towns?: string[] | string | null;
   special_club_code?: string | null;
   is_special_club?: boolean | null;
+  virtual_membership_enabled?: boolean | null;
 }
 
 export interface SpecialClubEligibility {
@@ -141,7 +142,13 @@ export function filterVisibleClubsForAge<T extends SpecialClubLike>(
     return visibleSpecialClubs;
   }
 
+  const virtualNormalClubs = clubs.filter((club) => {
+    if (club.is_special_club || club.special_club_code) return false;
+    if (clubMatchesCountry(club, options.userCountry)) return false;
+    return club.virtual_membership_enabled === true;
+  });
+
   const byId = new Map<string, T>();
-  [...countryClubs, ...visibleSpecialClubs].forEach((club) => byId.set(club.club_id, club));
+  [...countryClubs, ...virtualNormalClubs, ...visibleSpecialClubs].forEach((club) => byId.set(club.club_id, club));
   return [...byId.values()];
 }

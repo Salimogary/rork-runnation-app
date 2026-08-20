@@ -27,7 +27,7 @@ export default publicProcedure
 
     const { data: products, error: productsError } = await ctx.supabase
       .from("catalogue")
-      .select("catalogue_id, catalogue_item, price, size, quantity, photo_url")
+      .select("catalogue_id, catalogue_item, price, size, quantity, photo_url, currency_code, listing_status, condition")
       .in("catalogue_id", catalogueIds);
 
     if (productsError) throw productsError;
@@ -41,6 +41,9 @@ export default publicProcedure
       catalogue_id: item.catalogue_id,
       quantity: item.quantity,
       created_at: item.created_at,
-      product: productMap.get(item.catalogue_id) || null,
+      product: (() => {
+        const product = productMap.get(item.catalogue_id);
+        return product?.listing_status && product.listing_status !== "approved" ? null : product || null;
+      })(),
     }));
   });

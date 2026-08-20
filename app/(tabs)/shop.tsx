@@ -2,7 +2,7 @@ import { StyleSheet, View, Text, ScrollView, TouchableOpacity, RefreshControl, D
 import { useQuery } from "@tanstack/react-query";
 import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "@/lib/supabase";
-import { Globe2, Package, ShoppingCart, Trash2, Plus, Minus, ArrowRight } from "lucide-react-native";
+import { Globe2, Package, ShoppingCart, Trash2, Plus, Minus, ArrowRight, Store } from "lucide-react-native";
 import { Image } from "expo-image";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/contexts/AuthContext";
@@ -16,11 +16,10 @@ import * as Haptics from "expo-haptics";
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
-const COMING_SOON_SHOP_COUNTRY_CODES = new Set(["UG"]);
 const COUNTRY_CURRENCY: Record<string, { label: string; locale: string }> = {
   UG: { label: "UGX", locale: "en-UG" },
+  USD: { label: "USD", locale: "en-US" },
 };
-
 function normalizeCountryCode(country?: string | null) {
   const value = String(country || "").trim().toLowerCase();
   if (!value) return "";
@@ -35,6 +34,10 @@ interface CatalogueItemRaw {
   size: string | null;
   price: number | null;
   photo_url?: string | null;
+  country_code?: string | null;
+  currency_code?: string | null;
+  listing_status?: string | null;
+  condition?: string | null;
 }
 
 interface CatalogueItem {
@@ -44,6 +47,9 @@ interface CatalogueItem {
   size: string | null;
   price: number | null;
   photo_url?: string | null;
+  country_code?: string | null;
+  currency_code?: string | null;
+  condition?: string | null;
 }
 
 type ShopTab = "catalogue" | "cart";
@@ -62,30 +68,23 @@ export default function ShopScreen() {
   const profileCountry = String(profileBundle?.profile?.country || "").trim();
   const profileCountryCode = normalizeCountryCode(profileCountry);
   const hasCountry = profileCountry.length > 0;
-  const isComingSoonShopCountry = COMING_SOON_SHOP_COUNTRY_CODES.has(profileCountryCode);
-  const canShopInCountry = false;
+  const canShopInCountry = hasCountry;
   const currency = COUNTRY_CURRENCY[profileCountryCode] ?? { label: "USD", locale: "en-US" };
 
+  const { data: shopStatus } = trpc.shop.getMyShop.useQuery(
+    { userId: registrationId },
+    { enabled: !!registrationId && hasCountry }
+  );
+
   const { data: products, isLoading, refetch } = useQuery<CatalogueItem[]>({
-    queryKey: ["catalogue", profileCountryCode],
+    queryKey: ["catalogue", "global"],
     queryFn: async () => {
       console.log("Fetching catalogue items...");
-      let query = supabase
+      const query = supabase
         .from("catalogue")
         .select("*")
         .order("catalogue_item", { ascending: true });
-      if (profileCountryCode) {
-        query = query.eq("country_code", profileCountryCode);
-      }
       let { data, error } = await query;
-      if (error && error.message?.toLowerCase().includes("country_code")) {
-        const fallback = await supabase
-          .from("catalogue")
-          .select("*")
-          .order("catalogue_item", { ascending: true });
-        data = fallback.data;
-        error = fallback.error;
-      }
 
       if (error) {
         console.error("Error fetching catalogue:", {
@@ -98,14 +97,19 @@ export default function ShopScreen() {
       }
 
       console.log("Catalogue items fetched:", data?.length || 0);
-      return (data || []).map((item: CatalogueItemRaw) => ({
-        catalogue_id: item.catalogue_id,
-        catalogue_item: item.catalogue_item,
-        stock: item.quantity ?? 0,
-        size: item.size,
-        price: item.price,
-        photo_url: item.photo_url,
-      }));
+      return (data || [])
+        .filter((item: CatalogueItemRaw) => !item.listing_status || item.listing_status === "approved")
+        .map((item: CatalogueItemRaw) => ({
+          catalogue_id: item.catalogue_id,
+          catalogue_item: item.catalogue_item,
+          stock: item.quantity ?? 0,
+          size: item.size,
+          price: item.price,
+          photo_url: item.photo_url,
+          country_code: item.country_code,
+          currency_code: item.currency_code,
+          condition: item.condition || "New",
+        }));
     },
     enabled: canShopInCountry,
   });
@@ -176,6 +180,11 @@ export default function ShopScreen() {
       Alert.alert("Error", error.message || "Failed to clear cart");
     },
   });
+
+  const getCurrencyForItem = (item?: CatalogueItem | null) => {
+    const code = String(item?.currency_code || currency.label || "USD").toUpperCase();
+    return COUNTRY_CURRENCY[code] ?? { label: code, locale: code === "UGX" ? "en-UG" : "en-US" };
+  };
 
   const handleAddToCart = (item: CatalogueItem) => {
     if (!canShopInCountry) return;
@@ -282,23 +291,6 @@ export default function ShopScreen() {
     );
   }
 
-  if (!canShopInCountry) {
-    return (
-      <View style={[styles.container, { backgroundColor: themeColors.background }]}>
-        <Stack.Screen options={{ title: "Shop" }} />
-        <View style={styles.emptyContainer}>
-          <Package size={64} color={colors.primary} />
-          <Text style={[styles.emptyTitle, { color: themeColors.text }]}>Shop coming soon</Text>
-          <Text style={[styles.emptySubtext, { color: themeColors.textSecondary }]}>
-            {isComingSoonShopCountry
-              ? "RunNation Shop Uganda is not open yet because stock is still being prepared. Please check back soon."
-              : `Your country is set to ${profileCountry}. RunNation Shop is not open in this country yet.`}
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <Stack.Screen options={{ title: "Shop" }} />
@@ -352,78 +344,111 @@ export default function ShopScreen() {
               <ActivityIndicator size="large" color={colors.primary} />
               <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>Loading products...</Text>
             </View>
-          ) : !products || products.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Package size={64} color={colors.lightGray} />
-              <Text style={[styles.emptyText, { color: themeColors.text }]}>No items available</Text>
-              <Text style={[styles.emptySubtext, { color: themeColors.textSecondary }]}>Check back soon for new arrivals!</Text>
-            </View>
           ) : (
-            <View style={styles.productGrid}>
-              {products.map((item) => (
-                <View key={item.catalogue_id} style={[styles.productCard, { backgroundColor: themeColors.cardBackground }]}>
-                  {item.photo_url ? (
-                    <Image
-                      source={{ uri: item.photo_url }}
-                      style={styles.productImage}
-                      contentFit="cover"
-                      transition={200}
-                    />
-                  ) : (
-                    <View style={styles.productImagePlaceholder}>
-                      <Package size={40} color="#9ca3af" />
-                    </View>
-                  )}
-
-                  <View style={styles.productInfo}>
-                    <Text style={[styles.productName, { color: themeColors.text }]} numberOfLines={2}>
-                      {item.catalogue_item || 'Unnamed Item'}
-                    </Text>
-
-                    <View style={styles.detailsRow}>
-                      {item.size && (
-                        <View style={styles.sizeTag}>
-                          <Text style={styles.sizeText}>{item.size}</Text>
-                        </View>
-                      )}
-                      <View style={styles.stockBadge}>
-                        <View style={[
-                          styles.stockDot,
-                          item.stock > 0 ? styles.inStock : styles.outOfStockDot
-                        ]} />
-                        <Text style={styles.stockText}>
-                          {item.stock > 0 ? `${item.stock} left` : 'Out of stock'}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.priceRow}>
-                      <Text style={styles.priceLabel}>{currency.label}</Text>
-                      <Text style={[styles.priceValue, { color: themeColors.text }]}>
-                        {(item.price || 0).toLocaleString(currency.locale, { maximumFractionDigits: 0 })}
-                      </Text>
-                    </View>
-
-                    <TouchableOpacity
-                      style={styles.addToCartBtn}
-                      onPress={() => handleAddToCart(item)}
-                      disabled={item.stock <= 0 || addToCartMutation.isPending}
-                      activeOpacity={0.8}
-                    >
-                      <LinearGradient
-                        colors={item.stock <= 0 ? [colors.mediumGray, colors.mediumGray] : colors.gradient.orange}
-                        style={styles.addToCartGradient}
-                      >
-                        <ShoppingCart size={16} color={colors.white} />
-                        <Text style={styles.addToCartText}>
-                          {item.stock <= 0 ? "Out of Stock" : "Add to Cart"}
-                        </Text>
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  </View>
+            <>
+              <TouchableOpacity
+                style={[styles.retailerEntry, { backgroundColor: themeColors.cardBackground }]}
+                onPress={() => router.push("/shop-retailer-registration")}
+                activeOpacity={0.78}
+              >
+                <View style={styles.retailerEntryIcon}>
+                  <Store size={22} color={colors.primary} />
                 </View>
-              ))}
-            </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.retailerEntryTitle, { color: themeColors.text }]}>
+                    Register as an apparel retailer
+                  </Text>
+                  {shopStatus?.application ? (
+                    <Text style={[styles.retailerEntrySubtitle, { color: themeColors.textSecondary }]}>
+                      {String(shopStatus.application.status).toUpperCase()}
+                    </Text>
+                  ) : null}
+                </View>
+                <View style={styles.retailerEntryPlus}>
+                  <Plus size={18} color={colors.white} />
+                </View>
+              </TouchableOpacity>
+
+              {!products || products.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                  <Package size={64} color={colors.lightGray} />
+                  <Text style={[styles.emptyText, { color: themeColors.text }]}>No items listed yet</Text>
+                  <Text style={[styles.emptySubtext, { color: themeColors.textSecondary }]}>Approved running apparel will appear here.</Text>
+                </View>
+              ) : (
+                <View style={styles.productGrid}>
+                  {products.map((item) => {
+                    const itemCurrency = getCurrencyForItem(item);
+                    return (
+                      <View key={item.catalogue_id} style={[styles.productCard, { backgroundColor: themeColors.cardBackground }]}>
+                        {item.photo_url ? (
+                          <Image
+                            source={{ uri: item.photo_url }}
+                            style={styles.productImage}
+                            contentFit="cover"
+                            transition={200}
+                          />
+                        ) : (
+                          <View style={styles.productImagePlaceholder}>
+                            <Package size={40} color="#9ca3af" />
+                          </View>
+                        )}
+
+                        <View style={styles.productInfo}>
+                          <Text style={[styles.productName, { color: themeColors.text }]} numberOfLines={2}>
+                            {item.catalogue_item || 'Unnamed Item'}
+                          </Text>
+
+                          <View style={styles.detailsRow}>
+                            {item.size && (
+                              <View style={styles.sizeTag}>
+                                <Text style={styles.sizeText}>{item.size}</Text>
+                              </View>
+                            )}
+                            <View style={styles.conditionTag}>
+                              <Text style={styles.conditionText}>{item.condition || "New"}</Text>
+                            </View>
+                            <View style={styles.stockBadge}>
+                              <View style={[
+                                styles.stockDot,
+                                item.stock > 0 ? styles.inStock : styles.outOfStockDot
+                              ]} />
+                              <Text style={styles.stockText}>
+                                {item.stock > 0 ? `${item.stock} left` : 'Out of stock'}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <View style={styles.priceRow}>
+                            <Text style={styles.priceLabel}>{itemCurrency.label}</Text>
+                            <Text style={[styles.priceValue, { color: themeColors.text }]}>
+                              {(item.price || 0).toLocaleString(itemCurrency.locale, { maximumFractionDigits: 0 })}
+                            </Text>
+                          </View>
+
+                          <TouchableOpacity
+                            style={styles.addToCartBtn}
+                            onPress={() => handleAddToCart(item)}
+                            disabled={item.stock <= 0 || addToCartMutation.isPending}
+                            activeOpacity={0.8}
+                          >
+                            <LinearGradient
+                              colors={item.stock <= 0 ? [colors.mediumGray, colors.mediumGray] : colors.gradient.orange}
+                              style={styles.addToCartGradient}
+                            >
+                              <ShoppingCart size={16} color={colors.white} />
+                              <Text style={styles.addToCartText}>
+                                {item.stock <= 0 ? "Out of Stock" : "Add to Cart"}
+                              </Text>
+                            </LinearGradient>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </>
           )}
           <View style={{ height: 20 }} />
         </ScrollView>
@@ -608,6 +633,46 @@ const styles = StyleSheet.create({
   tabTextActive: {
     fontWeight: "700" as const,
   },
+  retailerEntry: {
+    minHeight: 58,
+    marginBottom: 14,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  retailerEntryIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: "#FFF4ED",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  retailerEntryTitle: {
+    fontSize: 16,
+    fontWeight: "800" as const,
+  },
+  retailerEntrySubtitle: {
+    fontSize: 12,
+    fontWeight: "700" as const,
+    marginTop: 2,
+  },
+  retailerEntryPlus: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   cartTabIcon: {
     position: "relative" as const,
   },
@@ -763,6 +828,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600" as const,
     color: colors.text,
+  },
+  conditionTag: {
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  conditionText: {
+    fontSize: 12,
+    fontWeight: "700" as const,
+    color: "#047857",
   },
   stockBadge: {
     flexDirection: "row",

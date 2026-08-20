@@ -2,6 +2,41 @@ import { publicProcedure } from "../../../create-context";
 
 const DEFAULT_FAQS = [
   {
+    faq_id: "default-create-club",
+    question: "How to create club",
+    answer:
+      "Open Settings > Join Service Team, choose the Club Coordinator role, and submit the club details requested there. After approval, the club profile becomes available for runners in its country.",
+    display_order: 1,
+  },
+  {
+    faq_id: "default-add-event",
+    question: "How to add event",
+    answer:
+      "Open Settings > Join Service Team and apply for the Event Organizer role. Approved event organizers and admins can add events, set event details, and manage participation rules.",
+    display_order: 2,
+  },
+  {
+    faq_id: "default-runnation-free",
+    question: "Is RunNation free",
+    answer:
+      "RunNation is subscription based with options to pay per quota or per year. However the first quota (90 days) is free.",
+    display_order: 3,
+  },
+  {
+    faq_id: "default-shop-works",
+    question: "How does the Shop work",
+    answer:
+      "All users can register as apparel sellers from the Shop. Listings must be approved by the country shop manager or Global Admin, and only running-related gear or club apparel is allowed. Approved sellers get 30 days free before shop listing fees apply.",
+    display_order: 4,
+  },
+  {
+    faq_id: "default-event-listings-work",
+    question: "How do Ride Share and Accommodation listings work",
+    answer:
+      "Drivers and accommodation hosts register their car or stay from Events. Each listing type gets its own 30-day free trial, then a separate listing subscription applies: UGX 20,000 or USD 4 quarterly, or UGX 60,000 or USD 12 annually. These fees are separate from RunNation membership, club membership, and shop listings.",
+    display_order: 5,
+  },
+  {
     faq_id: "default-1",
     question: "How do events, approvals, and event payments work?",
     answer:

@@ -28,9 +28,8 @@ const SERVICE_ROLE_DEFINITIONS = [
   {
     roleName: "shop_manager",
     label: "Shop Manager",
-    description: "Manage the RunNation shop presence for your country. This role is temporarily paused while the online store is being prepared.",
+    description: "Review shop-owner registrations and running apparel listings for your country.",
     maxPerCountry: 1,
-    comingSoon: true,
   },
   {
     roleName: "junior_runners_club_coordinator",

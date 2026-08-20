@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { publicProcedure } from "../../create-context";
+import { requireActiveListingEntitlement } from "../../listing-entitlements";
 import { resolveRideShareRegistrationId } from "./ride-share-utils";
 import { isRideShareEventExpired } from "./ride-share-permissions";
 
@@ -47,6 +48,7 @@ export default publicProcedure
   }))
   .mutation(async ({ ctx, input }) => {
     const driverRegistrationId = await resolveRideShareRegistrationId(ctx, input.registrationId);
+    const entitlement = await requireActiveListingEntitlement(ctx, driverRegistrationId, "ride_share");
 
     const { data: event, error: eventError } = await ctx.supabase
       .from("events")
@@ -87,6 +89,7 @@ export default publicProcedure
         car_type: input.carType,
         number_plate: input.numberPlate.trim().toUpperCase(),
         preferred_sex: input.preferredSex && input.preferredSex !== "Any" ? input.preferredSex : null,
+        listing_entitlement_id: entitlement.entitlement_id,
         status: input.vehicleType === "passenger_car_light" ? "active" : "pending_approval",
       })
       .select("ride_offer_id")

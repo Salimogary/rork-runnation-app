@@ -43,8 +43,6 @@ const SERVICE_ROLE_LIMITS: Record<string, number> = {
   magazine_columnist_motivation_speaker: 1,
 };
 
-const DISABLED_SERVICE_ROLES = new Set(["shop_manager"]);
-
 const SPECIAL_CLUB_CODE_BY_ROLE: Record<string, string> = {
   junior_runners_club_coordinator: "junior_runners",
   golden_age_runners_club_coordinator: "golden_age_runners",
@@ -134,9 +132,6 @@ export default publicProcedure
     }
 
     const inviteRoleName = getRoleName(invite);
-    if (inviteRoleName && DISABLED_SERVICE_ROLES.has(inviteRoleName)) {
-      throw new Error("Shop Manager is coming soon. The online store is not ready yet.");
-    }
 
     const { data: activeRoles, error: activeRolesError } = await ctx.supabase
       .from("user_role_assignments")

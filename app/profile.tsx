@@ -31,8 +31,6 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  Globe,
-  MapPin,
   UserPlus,
   UserCheck,
   PlusCircle,
@@ -127,6 +125,11 @@ interface ClubItem {
   country: string | null;
   location: string | null;
   description: string | null;
+  membership_type?: string | null;
+  virtual_membership_enabled?: boolean | null;
+  meeting_point?: string | null;
+  meeting_time?: string | null;
+  activity_options?: string[] | string | null;
   is_special_club?: boolean | null;
   special_club_code?: string | null;
   age_min?: number | null;
@@ -163,6 +166,19 @@ type UnitFormData = {
 function isGeneralHealthGoal(value: string | null | undefined): boolean {
   const normalized = String(value || "").trim().toLowerCase();
   return normalized === "general health" || normalized.includes("general health") || normalized.includes("health");
+}
+
+function formatClubMembershipType(value?: string | null): string {
+  return String(value || "free").trim().toLowerCase() === "paid" ? "Paid" : "Free";
+}
+
+function formatClubActivities(value?: string[] | string | null): string {
+  const rows = Array.isArray(value)
+    ? value
+    : String(value || "")
+      .split(",");
+  const cleaned = rows.map((item) => String(item).trim()).filter(Boolean);
+  return cleaned.length > 0 ? cleaned.join(", ") : "-";
 }
 
 interface ClubStartRequestData {
@@ -298,12 +314,16 @@ export default function ProfileScreen() {
     [visibleClubs]
   );
   const recommendedNormalClubs = useMemo(
-    () => visibleNormalClubs.filter((club) => clubMatchesTown(club, profile?.city_town_district)),
-    [visibleNormalClubs, profile?.city_town_district]
+    () => visibleNormalClubs.filter((club) => normalizeCountryLabel(club.country) === normalizeCountryLabel(profile?.country) && clubMatchesTown(club, profile?.city_town_district)),
+    [visibleNormalClubs, profile?.city_town_district, profile?.country]
   );
   const otherNormalClubs = useMemo(
-    () => visibleNormalClubs.filter((club) => !clubMatchesTown(club, profile?.city_town_district)),
-    [visibleNormalClubs, profile?.city_town_district]
+    () => visibleNormalClubs.filter((club) => normalizeCountryLabel(club.country) === normalizeCountryLabel(profile?.country) && !clubMatchesTown(club, profile?.city_town_district)),
+    [visibleNormalClubs, profile?.city_town_district, profile?.country]
+  );
+  const virtualNormalClubs = useMemo(
+    () => visibleNormalClubs.filter((club) => normalizeCountryLabel(club.country) !== normalizeCountryLabel(profile?.country) && club.virtual_membership_enabled === true),
+    [visibleNormalClubs, profile?.country]
   );
   const countryOptions = useMemo(() => {
     const rows = Array.isArray(countriesData)
@@ -1681,58 +1701,60 @@ export default function ProfileScreen() {
           </Text>
         </View>
       ) : null}
-      {list.map((club) => {
-        const isSelected = type === "normal" ? selectedNormalClubId === club.club_id : selectedSpecialClubIds.includes(club.club_id);
-        return (
-          <TouchableOpacity
-            key={club.club_id}
-            style={[styles.clubDetailCard, isSelected && styles.clubDetailCardSelected]}
-            onPress={() => {
-              if (type === "normal") {
-                setSelectedNormalClubId(isSelected ? null : club.club_id);
-                return;
-              }
-              setSelectedSpecialClubIds((current) =>
-                isSelected ? current.filter((clubId) => clubId !== club.club_id) : [...current, club.club_id]
-              );
-            }}
-            activeOpacity={0.7}
-          >
-            <View style={styles.clubDetailHeader}>
-              <View style={[styles.clubRadio, isSelected && styles.clubRadioSelected]}>
-                {isSelected && <View style={styles.clubRadioDot} />}
-              </View>
-              <Text style={[styles.clubDetailName, isSelected && styles.clubDetailNameSelected]}>
-                {club.club_name}
-              </Text>
-              {type === "special" && (
-                <View style={styles.specialClubBadge}>
-                  <Text style={styles.specialClubBadgeText}>Special</Text>
-                </View>
-              )}
+      {list.length > 0 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={styles.clubTable}>
+            <View style={[styles.clubTableRow, styles.clubTableHeader]}>
+              <View style={styles.clubTableNameColumn}><Text style={styles.clubTableHeaderText}>Club</Text></View>
+              <View style={styles.clubTableCountryColumn}><Text style={styles.clubTableHeaderText}>Country</Text></View>
+              <View style={styles.clubTableTownColumn}><Text style={styles.clubTableHeaderText}>Town/District</Text></View>
+              <View style={styles.clubTableMembershipColumn}><Text style={styles.clubTableHeaderText}>Membership</Text></View>
+              <View style={styles.clubTableVirtualColumn}><Text style={styles.clubTableHeaderText}>Virtual</Text></View>
+              <View style={styles.clubTableMeetingPointColumn}><Text style={styles.clubTableHeaderText}>Meeting point</Text></View>
+              <View style={styles.clubTableMeetingTimeColumn}><Text style={styles.clubTableHeaderText}>Meeting time</Text></View>
+              <View style={styles.clubTableActivitiesColumn}><Text style={styles.clubTableHeaderText}>Activities</Text></View>
             </View>
-            {(club.country || club.location) && (
-              <View style={styles.clubDetailMeta}>
-                {club.country && (
-                  <View style={styles.clubMetaRow}>
-                    <Globe size={13} color="#888" />
-                    <Text style={styles.clubMetaText}>{club.country}</Text>
+            {list.map((club, index) => {
+              const isSelected = type === "normal" ? selectedNormalClubId === club.club_id : selectedSpecialClubIds.includes(club.club_id);
+              return (
+                <TouchableOpacity
+                  key={club.club_id}
+                  style={[styles.clubTableRow, index % 2 === 1 && styles.clubTableRowAlt, isSelected && styles.clubTableRowSelected]}
+                  onPress={() => {
+                    if (type === "normal") {
+                      setSelectedNormalClubId(isSelected ? null : club.club_id);
+                      return;
+                    }
+                    setSelectedSpecialClubIds((current) =>
+                      isSelected ? current.filter((clubId) => clubId !== club.club_id) : [...current, club.club_id]
+                    );
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.clubTableNameColumn}>
+                    <View style={styles.clubTableNameCell}>
+                      <View style={[styles.clubRadio, isSelected && styles.clubRadioSelected]}>
+                        {isSelected && <View style={styles.clubRadioDot} />}
+                      </View>
+                      <Text style={[styles.clubTableCellText, styles.clubTableNameText, isSelected && styles.clubDetailNameSelected]} numberOfLines={2}>
+                        {club.club_name}
+                      </Text>
+                      {type === "special" && <Text style={styles.clubTableBadge}>Special</Text>}
+                    </View>
                   </View>
-                )}
-                {club.location && (
-                  <View style={styles.clubMetaRow}>
-                    <MapPin size={13} color="#888" />
-                    <Text style={styles.clubMetaText}>{club.location}</Text>
-                  </View>
-                )}
-              </View>
-            )}
-            {club.description && (
-              <Text style={styles.clubDetailDesc}>{club.description}</Text>
-            )}
-          </TouchableOpacity>
-        );
-      })}
+                  <View style={styles.clubTableCountryColumn}><Text style={styles.clubTableCellText} numberOfLines={2}>{club.country || "-"}</Text></View>
+                  <View style={styles.clubTableTownColumn}><Text style={styles.clubTableCellText} numberOfLines={2}>{club.location || "-"}</Text></View>
+                  <View style={styles.clubTableMembershipColumn}><Text style={styles.clubTableCellText}>{formatClubMembershipType(club.membership_type)}</Text></View>
+                  <View style={styles.clubTableVirtualColumn}><Text style={styles.clubTableCellText}>{club.virtual_membership_enabled ? "Y" : "N"}</Text></View>
+                  <View style={styles.clubTableMeetingPointColumn}><Text style={styles.clubTableCellText} numberOfLines={2}>{club.meeting_point || club.location || "-"}</Text></View>
+                  <View style={styles.clubTableMeetingTimeColumn}><Text style={styles.clubTableCellText} numberOfLines={2}>{club.meeting_time || "-"}</Text></View>
+                  <View style={styles.clubTableActivitiesColumn}><Text style={styles.clubTableCellText} numberOfLines={2}>{formatClubActivities(club.activity_options)}</Text></View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </ScrollView>
+      ) : null}
     </View>
   );
 
@@ -1743,6 +1765,7 @@ export default function ProfileScreen() {
       <View style={styles.clubsList}>
         {renderClubListSection("Recommended Normal Clubs", "Clubs active in your city/town/district.", recommendedNormalClubs, "normal")}
         {renderClubListSection("Other Normal Clubs", "Other local clubs in your profile country.", otherNormalClubs, "normal")}
+        {renderClubListSection("Virtual Clubs Outside Your Country", "Only out-of-country clubs with virtual membership are shown here.", virtualNormalClubs, "normal")}
         {renderClubListSection("Special Clubs", "Age, disability, or indoor-workout clubs you are eligible for.", visibleSpecialClubs, "special")}
         <TouchableOpacity style={styles.missingClubCard} onPress={() => void shareMissingClubInvite()} activeOpacity={0.75}>
           <Text style={styles.missingClubTitle}>My club is not on this list</Text>
@@ -2975,6 +2998,95 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
     lineHeight: 16,
+  },
+  clubTable: {
+    minWidth: 940,
+    borderRadius: 10,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    backgroundColor: "#fff",
+  },
+  clubTableRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    minHeight: 46,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+  },
+  clubTableHeader: {
+    minHeight: 36,
+    backgroundColor: "#1f2937",
+  },
+  clubTableRowAlt: {
+    backgroundColor: "#f9fafb",
+  },
+  clubTableRowSelected: {
+    backgroundColor: "#eff6ff",
+  },
+  clubTableHeaderText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "800" as const,
+  },
+  clubTableCellText: {
+    color: "#374151",
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "600" as const,
+  },
+  clubTableNameText: {
+    flex: 1,
+  },
+  clubTableNameCell: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  clubTableBadge: {
+    color: "#1d4ed8",
+    fontSize: 9,
+    fontWeight: "800" as const,
+  },
+  clubTableNameColumn: {
+    width: 168,
+    padding: 8,
+    justifyContent: "center",
+  },
+  clubTableCountryColumn: {
+    width: 92,
+    padding: 8,
+    justifyContent: "center",
+  },
+  clubTableTownColumn: {
+    width: 110,
+    padding: 8,
+    justifyContent: "center",
+  },
+  clubTableMembershipColumn: {
+    width: 86,
+    padding: 8,
+    justifyContent: "center",
+  },
+  clubTableVirtualColumn: {
+    width: 64,
+    padding: 8,
+    justifyContent: "center",
+  },
+  clubTableMeetingPointColumn: {
+    width: 140,
+    padding: 8,
+    justifyContent: "center",
+  },
+  clubTableMeetingTimeColumn: {
+    width: 120,
+    padding: 8,
+    justifyContent: "center",
+  },
+  clubTableActivitiesColumn: {
+    width: 160,
+    padding: 8,
+    justifyContent: "center",
   },
   clubDetailCard: {
     padding: 14,

@@ -650,6 +650,65 @@ function RankHistoryGraph({
   );
 }
 
+function RankHistoryCalendar({
+  points,
+  summary,
+}: {
+  points: CommunityRankHistoryPoint[];
+  summary?: RankSummary | null;
+}) {
+  const days = points
+    .filter((point) => typeof point.communityRank === "number")
+    .slice(-35);
+
+  if (days.length === 0 && !summary) {
+    return (
+      <View style={styles.rankCalendarEmpty}>
+        <Text style={styles.rankCalendarEmptyText}>Community ranking appears after your next eligible activity snapshot.</Text>
+      </View>
+    );
+  }
+
+  const displayDays = days.length > 0 ? days : [{ date: new Date().toISOString().slice(0, 10), communityRank: summary?.currentRank, communityTotal: summary?.totalParticipants }];
+
+  return (
+    <View style={styles.rankCalendarBlock}>
+      <View style={styles.rankCalendarHeader}>
+        <Text style={styles.rankCalendarTitle}>Community ranking</Text>
+        {summary ? (
+          <Text style={styles.rankCalendarSummary}>#{summary.currentRank} of {summary.totalParticipants}</Text>
+        ) : null}
+      </View>
+      <View style={styles.rankCalendarGrid}>
+        {displayDays.map((point, index) => {
+          const previous = index > 0 ? displayDays[index - 1] : null;
+          const rank = Number(point.communityRank || 0);
+          const previousRank = Number(previous?.communityRank || rank);
+          const improved = rank > 0 && rank < previousRank;
+          const declined = rank > previousRank;
+          const stayed = !improved && !declined;
+          const date = new Date(`${point.date}T00:00:00`);
+          const label = Number.isNaN(date.getTime())
+            ? point.date.slice(-2)
+            : String(date.getDate());
+          return (
+            <View
+              key={`${point.date}-${index}`}
+              style={[
+                styles.rankCalendarDay,
+                improved ? styles.rankCalendarDayUp : stayed ? styles.rankCalendarDaySame : styles.rankCalendarDayDown,
+              ]}
+            >
+              <Text style={styles.rankCalendarDayLabel}>{label}</Text>
+              <Text style={styles.rankCalendarDayRank}>#{rank || "-"}</Text>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 const getHealthRecommendations = (age: number | null) => {
   const stepTarget = age !== null && age >= 60 ? 2000 : 3000;
   const sleep = age !== null && age < 13
@@ -755,6 +814,7 @@ const scoreSmartFitHealth = (input: {
 export default function GoalsScreen() {
   const { user } = useAuth();
   const { colors: themeColors } = useTheme();
+  const sectionTitleStyle = useMemo(() => [styles.sectionTitle, { color: themeColors.text }], [themeColors.text]);
   const { isSubscribed } = useSubscription();
   const queryClient = useQueryClient();
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -2695,15 +2755,11 @@ export default function GoalsScreen() {
   }, [user?.id]);
 
   useEffect(() => {
-    if (!user?.id || (!familyRanking && !clubRanking && !communityActivityRankSummary)) return;
+    if (!user?.id || !communityActivityRankSummary) return;
 
     const today = getLocalDateKey(new Date());
     const nextPoint: CommunityRankHistoryPoint = {
       date: today,
-      familyRank: familyRanking?.currentRank,
-      familyTotal: familyRanking?.totalParticipants,
-      clubRank: clubRanking?.currentRank,
-      clubTotal: clubRanking?.totalParticipants,
       communityRank: communityActivityRankSummary?.currentRank,
       communityTotal: communityActivityRankSummary?.totalParticipants,
     };
@@ -2715,7 +2771,7 @@ export default function GoalsScreen() {
       });
       return merged;
     });
-  }, [clubRanking, communityActivityRankSummary, familyRanking, user?.id]);
+  }, [communityActivityRankSummary, user?.id]);
 
   const { data: medalGoalData, isLoading: medalGoalLoading, refetch: refetchMedalGoal } = useQuery<MedalGoalData | null>({
     queryKey: ["medalGoalData", user?.id, medalTargetGoal?.start_date, medalTargetGoal?.end_date, medalTargetGoal?.target_medals],
@@ -2972,8 +3028,8 @@ export default function GoalsScreen() {
   });
 
   const communityGoalRanks = useMemo(
-    () => [familyRanking, clubRanking, communityActivityRankSummary].filter(Boolean) as RankSummary[],
-    [clubRanking, communityActivityRankSummary, familyRanking]
+    () => [communityActivityRankSummary].filter(Boolean) as RankSummary[],
+    [communityActivityRankSummary]
   );
   const eligibleCommunityGoalRanks = useMemo(
     () => communityGoalRanks.filter((rank) => rank.totalParticipants >= 3),
@@ -2984,18 +3040,14 @@ export default function GoalsScreen() {
     const today = getLocalDateKey(new Date());
     const todayPoint: CommunityRankHistoryPoint = {
       date: today,
-      familyRank: familyRanking?.currentRank,
-      familyTotal: familyRanking?.totalParticipants,
-      clubRank: clubRanking?.currentRank,
-      clubTotal: clubRanking?.totalParticipants,
       communityRank: communityActivityRankSummary?.currentRank,
       communityTotal: communityActivityRankSummary?.totalParticipants,
     };
-    const hasTodayRank = [todayPoint.familyRank, todayPoint.clubRank, todayPoint.communityRank]
+    const hasTodayRank = [todayPoint.communityRank]
       .some((rank) => typeof rank === "number");
     const base = communityRankHistory.filter((point) => point.date !== today);
     return (hasTodayRank ? [...base, todayPoint] : base).slice(-35);
-  }, [clubRanking, communityActivityRankSummary, communityRankHistory, familyRanking]);
+  }, [communityActivityRankSummary, communityRankHistory]);
 
   const { data: eventGoals = [], refetch: refetchEvents } = useQuery<RegisteredEvent[]>({
     queryKey: ["goalEvents", user?.id],
@@ -3925,7 +3977,7 @@ export default function GoalsScreen() {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Target size={18} color={colors.primary} />
-              <Text style={styles.sectionTitle}>Set Goals</Text>
+              <Text style={sectionTitleStyle}>Set Goals</Text>
             </View>
             <View style={styles.setGoalsGrid}>
               {hasSelectedGoal("dailyRun") && (
@@ -4054,7 +4106,7 @@ export default function GoalsScreen() {
               <View key="fitness" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Zap size={18} color={colors.primary} />
-                  <Text style={styles.sectionTitle}>Work on my pace</Text>
+                  <Text style={sectionTitleStyle}>Work on my pace</Text>
                   <TouchableOpacity onPress={openEditGoalForm} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4119,7 +4171,7 @@ export default function GoalsScreen() {
               <View key="fitness" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Zap size={18} color={colors.primary} />
-                  <Text style={styles.sectionTitle}>Work on my pace</Text>
+                  <Text style={sectionTitleStyle}>Work on my pace</Text>
                   <TouchableOpacity onPress={openEditGoalForm} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4139,7 +4191,7 @@ export default function GoalsScreen() {
               <View key="fitness" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Zap size={18} color={colors.primary} />
-                  <Text style={styles.sectionTitle}>Work on my pace</Text>
+                  <Text style={sectionTitleStyle}>Work on my pace</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={openEditGoalForm} activeOpacity={0.8}>
                   <LinearGradient colors={["#FF6B35", "#FF8C42"]} style={styles.setupGoalGradient}>
@@ -4163,7 +4215,7 @@ export default function GoalsScreen() {
               <View key="dailyRun" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Calendar size={18} color="#0EA5E9" />
-                  <Text style={styles.sectionTitle}>Meet my exercise goals</Text>
+                  <Text style={sectionTitleStyle}>Meet my exercise goals</Text>
                   <TouchableOpacity onPress={openDailyRunGoalForm} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4237,7 +4289,7 @@ export default function GoalsScreen() {
               <View key="dailyRun" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Calendar size={18} color="#0EA5E9" />
-                  <Text style={styles.sectionTitle}>Meet my exercise goals</Text>
+                  <Text style={sectionTitleStyle}>Meet my exercise goals</Text>
                   <TouchableOpacity onPress={openEditHabit} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4263,7 +4315,7 @@ export default function GoalsScreen() {
               <View key="dailyRun" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Calendar size={18} color="#0EA5E9" />
-                  <Text style={styles.sectionTitle}>Meet my exercise goals</Text>
+                  <Text style={sectionTitleStyle}>Meet my exercise goals</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={openDailyRunGoalForm} activeOpacity={0.8}>
                   <LinearGradient colors={["#0EA5E9", "#38BDF8"]} style={styles.setupGoalGradient}>
@@ -4287,7 +4339,7 @@ export default function GoalsScreen() {
               <View key="runWindow" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Clock size={18} color="#2563EB" />
-                  <Text style={styles.sectionTitle}>Set exercise time</Text>
+                  <Text style={sectionTitleStyle}>Set exercise time</Text>
                   <TouchableOpacity onPress={openRunWindowForm} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4349,7 +4401,7 @@ export default function GoalsScreen() {
               <View key="runWindow" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Clock size={18} color="#2563EB" />
-                  <Text style={styles.sectionTitle}>Set exercise time</Text>
+                  <Text style={sectionTitleStyle}>Set exercise time</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={openRunWindowForm} activeOpacity={0.8}>
                   <LinearGradient colors={["#2563EB", "#38BDF8"]} style={styles.setupGoalGradient}>
@@ -4371,7 +4423,7 @@ export default function GoalsScreen() {
               <View key="budget" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <CreditCard size={18} color="#059669" />
-                  <Text style={styles.sectionTitle}>Manage running Expenditure</Text>
+                  <Text style={sectionTitleStyle}>Manage running Expenditure</Text>
                   <TouchableOpacity onPress={openRunningBudgetForm} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4475,7 +4527,7 @@ export default function GoalsScreen() {
               <View key="budget" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <CreditCard size={18} color="#059669" />
-                  <Text style={styles.sectionTitle}>Manage running Expenditure</Text>
+                  <Text style={sectionTitleStyle}>Manage running Expenditure</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={openRunningBudgetForm} activeOpacity={0.8}>
                   <LinearGradient colors={["#059669", "#34D399"]} style={styles.setupGoalGradient}>
@@ -4497,7 +4549,7 @@ export default function GoalsScreen() {
               <View key="weight" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Scale size={18} color={colors.primary} />
-                  <Text style={styles.sectionTitle}>Loose some weight</Text>
+                  <Text style={sectionTitleStyle}>Loose some weight</Text>
                   <TouchableOpacity onPress={openEditWeightTarget} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4647,7 +4699,7 @@ export default function GoalsScreen() {
               <View key="weight" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Scale size={18} color={colors.primary} />
-                  <Text style={styles.sectionTitle}>Loose some weight</Text>
+                  <Text style={sectionTitleStyle}>Loose some weight</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={openEditWeightTarget} activeOpacity={0.8}>
                   <LinearGradient colors={["#10B981", "#34D399"]} style={styles.setupGoalGradient}>
@@ -4671,7 +4723,7 @@ export default function GoalsScreen() {
               <View key="health" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Heart size={18} color="#E11D48" />
-                  <Text style={styles.sectionTitle}>Monitor my health</Text>
+                  <Text style={sectionTitleStyle}>Monitor my health</Text>
                   <TouchableOpacity onPress={() => setShowHealthForm(true)} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Log</Text>
                     <Plus size={14} color={colors.primary} />
@@ -4786,7 +4838,7 @@ export default function GoalsScreen() {
               <View key="health" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Heart size={18} color="#E11D48" />
-                  <Text style={styles.sectionTitle}>Monitor my health</Text>
+                  <Text style={sectionTitleStyle}>Monitor my health</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={() => setShowHealthForm(true)} activeOpacity={0.8}>
                   <LinearGradient colors={["#E11D48", "#F43F5E"]} style={styles.setupGoalGradient}>
@@ -4810,7 +4862,7 @@ export default function GoalsScreen() {
               <View key="habit" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Flame size={18} color="#0D9488" />
-                  <Text style={styles.sectionTitle}>Follow an exercise plan</Text>
+                  <Text style={sectionTitleStyle}>Follow an exercise plan</Text>
                   <TouchableOpacity onPress={openEditHabit} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -4905,7 +4957,7 @@ export default function GoalsScreen() {
               <View key="habit" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Flame size={18} color="#0D9488" />
-                  <Text style={styles.sectionTitle}>Follow an exercise plan</Text>
+                  <Text style={sectionTitleStyle}>Follow an exercise plan</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={() => { resetHabitForm(); setShowHabitModal(true); }} activeOpacity={0.8}>
                   <LinearGradient colors={["#0D9488", "#14B8A6"]} style={styles.setupGoalGradient}>
@@ -4929,7 +4981,7 @@ export default function GoalsScreen() {
               <View key="medals" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Trophy size={18} color="#D97706" />
-                  <Text style={styles.sectionTitle}>Get medals</Text>
+                  <Text style={sectionTitleStyle}>Get medals</Text>
                   <TouchableOpacity onPress={openEditMedalGoal} style={styles.editButton} activeOpacity={0.7}>
                     <Text style={styles.editButtonText}>Edit</Text>
                     <ChevronRight size={14} color={colors.primary} />
@@ -5063,7 +5115,7 @@ export default function GoalsScreen() {
               <View key="medals" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Trophy size={18} color="#D97706" />
-                  <Text style={styles.sectionTitle}>Get medals</Text>
+                  <Text style={sectionTitleStyle}>Get medals</Text>
                 </View>
                 <TouchableOpacity style={styles.setupGoalCard} onPress={openEditMedalGoal} activeOpacity={0.8}>
                   <LinearGradient colors={["#D97706", "#F59E0B"]} style={styles.setupGoalGradient}>
@@ -5085,38 +5137,12 @@ export default function GoalsScreen() {
               <View key="community" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Users size={18} color="#0EA5E9" />
-                  <Text style={styles.sectionTitle}>Be part in the community</Text>
+                  <Text style={sectionTitleStyle}>Be part in the community</Text>
                 </View>
                 <View style={styles.communityCard}>
-                  <RankHistoryGraph
+                  <RankHistoryCalendar
                     points={communityRankGraphPoints}
-                    rankKey="familyRank"
-                    totalKey="familyTotal"
-                    label="Family"
-                    color={RANK_HISTORY_COLORS.family}
-                    summary={familyRanking}
-                    backgroundColor="#F5F3FF"
-                    borderColor="#DDD6FE"
-                  />
-                  <RankHistoryGraph
-                    points={communityRankGraphPoints}
-                    rankKey="clubRank"
-                    totalKey="clubTotal"
-                    label="Club"
-                    color={RANK_HISTORY_COLORS.club}
-                    summary={clubRanking}
-                    backgroundColor="#F0FDF4"
-                    borderColor="#BBF7D0"
-                  />
-                  <RankHistoryGraph
-                    points={communityRankGraphPoints}
-                    rankKey="communityRank"
-                    totalKey="communityTotal"
-                    label="Community"
-                    color={RANK_HISTORY_COLORS.community}
                     summary={communityActivityRankSummary}
-                    backgroundColor="#F0F9FF"
-                    borderColor="#BAE6FD"
                   />
 
                   {rankChange && rankChange.previousRank > 0 && (
@@ -5127,7 +5153,7 @@ export default function GoalsScreen() {
                   )}
 
                   <Text style={styles.fitnessFootnote}>
-                    Rank history is saved locally each day. Graphs appear only for activity groups with at least 3 competitors.
+                    Rank history is saved locally each day. Green means rank improved, amber means it stayed constant, and red means it declined.
                   </Text>
                 </View>
               </View>
@@ -5135,7 +5161,7 @@ export default function GoalsScreen() {
               <View key="community" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Users size={18} color="#0EA5E9" />
-                  <Text style={styles.sectionTitle}>Be part in the community</Text>
+                  <Text style={sectionTitleStyle}>Be part in the community</Text>
                 </View>
                 <View style={styles.communityCard}>
                   <View style={styles.noActivitiesInfo}>
@@ -5157,7 +5183,7 @@ export default function GoalsScreen() {
               <View key="events" style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Award size={18} color={colors.text} />
-                  <Text style={styles.sectionTitle}>Event Goals</Text>
+                  <Text style={sectionTitleStyle}>Event Goals</Text>
                 </View>
                 {ongoingEvents.map((event) => (
                   <View key={event.eventId} style={styles.eventGoalCard}>
@@ -7558,6 +7584,79 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 3,
     elevation: 1,
+  },
+  rankCalendarBlock: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#BAE6FD",
+    backgroundColor: "#F0F9FF",
+    padding: 12,
+    gap: 10,
+  },
+  rankCalendarHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    gap: 10,
+  },
+  rankCalendarTitle: {
+    fontSize: 13,
+    fontWeight: "900" as const,
+    color: "#0F172A",
+  },
+  rankCalendarSummary: {
+    fontSize: 12,
+    fontWeight: "900" as const,
+    color: "#0369A1",
+  },
+  rankCalendarGrid: {
+    flexDirection: "row" as const,
+    flexWrap: "wrap" as const,
+    gap: 7,
+  },
+  rankCalendarDay: {
+    width: 46,
+    minHeight: 48,
+    borderRadius: 8,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    borderWidth: 1,
+  },
+  rankCalendarDayUp: {
+    backgroundColor: "#DCFCE7",
+    borderColor: "#86EFAC",
+  },
+  rankCalendarDaySame: {
+    backgroundColor: "#FEF3C7",
+    borderColor: "#FCD34D",
+  },
+  rankCalendarDayDown: {
+    backgroundColor: "#FEE2E2",
+    borderColor: "#FCA5A5",
+  },
+  rankCalendarDayLabel: {
+    fontSize: 11,
+    fontWeight: "900" as const,
+    color: "#0F172A",
+  },
+  rankCalendarDayRank: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: "900" as const,
+    color: "#0F172A",
+  },
+  rankCalendarEmpty: {
+    borderRadius: 12,
+    backgroundColor: "#F8FAFC",
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  rankCalendarEmptyText: {
+    fontSize: 12,
+    fontWeight: "700" as const,
+    color: "#64748B",
+    textAlign: "center" as const,
   },
   goalRankList: {
     gap: 8,

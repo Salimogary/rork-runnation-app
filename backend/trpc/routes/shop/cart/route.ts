@@ -23,6 +23,9 @@ export default publicProcedure
     if (productError || !product) {
       throw new Error("Product not found: " + (productError?.message || "unknown"));
     }
+    if (product.listing_status && product.listing_status !== "approved") {
+      throw new Error("This item is not available yet.");
+    }
 
     const { data: existingCart } = await ctx.supabase
       .from("shopping_cart")

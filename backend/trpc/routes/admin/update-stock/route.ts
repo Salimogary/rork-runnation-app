@@ -7,6 +7,7 @@ export default publicProcedure
     z.object({
       catalogueId: z.string(),
       quantity: z.number().int().nonnegative(),
+      condition: z.enum(["New", "Used", "Refurbished"]).optional(),
     })
   )
   .mutation(async ({ input, ctx }) => {
@@ -15,11 +16,14 @@ export default publicProcedure
       allowCountryAdmin: true,
     });
 
-    const { catalogueId, quantity } = input;
+    const { catalogueId, quantity, condition } = input;
 
     const { error } = await ctx.supabase
       .from("catalogue")
-      .update({ quantity: quantity })
+      .update({
+        quantity,
+        ...(condition ? { condition } : {}),
+      })
       .eq("catalogue_id", catalogueId);
 
     if (error) throw error;
@@ -30,6 +34,7 @@ export default publicProcedure
       metadata: {
         catalogueId,
         quantity,
+        condition,
       },
     });
 

@@ -17,6 +17,8 @@ type RoleName =
   | "magazine_columnist_sports_journalist"
   | "magazine_columnist_motivation_speaker"
   | "chat_room_administrator"
+  | "shop_manager"
+  | "shop_owner"
   | "user";
 
 type RoleAssignment = {
@@ -38,6 +40,7 @@ export type ActorRoleSession = {
   isMagazineEditor: boolean;
   isMagazineColumnist: boolean;
   isChatRoomAdministrator: boolean;
+  isShopManager: boolean;
   hasAdminAccess: boolean;
 };
 
@@ -240,6 +243,7 @@ export async function getActorRoleSession(ctx: Context): Promise<ActorRoleSessio
   isMagazineEditor: false,
   isMagazineColumnist: false,
   isChatRoomAdministrator: false,
+  isShopManager: false,
   hasAdminAccess: false,
 };
 
@@ -287,6 +291,7 @@ export async function getActorRoleSession(ctx: Context): Promise<ActorRoleSessio
     const isMagazineEditor = roles.some((role) => role.roleName === "magazine_editor");
     const isMagazineColumnist = roles.some((role) => role.roleName.startsWith("magazine_columnist_"));
     const isChatRoomAdministrator = roles.some((role) => role.roleName === "chat_room_administrator");
+    const isShopManager = roles.some((role) => role.roleName === "shop_manager");
 
     return {
       authUserId: ctx.authUserId,
@@ -300,8 +305,9 @@ export async function getActorRoleSession(ctx: Context): Promise<ActorRoleSessio
       isMagazineEditor,
       isMagazineColumnist,
       isChatRoomAdministrator,
+      isShopManager,
       hasAdminAccess:
-        isSuperAdmin || isCountryAdmin || isCountryCoordinator || isClubCoordinator || isSpecialClubCoordinator || isEventOrganizer || isMagazineEditor || isMagazineColumnist || isChatRoomAdministrator,
+        isSuperAdmin || isCountryAdmin || isCountryCoordinator || isClubCoordinator || isSpecialClubCoordinator || isEventOrganizer || isMagazineEditor || isMagazineColumnist || isChatRoomAdministrator || isShopManager,
     };
   } catch (error) {
     console.warn("[RBAC] Failed to resolve actor roles:", error instanceof Error ? error.message : error);
@@ -321,6 +327,7 @@ export async function requireAdminPermission(
     allowMagazineEditor?: boolean;
     allowMagazineColumnist?: boolean;
     allowChatRoomAdministrator?: boolean;
+    allowShopManager?: boolean;
     countryCode?: string | null;
     clubId?: string | null;
     organizerId?: string | null;
@@ -357,6 +364,12 @@ export async function requireAdminPermission(
     (options.allowMagazineEditor && actor.isMagazineEditor) ||
     (options.allowMagazineColumnist && actor.isMagazineColumnist) ||
     (options.allowChatRoomAdministrator && actor.isChatRoomAdministrator) ||
+    (options.allowShopManager &&
+      actor.roles.some(
+        (role) =>
+          role.roleName === "shop_manager" &&
+          (!options.countryCode || role.countryCode === options.countryCode)
+      )) ||
     (options.allowSpecialClubCoordinator && (await actorCanManageSpecialClub(ctx, actor, options.clubId)));
 
   if (!canAccess) {

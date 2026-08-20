@@ -20,8 +20,6 @@ const SERVICE_ROLE_LIMITS: Record<string, number> = {
   magazine_columnist_motivation_speaker: 1,
 };
 
-const DISABLED_SERVICE_ROLES = new Set(["shop_manager"]);
-
 const serviceRoleNameSchema = z.enum([
   "event_organizer",
   "club_coordinator",
@@ -119,6 +117,11 @@ export default publicProcedure
       proposedName: proposedProfileFieldSchema,
       proposedLocation: proposedProfileFieldSchema,
       proposedDescription: proposedProfileFieldSchema,
+      clubMembershipType: z.enum(["free", "paid"]).optional().default("free"),
+      clubVirtualMembershipEnabled: z.boolean().optional().default(false),
+      clubMeetingPoint: proposedProfileFieldSchema,
+      clubMeetingTime: proposedProfileFieldSchema,
+      clubActivityOptions: z.array(z.enum(["walk", "run", "stairs", "cycle", "treadmill"])).max(5).optional().default([]),
     })
   )
   .mutation(async ({ input, ctx }) => {
@@ -128,9 +131,6 @@ export default publicProcedure
 
     const countryCode = input.countryCode.trim().toUpperCase();
     const roleName = input.roleName;
-    if (DISABLED_SERVICE_ROLES.has(roleName)) {
-      throw new Error("Shop Manager is coming soon. The online store is not ready yet.");
-    }
     const maxPerCountry = SERVICE_ROLE_LIMITS[roleName];
     const isGlobalRole = GLOBAL_SERVICE_ROLES.has(roleName);
     const allowsApplicantLinks = !ROLES_WITHOUT_APPLICANT_LINKS.has(roleName);
@@ -293,6 +293,11 @@ export default publicProcedure
           country: countryCode,
           coordinator_id: String(coordinatorId),
           is_active: false,
+          membership_type: input.clubMembershipType,
+          virtual_membership_enabled: input.clubVirtualMembershipEnabled,
+          meeting_point: input.clubMeetingPoint,
+          meeting_time: input.clubMeetingTime,
+          activity_options: input.clubActivityOptions,
         })
         .select("club_id")
         .maybeSingle();

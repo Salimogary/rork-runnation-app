@@ -1,7 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
+  Modal,
+  Platform,
   ScrollView,
   Share,
   StyleSheet,
@@ -16,6 +19,7 @@ import { Activity, Check, Gauge, Share2, Timer, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import * as ImagePicker from "expo-image-picker";
 
 type ApprovedActivity = {
   activity_id: string;
@@ -67,6 +71,8 @@ export default function ActivityCompleteScreen() {
   const activityId = Array.isArray(rawActivityId) ? rawActivityId[0] : rawActivityId;
   const { user, registrationId } = useAuth();
   const effectiveRegistrationId = registrationId || user?.id || "";
+  const [shareImageUri, setShareImageUri] = useState<string | null>(null);
+  const [showSharePreview, setShowSharePreview] = useState(false);
 
   const { data: activity, isLoading, error } = useQuery<ApprovedActivity>({
     queryKey: ["approved-activity-complete", activityId, effectiveRegistrationId],
@@ -129,17 +135,47 @@ export default function ActivityCompleteScreen() {
     [activity?.end_time, activity?.start_time]
   );
 
+  const buildShareMessage = () => {
+    if (!activity) return;
+    return [
+      `${activity.runnerName} completed a ${activity.exercise_type || "workout"} on RunNation.`,
+      activity.exercise_type === "Stairs"
+        ? `${Number(activity.steps_count || 0).toLocaleString()} steps in ${formatDuration(durationSeconds)}.`
+        : `${activity.distance_km.toFixed(2)} km in ${formatDuration(durationSeconds)}.`,
+      activity.exercise_type === "Stairs" ? null : `Average pace: ${formatPace(activity.pace_min_per_km)} /km.`,
+    ].filter(Boolean).join("\n");
+  };
+
   const shareActivity = async () => {
     if (!activity) return;
-    await Share.share({
-      message: [
-        `${activity.runnerName} completed a ${activity.exercise_type || "workout"} on RunNation.`,
-        activity.exercise_type === "Stairs"
-          ? `${Number(activity.steps_count || 0).toLocaleString()} steps in ${formatDuration(durationSeconds)}.`
-          : `${activity.distance_km.toFixed(2)} km in ${formatDuration(durationSeconds)}.`,
-        activity.exercise_type === "Stairs" ? null : `Average pace: ${formatPace(activity.pace_min_per_km)} /km.`,
-      ].filter(Boolean).join("\n"),
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      quality: 0.95,
     });
+    if (result.canceled || !result.assets?.[0]?.uri) return;
+    const asset = result.assets[0];
+    const mimeType = String(asset.mimeType || "").toLowerCase();
+    const uri = asset.uri;
+    const isImage = mimeType.startsWith("image/") || /\.(jpe?g|png|webp|heic|heif)$/i.test(uri);
+    if (!isImage) {
+      Alert.alert("Image Required", "Please choose an image file.");
+      return;
+    }
+    setShareImageUri(uri);
+    setShowSharePreview(true);
+  };
+
+  const confirmShareActivity = async () => {
+    if (!activity) return;
+    const payload: { message: string; url?: string } = {
+      message: buildShareMessage() || "",
+    };
+    if (shareImageUri && Platform.OS === "ios") {
+      payload.url = shareImageUri;
+    }
+    await Share.share(payload);
+    setShowSharePreview(false);
   };
 
   if (isLoading) {
@@ -263,6 +299,46 @@ export default function ActivityCompleteScreen() {
           <Share2 size={23} color="#60A5FA" />
         </TouchableOpacity>
       </View>
+
+      <Modal visible={showSharePreview} transparent animationType="fade" onRequestClose={() => setShowSharePreview(false)}>
+        <View style={styles.shareModalBackdrop}>
+          <View style={styles.shareModalCard}>
+            <View style={styles.sharePreviewFrame}>
+              {shareImageUri ? <Image source={{ uri: shareImageUri }} style={styles.sharePreviewImage} /> : null}
+              <LinearGradient
+                colors={["rgba(2,6,23,0.75)", "rgba(2,6,23,0.15)", "rgba(2,6,23,0.82)"]}
+                style={styles.sharePreviewOverlay}
+              >
+                <Text style={styles.sharePreviewHeader}>RunNation</Text>
+                <View style={styles.sharePreviewStats}>
+                  <View style={styles.sharePreviewStat}>
+                    <Text style={styles.sharePreviewValue}>
+                      {activity.exercise_type === "Stairs" ? Number(activity.steps_count || 0).toLocaleString() : activity.distance_km.toFixed(2)}
+                    </Text>
+                    <Text style={styles.sharePreviewLabel}>{activity.exercise_type === "Stairs" ? "Steps" : "Distance"}</Text>
+                  </View>
+                  <View style={styles.sharePreviewStat}>
+                    <Text style={styles.sharePreviewValue}>{activity.exercise_type === "Stairs" ? "-" : formatPace(activity.pace_min_per_km)}</Text>
+                    <Text style={styles.sharePreviewLabel}>Pace</Text>
+                  </View>
+                  <View style={styles.sharePreviewStat}>
+                    <Text style={styles.sharePreviewValue}>{formatDuration(durationSeconds)}</Text>
+                    <Text style={styles.sharePreviewLabel}>Time</Text>
+                  </View>
+                </View>
+              </LinearGradient>
+            </View>
+            <View style={styles.shareModalActions}>
+              <TouchableOpacity style={styles.shareModalButtonSecondary} onPress={() => setShowSharePreview(false)}>
+                <Text style={styles.shareModalButtonSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.shareModalButtonPrimary} onPress={confirmShareActivity}>
+                <Text style={styles.shareModalButtonPrimaryText}>Share</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -493,5 +569,95 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.38)",
     backgroundColor: "rgba(3,7,24,0.78)",
     elevation: 5,
+  },
+  shareModalBackdrop: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 18,
+    backgroundColor: "rgba(2,6,23,0.78)",
+  },
+  shareModalCard: {
+    width: "100%",
+    maxWidth: 420,
+    borderRadius: 18,
+    overflow: "hidden",
+    backgroundColor: "#0F172A",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  sharePreviewFrame: {
+    width: "100%",
+    aspectRatio: 0.8,
+    backgroundColor: "#111827",
+  },
+  sharePreviewImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: "100%",
+    height: "100%",
+  },
+  sharePreviewOverlay: {
+    flex: 1,
+    justifyContent: "space-between",
+    padding: 22,
+  },
+  sharePreviewHeader: {
+    color: "#FFFFFF",
+    fontSize: 28,
+    fontWeight: "900",
+  },
+  sharePreviewStats: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  sharePreviewStat: {
+    flex: 1,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+    backgroundColor: "rgba(15,23,42,0.78)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+  },
+  sharePreviewValue: {
+    color: "#FFFFFF",
+    fontSize: 24,
+    fontWeight: "900",
+  },
+  sharePreviewLabel: {
+    marginTop: 3,
+    color: "#CBD5E1",
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  shareModalActions: {
+    flexDirection: "row",
+    gap: 10,
+    padding: 14,
+  },
+  shareModalButtonSecondary: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1E293B",
+  },
+  shareModalButtonSecondaryText: {
+    color: "#CBD5E1",
+    fontWeight: "900",
+  },
+  shareModalButtonPrimary: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F97316",
+  },
+  shareModalButtonPrimaryText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
   },
 });
