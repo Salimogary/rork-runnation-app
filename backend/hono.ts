@@ -7,6 +7,70 @@ import { env } from "./trpc/env";
 
 const app = new Hono();
 
+const accountDeletionPageHtml = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RunNation Account Deletion</title>
+    <meta name="description" content="Instructions for requesting deletion of a RunNation account and associated data." />
+    <style>
+      :root { color-scheme: light; --ink: #172033; --muted: #5d6679; --line: #dde3ee; --brand: #0f7d5a; --bg: #f6f8fb; --panel: #ffffff; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); line-height: 1.6; }
+      main { width: min(920px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0; }
+      article { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: clamp(24px, 5vw, 48px); }
+      .eyebrow { margin: 0 0 8px; color: var(--brand); font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+      h1 { margin: 0; font-size: clamp(30px, 6vw, 48px); line-height: 1.08; }
+      h2 { margin: 34px 0 10px; font-size: 22px; line-height: 1.25; }
+      p, li { font-size: 16px; }
+      p { margin: 14px 0; }
+      ul, ol { padding-left: 22px; }
+      .summary { margin-top: 18px; color: var(--muted); font-size: 18px; }
+      .notice { margin-top: 24px; border-left: 4px solid var(--brand); background: #edf8f4; padding: 14px 16px; }
+      footer { margin-top: 28px; color: var(--muted); font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <p class="eyebrow">RunNation</p>
+        <h1>Account Deletion Request</h1>
+        <p class="summary">This page explains how RunNation users can request deletion of their account and associated data.</p>
+        <div class="notice"><strong>App name:</strong> RunNation<br /><strong>Developer:</strong> RunNation / Salim Ogary</div>
+        <h2>How To Request Account Deletion</h2>
+        <ol>
+          <li>Open the RunNation app.</li>
+          <li>Go to <strong>Settings</strong>.</li>
+          <li>Use <strong>Send Feedback</strong>, <strong>Help</strong>, or the available support option.</li>
+          <li>Send a request saying: <strong>Please delete my RunNation account</strong>.</li>
+          <li>Include the email address, username, or phone number linked to your RunNation account so we can identify it.</li>
+        </ol>
+        <p>If you cannot access the app, contact RunNation support using the official support channel provided by the developer and include the account email, username, or phone number linked to your account.</p>
+        <h2>Data That May Be Deleted</h2>
+        <p>When your deletion request is processed, RunNation may delete or anonymize account data such as:</p>
+        <ul>
+          <li>Profile details, including name, username, email address, phone number, date of birth, country, town, club, goals, and family code.</li>
+          <li>Profile photos and other uploaded account images.</li>
+          <li>Workout and fitness activity records where deletion is operationally possible.</li>
+          <li>Social posts, chat content, comments, reports, and other user-generated content where deletion is operationally possible.</li>
+          <li>Club membership, event participation, magazine submissions, shop/order records, and support records where deletion is operationally possible.</li>
+        </ul>
+        <h2>Data That May Be Retained</h2>
+        <p>Some information may be retained for a limited period where necessary for safety, fraud prevention, moderation, dispute resolution, legal compliance, financial/accounting records, or backup integrity.</p>
+        <p>Records retained for these reasons are restricted to the purposes above and are no longer used as an active RunNation account.</p>
+        <h2>Deleting Some Data Without Deleting The Account</h2>
+        <p>Users may also request removal or correction of some account data, uploaded photos, posts, submissions, or other content without deleting the full account. Use the same in-app support or feedback process and clearly describe the data you want removed or corrected.</p>
+        <h2>Processing Time</h2>
+        <p>RunNation aims to review deletion requests promptly. Some deletion or anonymization steps may take additional time where records must be checked for security, moderation, legal, financial, or operational reasons.</p>
+        <h2>Privacy Policy</h2>
+        <p>For more information about RunNation privacy practices, see the RunNation Privacy Policy and Terms of Use inside the app under <strong>Settings</strong>.</p>
+      </article>
+      <footer>Last updated: 1 September 2026</footer>
+    </main>
+  </body>
+</html>`;
+
 app.use("*", async (c, next) => {
   c.header("X-Content-Type-Options", "nosniff");
   c.header("X-Frame-Options", "DENY");
@@ -32,6 +96,8 @@ app.use(
       createContext({ req: c.req.raw as any } as any),
   })
 );
+
+app.get("/delete-account", (c) => c.html(accountDeletionPageHtml));
 
 app.get("/", (c) => {
   return c.json({ status: "ok", message: "API is running" });
